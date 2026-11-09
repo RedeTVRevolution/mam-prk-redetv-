@@ -189,14 +189,17 @@ def test_grava_busca_pelo_adaptador_sem_guardar_dados_da_nuvem(tmp_path: Path) -
 
     gravar_busca(CONFIG, transporte, destino=destino)
 
-    [(metodo, caminho, pedido)] = transporte.chamadas
-    assert metodo == "POST"
-    assert caminho == f"{CONFIG.caminho_da_colecao}/dataObjects:batchSearch"
-    assert pedido == pedido_de_busca(CONFIG, Consulta(texto=com_as_formas("gravata")))
+    assert {c for _, c, _ in transporte.chamadas} == {
+        f"{CONFIG.local}/collections/{colecao}/dataObjects:batchSearch"
+        for colecao in CONFIG.colecoes
+    }
+    pedido = pedido_de_busca(CONFIG, Consulta(texto=com_as_formas("gravata")))
+    assert len(transporte.chamadas) == 2
+    assert all(m == "POST" and p == pedido for m, _, p in transporte.chamadas)
     assert json.loads(destino.read_text()) == {
         "origem": "nuvem",
         "pedido": pedido,
-        "resultados": 1,
+        "resultados": 2,
     }
 
 

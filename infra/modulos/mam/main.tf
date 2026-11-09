@@ -613,6 +613,7 @@ locals {
 # por BUSCA_*. A coleção de medida é a temporária do `make medir-busca`.
 locals {
   colecao_da_busca           = "momentos"
+  colecao_de_texto_da_busca  = "momentos-texto"
   colecao_de_medida_da_busca = "momentos-medida"
   indice_da_descricao        = "momentos-descricao-ann"
   # O modelo do Model Armor e a configuração da Ranking API (a padrão, que já existe no
@@ -1082,6 +1083,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_COLECAO"
         value = local.colecao_da_busca
+      }
+      env {
+        name  = "BUSCA_COLECAO_DE_TEXTO"
+        value = local.colecao_de_texto_da_busca
       }
       env {
         name  = "BUSCA_INDICE_DESCRICAO"
@@ -1918,6 +1923,10 @@ resource "google_cloud_run_v2_job" "indexacao" {
         env {
           name  = "BUSCA_COLECAO"
           value = local.colecao_da_busca
+        }
+        env {
+          name  = "BUSCA_COLECAO_DE_TEXTO"
+          value = local.colecao_de_texto_da_busca
         }
         env {
           name  = "BUSCA_INDICE_DESCRICAO"
@@ -2953,6 +2962,10 @@ output "busca_regiao" {
 
 output "busca_colecao" {
   value = local.colecao_da_busca
+}
+
+output "busca_colecao_de_texto" {
+  value = local.colecao_de_texto_da_busca
 }
 
 output "busca_colecao_de_medida" {

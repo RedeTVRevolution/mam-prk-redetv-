@@ -823,3 +823,30 @@ def test_pedido_so_vale_em_job_concluido() -> None:
 
     assert pedir_indexacao(jobs, "j2", BASE) is None
     assert tomar_a_rodada(jobs, "j2", BASE, "a") is None
+
+
+def test_reindexar_id_explicito_na_lixeira_grava_as_duas_colecoes_marcadas() -> None:
+    from api.agent_retrieval import AgentRetrieval
+    from api.tests.test_agent_retrieval import CONFIG, _ColecaoEmMemoria
+
+    mundo = Mundo()
+    envio = EnvioParaLixeira(em=BASE, por_uid="u1", por_email="u@x", motivo="x")
+    mundo.jobs.salvar(_job().model_copy(update={"lixeira": envio}))
+    transporte = _ColecaoEmMemoria()
+    resultado = reindexar_jobs(
+        ["j1"],
+        mundo.jobs,
+        mundo.armazenamento,
+        mundo.correcoes,
+        AgentRetrieval(CONFIG, transporte),
+    )
+    assert resultado == {"j1": "indexado"}
+    assert {n.split("/collections/")[1].split("/")[0] for n in transporte.objetos} == {
+        "col-z",
+        "col-texto",
+    }
+    assert all(d["na_lixeira"] is True for d in transporte.objetos.values())
+    assert all(
+        ("/col-z/" in n) == (d["tipo"] == "plano")
+        for n, d in transporte.objetos.items()
+    )

@@ -3,8 +3,8 @@
 Projeto, região, coleção, índices e dimensão chegam por variável de ambiente (o
 `infra/modulos/mam/main.tf` as entrega); nada disso é escrito aqui. A rede fica atrás de
 `Transporte`: aqui moram a montagem dos pedidos e a leitura das respostas, testadas sem
-rede. Cada vetor tem o seu índice ANN (um índice cobre um só campo de vetor), implantado
-junto com a coleção, e toda busca por vetor leva o `searchHint.indexHint` dele, porque o
+rede. Só os planos têm vetor e índice ANN; fala, texto na tela e objeto ficam numa segunda
+coleção, sem vetor nem índice. Toda busca por vetor leva o `searchHint.indexHint`, porque o
 KNN sem índice aceita no máximo 100 mil registros. Com `BUSCA_INDICES_LIGADOS=false` (o
 dev, por custo) não há índice ANN: a coleção nasce sem eles e a busca vai pelo KNN
 (`knnHint` explícito, cosseno), com o embedding da consulta calculado aqui.
@@ -19,7 +19,8 @@ import re
 import threading
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass, fields
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, fields, replace
 from datetime import date
 from time import sleep, time
 from typing import Any, Protocol
@@ -27,6 +28,7 @@ from typing import Any, Protocol
 import google.auth
 import google.auth.transport.requests
 
+from api.busca import _intercalar
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.orcamento_de_escrita import Orcamento
@@ -101,6 +103,7 @@ class ConfigDaBusca:
     colecao: str
     indice_da_descricao: str
     dimensao: int
+    colecao_de_texto: str | None  # None só na medição, restrita à coleção de planos.
     # O corte do que vem só da busca por significado (`Consulta.cortar_significado`): a
     # distância de cosseno máxima e o mínimo de palavras do registro. Falas curtas ("ok.",
     # "Tchau,") ficam perto de qualquer consulta. None: sem corte.
@@ -133,6 +136,7 @@ class ConfigDaBusca:
             projeto=ambiente["GCP_PROJECT_ID"],
             regiao=ambiente["BUSCA_REGIAO"],
             colecao=ambiente["BUSCA_COLECAO"],
+            colecao_de_texto=ambiente["BUSCA_COLECAO_DE_TEXTO"],
             indice_da_descricao=ambiente["BUSCA_INDICE_DESCRICAO"],
             dimensao=int(ambiente["BUSCA_DIMENSAO"]),
             distancia_maxima=float(distancia) if distancia else None,
@@ -146,13 +150,21 @@ class ConfigDaBusca:
         return f"projects/{self.projeto}/locations/{self.regiao}"
 
     @property
+    def colecoes(self) -> tuple[str, ...]:
+        return (
+            (self.colecao, self.colecao_de_texto)
+            if self.colecao_de_texto
+            else (self.colecao,)
+        )
+
+    @property
     def caminho_da_colecao(self) -> str:
         return f"{self.local}/collections/{self.colecao}"
 
     @property
     def indices(self) -> dict[str, str]:
         """O id do índice ANN de cada campo de vetor ligado; nenhum sem `indices_ligados`."""
-        if not self.indices_ligados:
+        if not self.indices_ligados or self.colecao == self.colecao_de_texto:
             return {}
         return {CAMPO_DO_VETOR_DA_DESCRICAO: self.indice_da_descricao}
 
@@ -319,10 +331,11 @@ def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
         "destaque": numero,
         "sistema": texto,
         "na_lixeira": booleano,
-        # Só para o embedding automático, que recusa registro sem texto: a descrição do
-        # plano ou o texto da fala, do texto na tela ou do objeto (ADR 0006).
-        "significado": texto,
     }
+    if config.colecao == config.colecao_de_texto:
+        return {"dataSchema": {"type": "object", "properties": propriedades}}
+    # Só os planos têm embedding automático, que recusa texto vazio.
+    propriedades["significado"] = texto
     return {
         "dataSchema": {"type": "object", "properties": propriedades},
         "vectorSchema": {
@@ -388,7 +401,7 @@ def esperar(
 
 
 ORIENTACAO_DO_ESQUEMA = (
-    "o PATCH só acrescenta propriedade; apague a coleção, rode "
+    "o PATCH só acrescenta propriedade; esvazie e depois apague a coleção, rode "
     "`make criar-colecao-da-busca` e `make reindexar`"
 )
 
@@ -479,6 +492,20 @@ def criar_colecao(
     transporte: Transporte,
     dormir: Callable[[float], None] = sleep,
 ) -> list[str]:
+    """Cria as coleções configuradas, com índice ANN só na dos planos."""
+    acrescentados = []
+    for nome in config.colecoes:
+        acrescentados.extend(
+            _criar_colecao(replace(config, colecao=nome), transporte, dormir)
+        )
+    return acrescentados
+
+
+def _criar_colecao(
+    config: ConfigDaBusca,
+    transporte: Transporte,
+    dormir: Callable[[float], None] = sleep,
+) -> list[str]:
     """Cria a coleção e os índices ANN dela, um depois do outro, esperando cada um
     ficar pronto. Na coleção que já existe, acrescenta por PATCH as propriedades que
     faltam no esquema (devolvidas; os registros já gravados só são achados depois de
@@ -511,7 +538,20 @@ def apagar_colecao(
     transporte: Transporte,
     dormir: Callable[[float], None] = sleep,
 ) -> None:
-    """Apaga a coleção com os índices e os objetos dela e espera a operação terminar."""
+    """Esvazia a coleção antes de apagar; `force` remove índices, mas não os objetos."""
+    nomes: list[str] = []
+    pedido: dict[str, Any] = {"pageSize": OBJETOS_POR_PAGINA}
+    while True:
+        pagina = transporte(
+            "POST", f"{config.caminho_da_colecao}/dataObjects:query", pedido
+        )
+        nomes.extend(o["name"] for o in pagina.get("dataObjects", []))
+        if not pagina.get("nextPageToken"):
+            break
+        pedido = pedido | {"pageToken": pagina["nextPageToken"]}
+    AgentRetrieval(config, transporte, tentar_no_429=True, dormir=dormir)._apagar_nomes(
+        nomes, config.colecao
+    )
     caminho = f"{config.caminho_da_colecao}?force=true"
     esperar(transporte("DELETE", caminho, None), transporte, dormir)
 
@@ -526,9 +566,9 @@ def _dados(r: Registro) -> dict[str, Any]:
         "pessoas": r.pessoas,
         "cor_base": r.cor_base,
         "na_lixeira": r.na_lixeira,
-        # Nunca vazio: o tipo é o último recurso.
-        "significado": r.descricao or r.texto or r.tipo,
     }
+    if r.tipo == "plano":
+        dados["significado"] = r.descricao or r.texto or r.tipo
     opcionais = {
         "programa": r.programa,
         "data_de_exibicao": _dia(r.data_de_exibicao) if r.data_de_exibicao else None,
@@ -649,7 +689,7 @@ def montar_plano(
 ) -> PlanoDeReindexacao:
     """Compara os registros novos com os dados lidos do índice, por id. Função pura.
 
-    Id novo cria; id que sumiu apaga; `significado` diferente apaga e cria (o
+    Id novo cria; id que sumiu apaga; só nos planos, `significado` diferente apaga e cria (o
     `batchUpdate` não recalcula o embedding automático); outro campo diferente
     atualiza; igual não faz nada. `data_de_exibicao` é comparada em dias, como no
     índice."""
@@ -662,7 +702,9 @@ def montar_plano(
         vistos.add(r.id)
         agora = _canonico(_dados(r))
         velho = antes.get(r.id)
-        if velho is None or velho.get("significado") != agora["significado"]:
+        if velho is None or (
+            r.tipo == "plano" and velho.get("significado") != agora["significado"]
+        ):
             criar.append(r)
         elif velho != agora:
             atualizar.append(r)
@@ -704,7 +746,7 @@ class AgentRetrieval:
         # Os lotes que este processo gravou no último minuto, (quando, objetos): o ritmo
         # local, que vale entre os vídeos do mesmo processo (o `make reindexar` de todos)
         # e é o que segura se o orçamento compartilhado falha.
-        self._escritas: deque[tuple[float, int]] = deque()
+        self._escritas: dict[str, deque[tuple[float, int]]] = {}
         # Uma busca do usuário repete o mesmo texto em várias cláusulas (a livre e a de cada
         # pessoa na imagem): cada texto é embutido uma vez só, até 256 textos.
         self._vetores: dict[str, list[float]] = {}
@@ -714,12 +756,17 @@ class AgentRetrieval:
         self._trava_do_embutindo = threading.Lock()
 
     def _chamar(
-        self, caminho: str, corpo: dict[str, Any], *, esperar: bool = False
+        self,
+        caminho: str,
+        corpo: dict[str, Any],
+        *,
+        esperar: bool = False,
+        colecao: str | None = None,
     ) -> dict[str, Any]:
         """Com `tentar_no_429` e `esperar` (as chamadas da gravação e da apagada), espera
         e tenta de novo no 429: a cota de escrita é da coleção, e dois vídeos indexando
         juntos a dividem (#411)."""
-        url = f"{self._config.caminho_da_colecao}/{caminho}"
+        url = f"{self._config.local}/collections/{colecao or self._config.colecao}/{caminho}"
         tenta = self._tentar_no_429 and esperar
         esperas = ESPERAS_NO_429_S if tenta else ()
         for espera in esperas:
@@ -732,7 +779,7 @@ class AgentRetrieval:
                 self._dormir(espera)
         return self._transporte("POST", url, corpo)
 
-    def _reservar(self, objetos: int) -> None:
+    def _reservar(self, objetos: int, colecao: str) -> None:
         """Reserva os objetos de um lote de escrita (criar ou apagar) no orçamento
         compartilhado e espera a vez. Se o Firestore falha, avisa e cai no ritmo local."""
         cota = self._config.cota_de_escrita
@@ -742,13 +789,15 @@ class AgentRetrieval:
             try:
                 while True:
                     espera = self._orcamento.reservar(
-                        self._config.colecao,
+                        colecao,
                         objetos,
                         cota * FRACAO_DA_COTA,
                         self._relogio(),
                     )
                     if not espera:
-                        self._escritas.append((self._relogio(), objetos))
+                        self._escritas.setdefault(colecao, deque()).append(
+                            (self._relogio(), objetos)
+                        )
                         return
                     self._dormir(espera)
             except Exception:
@@ -756,26 +805,31 @@ class AgentRetrieval:
                     "orçamento de escrita fora do ar, seguindo pelo ritmo local",
                     exc_info=True,
                 )
-        self._no_ritmo(objetos)
+        self._no_ritmo(objetos, colecao)
 
-    def _no_ritmo(self, objetos: int) -> None:
+    def _no_ritmo(self, objetos: int, colecao: str) -> None:
         """Espera até os objetos gravados nos últimos 60 s, mais estes, caberem na fração
         `FRACAO_DA_COTA` da cota de escrita. Sem cota configurada, não espera."""
         if self._config.cota_de_escrita is None:
             return
         limite = self._config.cota_de_escrita * FRACAO_DA_COTA
+        escritas = self._escritas.setdefault(colecao, deque())
         while True:
             agora = self._relogio()
-            while self._escritas and self._escritas[0][0] <= agora - 60:
-                self._escritas.popleft()
-            gravados = sum(n for _, n in self._escritas)
-            if not self._escritas or gravados + objetos <= limite:
-                self._escritas.append((agora, objetos))
+            while escritas and escritas[0][0] <= agora - 60:
+                escritas.popleft()
+            gravados = sum(n for _, n in escritas)
+            if not escritas or gravados + objetos <= limite:
+                escritas.append((agora, objetos))
                 return
-            self._dormir(self._escritas[0][0] + 60 - agora)
+            self._dormir(escritas[0][0] + 60 - agora)
 
     def _objetos_do_video(
-        self, job_id: str, campos: list[str] | None = None
+        self,
+        job_id: str,
+        campos: list[str] | None = None,
+        *,
+        colecao: str | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Os objetos do vídeo, página a página pelo `dataObjects:query`; com `campos`, cada
         um traz esses campos de `data`."""
@@ -786,40 +840,63 @@ class AgentRetrieval:
         if campos is not None:
             pedido["outputFields"] = {"dataFields": campos}
         while True:
-            pagina = self._chamar("dataObjects:query", pedido, esperar=True)
+            pagina = self._chamar(
+                "dataObjects:query", pedido, esperar=True, colecao=colecao
+            )
             yield from pagina.get("dataObjects", [])
             if not pagina.get("nextPageToken"):
                 return
             pedido = pedido | {"pageToken": pagina["nextPageToken"]}
 
-    def _ler_com_nomes(self, job_id: str) -> list[tuple[str, dict[str, Any]]]:
+    def _ler_com_nomes(
+        self, job_id: str, colecao: str
+    ) -> list[tuple[str, dict[str, Any]]]:
         """Nome e dados de todos os objetos do vídeo, só com os campos do esquema da
         coleção: um campo fora do `dataSchema` dá HTTP 400 no `query`. Os vetores não
         voltam."""
-        campos = list(esquema_da_colecao(self._config)["dataSchema"]["properties"])
-        return [(o["name"], o["data"]) for o in self._objetos_do_video(job_id, campos)]
+        config = replace(self._config, colecao=colecao)
+        campos = list(esquema_da_colecao(config)["dataSchema"]["properties"])
+        return [
+            (o["name"], o["data"])
+            for o in self._objetos_do_video(job_id, campos, colecao=colecao)
+        ]
 
     def ler_indice(self, job_id: str) -> list[dict[str, Any]]:
         """Os dados de todos os objetos do vídeo (ver `_ler_com_nomes`)."""
-        return [dados for _, dados in self._ler_com_nomes(job_id)]
+        return [
+            dados
+            for colecao in self._config.colecoes
+            for _, dados in self._ler_com_nomes(job_id, colecao)
+        ]
 
     def _escrever(
-        self, operacao: str, pedidos: list[dict[str, Any]], lote: int
+        self, operacao: str, pedidos: list[dict[str, Any]], lote: int, colecao: str
     ) -> None:
         """Manda os pedidos em lotes de até `lote`, cada um reservado antes no orçamento
         da cota (#460)."""
         for i in range(0, len(pedidos), lote):
             pedacos = pedidos[i : i + lote]
-            self._reservar(len(pedacos))
-            self._chamar(f"dataObjects:{operacao}", {"requests": pedacos}, esperar=True)
+            self._reservar(len(pedacos), colecao)
+            self._chamar(
+                f"dataObjects:{operacao}",
+                {"requests": pedacos},
+                esperar=True,
+                colecao=colecao,
+            )
 
-    def _apagar_nomes(self, nomes: list[str]) -> None:
+    def _apagar_nomes(self, nomes: list[str], colecao: str) -> None:
         """O `batchDelete` só aceita nomes, em lotes de até `OBJETOS_POR_PAGINA`."""
-        self._escrever("batchDelete", [{"name": n} for n in nomes], OBJETOS_POR_PAGINA)
+        self._escrever(
+            "batchDelete", [{"name": n} for n in nomes], OBJETOS_POR_PAGINA, colecao
+        )
 
     def apagar(self, job_id: str) -> None:
         """Apaga o vídeo inteiro: junta os nomes, página a página, e apaga em lote."""
-        self._apagar_nomes([o["name"] for o in self._objetos_do_video(job_id)])
+        for colecao in self._config.colecoes:
+            self._apagar_nomes(
+                [o["name"] for o in self._objetos_do_video(job_id, colecao=colecao)],
+                colecao,
+            )
 
     def marcar_lixeira(self, job_id: str, na_lixeira: bool) -> None:
         """Põe `na_lixeira` nos objetos do vídeo (#482), só nos que ainda não têm esse
@@ -827,18 +904,19 @@ class AgentRetrieval:
         `data` inteiro, então cada pedido leva os dados lidos com o campo novo; o vetor
         não se recalcula. O número inteiro que voltou como float volta inteiro (o esquema
         o declara `integer`). Cada lote passa pelo orçamento da cota (#460)."""
-        pedidos = [
-            {
-                "dataObject": {
-                    "name": nome,
-                    "data": _inteiros(dados) | {"na_lixeira": na_lixeira},
-                },
-                "updateMask": "data",
-            }
-            for nome, dados in self._ler_com_nomes(job_id)
-            if dados.get("na_lixeira") is not na_lixeira
-        ]
-        self._escrever("batchUpdate", pedidos, OBJETOS_POR_PAGINA)
+        for colecao in self._config.colecoes:
+            pedidos = [
+                {
+                    "dataObject": {
+                        "name": nome,
+                        "data": _inteiros(dados) | {"na_lixeira": na_lixeira},
+                    },
+                    "updateMask": "data",
+                }
+                for nome, dados in self._ler_com_nomes(job_id, colecao)
+                if dados.get("na_lixeira") is not na_lixeira
+            ]
+            self._escrever("batchUpdate", pedidos, OBJETOS_POR_PAGINA, colecao)
 
     def preencher_filtros(
         self, job_id: str, sistema: str | None, na_lixeira: bool
@@ -849,64 +927,84 @@ class AgentRetrieval:
         lidos com o campo novo; `significado` não muda, e por isso o embedding automático
         não se refaz (o `batchUpdate` não o recalcula). Cada lote passa pelo orçamento da
         cota (#460) e uma carga interrompida recomeça só com o que falta."""
-        pedidos = []
-        for nome, dados in self._ler_com_nomes(job_id):
-            novos: dict[str, Any] = {}
-            if "na_lixeira" not in dados:
-                novos["na_lixeira"] = na_lixeira
-            if sistema is not None and "sistema" not in dados:
-                novos["sistema"] = sistema
-            if novos:
-                pedidos.append(
-                    {
-                        "dataObject": {"name": nome, "data": _inteiros(dados) | novos},
-                        "updateMask": "data",
-                    }
-                )
-        self._escrever("batchUpdate", pedidos, OBJETOS_POR_PAGINA)
-        return len(pedidos)
+        total = 0
+        for colecao in self._config.colecoes:
+            pedidos = []
+            for nome, dados in self._ler_com_nomes(job_id, colecao):
+                novos: dict[str, Any] = {}
+                if "na_lixeira" not in dados:
+                    novos["na_lixeira"] = na_lixeira
+                if sistema is not None and "sistema" not in dados:
+                    novos["sistema"] = sistema
+                if novos:
+                    pedidos.append(
+                        {
+                            "dataObject": {
+                                "name": nome,
+                                "data": _inteiros(dados) | novos,
+                            },
+                            "updateMask": "data",
+                        }
+                    )
+            self._escrever("batchUpdate", pedidos, OBJETOS_POR_PAGINA, colecao)
+            total += len(pedidos)
+        return total
 
     def gravar(self, job_id: str, registros: list[Registro]) -> None:
         """Grava só o que mudou (#418): lê o índice do vídeo, compara com `registros` e
         aplica o plano (`montar_plano`). Interrompida no meio, uma nova rodada compara
         de novo com o índice e termina o trabalho."""
-        try:
-            self._gravar_uma_vez(job_id, registros)
-        except JaExiste:
-            # Um lote já estava lá: reenviado depois de uma resposta perdida, ou de outra
-            # indexação do mesmo vídeo (os ids são fixos). Lê o índice de novo, que agora
-            # tem esse lote, e compara outra vez (#411).
-            log.warning("%s: 409 na gravação, comparando com o índice de novo", job_id)
-            self._gravar_uma_vez(job_id, registros)
+        for colecao in self._config.colecoes:
+            escolhidos = [
+                r
+                for r in registros
+                if (r.tipo == "plano") == (colecao == self._config.colecao)
+            ]
+            try:
+                self._gravar_uma_vez(job_id, escolhidos, colecao)
+            except JaExiste:
+                # Um lote já estava lá: reenviado depois de uma resposta perdida, ou de outra
+                # indexação do mesmo vídeo (os ids são fixos). Lê o índice de novo, que agora
+                # tem esse lote, e compara outra vez (#411).
+                log.warning(
+                    "%s: 409 na gravação, comparando com o índice de novo", job_id
+                )
+                self._gravar_uma_vez(job_id, escolhidos, colecao)
         if not self._config.indices_ligados:
             self._avisar_do_teto_do_knn()
 
-    def _gravar_uma_vez(self, job_id: str, registros: list[Registro]) -> None:
+    def _gravar_uma_vez(
+        self, job_id: str, registros: list[Registro], colecao: str
+    ) -> None:
         # Só vale como lido o objeto com o nome que o id dele dá hoje: o que tem outro
         # nome (o id antigo, ou o resumo de `_id_do_objeto`) é lixo e sai, e o registro
         # dele entra pelo nome certo. Dois objetos com o mesmo `data.id` não se confundem.
         nome_do_id: dict[str, str] = {}
         validos: list[dict[str, Any]] = []
         lixo: list[str] = []
-        for nome, dados in self._ler_com_nomes(job_id):
+        for nome, dados in self._ler_com_nomes(job_id, colecao):
             if _nome_vale(nome, dados):
                 nome_do_id[dados["id"]] = nome
                 validos.append(dados)
             else:
                 lixo.append(nome)
         plano = montar_plano(registros, validos)
-        self._apagar_nomes(lixo + [nome_do_id[i] for i in plano.apagar])
+        self._apagar_nomes(lixo + [nome_do_id[i] for i in plano.apagar], colecao)
         self._escrever(
-            "batchCreate", [_criacao(r) for r in plano.criar], REGISTROS_POR_LOTE
+            "batchCreate",
+            [_criacao(r) for r in plano.criar],
+            REGISTROS_POR_LOTE,
+            colecao,
         )
         self._escrever(
             "batchUpdate",
-            [self._atualizacao(r) for r in plano.atualizar],
+            [self._atualizacao(r, colecao) for r in plano.atualizar],
             OBJETOS_POR_PAGINA,
+            colecao,
         )
 
-    def _atualizacao(self, r: Registro) -> dict[str, Any]:
-        nome = f"{self._config.caminho_da_colecao}/dataObjects/{_id_do_objeto(r.id)}"
+    def _atualizacao(self, r: Registro, colecao: str) -> dict[str, Any]:
+        nome = f"{self._config.local}/collections/{colecao}/dataObjects/{_id_do_objeto(r.id)}"
         return {"dataObject": {"name": nome, "data": _dados(r)}, "updateMask": "data"}
 
     def _avisar_do_teto_do_knn(self) -> None:
@@ -970,6 +1068,26 @@ class AgentRetrieval:
         return valores
 
     def buscar(self, consulta: Consulta) -> list[Registro]:
+        tipo = consulta.filtros.tipo
+        colecoes = []
+        if tipo in (None, "plano"):
+            colecoes.append((self._config.colecao, consulta))
+        if tipo != "plano" and consulta.texto and self._config.colecao_de_texto:
+            colecoes.append(
+                (
+                    self._config.colecao_de_texto,
+                    replace(consulta, significado=None, cortar_significado=False),
+                )
+            )
+        if not colecoes:
+            return []
+        if len(colecoes) == 1:
+            return self._buscar_na_colecao(*colecoes[0])[: consulta.limite]
+        with ThreadPoolExecutor(2) as pool:
+            futuros = [pool.submit(self._buscar_na_colecao, c, q) for c, q in colecoes]
+        return _intercalar([f.result() for f in futuros])[: consulta.limite]
+
+    def _buscar_na_colecao(self, colecao: str, consulta: Consulta) -> list[Registro]:
         # Sem índice ANN a consulta vira vetor aqui (`pedido_de_busca`).
         vetor = (
             self.vetor_da_consulta(consulta.significado)
@@ -977,7 +1095,9 @@ class AgentRetrieval:
             else None
         )
         resposta = self._chamar(
-            "dataObjects:batchSearch", pedido_de_busca(self._config, consulta, vetor)
+            "dataObjects:batchSearch",
+            pedido_de_busca(self._config, consulta, vetor),
+            colecao=colecao,
         )
         # Uma lista de resultados por busca; com o RRF, uma lista só, já fundida.
         registros = [

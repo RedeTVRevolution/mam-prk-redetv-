@@ -1,4 +1,4 @@
-"""`make criar-colecao-da-busca` (#117): a coleção de momentos e o índice ANN; idempotente."""
+"""`make criar-colecao-da-busca` (#117): as duas coleções e só o índice ANN dos planos; idempotente."""
 
 import os
 import sys
@@ -18,7 +18,7 @@ if __name__ == "__main__":
         acrescentados = criar_colecao(config, transporte)
     except EsquemaIncompativel as erro:
         sys.exit(str(erro))
-    print("Coleção e índice da busca prontos.")
+    print("Coleções e índice da busca prontos.")
     if acrescentados:
         print(
             f"Campos acrescentados ao esquema: {', '.join(acrescentados)}. "

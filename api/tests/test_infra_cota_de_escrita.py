@@ -25,3 +25,24 @@ def test_a_cota_chega_ao_web_ao_purga_e_a_indexacao_pela_mesma_variavel() -> Non
             r"tostring\(var\.cota_de_escrita_da_busca\)",
             bloco,
         ), nome
+
+
+def test_colecao_de_texto_chega_aos_tres_escritores_e_aos_outputs() -> None:
+    for texto, cabecalho in (
+        (MAIN, 'resource "google_cloud_run_v2_service" "web"'),
+        (MAIN, 'resource "google_cloud_run_v2_job" "indexacao"'),
+        (PURGA, 'resource "google_cloud_run_v2_job" "purga"'),
+    ):
+        assert re.search(
+            r'name\s*=\s*"BUSCA_COLECAO_DE_TEXTO"\s*value\s*=\s*local\.colecao_de_texto_da_busca',
+            _bloco(texto, cabecalho),
+        )
+    assert 'output "busca_colecao_de_texto"' in MAIN
+    for raiz in (
+        MODULO.parents[1] / "main.tf",
+        MODULO.parents[1] / "ambientes/prod/main.tf",
+    ):
+        assert 'output "busca_colecao_de_texto"' in raiz.read_text()
+    makefile = (MODULO.parents[2] / "Makefile").read_text()
+    assert "BUSCA_COLECAO_DE_TEXTO=" in makefile
+    assert "output -raw busca_colecao_de_texto" in makefile

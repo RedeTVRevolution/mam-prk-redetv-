@@ -233,6 +233,10 @@ output "busca_colecao" {
   value = module.mam.busca_colecao
 }
 
+output "busca_colecao_de_texto" {
+  value = module.mam.busca_colecao_de_texto
+}
+
 output "busca_colecao_de_medida" {
   value = module.mam.busca_colecao_de_medida
 }

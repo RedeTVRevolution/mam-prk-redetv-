@@ -279,6 +279,7 @@ def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
     assert 'args    = ["-m", "api.indexacao"]' in job
     assert "max_retries     = 0" in job
     assert "BUSCA_COLECAO" in job and "BUSCA_INDICE_DESCRICAO" in job
+    assert "BUSCA_COLECAO_DE_TEXTO" in job
     assert re.search(
         r"job_de_indexacao\s+= google_cloud_run_v2_job\.indexacao\.name", main
     )

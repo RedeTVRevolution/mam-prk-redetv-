@@ -22,7 +22,7 @@ import logging
 import os
 import sys
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -223,13 +223,19 @@ def _ajustes(caso: Caso) -> Ajustes | None:
 
 def esquema_sem_campos(config: ConfigDaBusca, transporte: Transporte) -> str | None:
     """A mensagem de erro se o esquema real da coleção não tem os campos de texto da busca."""
-    faltam = conferir_esquema(config, transporte)
-    if not faltam:
+    erros = []
+    for colecao in config.colecoes:
+        faltam = conferir_esquema(replace(config, colecao=colecao), transporte)
+        if faltam:
+            campos = ", ".join(repr(c) for c in faltam)
+            erros.append(
+                f"o esquema da coleção {colecao} não tem o(s) campo(s) {campos}"
+            )
+    if not erros:
         return None
-    campos = ", ".join(repr(c) for c in faltam)
     return (
-        f"o esquema da coleção não tem o(s) campo(s) {campos}: toda busca por palavra "
-        "voltaria vazia. Rode `make criar-colecao-da-busca` e `make reindexar`."
+        "; ".join(erros) + ": toda busca por palavra voltaria vazia. "
+        "Rode `make criar-colecao-da-busca` e `make reindexar`."
     )
 
 

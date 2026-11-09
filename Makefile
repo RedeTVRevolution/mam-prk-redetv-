@@ -129,6 +129,7 @@ gravar-cassetes: gravar-cassete-da-busca
 AMBIENTE_DA_BUSCA = set -a && . ./.env && set +a && \
 	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
 	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
+	BUSCA_COLECAO_DE_TEXTO="$${BUSCA_COLECAO_DE_TEXTO:-$$(terraform -chdir=infra output -raw busca_colecao_de_texto)}" \
 	BUSCA_COLECAO_DE_MEDIDA="$${BUSCA_COLECAO_DE_MEDIDA:-$$(terraform -chdir=infra output -raw busca_colecao_de_medida)}" \
 	BUSCA_INDICE_DESCRICAO="$${BUSCA_INDICE_DESCRICAO:-$$(terraform -chdir=infra output -raw busca_indice_descricao)}" \
 	BUSCA_INDICES_LIGADOS="$${BUSCA_INDICES_LIGADOS:-$$(terraform -chdir=infra output -raw busca_indices_ligados || echo terraform_output_falhou)}" \

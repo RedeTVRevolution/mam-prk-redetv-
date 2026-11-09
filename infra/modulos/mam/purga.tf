@@ -80,6 +80,10 @@ resource "google_cloud_run_v2_job" "purga" {
           value = local.colecao_da_busca
         }
         env {
+          name  = "BUSCA_COLECAO_DE_TEXTO"
+          value = local.colecao_de_texto_da_busca
+        }
+        env {
           name  = "BUSCA_INDICE_DESCRICAO"
           value = local.indice_da_descricao
         }
