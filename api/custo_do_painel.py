@@ -100,6 +100,8 @@ class BaseDeCusto:
     por_etapa: list[CustoDaEtapa]
     sem_dono: list[CustoSemDono]
     moedas: frozenset[str]
+    # O dia da última linha do faturamento no período: a exportação atrasa de 1 a 2 dias.
+    faturamento_ate: date | None = None
 
     @property
     def moeda(self) -> str | None:
@@ -182,6 +184,9 @@ class CustoEmMemoria:
             por_etapa=[CustoDaEtapa(e, c) for e, c in por_etapa.items()],
             sem_dono=[CustoSemDono(m, s, c) for (m, s), c in sem_dono.items()],
             moedas=frozenset(c.moeda for c in linhas),
+            faturamento_ate=max(
+                (c.dia for c in linhas if no_periodo(c.dia)), default=None
+            ),
         )
 
 
@@ -273,6 +278,14 @@ class FaturamentoBigQuery:
                 "SELECT 'moeda', NULL, NULL, NULL, NULL, NULL, 0.0, 0, 0.0, moeda\n"
                 "FROM linhas GROUP BY moeda"
             ),
+            # O dia vai em `rotulo`, como texto, na coluna que as outras partes já têm.
+            (
+                "SELECT 'ate', NULL, NULL, NULL, NULL, CAST(MAX(l.dia) AS STRING),"
+                " 0.0, 0, 0.0, l.moeda\n"
+                "FROM linhas AS l\n"
+                f"WHERE {' AND '.join(onde_do_custo_sem_dono)}\n"
+                "GROUP BY l.moeda"
+            ),
         ]
         if not filtro.com_dono:
             partes.append(
@@ -318,6 +331,7 @@ class FaturamentoBigQuery:
         por_etapa: dict[str, float] = defaultdict(float)
         sem_dono: list[CustoSemDono] = []
         moedas: set[str] = set()
+        faturamento_ate: date | None = None
         for (
             tipo,
             mes,
@@ -345,6 +359,9 @@ class FaturamentoBigQuery:
                 )
             elif tipo == "etapa":
                 por_etapa[rotulo] += float(custo)
+            elif tipo == "ate" and rotulo:
+                dia = date.fromisoformat(rotulo)
+                faturamento_ate = max(faturamento_ate or dia, dia)
             elif tipo == "sem_dono":
                 sem_dono.append(CustoSemDono(mes, _texto(rotulo), float(custo)))
         return BaseDeCusto(
@@ -352,6 +369,7 @@ class FaturamentoBigQuery:
             por_etapa=[CustoDaEtapa(e, c) for e, c in por_etapa.items()],
             sem_dono=sem_dono,
             moedas=frozenset(moedas),
+            faturamento_ate=faturamento_ate,
         )
 
 
@@ -404,6 +422,7 @@ class RelatorioDeCusto(BaseModel):
     programa: str | None
     usuario: str | None
     moeda: str | None
+    faturamento_ate: date | None
     total: TotalDeCusto
     por_mes: list[MesDeCusto]
     por_quem: list[QuemDeCusto]
@@ -494,6 +513,7 @@ def relatorio_de_custo(
         programa=programa,
         usuario=usuario,
         moeda=base.moeda,
+        faturamento_ate=base.faturamento_ate,
         total=TotalDeCusto(**total(base.dos_jobs, base.sem_dono)),
         por_mes=[
             MesDeCusto(

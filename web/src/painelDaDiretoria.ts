@@ -330,6 +330,8 @@ export interface RelatorioDeCusto {
   programa: string | null
   usuario: string | null
   moeda: string | null
+  /** O dia (AAAA-MM-DD) da última linha do faturamento no período; `null` sem linha. */
+  faturamento_ate: string | null
   total: TotalDeCusto
   por_mes: MesDeCusto[]
   por_quem: QuemDeCusto[]

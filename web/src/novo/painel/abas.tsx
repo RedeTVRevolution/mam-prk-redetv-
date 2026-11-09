@@ -457,8 +457,14 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
   if (relatorio.por_mes.length === 0 && relatorio.sem_dono_por_servico.length === 0) return <Vazio texto="Nenhum custo neste filtro." />
   // O custo vem sempre por mês: o mês vira o primeiro dia dele, como os grupos das outras abas.
   const meses = relatorio.por_mes.map((m) => ({ ...m, dia: `${m.mes}-01` }))
+  const [, mes, dia] = relatorio.faturamento_ate?.split('-') ?? []
   return (
     <>
+      {dia && (
+        <p>
+          Custo até {dia}/{mes} — o faturamento do Google chega com 1 a 2 dias de atraso; vídeos mais novos ainda não entram aqui.
+        </p>
+      )}
       <Indicadores>
         <Indicador rotulo="Custo" valor={valor(t.custo)} />
         <Indicador rotulo="Custo dos vídeos" valor={valor(t.custo_dos_jobs)} />
