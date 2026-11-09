@@ -14,10 +14,8 @@ from api.catalogo import (
     nomes_de_busca,
 )
 from api.comparador import normalizar
-from api.entendimento_da_consulta import ModelArmorEmMemoria
 from api.jobs import Job, RepositorioEmMemoria
 from api.tests.test_busca import (
-    PROGRAMAS,
     VESTIDO,
     Mundo,
     job,
@@ -96,7 +94,7 @@ def test_cem_registros_de_quarenta_videos_leem_os_jobs_numa_leitura_em_lote() ->
     jobs.um_a_um = 0
     jobs.lotes.clear()
 
-    resultado = m.busca().buscar("vestido vermelho da Sabrina Sato", limite=100)
+    resultado = m.busca().buscar("vestido vermelho", limite=100)
 
     assert len(resultado.videos) == 40
     assert jobs.um_a_um == 0
@@ -119,7 +117,7 @@ def test_video_que_nao_e_visivel_continua_fora_do_resultado_em_lote() -> None:
         "sumido", [objeto("sumido:objeto:0", "sumido", 1_000, 2_000, dono=m.sabrina)]
     )
 
-    resultado = m.busca().buscar("vestido vermelho da Sabrina Sato")
+    resultado = m.busca().buscar("vestido vermelho")
 
     assert [v.job_id for v in resultado.videos] == ["bom"]
 
@@ -146,8 +144,6 @@ def test_a_busca_e_o_autocompletar_podem_dividir_a_mesma_copia() -> None:
     busca = Busca(
         transporte=m.transporte,
         catalogo=catalogo,
-        armor=ModelArmorEmMemoria(),
-        programas=PROGRAMAS,
         indice=m.indice,
         ranking=RankingEmOrdem(),
         repositorio=m.jobs,

@@ -46,3 +46,10 @@ def test_a_decupagem_antiga_sem_a_versao_continua_sendo_lida() -> None:
 
     assert (lida.versao_pipeline, lida.manifesto_do_pipeline) == (None, None)
     assert lida.video.sha256 == SHA
+
+
+def test_busca_nao_faz_parte_das_etapas_da_decupagem() -> None:
+    fixado = manifesto()
+    assert all(
+        "consulta" not in fixado[parte] for parte in ("modelos", "modos", "instrucoes")
+    )

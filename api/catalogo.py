@@ -101,7 +101,7 @@ VALIDADE_DA_COPIA = timedelta(seconds=30)
 
 class CopiaCurta[T]:
     """A lista de um catálogo lida há pouco, para todos que a pedem (o autocompletar e o
-    entendimento da consulta). Um nome acrescentado a descarta. Quando expira, uma thread
+    busca por nome). Um nome acrescentado a descarta. Quando expira, uma thread
     só relê; as outras usam a cópia anterior, e só esperam se não há cópia (a primeira
     leitura, ou depois de `descartar`)."""
 

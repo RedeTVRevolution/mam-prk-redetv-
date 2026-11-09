@@ -65,7 +65,6 @@ from api.correcoes import (
 from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
 from api.dados_da_purga import dados_do_ambiente
 from api.decupagem import Decupagem
-from api.entendimento_da_consulta import ModelArmor
 from api.eventos_de_uso import (
     Eventos,
     SemEventos,
@@ -235,17 +234,10 @@ class _SemChaves:
 
 
 class _SemModelo:
-    """Sem modelo ligado à busca: toda consulta cai no plano B."""
+    """Sem modelo ligado: a busca por imagem fica indisponível."""
 
     def gerar(self, chamada: Chamada) -> str:
         raise ErroHttp(503)
-
-
-class _SemModelArmor:
-    """Sem Model Armor, não há veredito: o modelo nunca é chamado (plano B)."""
-
-    def acusa_injecao(self, texto: str) -> bool:
-        raise RuntimeError("Model Armor não ligado")
 
 
 class _FrontComEnderecos(StaticFiles):
@@ -350,7 +342,6 @@ def criar_app(
     cache_do_painel: CacheCurto | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
-    armor: ModelArmor | None = None,
     ranking: Ranking | None = None,
     listas_da_busca: ListasDaBusca | None = None,
     busca_por_minuto: int = CONSULTAS_POR_MINUTO,
@@ -589,8 +580,6 @@ def criar_app(
             Busca(
                 transporte=transporte_da_consulta or _SemModelo(),
                 catalogo=catalogo_de_pessoas,
-                armor=armor or _SemModelArmor(),
-                programas=NomesDosProgramas(repositorio_de_programas),
                 indice=indice_da_busca,
                 ranking=ranking or RankingEmOrdem(),
                 repositorio=repositorio_de_jobs,
@@ -875,7 +864,6 @@ if _projeto:
             os.environ["BUCKET_DECUPAGENS"],
         ),
         transporte_da_consulta=_adaptadores.transporte_da_consulta,
-        armor=_adaptadores.armor,
         ranking=_adaptadores.ranking,
     )
 else:

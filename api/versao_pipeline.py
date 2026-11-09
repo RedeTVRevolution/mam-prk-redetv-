@@ -12,7 +12,6 @@ import hashlib
 from typing import Any
 
 from api import (
-    entendimento_da_consulta,
     florence,
     gemini,
     inventario,
@@ -23,7 +22,7 @@ from api import (
 from api.agent_retrieval import MODELO_DO_EMBEDDING
 from api.decupagem import VERSAO_ESQUEMA
 
-VERSAO_PIPELINE = "2026.11.7"
+VERSAO_PIPELINE = "2026.11.8"
 
 
 def _hash(texto: str) -> str:
@@ -37,7 +36,6 @@ def manifesto() -> dict[str, Any]:
             "analise": gemini.MODELO,
             "versao_do_modelo_da_analise": gemini.VERSAO_DO_MODELO,
             "modelo_forte": modelo_forte.MODELO_FORTE,
-            "consulta": entendimento_da_consulta.MODELO_DA_CONSULTA,
             "embedding": MODELO_DO_EMBEDDING,
         },
         # O modo de cobrança faz parte do pipeline (#402): Flex em tudo, menos a identificação.
@@ -45,12 +43,10 @@ def manifesto() -> dict[str, Any]:
             "analise": gemini.MODO_FLEX,
             "inventario": gemini.MODO_FLEX,
             "modelo_forte": gemini.MODO_STANDARD,
-            "consulta": gemini.MODO_STANDARD,
         },
         "instrucoes": {
             "analise": _hash(gemini.INSTRUCAO),
             "modelo_forte": _hash(modelo_forte.INSTRUCAO + modelo_forte.PESSOA),
-            "consulta": _hash(entendimento_da_consulta.INSTRUCAO),
             "conversao_do_inventario": _hash(inventario.INSTRUCAO_DA_CONVERSAO),
             "olhar_do_inventario": _hash(inventario.INSTRUCAO_DO_OLHAR),
         },

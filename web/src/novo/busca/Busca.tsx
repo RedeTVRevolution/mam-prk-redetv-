@@ -29,7 +29,6 @@ import {
   type TipoDeMomento,
   type ValorDaFaceta,
 } from '../../busca.ts'
-import { dataDeExibicao } from '../../jobs.ts'
 import { guardado, guardarResultado } from '../../resultadoDaBusca.ts'
 import { enderecoDaBusca, navegar } from '../../rotas.ts'
 import { Falha } from '../comum/Falha.tsx'
@@ -43,7 +42,6 @@ import { useBusca, useEntrandoNaBusca, type PedidoDaBusca } from './useBusca.ts'
 
 /** A largura mínima da cena na grade. */
 const LARGURA_DA_CENA = 240
-const ENTENDIDO = 'entendido'
 const ANOS = Array.from({ length: 26 }, (_, i) => String(new Date().getFullYear() - i))
 const ORDENS: Record<OrdemDaBusca, string> = { relevancia: 'Relevância', data: 'Data de exibição' }
 const COR_DO_CHIP: Record<(typeof EVIDENCIAS)[number]['tipo'], string> = {
@@ -74,23 +72,16 @@ function mensagemDoErro(tipo: Tipo, erro: unknown): string {
   return 'Não foi possível buscar agora. Tente de novo.'
 }
 
-/** "01/03/2020 a 31/12/2024", "Desde 01/03/2020", "Até 31/12/2024". */
-function rotuloDoPeriodo(desde: string | null, ate: string | null): string {
-  if (desde && ate) return `${dataDeExibicao(desde)} a ${dataDeExibicao(ate)}`
-  return desde ? `Desde ${dataDeExibicao(desde)}` : `Até ${dataDeExibicao(ate)}`
-}
-
 const opcoesDa = (valores: ValorDaFaceta[]) => valores.map((v) => ({ valor: v.valor, rotulo: v.rotulo, contagem: v.videos }))
 
-function Alternar({ ligado, desabilitado, cor, aoAlternar, children }: { ligado: boolean; desabilitado?: boolean; cor: string; aoAlternar: () => void; children: ReactNode }) {
+function Alternar({ ligado, cor, aoAlternar, children }: { ligado: boolean; cor: string; aoAlternar: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
       aria-pressed={ligado}
-      disabled={desabilitado}
       onClick={aoAlternar}
       className={cn(
-        'flex h-7 items-center gap-1 rounded-sm border px-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-70',
+        'flex h-7 items-center gap-1 rounded-sm border px-2 text-sm transition-colors',
         ligado ? cn('bg-selected', cor) : 'border-strong bg-input text-muted-foreground hover:text-foreground',
       )}
     >
@@ -266,16 +257,11 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
           const pagina = busca.paginas?.[0]
           const entendida = pagina?.entendida
           const facetas = pagina?.facetas
-          // Os chips da URL valem sobre o entendido: um clique antes de a busca voltar não se perde.
-          const ligadas = consulta.evidencias ?? entendida?.evidencias ?? []
+          const ligadas = consulta.evidencias ?? []
           const alternar = (id: Evidencia) => mudar({ evidencias: ligadas.includes(id) ? ligadas.filter((e) => e !== id) : [...ligadas, id] })
-          const programaNaTela = consulta.programa ?? entendida?.programa ?? ''
-          const { desde, ate } = entendida ?? { desde: null, ate: null }
-          const anoEntendido = desde && ate && desde.slice(0, 4) === ate.slice(0, 4) ? Number(desde.slice(0, 4)) : null
-          // Um período entendido que não cabe num ano aparece como está; limpar o ano o tira.
-          const periodoEntendido = consulta.ano === null && anoEntendido === null && (desde || ate) ? rotuloDoPeriodo(desde, ate) : null
-          const anoNaTela = consulta.ano ?? anoEntendido
-          const valorDoAno = periodoEntendido ? ENTENDIDO : typeof anoNaTela === 'number' ? String(anoNaTela) : null
+          const programaNaTela = consulta.programa ?? ''
+          const anoNaTela = consulta.ano
+          const valorDoAno = typeof anoNaTela === 'number' ? String(anoNaTela) : null
           const anos = typeof anoNaTela === 'number' && !ANOS.includes(String(anoNaTela)) ? [String(anoNaTela), ...ANOS] : ANOS
           const comFacetas = facetas?.programa ?? []
           const opcoesDePrograma = [...opcoesDa(comFacetas), ...programas.filter((p) => !comFacetas.some((f) => f.valor === p)).map((p) => ({ valor: p, rotulo: p }))]
@@ -349,8 +335,6 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                             key={e.id}
                             ligado={ligadas.includes(e.id)}
                             cor={COR_DO_CHIP[e.tipo]}
-                            // Sem nenhum chip ligado a busca voltaria ao entendido: o último fica.
-                            desabilitado={ligadas.length === 1 && ligadas.includes(e.id)}
                             aoAlternar={() => alternar(e.id)}
                           >
                             {e.rotulo}
@@ -371,11 +355,9 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                     rotulo="Ano"
                     Icone={IconCalendarEvent}
                     unico
-                    opcoes={[...(periodoEntendido ? [{ valor: ENTENDIDO, rotulo: periodoEntendido }] : []), ...anos.map((a) => ({ valor: a, rotulo: a }))]}
+                    opcoes={anos.map((a) => ({ valor: a, rotulo: a }))}
                     valor={valorDoAno ? [valorDoAno] : []}
-                    aoMudar={([v]) => {
-                      if (v !== ENTENDIDO) mudar({ ano: v ? Number(v) : 'todos', mes: null })
-                    }}
+                    aoMudar={([v]) => mudar({ ano: v ? Number(v) : 'todos', mes: null })}
                   />
                   {!foto &&
                     FACETAS.filter((f) => (facetas?.[f.nome].length ?? 0) > 0 || ligado[f.nome] !== null).map((f) => (
@@ -420,7 +402,7 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
           if (foto) return null
           const pagina = busca.paginas?.[0]
           if (!pagina) return null
-          const ligadas = consulta.evidencias ?? pagina.entendida.evidencias
+          const ligadas = consulta.evidencias ?? []
           return (
             <>
               {pagina.sem_aparicoes.map((s) => (
