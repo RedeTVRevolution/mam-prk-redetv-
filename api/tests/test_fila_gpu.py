@@ -2,6 +2,7 @@
 
 import ast
 import re
+from collections import Counter
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -51,7 +52,7 @@ class ErroDaChamada(Exception):
 
 def numero(valor: Any) -> Any:
     if type(valor) not in (int, float):
-        raise TypeError("comparação de ordem exige números no Workflows")
+        raise TypeError("operação exige números no Workflows")
     return valor
 
 
@@ -106,6 +107,7 @@ class FilaLocal:
                 format=lambda v: datetime.fromtimestamp(v, UTC).isoformat(),
             ),
             map=SimpleNamespace(get=campo),
+            int=lambda v: int(numero(v)),
             list=SimpleNamespace(concat=lambda a, b: a + [b]),
             default=lambda v, padrao: padrao if v is None else v,
             len=len,
@@ -127,7 +129,10 @@ class FilaLocal:
                 lambda m: {"null": "None", "true": "True", "false": "False"}[m[0]],
                 valor[2:-1],
             )
-            arvore = ComparacoesNumericas().visit(ast.parse(expressao, mode="eval"))
+            arvore = ast.parse(expressao, mode="eval")
+            if any(isinstance(no, ast.Dict) for no in ast.walk(arvore)):
+                raise SyntaxError("Workflows não aceita mapa literal em expressão")
+            arvore = ComparacoesNumericas().visit(arvore)
             codigo = compile(ast.fix_missing_locations(arvore), "<expressao>", "eval")
             return mapa(
                 deepcopy(eval(codigo, {"__builtins__": {}, "numero": numero}, escopo))
@@ -158,6 +163,8 @@ class FilaLocal:
                     escopo,
                 )
             )
+            if isinstance(recipiente, dict) and not isinstance(chave, str):
+                raise TypeError("chave de mapa exige string no Workflows")
             recipiente[chave] = valor
 
     def passos(self, passos: list[Any], escopo: dict[str, Any], dono: str) -> None:
@@ -346,6 +353,130 @@ def test_duas_execucoes_disputam_a_ultima_vaga_sem_perder_pedidos(
     assert [p["job_id"]["stringValue"] for p in fila.itens("espera")] == ["b"]
 
 
+def test_patch_com_versao_vencida_recusa_sem_mudar_a_fila() -> None:
+    fila = FilaLocal()
+    fila.job("a")
+    fila.pedir("a")
+    antigo = deepcopy(fila.documento)
+    assert antigo is not None
+    fila.pedir("a", acao="renovar")
+    atual = deepcopy(fila.documento)
+    with pytest.raises(ErroDaChamada) as erro:
+        fila.chamar(
+            "googleapis.firestore.v1.projects.databases.documents.patch",
+            {
+                "name": "fila_gpu/vagas",
+                "currentDocument": {"updateTime": antigo["updateTime"]},
+                "body": antigo,
+            },
+        )
+    assert erro.value.dados.code == 400  # FAILED_PRECONDITION
+    assert fila.documento == atual
+
+
+def test_24_pedidos_intercalados_convergem_apos_ler_versoes_vencidas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fila = FilaLocal(vagas=3)
+    fila.job("ff")
+    fila.pedir("ff")
+    pedidos = [f"{i:032x}" for i in range(24)]
+    for job in pedidos:
+        fila.job(job)
+    conflitos: Counter[str] = Counter()
+    em_curso: list[str] = []
+    chamar = fila.chamar
+
+    def contar_conflitos(nome: str, args: dict[str, Any]) -> Any:
+        try:
+            return chamar(nome, args)
+        except ErroDaChamada as erro:
+            if erro.dados.code == 400:
+                conflitos[em_curso[-1]] += 1
+            raise
+
+    def intercalar(indice: int) -> None:
+        if indice == len(pedidos):
+            # Vence a versão que todos os 24 já leram, antes de seus PATCHes.
+            fila.pedir("ff", acao="renovar")
+            return
+        em_curso.append(pedidos[indice])
+        fila.antes_patch = lambda: intercalar(indice + 1)
+        fila.pedir(pedidos[indice], dono=pedidos[indice])
+        em_curso.pop()
+
+    monkeypatch.setattr(fila, "chamar", contar_conflitos)
+    intercalar(0)
+    assert conflitos == Counter({job: 1 for job in pedidos})
+    assert len(fila.itens("ocupadas")) == 3
+    itens = fila.itens("ocupadas") + fila.itens("espera")
+    identidades = [
+        (
+            p["job_id"]["stringValue"],
+            p["etapa"]["stringValue"],
+            p["dono"]["stringValue"],
+        )
+        for p in itens
+    ]
+    assert len(identidades) == len(set(identidades)) == len(pedidos) + 1
+    assert {p[0] for p in identidades} == {*pedidos, "ff"}
+
+
+def test_releitura_le_cada_job_uma_vez_e_o_proximo_pulso_le_de_novo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fila = FilaLocal(vagas=2)
+    for job in ("a", "b", "c"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("a", "leitura_da_tela")
+    fila.pedir("b")
+    fila.pedir("c")
+    fila.job("c", estado="ausente")
+    leituras: Counter[str] = Counter()
+    chamar = fila.chamar
+
+    def contar_jobs(nome: str, args: dict[str, Any]) -> Any:
+        if nome.endswith("documents.get") and "/jobs/" in args["name"]:
+            leituras[args["name"].rsplit("/", 1)[1]] += 1
+        return chamar(nome, args)
+
+    def vencer_a_versao() -> None:
+        assert fila.documento is not None
+        fila.versao += 1
+        fila.documento["updateTime"] = str(fila.versao)
+        fila.job("a", estado="cancelado")
+
+    monkeypatch.setattr(fila, "chamar", contar_jobs)
+    fila.antes_patch = vencer_a_versao
+    assert fila.pedir("b")["vaga"] is False
+    assert leituras == Counter({"a": 1, "b": 1, "c": 1})
+    assert fila.pedir("b")["vaga"] is True
+    assert leituras == Counter({"a": 2, "b": 2, "c": 1})
+
+
+@pytest.mark.parametrize("agora", [1000.0, 1000.001, 1000.002, 1000.0035])
+def test_espera_da_releitura_varia_com_os_milissegundos_do_relogio(
+    monkeypatch: pytest.MonkeyPatch, agora: float
+) -> None:
+    fila = FilaLocal()
+    fila.job("a")
+    fila.agora = agora
+    fila.erro_antes = 400
+    esperas = []
+    chamar = fila.chamar
+
+    def contar_esperas(nome: str, args: dict[str, Any]) -> Any:
+        if nome == "sys.sleep":
+            esperas.append(args["seconds"])
+        return chamar(nome, args)
+
+    monkeypatch.setattr(fila, "chamar", contar_esperas)
+    assert fila.pedir("a")["vaga"] is True
+    assert esperas == [1 + int(agora * 1000) % 3]
+    assert type(esperas[0]) is int
+
+
 @pytest.mark.parametrize("depois", [False, True])
 def test_gravacao_falha_antes_ou_depois_de_persistir_sem_duplicar_vaga(
     depois: bool,
@@ -434,6 +565,14 @@ def test_avaliador_recusa_comparacao_de_ordem_entre_strings(operador: str) -> No
         fila.valor(f'${{"a" {operador} "b"}}', {})
     assert fila.valor(f"${{1 {operador} 2}}", {}) == (operador in ["<", "<="])
     assert fila.valor(f'${{false and "a" {operador} "b"}}', {}) is False
+
+
+def test_avaliador_recusa_mapa_literal_e_chave_que_nao_e_string() -> None:
+    fila = FilaLocal()
+    with pytest.raises(SyntaxError, match="mapa literal"):
+        fila.valor("${default(null, {})}", {"default": lambda v, padrao: padrao})
+    with pytest.raises(TypeError, match="chave de mapa exige string"):
+        fila.atribuir("cache[chave]", "job", {"cache": {}, "chave": 1})
 
 
 @pytest.mark.parametrize(
@@ -526,7 +665,7 @@ def test_o_log_recupera_a_posicao_se_a_resposta_da_gravacao_se_perdeu() -> None:
         "job_id": "a",
         "etapa": "transcricao",
         "posicao": 0,
-        "espera_s": 2.0,
+        "espera_s": 4.0,
     }
 
 
