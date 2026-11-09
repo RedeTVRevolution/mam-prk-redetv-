@@ -30,6 +30,7 @@ from api.sinais import (
     Registrar,
     imprimir,
     registro_da_resposta_fora_do_esquema,
+    registro_das_pessoas_fora_da_pauta,
     registro_do_uso_do_modelo,
 )
 from api.transcricao import Transcricao
@@ -77,6 +78,7 @@ REGRAS GERAIS
 
 2. PAUTAS E NARRATIVA
 - Divida o vídeo em pautas: cada assunto, reportagem ou quadro, com início e fim.
+- Toda pessoa citada numa pauta precisa estar em pessoas.
 - Para cada pauta: título curto, resumo jornalístico fiel ao que foi mostrado e dito, pessoas envolvidas e tom, só um destes valores, sem acento: informativo, polemico, descontraido, exclusivo, homenagem, analise, comercial (use comercial para a pauta que é ação comercial ou merchandising, não reportagem; o comercial continua registrado em comerciais).
 - Exemplos de pauta: entrevista coletiva do governador, chuva forte na cidade, gols da rodada, separação de celebridade, quadro de prêmios do auditório.
 
@@ -346,11 +348,38 @@ def _chaves(dados: Any) -> set[str]:
     return set()
 
 
-def _validar(texto: str, video: Video) -> Decupagem:
+def _tirar_pessoas_fora_das_pautas(dados: dict[str, Any], registrar: Registrar) -> None:
+    """O modelo às vezes cita na pauta um id que não declarou em `pessoas`; refazer a
+    chamada custa e repete o erro. A pauta fica só com os ids declarados, com uma linha
+    no log. Só aqui, na resposta do modelo: a Decupagem gravada segue com o esquema
+    estrito. Forma estranha fica para o esquema recusar."""
+    pessoas, pautas = dados.get("pessoas"), dados.get("pautas")
+    if not isinstance(pessoas, list) or not isinstance(pautas, list):
+        return
+    ids = {
+        p["id"] for p in pessoas if isinstance(p, dict) and isinstance(p.get("id"), str)
+    }
+    fora: dict[str, list[str]] = {}
+    for pauta in pautas:
+        citadas = pauta.get("pessoas") if isinstance(pauta, dict) else None
+        if not isinstance(citadas, list) or not all(
+            isinstance(i, str) for i in citadas
+        ):
+            continue
+        sobrou = [i for i in citadas if i in ids]
+        if len(sobrou) < len(citadas):
+            fora[str(pauta.get("id"))] = [str(i) for i in citadas if i not in ids]
+            pauta["pessoas"] = sobrou
+    if fora:
+        registrar(registro_das_pessoas_fora_da_pauta(fora))
+
+
+def _validar(texto: str, video: Video, registrar: Registrar = imprimir) -> Decupagem:
     """Levanta `ValueError` (JSON quebrado, fora do esquema ou tempo fora de MM:SS)."""
     dados = json.loads(texto)
     if not isinstance(dados, dict) or _chaves(dados) & CAMPOS_DO_SERVIDOR:
         raise ValueError("resposta fora do esquema")
+    _tirar_pessoas_fora_das_pautas(dados, registrar)
     return Decupagem.model_validate(
         {
             **tempos_em_ms(dados, video.duracao_ms),

@@ -10,6 +10,7 @@ import requests
 
 from api.decupagem import Video, esquema_do_modelo
 from api.gemini import (
+    INSTRUCAO,
     MODO_FLEX,
     MODO_STANDARD,
     PRAZO_DA_ANALISE_S,
@@ -147,6 +148,68 @@ def test_clipe3_tempo_em_ms_escrito_pelo_modelo_e_recusado() -> None:
     ruim["transcricao"][0].update(inicio_ms=0, fim_ms=124)
     with pytest.raises(ValueError):
         _validar(json.dumps(ruim), VIDEO_CONFIAVEL)
+
+
+def _com_pessoa_fantasma() -> tuple[str, str]:
+    dados = resposta_em_mm_ss()
+    existente = dados["pessoas"][0]["id"]
+    dados["pautas"][0]["pessoas"] = [existente, "fantasma"]
+    return json.dumps(dados), existente
+
+
+def test_pauta_com_pessoa_fora_de_pessoas_e_aceita_sem_ela() -> None:
+    texto, existente = _com_pessoa_fantasma()
+    linhas: list[str] = []
+
+    d = _validar(texto, VIDEO_CONFIAVEL, linhas.append)
+
+    assert d.pautas[0].pessoas == [existente]
+    [linha] = linhas
+    registro = json.loads(linha)
+    assert registro["evento"] == "pessoas_fora_da_pauta_removidas"
+    assert registro["severity"] == "WARNING"
+    assert registro["pautas"] == {d.pautas[0].id: ["fantasma"]}
+
+
+def test_pauta_com_pessoa_fora_nao_gasta_nova_chamada() -> None:
+    texto, _ = _com_pessoa_fantasma()
+    t = TransporteFalso(texto)
+
+    _rodar(t)
+
+    assert len(t.chamadas) == 1
+
+
+@pytest.mark.parametrize(
+    "estragar",
+    [
+        lambda d: d["pessoas"][0].update(id=[]),
+        lambda d: d["pessoas"][0].update(id={}),
+        lambda d: d["pautas"][0].update(pessoas=[[]]),
+        lambda d: d["pautas"][0].update(pessoas=[{}]),
+    ],
+    ids=["id-lista", "id-objeto", "citada-lista", "citada-objeto"],
+)
+def test_pessoa_com_forma_estranha_e_recusada(
+    estragar: Callable[[dict[str, Any]], None],
+) -> None:
+    dados = resposta_em_mm_ss()
+    estragar(dados)
+
+    with pytest.raises(ValueError):
+        _validar(json.dumps(dados), VIDEO_CONFIAVEL)
+
+
+def test_resposta_sem_pessoa_fora_nao_registra_nada() -> None:
+    linhas: list[str] = []
+
+    _validar(BOA, VIDEO_CONFIAVEL, linhas.append)
+
+    assert linhas == []
+
+
+def test_instrucao_pede_pessoa_da_pauta_em_pessoas() -> None:
+    assert "precisa estar em pessoas" in INSTRUCAO
 
 
 def test_devolve_decupagem_valida() -> None:
