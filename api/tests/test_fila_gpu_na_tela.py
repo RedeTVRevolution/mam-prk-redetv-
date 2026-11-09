@@ -36,7 +36,7 @@ def pedido(job_id: str, etapa: str = "transcricao", **campos: Any) -> dict[str, 
     }
 
 
-def test_detalhe_calcula_a_posicao_por_criacao_job_e_etapa_sem_gravar() -> None:
+def test_detalhe_calcula_a_posicao_por_criacao_e_ordem_da_espera_sem_gravar() -> None:
     repositorio = JobsComFila(
         {
             "espera": [
@@ -60,8 +60,8 @@ def test_detalhe_calcula_a_posicao_por_criacao_job_e_etapa_sem_gravar() -> None:
 
     for id_, posicao in (
         ("antigo", 1),
-        ("a", 2),
-        ("b", 4),
+        ("b", 2),
+        ("a", 3),
         ("ocupante", None),
         ("fora", None),
     ):

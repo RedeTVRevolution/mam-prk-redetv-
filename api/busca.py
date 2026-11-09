@@ -1,4 +1,4 @@
-"""Busca (#120): a consulta entendida vira cláusulas no índice, que voltam fundidas por RRF,
+"""Busca (#120): o texto saneado vira cláusulas no índice, que voltam fundidas por RRF,
 reordenadas, juntadas em trechos e agrupadas por vídeo.
 
 Os filtros do servidor (permissão, lixeira) entram por cima de tudo o que vem da consulta
@@ -25,13 +25,10 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, PrivateAttr
 
-from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.entendimento_da_consulta import (
-    EVIDENCIAS,
     ConsultaEntendida,
-    ModelArmor,
     entender,
     termo_da_foto,
 )
@@ -85,10 +82,6 @@ TETO_DE_ASSINATURAS = 16
 TETO_DE_CONSULTAS_AO_INDICE = 3
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
-# Entendimento da consulta (Flash-Lite) guardado por pessoa e consulta (#489): uma faceta
-# ou ordem nova não paga o modelo de novo. O Model Armor roda sempre.
-VALIDADE_DO_ENTENDIMENTO_S = 300.0  # 5 min, o que a web guarda das combinações vistas
-TETO_DO_ENTENDIMENTO = 500  # respostas por instância (LRU), poucos KB cada
 ROTULO_DO_TIPO: dict[str, str] = {
     "plano": "Plano",
     "fala": "Fala",
@@ -97,7 +90,7 @@ ROTULO_DO_TIPO: dict[str, str] = {
 }
 
 Ordem = Literal["relevancia", "data"]
-# As evidências que o editor liga e desliga: as quatro do modelo, mais objeto e marca.
+# As evidências que o editor liga e desliga na tela.
 EvidenciaDaBusca = Literal["imagem", "citada", "fala", "gc", "objeto", "marca"]
 
 
@@ -171,7 +164,7 @@ class SemAparicao(BaseModel):
 
 
 class Entendida(BaseModel):
-    """O que a busca usou da consulta: os chips e filtros que a tela mostra ligados."""
+    """Filtros aplicados e termo da foto; o nome do campo fica por compatibilidade."""
 
     evidencias: list[EvidenciaDaBusca]
     programa: str | None
@@ -184,13 +177,13 @@ class Entendida(BaseModel):
 
 @dataclass(frozen=True)
 class Ajustes:
-    """O que o editor mudou na tela, por cima do que o modelo entendeu."""
+    """Os filtros que o editor escolheu na tela."""
 
-    evidencias: tuple[EvidenciaDaBusca, ...] = ()  # vazio: fica o entendido
+    evidencias: tuple[EvidenciaDaBusca, ...] = ()  # vazio: todos os tipos
     programa: str | None = None  # "": sem programa
     desde: date | None = None
     ate: date | None = None
-    sem_periodo: bool = False  # tira o período entendido (o "Todos os anos" da tela)
+    sem_periodo: bool = False  # o "Todos os anos" da tela
     # Facetas da tela: filtram os candidatos (os de programa e mês são o programa e o período).
     pessoa: str | None = None  # id do catálogo: na imagem ou dona do objeto
     marca: str | None = None
@@ -377,8 +370,6 @@ class Busca:
         *,
         transporte: Transporte,
         catalogo: Catalogo,
-        armor: ModelArmor,
-        programas: Collection[str],
         indice: IndiceDaBusca,
         ranking: Ranking,
         repositorio: RepositorioDeJobs,
@@ -394,16 +385,11 @@ class Busca:
         )
         self._transporte = transporte
         self._catalogo = catalogo
-        self._armor = armor
-        self._programas = programas
         self._indice = indice
         self._ranking = ranking
         self._repositorio = repositorio
         self._armazenamento = armazenamento
         self._relogio = relogio
-        self._entendimentos = CacheCurto(
-            VALIDADE_DO_ENTENDIMENTO_S, TETO_DO_ENTENDIMENTO
-        )
 
     def buscar(
         self,
@@ -426,7 +412,7 @@ class Busca:
 
         `imagem` (JPEG já regravado, #270): o modelo da consulta dá o termo do objeto da
         foto (#443) e a busca segue como se a pessoa o tivesse digitado, com o mesmo
-        entendimento, Model Armor e ranking; só os filtros de `ajustes` valem. Sem o modelo,
+        saneamento, índice e ranking; só os filtros de `ajustes` valem. Sem o modelo,
         se ele falhar ou não achar objeto, levanta `BuscaPorImagemIndisponivel`: sem texto
         digitado não há plano B."""
         inicio = time.perf_counter()
@@ -453,13 +439,8 @@ class Busca:
         entendida = _ajustada(
             entender(
                 texto,
-                transporte=self._transporte,
                 catalogo=self._catalogo,
-                armor=self._armor,
-                programas=self._programas,
                 todas=self._copia_do_catalogo.itens,
-                cache=self._entendimentos,
-                dono=dono,
             ),
             ajustes or Ajustes(),
         )
@@ -507,20 +488,8 @@ class Busca:
             carregar_nomes([id])
             return nomes.get(id or "") or None
 
-        carregar_nomes([*entendida.pessoas, *(o.dono for o in entendida.objetos)])
-        fora = entendida.pessoas_fora_do_catalogo
-        if fora:
-            # Pessoa que o catálogo não resolve não tem como aparecer: as outras cláusulas
-            # ("vestido vermelho") trariam o de outra pessoa como se fosse dela. Ficam só
-            # as menções do nome, se pedidas ("Ver as menções" liga Citada e Fala).
-            base = _base(entendida)
-            clausulas = [
-                c
-                for quem in fora
-                for c in _clausulas_das_mencoes(quem, entendida, base, nome)
-            ]
-        else:
-            clausulas = self._clausulas(entendida, nome)
+        carregar_nomes(entendida.pessoas)
+        clausulas = self._clausulas(entendida, nome)
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
@@ -605,18 +574,17 @@ class Busca:
             # "Nenhuma aparição" fala do acervo, não do que a faceta deixou.
             if c.pessoa_na_imagem
             and not (achados_da_clausula if sem_facetas else consultar(c.consulta))
-        ] + [self._sem_aparicao(quem, None, entendida, consultar) for quem in fora]
+        ]
         log.info(
-            "busca em %d ms: %d vídeos, %d clausulas%s",
+            "busca em %d ms: %d vídeos, %d clausulas",
             (time.perf_counter() - inicio) * 1000,
             len(videos),
             len(clausulas),
-            ", plano B" if entendida.plano_b else "",
         )
         agora = self._relogio()
         resultado = ResultadoDaBusca(
             entendida=Entendida(
-                evidencias=_ligadas(entendida),
+                evidencias=list(entendida.evidencias),
                 programa=entendida.programa,
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
@@ -624,7 +592,7 @@ class Busca:
             ),
             videos=videos,
             sem_aparicoes=vazios,
-            plano_b=entendida.plano_b,
+            plano_b=False,
             facetas=_facetas([r for r, _, _ in fundidos], nome),
             quadros_expiram_em=agora + VALIDADE_INFORMADA_DA_IMAGEM,
         )
@@ -789,58 +757,34 @@ class Busca:
     ) -> list[_Clausula]:
         base = _base(e)
         clausulas: list[_Clausula] = []
-        donos: set[str] = set()
-        for o in e.objetos:
-            # O índice não aceita cláusula só de filtros: a peça vai também como texto.
-            texto = o.tipo or o.cor_base or o.categoria
-            if not texto:
-                continue
-            # Com o nome pedido, a categoria não filtra: a consulta e o inventário podem
-            # classificar o mesmo objeto diferente ("abajur" como móvel ou decoração).
-            categoria = None if o.tipo else o.categoria
-            if o.dono:
-                donos.add(o.dono)
-            clausulas.append(
-                _Clausula(
-                    Consulta(
-                        filtros=replace(
-                            base,
-                            tipo="objeto",
-                            categoria=categoria,
-                            cor_base=o.cor_base,
-                            dono=o.dono,
-                        ),
-                        texto=com_as_formas(texto),
-                    ),
-                    lambda r: _motivo(r, nome),
-                )
-            )
-        for marca in e.marcas:
-            clausulas.append(
-                _Clausula(
-                    Consulta(
-                        filtros=replace(base, tipo="objeto", marca=marca),
-                        texto=normalizar(marca),
-                    ),
-                    lambda r: _motivo(r, nome),
-                )
-            )
         for pessoa in e.pessoas:
-            if pessoa in donos:
-                continue
             clausulas.extend(_clausulas_da_pessoa(pessoa, e, base, nome))
         if livre := _texto_da_busca(e):
-            clausulas.append(
-                _Clausula(
-                    Consulta(
-                        filtros=base,
-                        texto=com_as_formas(livre),
-                        significado=livre,
-                        cortar_significado=True,
-                    ),
-                    lambda r: _motivo(r, nome),
-                )
+            tipos: list[TipoDeRegistro | None] = []
+            por_evidencia: tuple[tuple[EvidenciaDaBusca, TipoDeRegistro], ...] = (
+                ("imagem", "plano"),
+                ("fala", "fala"),
+                ("gc", "texto_na_tela"),
+                ("objeto", "objeto"),
+                ("marca", "objeto"),
+                ("citada", "fala"),
+                ("citada", "texto_na_tela"),
             )
+            for evidencia, tipo in por_evidencia:
+                if evidencia in e.evidencias and tipo not in tipos:
+                    tipos.append(tipo)
+            for tipo_do_texto in tipos or [None]:
+                clausulas.append(
+                    _Clausula(
+                        Consulta(
+                            filtros=replace(base, tipo=tipo_do_texto),
+                            texto=com_as_formas(livre),
+                            significado=livre,
+                            cortar_significado=True,
+                        ),
+                        lambda r: _motivo(r, nome),
+                    )
+                )
         return clausulas
 
     def _assinar_os_quadros(
@@ -1036,32 +980,9 @@ def _facetas(
     )
 
 
-def _ligadas(e: ConsultaEntendida) -> list[EvidenciaDaBusca]:
-    """Os chips ligados: as evidências da consulta (ou o padrão de pessoa)."""
-    ligadas: list[EvidenciaDaBusca] = list(e.evidencias)
-    if not ligadas and e.pessoas:
-        ligadas.append("imagem")
-    if e.objetos:
-        ligadas.append("objeto")
-    if e.marcas:
-        ligadas.append("marca")
-    return ligadas
-
-
 def _ajustada(e: ConsultaEntendida, a: Ajustes) -> ConsultaEntendida:
-    """Aplica o que o editor ligou ou desligou; só o que ele pediu muda."""
-    if a.evidencias:
-        ligadas = set(a.evidencias)
-        do_modelo = tuple(x for x in EVIDENCIAS if x in ligadas)
-        e = replace(
-            e,
-            evidencias=do_modelo,
-            objetos=e.objetos if "objeto" in ligadas else (),
-            marcas=e.marcas if "marca" in ligadas else (),
-            # Sem evidência de pessoa ligada, as pessoas saem (o padrão ligaria uma). A
-            # frase das aspas fica: ela filtra todo tipo de registro, não um chip.
-            pessoas=e.pessoas if do_modelo else (),
-        )
+    """Aplica os filtros da tela."""
+    e = replace(e, evidencias=a.evidencias)
     if a.programa is not None:
         e = replace(e, programa=a.programa or None)
     if a.sem_periodo:
@@ -1083,12 +1004,12 @@ def _base(e: ConsultaEntendida) -> Filtros:
 
 
 def _evidencias(e: ConsultaEntendida) -> tuple[str, ...]:
-    return e.evidencias or ("imagem",)
+    return e.evidencias or ("imagem", "fala", "gc")
 
 
 def _texto_da_busca(e: ConsultaEntendida) -> str:
     """O que vai à busca por texto e por significado: a frase das aspas e o resto, sem
-    repetir a frase se o modelo já a pôs no texto livre."""
+    repetir a frase se ela já está no texto livre."""
     if e.frase_exata and e.texto_livre and _contem(e.texto_livre, e.frase_exata):
         return e.texto_livre
     return " ".join(p for p in (e.frase_exata, e.texto_livre) if p)

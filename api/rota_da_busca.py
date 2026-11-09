@@ -50,8 +50,8 @@ NOTA_DO_QUADRO = (
     "(`plano-6.jpg`). O `quadro_url` assinado, que só a chave "
     "de sistema recebe, é obsoleto e vai sair da resposta."
 )
-# Acima do teto do modelo, para que o plano B chegue ao usuário antes do 504.
-TEMPO_MAXIMO_S = TEMPO_DA_CONSULTA_S + 5.0
+# Prazo da busca por texto, incluindo índice e ranking.
+TEMPO_MAXIMO_S = 15.0
 
 # A foto da busca por imagem é entrada hostil (#270): só JPEG ou PNG, pelo conteúdo.
 FORMATOS_DA_BUSCA_POR_IMAGEM = frozenset({"JPEG", "PNG"})
@@ -299,8 +299,7 @@ def criar_rotas_da_busca(
                 programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
             ),
         )
-        # Dois passos do modelo em série (descrever a foto e entender o termo), cada um com o
-        # seu teto: o prazo cobre os dois, para o plano B do entendimento chegar antes do 504.
+        # A foto tem uma chamada para a descrição, além do prazo da busca pelo termo.
         prazo_s = tempo_maximo_s + TEMPO_DA_CONSULTA_S
         try:
             resultado = futuro.result(timeout=prazo_s)

@@ -13,13 +13,13 @@ export const EVIDENCIAS = [
   { id: 'marca', rotulo: 'Marca', tipo: 'comercial' },
 ] as const
 
-/** O que a URL guarda: sem `ev`, ficam as evidências que a API entendeu da consulta. */
+/** O que a URL guarda: sem `ev`, a busca traz todos os tipos. */
 export interface ConsultaDaBusca {
   q: string
   evidencias: Evidencia[] | null
-  /** `null`: o programa entendido; `''`: nenhum programa. */
+  /** `null`: nenhum programa; `''`: nenhum programa. */
   programa: string | null
-  /** `null`: o período entendido; `'todos'`: nenhum período. */
+  /** `null`: nenhum período; `'todos'`: nenhum período. */
   ano: number | 'todos' | null
   /** Faceta de mês (`2024-05`): vale sobre o ano. */
   mes: string | null
@@ -99,7 +99,7 @@ const IDS_DE_EVIDENCIA: string[] = EVIDENCIAS.map((e) => e.id)
 /** O teto do texto da busca: a API dá 422 com mais que isso (#372). */
 export const TAMANHO_DA_CONSULTA = 300
 
-/** A busca de um texto novo: chips e filtros voltam ao que a API entender. */
+/** A busca de um texto novo: chips e filtros voltam a ficar vazios. */
 export function consultaNova(q: string): ConsultaDaBusca {
   return {
     q,

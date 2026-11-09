@@ -2707,7 +2707,7 @@
     "/v1/busca": {
       "get": {
         "summary": "Buscar momentos por texto",
-        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`) e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o entendimento da consulta falhou e a busca caiu para palavras soltas.",
+        "description": "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e marcas. `q` é a frase em português, saneada e buscada inteira, sem interpretação pelo Gemini nem Model Armor. Aspas delimitam uma frase exata; nomes inteiros do catálogo acrescentam cláusulas de pessoa. Filtros: `ev` (repetível: `imagem`, `citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, `texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou `data`) e `limite` (1 a 50 vídeos). Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Limite de 30 consultas por minuto por chave. `ev` restringe também o texto livre: `imagem` busca planos, `fala` falas e `gc` textos na tela; sem `ev`, todos os tipos entram. `entendida` traz os filtros aplicados e `plano_b` fica `false`, mantido por compatibilidade.",
         "operationId": "buscar_v1_busca_get",
         "parameters": [
           {
@@ -2928,10 +2928,7 @@
                 },
                 "example": {
                   "entendida": {
-                    "evidencias": [
-                      "imagem",
-                      "citada"
-                    ],
+                    "evidencias": [],
                     "programa": null,
                     "desde": null,
                     "ate": null,
@@ -3122,7 +3119,7 @@
     "/v1/busca/imagem": {
       "post": {
         "summary": "Buscar momentos por imagem",
-        "description": "Acha os momentos do objeto que aparece na foto: o modelo da consulta dá o nome do objeto (e no máximo uma característica) e a busca segue como se esse termo tivesse sido digitado; o termo vem em `entendida.termo_da_foto`. O corpo é `multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória e pelo modelo: não é guardada. Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
+        "description": "Acha os momentos do objeto que aparece na foto: o modelo da consulta dá o nome do objeto (e no máximo uma característica) e a busca segue como se esse termo tivesse sido digitado, sem segunda chamada ao Gemini nem Model Armor; o termo vem em `entendida.termo_da_foto`. O corpo é `multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória e pelo modelo: não é guardada. Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição. A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o caminho do quadro no vídeo (`quadros/plano-6.jpg`): peça a URL em `GET /v1/jobs/{job_id}/quadros/{arquivo}`, com o nome do arquivo (`plano-6.jpg`). O `quadro_url` assinado é obsoleto e vai sair da resposta. O resultado vem em páginas de `limite` vídeos, até uns 500: o cabeçalho `X-Proximo-Cursor` traz o `cursor` da página seguinte e some na última. Repita a mesma consulta com ele em até 15 min; a ordem é a da 1ª página. Escopo `ler`. Divide com a busca por texto o limite de 30 consultas por minuto.",
         "operationId": "buscar_por_imagem_v1_busca_imagem_post",
         "parameters": [
           {
@@ -3230,10 +3227,7 @@
                 },
                 "example": {
                   "entendida": {
-                    "evidencias": [
-                      "imagem",
-                      "citada"
-                    ],
+                    "evidencias": [],
                     "programa": null,
                     "desde": null,
                     "ate": null,
@@ -4439,7 +4433,7 @@
           "ate"
         ],
         "title": "Entendida",
-        "description": "O que a busca usou da consulta: os chips e filtros que a tela mostra ligados."
+        "description": "Filtros aplicados e termo da foto; o nome do campo fica por compatibilidade."
       },
       "EnviadoPor": {
         "properties": {

@@ -6,7 +6,7 @@ import random
 import threading
 import time
 import zlib
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -25,6 +25,7 @@ from api.busca import (
     Busca,
     BuscaCancelada,
     Entendida,
+    EvidenciaDaBusca,
     Facetas,
     ListaDaBusca,
     MomentoGuardado,
@@ -36,8 +37,6 @@ from api.busca import (
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import (
     TEMPO_DA_CONSULTA_S,
-    ModelArmor,
-    ModelArmorEmMemoria,
 )
 from api.eventos_de_uso import Eventos
 from api.gemini import ErroHttp
@@ -45,7 +44,7 @@ from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import CursorInvalido, Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
-from api.programas import NomesDosProgramas, Programa, ProgramasEmMemoria
+from api.programas import Programa, ProgramasEmMemoria
 from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import TransporteFalso
@@ -139,14 +138,10 @@ class Mundo:
         self,
         ranking: Ranking | None = None,
         relogio: Callable[[], datetime] = lambda: BASE,
-        armor: ModelArmor | None = None,
-        programas: Collection[str] = PROGRAMAS,
     ) -> Busca:
         return Busca(
             transporte=self.transporte,
             catalogo=self.catalogo,
-            armor=armor or ModelArmorEmMemoria(),
-            programas=programas,
             indice=self.indice,
             ranking=ranking or RankingEmOrdem(),
             repositorio=self.jobs,
@@ -162,11 +157,11 @@ class Mundo:
         )
 
 
-def buscar(m: Mundo, texto: str = "vestido vermelho da Sabrina Sato", **kw: Any) -> Any:
+def buscar(m: Mundo, texto: str = "vestido vermelho", **kw: Any) -> Any:
     return m.busca().buscar(texto, **kw)
 
 
-def test_uma_busca_le_a_colecao_de_programas_uma_vez() -> None:
+def test_uma_busca_nao_le_a_colecao_de_programas() -> None:
     class ProgramasContados(ProgramasEmMemoria):
         leituras = 0
 
@@ -178,9 +173,20 @@ def test_uma_busca_le_a_colecao_de_programas_uma_vez() -> None:
         [Programa(id=f"p{i}", nome=n, perfil="") for i, n in enumerate(PROGRAMAS)]
     )
     m = Mundo(pedido(texto_livre="vestido"))
-    busca = m.busca(programas=NomesDosProgramas(repositorio))
-    busca.buscar("vestido vermelho da Sabrina Sato")
-    assert repositorio.leituras == 1
+    app = criar_app(
+        VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@b.c")}),
+        m.jobs,
+        m.armazenamento,
+        indice=m.indice,
+        programas=repositorio,
+    )
+    resposta = TestClient(app).get(
+        "/v1/busca",
+        params={"q": "vestido vermelho da Sabrina Sato"},
+        headers=AUTORIZACAO,
+    )
+    assert resposta.status_code == 200
+    assert repositorio.leituras == 0
 
 
 def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> None:
@@ -208,7 +214,7 @@ def test_vestido_vermelho_da_sabrina_devolve_so_o_momento_do_objeto_dela() -> No
     )
     m.com(job("j2"), objeto("j2:objeto:0", "j2", 1_000, 2_000, dono="outra"))
 
-    resultado = buscar(m)
+    resultado = buscar(m, ajustes=Ajustes(pessoa=m.sabrina, tipo="objeto"))
 
     assert [v.job_id for v in resultado.videos] == ["j1"]
     video = resultado.videos[0]
@@ -249,9 +255,20 @@ def _mundo_de_varias_clausulas(indice: IndiceEspia | None = None) -> Mundo:
         )
         for n, (t, c) in enumerate(OUTROS_OBJETOS)
     ]
+    dos_outros = [
+        replace(r, tipo="plano", pessoas=[m.sabrina], descricao=r.texto)
+        for r in dos_outros
+    ]
     m.com(
         job("j1"),
-        objeto("j1:objeto:0", "j1", 12_000, 19_000, dono=m.sabrina),
+        Registro(
+            id="p0",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=12_000,
+            fim_ms=19_000,
+            pessoas=[m.sabrina],
+        ),
         *(r for r in dos_outros if r.job_id == "j1"),
     )
     m.com(job("j2"), *(r for r in dos_outros if r.job_id == "j2"))
@@ -285,7 +302,7 @@ def test_as_clausulas_vao_ao_indice_ao_mesmo_tempo_e_com_limite() -> None:
                     self.em_voo -= 1
 
     lento = IndiceLento()
-    resultado = buscar(_mundo_de_varias_clausulas(lento))
+    resultado = buscar(_mundo_de_varias_clausulas(lento), "Sabrina Sato")
     assert len(lento.consultas) > TETO_DE_CONSULTAS_AO_INDICE
     assert lento.pico == TETO_DE_CONSULTAS_AO_INDICE
     assert resultado.videos
@@ -294,9 +311,9 @@ def test_as_clausulas_vao_ao_indice_ao_mesmo_tempo_e_com_limite() -> None:
 def test_o_resultado_em_paralelo_e_o_da_execucao_em_serie(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    em_paralelo = buscar(_mundo_de_varias_clausulas())
+    em_paralelo = buscar(_mundo_de_varias_clausulas(), "Sabrina Sato")
     monkeypatch.setattr("api.busca.TETO_DE_CONSULTAS_AO_INDICE", 1)
-    em_serie = buscar(_mundo_de_varias_clausulas())
+    em_serie = buscar(_mundo_de_varias_clausulas(), "Sabrina Sato")
     assert [v.n_momentos for v in em_paralelo.videos] == [3, 1]
     assert em_paralelo.videos == em_serie.videos
     assert em_paralelo.sem_aparicoes == em_serie.sem_aparicoes
@@ -374,7 +391,9 @@ def test_filtro_do_servidor_nao_e_sobrescrito_pela_consulta() -> None:
     )
 
     resultado = m.busca().buscar(
-        "vestido no Leo Dias", filtros_do_servidor=Filtros(programa="TV Fama")
+        "vestido",
+        ajustes=Ajustes(programa="Leo Dias"),
+        filtros_do_servidor=Filtros(programa="TV Fama"),
     )
 
     assert {c.filtros.programa for c in m.indice.consultas} == {"TV Fama"}
@@ -423,26 +442,39 @@ def test_videos_pelo_melhor_momento_e_no_empate_pelo_numero_de_momentos() -> Non
     }
     pedido_dos_dois = pedido(objetos=[{**VESTIDO, "pessoa": None}, sandalia])
     m = Mundo(pedido_dos_dois, pedido_dos_dois)
-    m.com(job("j1", data_exibicao=date(2024, 1, 1)), objeto("a", "j1", 0, 1_000))
+    m.com(
+        job("j1", data_exibicao=date(2024, 1, 1)),
+        objeto("a", "j1", 0, 1_000, texto="vestido vermelho e sandália"),
+    )
     m.com(
         job("j2", data_exibicao=date(2020, 1, 1)),
         *(
-            objeto(
-                id,
-                "j2",
-                inicio,
-                inicio + 1_000,
-                categoria="calcado",
-                tipo_do_objeto="sandalia",
-                texto="sandalia",
+            replace(
+                objeto(
+                    id,
+                    "j2",
+                    inicio,
+                    inicio + 1_000,
+                    categoria="calcado",
+                    tipo_do_objeto="sandalia",
+                    texto="vestido vermelho e sandália",
+                ),
+                tipo="fala",
             )
             for id, inicio in (("b", 0), ("c", 20_000))
         ),
     )
     # o melhor momento de cada vídeo é o primeiro da sua cláusula: empatam no RRF
-    resultado = buscar(m, "vestido vermelho e sandália")
+    resultado = buscar(
+        m, "vestido vermelho e sandália", ajustes=Ajustes(evidencias=("objeto", "fala"))
+    )
     assert [v.job_id for v in resultado.videos] == ["j2", "j1"]
-    por_data = buscar(m, "vestido vermelho e sandália", ordem="data")
+    por_data = buscar(
+        m,
+        "vestido vermelho e sandália",
+        ordem="data",
+        ajustes=Ajustes(evidencias=("objeto", "fala")),
+    )
     assert [v.job_id for v in por_data.videos] == ["j1", "j2"]
 
 
@@ -457,7 +489,7 @@ def test_nenhuma_clausula_vai_ao_indice_so_com_filtros() -> None:
         )
     )
     m.com(job("j1"), objeto("a", "j1", 0, 1_000, marca="Farm", texto="vestido Farm"))
-    resultado = buscar(m, "Sabrina Sato e Farm")
+    resultado = buscar(m, "Farm", ajustes=Ajustes(marca="Farm"))
     assert m.indice.consultas
     assert all(c.texto or c.significado for c in m.indice.consultas)
     assert [v.job_id for v in resultado.videos] == ["j1"]
@@ -499,9 +531,9 @@ def test_ranking_so_roda_com_texto_livre() -> None:
         ),
     )
     m.busca(Espia()).buscar("vestido vermelho")
-    assert chamadas == []
+    assert chamadas == ["vestido vermelho"]
     m.busca(Espia()).buscar("estúdio")
-    assert chamadas == ["estúdio"]
+    assert chamadas == ["vestido vermelho", "estúdio"]
 
 
 def test_falha_do_ranking_mantem_a_ordem_do_indice() -> None:
@@ -544,7 +576,7 @@ def test_sem_aparicoes_diz_quantas_mencoes_ha_na_fala_e_na_tela() -> None:
         ),
     )
 
-    resultado = buscar(m, "Sabrina Sato")
+    resultado = buscar(m, "Sabrina Sato", ajustes=Ajustes(evidencias=("imagem",)))
 
     assert resultado.videos == []
     (vazio,) = resultado.sem_aparicoes
@@ -555,7 +587,7 @@ def test_sem_aparicoes_diz_quantas_mencoes_ha_na_fala_e_na_tela() -> None:
     )
 
 
-def test_pessoa_fora_do_catalogo_em_consulta_composta_volta_vazia_com_aviso() -> None:
+def test_nome_fora_do_catalogo_em_consulta_composta_fica_no_texto_inteiro() -> None:
     fulano = {**VESTIDO, "pessoa": "Fulano"}
     m = Mundo(pedido(pessoas=["Fulano"], objetos=[fulano]))
     m.com(
@@ -582,9 +614,8 @@ def test_pessoa_fora_do_catalogo_em_consulta_composta_volta_vazia_com_aviso() ->
     resultado = buscar(m, "Fulano de vestido vermelho")
 
     assert resultado.videos == []
-    (vazio,) = resultado.sem_aparicoes
-    assert (vazio.pessoa_id, vazio.nome) == (None, "Fulano")
-    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (2, 0)
+    assert resultado.sem_aparicoes == []
+    assert {c.significado for c in m.indice.consultas} == {"Fulano de vestido vermelho"}
 
 
 def test_ver_as_mencoes_de_um_nome_fora_do_catalogo_traz_a_fala() -> None:
@@ -598,8 +629,8 @@ def test_ver_as_mencoes_de_um_nome_fora_do_catalogo_traz_a_fala() -> None:
 
     resultado = buscar(
         m,
-        "Fulano de vestido vermelho",
-        ajustes=Ajustes(evidencias=("imagem", "citada", "fala")),
+        "Fulano",
+        ajustes=Ajustes(evidencias=("citada", "fala")),
     )
 
     assert [mo.motivo for v in resultado.videos for mo in v.momentos] == [
@@ -655,7 +686,7 @@ def test_sem_aparicoes_vem_mesmo_com_outros_resultados_e_no_programa_pedido() ->
         ),
     )
 
-    resultado = buscar(m, "Sabrina Sato na praia no Leo Dias")
+    resultado = buscar(m, "Sabrina Sato", ajustes=Ajustes(programa="Leo Dias"))
 
     assert [v.job_id for v in resultado.videos] == ["j1"]
     (vazio,) = resultado.sem_aparicoes
@@ -754,7 +785,6 @@ def cliente(
         catalogo=m.catalogo,
         indice=indice or m.indice,
         transporte_da_consulta=m.transporte,
-        armor=ModelArmorEmMemoria(),
         busca_por_minuto=maximo_por_minuto,
         tempo_maximo_da_busca_s=tempo_maximo_s,
         limites_da_imagem=limites_da_imagem,
@@ -877,7 +907,7 @@ def test_as_paginas_seguintes_nao_chamam_modelo_indice_nem_ranking() -> None:
     # A ordem é a do ranking da 1ª página, mesmo com ele fora nas seguintes.
     assert ids == em_ordem[::-1]
     assert terceira._proximo_cursor is None
-    assert len(m.transporte.chamadas) == 2  # uma por 1ª página
+    assert m.transporte.chamadas == []  # nem a primeira página chama modelo
     assert len(m.indice.consultas) == consultas
     assert ranking.recebidos == [5]
 
@@ -1120,7 +1150,7 @@ def test_consulta_que_passa_do_tempo_maximo_responde_504() -> None:
     )
 
 
-def test_sem_modelo_nem_model_armor_a_busca_cai_no_plano_b() -> None:
+def test_sem_modelo_a_busca_por_texto_funciona() -> None:
     m = Mundo()
     app = criar_app(
         VerificadorFalso({"token-bom": Usuario(uid="u1", email="a@b.c")}),
@@ -1132,6 +1162,7 @@ def test_sem_modelo_nem_model_armor_a_busca_cai_no_plano_b() -> None:
     r = TestClient(app).get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
     assert r.status_code == 200
     assert r.json()["videos"][0]["job_id"] == "j1"
+    assert not r.json()["plano_b"]
 
 
 def test_pedido_sem_consulta_responde_422() -> None:
@@ -1140,7 +1171,7 @@ def test_pedido_sem_consulta_responde_422() -> None:
 
 
 def test_o_tempo_maximo_da_rota_passa_do_teto_do_modelo() -> None:
-    # senão a rota responde 504 antes de o plano B chegar
+    # Mantém a margem do prazo antigo; a foto soma seu teto à parte.
     assert TEMPO_MAXIMO_S > TEMPO_DA_CONSULTA_S
 
 
@@ -1153,21 +1184,23 @@ def _fala(id: str, texto: str) -> Registro:
     )
 
 
-def test_o_resultado_diz_quais_chips_estao_ligados_e_o_programa_entendido() -> None:
+def test_o_resultado_nao_liga_chips_nem_programa_pelo_texto() -> None:
     m = Mundo(pedido(pessoas=["Sabrina Sato"], objetos=[VESTIDO], programa="TV Fama"))
     m.com(job("j1"))
 
     entendida = buscar(m, "x").entendida
 
-    assert entendida.evidencias == ["imagem", "objeto"]
-    assert entendida.programa == "TV Fama"
+    assert entendida.evidencias == []
+    assert entendida.programa is None
 
 
-def test_ligar_citada_e_fala_traz_as_mencoes_que_o_padrao_deixava_de_fora() -> None:
+def test_ligar_imagem_e_fala_restringe_as_evidencias_da_pessoa() -> None:
     m = Mundo(pedido(pessoas=["Sabrina Sato"]), pedido(pessoas=["Sabrina Sato"]))
     m.com(job("j1"), _fala("f1", "oi Sabrina Sato"))
 
-    assert buscar(m, "Sabrina Sato").videos == []
+    assert (
+        buscar(m, "Sabrina Sato", ajustes=Ajustes(evidencias=("imagem",))).videos == []
+    )
 
     de_novo = buscar(m, "Sabrina Sato", ajustes=Ajustes(evidencias=("imagem", "fala")))
     assert [v.momentos[0].motivo for v in de_novo.videos] == ["Fala: 'oi Sabrina Sato'"]
@@ -1192,7 +1225,13 @@ def test_nome_vai_normalizado_sem_transformar_or_em_operador(
 
     textos = [c.texto for c in m.indice.consultas if c.texto]
     assert textos
-    assert set(textos) == {"angelica or sato"}
+    assert any(c.significado == nome for c in m.indice.consultas)
+    assert all(
+        c.filtros.pessoa in (None, m.catalogo.achar(nome)[0].id if cadastrada else None)
+        for c in m.indice.consultas
+    )
+    if cadastrada and mencoes:
+        assert "angelica or sato" in textos
 
 
 def test_desligar_o_chip_de_objeto_tira_as_clausulas_de_objeto() -> None:
@@ -1205,7 +1244,7 @@ def test_desligar_o_chip_de_objeto_tira_as_clausulas_de_objeto() -> None:
     assert resultado.entendida.evidencias == ["fala"]
 
 
-def test_programa_e_periodo_da_tela_valem_sobre_o_entendido() -> None:
+def test_programa_e_periodo_vem_so_da_tela() -> None:
     m = Mundo(pedido(texto_livre="vestido", programa="Leo Dias"))
     m.com(job("j1"), objeto("a", "j1", 0, 1_000))
 
@@ -1247,7 +1286,7 @@ def test_a_rota_aceita_ev_programa_e_periodo() -> None:
     )
 
 
-def test_sem_periodo_tira_o_periodo_entendido() -> None:
+def test_sem_periodo_nao_deduz_datas_do_texto() -> None:
     m = Mundo(
         pedido(
             texto_livre="vestido",
@@ -1557,13 +1596,13 @@ def test_facetas_ignoram_video_que_o_usuario_nao_ve() -> None:
     assert contagens(f.programa) == {"TV Fama": 1}
 
 
-def test_plano_b_tambem_devolve_as_facetas() -> None:
+def test_busca_sem_modelo_devolve_as_facetas() -> None:
     m = Mundo(ErroHttp(400))
     m.com(job("j1"), objeto("a", "j1", 0, 1_000, marca="Nike"))
 
     r = buscar(m, "vestido")
 
-    assert r.plano_b
+    assert not r.plano_b
     assert contagens(r.facetas.marca) == {"Nike": 1}
 
 
@@ -1745,7 +1784,7 @@ def test_a_frase_nao_se_repete_quando_o_modelo_a_poe_no_texto_livre() -> None:
 def test_a_frase_continua_filtrando_com_qualquer_chip() -> None:
     m = Mundo("isto nao e json")
     _planos(m, *FRASES)
-    resultado = buscar(m, '"vestido amarelo"', ajustes=Ajustes(evidencias=("objeto",)))
+    resultado = buscar(m, '"vestido amarelo"', ajustes=Ajustes(evidencias=("imagem",)))
     assert _achados(resultado) == [0, 1]
 
 
@@ -1939,7 +1978,7 @@ def test_objeto_pedido_no_singular_ou_no_plural_acha_o_mesmo_momento(
             tipo_do_objeto=no_registro,
             cor_base=[],
             cor=None,
-            texto=no_registro,
+            texto=singular if no_indice == "singular" else plural,
         ),
     )
     assert [v.job_id for v in buscar(m, consulta).videos] == ["j1"]
@@ -2060,14 +2099,101 @@ def test_sem_nada_inelegivel_o_resultado_e_o_mesmo_com_e_sem_o_filtro() -> None:
     assert rodar(filtros_do_servidor()) == rodar(Filtros())
 
 
-def test_faceta_nova_nao_chama_o_modelo_de_novo_e_o_armor_sim() -> None:
-    armor = ModelArmorEmMemoria()
+def test_faceta_ou_dono_novo_nao_chama_modelo() -> None:
     m = Mundo(pedido(texto_livre="vestido"), pedido(texto_livre="vestido"))
-    busca = m.busca(armor=armor)
+    busca = m.busca()
 
     busca.buscar("vestido", dono="ana")
     busca.buscar("vestido", dono="ana", ajustes=Ajustes(marca="Adidas"))
-    busca.buscar("vestido", dono="bia")  # outra pessoa: não acerta o cache
+    busca.buscar("vestido", dono="bia")  # outra pessoa também não chama modelo
 
-    assert len(m.transporte.chamadas) == 2
-    assert armor.consultas == ["vestido"] * 3
+    assert m.transporte.chamadas == []
+
+
+@pytest.mark.parametrize("frase", ["tapete vermelho", "tarde é sua"])
+def test_frase_inteira_acha_falas_sem_chamar_modelo(frase: str) -> None:
+    m = Mundo(pedido(objetos=[VESTIDO], programa="TV Fama"))
+    m.com(job("j1"), _fala("f1", f"{frase} para o Roberto"))
+
+    resultado = buscar(m, frase)
+
+    assert [v.job_id for v in resultado.videos] == ["j1"]
+    assert m.transporte.chamadas == []
+    assert {c.significado for c in m.indice.consultas} == {frase}
+
+
+@pytest.mark.parametrize("frase", ["tapete vermelho", "tarde é sua"])
+@pytest.mark.parametrize(
+    "evidencias, tipos",
+    [
+        (("fala",), ["fala"]),
+        (("gc",), ["texto_na_tela"]),
+        (("imagem",), ["plano"]),
+        (("fala", "gc"), ["fala", "texto_na_tela"]),
+        ((), ["fala", "texto_na_tela", "plano"]),
+    ],
+)
+def test_evidencias_filtram_tambem_o_texto_livre(
+    frase: str, evidencias: tuple[EvidenciaDaBusca, ...], tipos: list[str]
+) -> None:
+    m = Mundo(pedido(texto_livre=frase))
+    m.com(
+        job("j1"),
+        _fala("f1", frase),
+        Registro(
+            id="gc1",
+            tipo="texto_na_tela",
+            job_id="j1",
+            inicio_ms=5_000,
+            fim_ms=6_000,
+            texto=frase,
+        ),
+        Registro(
+            id="p1",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=10_000,
+            fim_ms=11_000,
+            descricao=frase,
+        ),
+    )
+
+    resultado = buscar(m, frase, ajustes=Ajustes(evidencias=evidencias))
+
+    assert [momento.tipo for v in resultado.videos for momento in v.momentos] == tipos
+    assert {c.filtros.tipo for c in m.indice.consultas} == (
+        set(tipos) if evidencias else {None}
+    )
+
+
+def test_nome_inteiro_do_catalogo_na_frase_gera_imagem_fala_e_gc() -> None:
+    m = Mundo()
+    m.catalogo.acrescentar("Angélica Silva", "apresentadora", [])
+    m.com(
+        job("j1"),
+        Registro(
+            id="p1",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            descricao="estúdio",
+            pessoas=[m.sabrina],
+        ),
+    )
+
+    resultado = buscar(m, "entrevista com SABRINA SÁTO")
+
+    assert resultado.videos
+    assert any(c.filtros.pessoa == m.sabrina for c in m.indice.consultas)
+    assert {c.filtros.tipo for c in m.indice.consultas} >= {
+        "plano",
+        "fala",
+        "texto_na_tela",
+    }
+    assert all(
+        c.filtros.pessoa is None
+        for c in m.indice.consultas
+        if c.filtros.tipo != "plano"
+    )
+    assert m.transporte.chamadas == []

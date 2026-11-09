@@ -1,11 +1,4 @@
-"""Adaptadores reais da busca: Model Armor e Ranking API, e a montagem pelo ambiente.
-
-O Model Armor julga a consulta antes de o modelo vê-la; a Ranking API reordena os
-registros pela consulta de texto livre. As duas só lançam erro: o `entender` e a busca
-já caem no plano B e na ordem do índice (`api/entendimento_da_consulta.py`, `api/busca.py`).
-Os nomes (modelo do Model Armor, região, configuração da Ranking) vêm do ambiente, que
-o `infra/modulos/mam/main.tf` preenche.
-"""
+"""Adaptadores reais da busca: descrição da foto pelo Gemini e Ranking API."""
 
 import logging
 from collections.abc import Callable, Mapping
@@ -17,22 +10,16 @@ import google.auth.transport.requests
 import requests
 
 from api.busca import Ranking
-from api.entendimento_da_consulta import ModelArmor
 from api.gemini import ErroHttp, SessaoHttp, Transporte, TransporteVertex
 from api.indice_da_busca import Registro
 
 log = logging.getLogger(__name__)
 
-TEMPO_DO_MODEL_ARMOR_S = 3.0
 TEMPO_DA_RANKING_S = 5.0
 # O limite de registros por pedido da Ranking API (RankRequest.records: no máximo 200);
 # a busca funde várias cláusulas de até 100 registros, então passar disso é comum.
 REGISTROS_POR_PEDIDO = 200
 MODELO_DA_RANKING = "semantic-ranker-default@latest"
-
-
-class VeredictoIndefinido(Exception):
-    """O Model Armor respondeu 200, mas sem dizer se há injeção."""
 
 
 def _postar(
@@ -49,37 +36,6 @@ def _postar(
         return cast(dict[str, Any], resposta.json())
     except ValueError as e:
         raise ErroHttp(502) from e
-
-
-class ModelArmorReal:
-    """`sanitizeUserPrompt` num modelo (template) com o filtro de injeção e jailbreak."""
-
-    def __init__(
-        self, projeto: str, regiao: str, modelo: str, sessao: SessaoHttp
-    ) -> None:
-        self._url = (
-            f"https://modelarmor.{regiao}.rep.googleapis.com/v1/projects/{projeto}"
-            f"/locations/{regiao}/templates/{modelo}:sanitizeUserPrompt"
-        )
-        self._sessao = sessao
-
-    def acusa_injecao(self, texto: str) -> bool:
-        dados = _postar(
-            self._sessao,
-            self._url,
-            {"userPromptData": {"text": texto}},
-            TEMPO_DO_MODEL_ARMOR_S,
-        )
-        resultado = (dados.get("sanitizationResult") or {}).get("filterResults") or {}
-        filtro = (resultado.get("pi_and_jailbreak") or {}).get(
-            "piAndJailbreakFilterResult"
-        ) or {}
-        estado = filtro.get("matchState")
-        if estado == "MATCH_FOUND":
-            return True
-        if estado == "NO_MATCH_FOUND":
-            return False
-        raise VeredictoIndefinido(f"matchState={estado!r}")
 
 
 def _texto_do_registro(r: Registro) -> str:
@@ -137,19 +93,13 @@ class RankingReal:
 @dataclass(frozen=True)
 class AdaptadoresDaBusca:
     transporte_da_consulta: Transporte | None = None
-    armor: ModelArmor | None = None
     ranking: Ranking | None = None
 
 
 def adaptadores_da_busca(
     ambiente: Mapping[str, str], sessao: Callable[[], SessaoHttp] | None = None
 ) -> AdaptadoresDaBusca:
-    """Liga o que o ambiente configura; o resto fica `None`, e a busca usa os substitutos.
-
-    O Model Armor e o modelo da consulta entram juntos: sem o veredito, o modelo nunca é
-    chamado. A consulta usa o transporte da decupagem, mas com `Chamada.texto` ele vai em
-    Standard, sem os cabeçalhos do Flex (a consulta é interativa).
-    """
+    """Liga o modelo só para descrever fotos; a Ranking depende da configuração."""
     projeto = ambiente.get("GCP_PROJECT_ID")
     if not projeto:
         return AdaptadoresDaBusca()
@@ -161,21 +111,9 @@ def adaptadores_da_busca(
             sessao_unica = (sessao or _sessao_autorizada)()
         return sessao_unica
 
-    modelo = ambiente.get("MODEL_ARMOR_MODELO")
-    regiao = ambiente.get("MODEL_ARMOR_REGIAO")
     configuracao = ambiente.get("RANKING_CONFIG")
-    ligado_ao_armor = bool(modelo and regiao)
     return AdaptadoresDaBusca(
-        transporte_da_consulta=(
-            TransporteVertex(projeto, sessao_http(), etapa="busca")
-            if ligado_ao_armor
-            else None
-        ),
-        armor=(
-            ModelArmorReal(projeto, cast(str, regiao), cast(str, modelo), sessao_http())
-            if ligado_ao_armor
-            else None
-        ),
+        transporte_da_consulta=TransporteVertex(projeto, sessao_http(), etapa="busca"),
         ranking=(
             RankingReal(projeto, configuracao, sessao_http()) if configuracao else None
         ),

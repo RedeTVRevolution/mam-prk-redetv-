@@ -2,9 +2,11 @@
 
 import ast
 import re
+from collections import Counter
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
+from itertools import permutations
 from types import SimpleNamespace
 from typing import Any
 
@@ -48,6 +50,28 @@ class ErroDaChamada(Exception):
         self.dados = mapa({"code": codigo, "tags": tags or ["HttpError"]})
 
 
+def numero(valor: Any) -> Any:
+    if type(valor) not in (int, float):
+        raise TypeError("operação exige números no Workflows")
+    return valor
+
+
+class ComparacoesNumericas(ast.NodeTransformer):
+    def visit_Compare(self, no: ast.Compare) -> ast.Compare:
+        self.generic_visit(no)
+        if any(isinstance(op, ast.Lt | ast.LtE | ast.Gt | ast.GtE) for op in no.ops):
+            operandos: list[ast.expr] = [
+                ast.Call(
+                    func=ast.Name(id="numero", ctx=ast.Load()),
+                    args=[operando],
+                    keywords=[],
+                )
+                for operando in [no.left, *no.comparators]
+            ]
+            no.left, no.comparators = operandos[0], operandos[1:]
+        return no
+
+
 class FilaLocal:
     """Interpreta só os comandos usados pela fila; APIs externas são os únicos dublês."""
 
@@ -83,6 +107,7 @@ class FilaLocal:
                 format=lambda v: datetime.fromtimestamp(v, UTC).isoformat(),
             ),
             map=SimpleNamespace(get=campo),
+            int=lambda v: int(numero(v)),
             list=SimpleNamespace(concat=lambda a, b: a + [b]),
             default=lambda v, padrao: padrao if v is None else v,
             len=len,
@@ -104,7 +129,14 @@ class FilaLocal:
                 lambda m: {"null": "None", "true": "True", "false": "False"}[m[0]],
                 valor[2:-1],
             )
-            return mapa(deepcopy(eval(expressao, {"__builtins__": {}}, escopo)))
+            arvore = ast.parse(expressao, mode="eval")
+            if any(isinstance(no, ast.Dict) for no in ast.walk(arvore)):
+                raise SyntaxError("Workflows não aceita mapa literal em expressão")
+            arvore = ComparacoesNumericas().visit(arvore)
+            codigo = compile(ast.fix_missing_locations(arvore), "<expressao>", "eval")
+            return mapa(
+                deepcopy(eval(codigo, {"__builtins__": {}, "numero": numero}, escopo))
+            )
         if isinstance(valor, dict):
             return mapa({k: self.valor(v, escopo) for k, v in valor.items()})
         if isinstance(valor, list):
@@ -131,6 +163,8 @@ class FilaLocal:
                     escopo,
                 )
             )
+            if isinstance(recipiente, dict) and not isinstance(chave, str):
+                raise TypeError("chave de mapa exige string no Workflows")
             recipiente[chave] = valor
 
     def passos(self, passos: list[Any], escopo: dict[str, Any], dono: str) -> None:
@@ -319,6 +353,130 @@ def test_duas_execucoes_disputam_a_ultima_vaga_sem_perder_pedidos(
     assert [p["job_id"]["stringValue"] for p in fila.itens("espera")] == ["b"]
 
 
+def test_patch_com_versao_vencida_recusa_sem_mudar_a_fila() -> None:
+    fila = FilaLocal()
+    fila.job("a")
+    fila.pedir("a")
+    antigo = deepcopy(fila.documento)
+    assert antigo is not None
+    fila.pedir("a", acao="renovar")
+    atual = deepcopy(fila.documento)
+    with pytest.raises(ErroDaChamada) as erro:
+        fila.chamar(
+            "googleapis.firestore.v1.projects.databases.documents.patch",
+            {
+                "name": "fila_gpu/vagas",
+                "currentDocument": {"updateTime": antigo["updateTime"]},
+                "body": antigo,
+            },
+        )
+    assert erro.value.dados.code == 400  # FAILED_PRECONDITION
+    assert fila.documento == atual
+
+
+def test_24_pedidos_intercalados_convergem_apos_ler_versoes_vencidas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fila = FilaLocal(vagas=3)
+    fila.job("ff")
+    fila.pedir("ff")
+    pedidos = [f"{i:032x}" for i in range(24)]
+    for job in pedidos:
+        fila.job(job)
+    conflitos: Counter[str] = Counter()
+    em_curso: list[str] = []
+    chamar = fila.chamar
+
+    def contar_conflitos(nome: str, args: dict[str, Any]) -> Any:
+        try:
+            return chamar(nome, args)
+        except ErroDaChamada as erro:
+            if erro.dados.code == 400:
+                conflitos[em_curso[-1]] += 1
+            raise
+
+    def intercalar(indice: int) -> None:
+        if indice == len(pedidos):
+            # Vence a versão que todos os 24 já leram, antes de seus PATCHes.
+            fila.pedir("ff", acao="renovar")
+            return
+        em_curso.append(pedidos[indice])
+        fila.antes_patch = lambda: intercalar(indice + 1)
+        fila.pedir(pedidos[indice], dono=pedidos[indice])
+        em_curso.pop()
+
+    monkeypatch.setattr(fila, "chamar", contar_conflitos)
+    intercalar(0)
+    assert conflitos == Counter({job: 1 for job in pedidos})
+    assert len(fila.itens("ocupadas")) == 3
+    itens = fila.itens("ocupadas") + fila.itens("espera")
+    identidades = [
+        (
+            p["job_id"]["stringValue"],
+            p["etapa"]["stringValue"],
+            p["dono"]["stringValue"],
+        )
+        for p in itens
+    ]
+    assert len(identidades) == len(set(identidades)) == len(pedidos) + 1
+    assert {p[0] for p in identidades} == {*pedidos, "ff"}
+
+
+def test_releitura_le_cada_job_uma_vez_e_o_proximo_pulso_le_de_novo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fila = FilaLocal(vagas=2)
+    for job in ("a", "b", "c"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("a", "leitura_da_tela")
+    fila.pedir("b")
+    fila.pedir("c")
+    fila.job("c", estado="ausente")
+    leituras: Counter[str] = Counter()
+    chamar = fila.chamar
+
+    def contar_jobs(nome: str, args: dict[str, Any]) -> Any:
+        if nome.endswith("documents.get") and "/jobs/" in args["name"]:
+            leituras[args["name"].rsplit("/", 1)[1]] += 1
+        return chamar(nome, args)
+
+    def vencer_a_versao() -> None:
+        assert fila.documento is not None
+        fila.versao += 1
+        fila.documento["updateTime"] = str(fila.versao)
+        fila.job("a", estado="cancelado")
+
+    monkeypatch.setattr(fila, "chamar", contar_jobs)
+    fila.antes_patch = vencer_a_versao
+    assert fila.pedir("b")["vaga"] is False
+    assert leituras == Counter({"a": 1, "b": 1, "c": 1})
+    assert fila.pedir("b")["vaga"] is True
+    assert leituras == Counter({"a": 2, "b": 2, "c": 1})
+
+
+@pytest.mark.parametrize("agora", [1000.0, 1000.001, 1000.002, 1000.0035])
+def test_espera_da_releitura_varia_com_os_milissegundos_do_relogio(
+    monkeypatch: pytest.MonkeyPatch, agora: float
+) -> None:
+    fila = FilaLocal()
+    fila.job("a")
+    fila.agora = agora
+    fila.erro_antes = 400
+    esperas = []
+    chamar = fila.chamar
+
+    def contar_esperas(nome: str, args: dict[str, Any]) -> Any:
+        if nome == "sys.sleep":
+            esperas.append(args["seconds"])
+        return chamar(nome, args)
+
+    monkeypatch.setattr(fila, "chamar", contar_esperas)
+    assert fila.pedir("a")["vaga"] is True
+    assert esperas == [1 + int(agora * 1000) % 3]
+    assert type(esperas[0]) is int
+
+
 @pytest.mark.parametrize("depois", [False, True])
 def test_gravacao_falha_antes_ou_depois_de_persistir_sem_duplicar_vaga(
     depois: bool,
@@ -368,7 +526,7 @@ def test_ordem_e_pelo_job_e_nao_pela_ordem_dos_pulsos() -> None:
     assert fila.pedir("a") == {"vaga": True, "posicao": 0, "posicao_inicial": 0}
 
 
-def test_desempata_por_job_id_e_depois_por_etapa() -> None:
+def test_desempata_pela_ordem_de_insercao() -> None:
     fila = FilaLocal()
     for job in ("ocupante", "b", "a"):
         fila.job(job)
@@ -377,9 +535,44 @@ def test_desempata_por_job_id_e_depois_por_etapa() -> None:
     fila.pedir("a", "transcricao")
     fila.pedir("a", "leitura_da_tela")
     fila.pedir("ocupante", acao="liberar")
-    assert fila.pedir("b")["posicao"] == 2
+    assert fila.pedir("a", "leitura_da_tela")["posicao"] == 2
     assert fila.pedir("a", "transcricao")["posicao"] == 1
-    assert fila.pedir("a", "leitura_da_tela")["vaga"] is True
+    assert fila.pedir("b")["vaga"] is True
+
+
+@pytest.mark.parametrize(
+    "etapas",
+    [("transcricao", "leitura_da_tela"), ("leitura_da_tela", "transcricao")],
+)
+def test_mesma_chegada_tem_posicoes_distintas_e_iguais_para_todos_os_leitores(
+    etapas: tuple[str, str],
+) -> None:
+    fila = FilaLocal()
+    fila.job("ocupante")
+    fila.job("z", "1970-01-01T00:00:02Z")
+    fila.job("a", "1970-01-01T00:00:03Z")
+    fila.pedir("ocupante")
+    pedidos = [("z", etapas[0]), ("z", etapas[1]), ("a", "transcricao")]
+    assert [fila.pedir(*pedido)["posicao"] for pedido in pedidos] == [0, 1, 2]
+    for ordem in permutations(range(3)):
+        assert [fila.pedir(*pedidos[i])["posicao"] for i in ordem] == list(ordem)
+
+
+@pytest.mark.parametrize("operador", ["<", "<=", ">", ">="])
+def test_avaliador_recusa_comparacao_de_ordem_entre_strings(operador: str) -> None:
+    fila = FilaLocal()
+    with pytest.raises(TypeError, match="exige números"):
+        fila.valor(f'${{"a" {operador} "b"}}', {})
+    assert fila.valor(f"${{1 {operador} 2}}", {}) == (operador in ["<", "<="])
+    assert fila.valor(f'${{false and "a" {operador} "b"}}', {}) is False
+
+
+def test_avaliador_recusa_mapa_literal_e_chave_que_nao_e_string() -> None:
+    fila = FilaLocal()
+    with pytest.raises(SyntaxError, match="mapa literal"):
+        fila.valor("${default(null, {})}", {"default": lambda v, padrao: padrao})
+    with pytest.raises(TypeError, match="chave de mapa exige string"):
+        fila.atribuir("cache[chave]", "job", {"cache": {}, "chave": 1})
 
 
 @pytest.mark.parametrize(
@@ -472,7 +665,7 @@ def test_o_log_recupera_a_posicao_se_a_resposta_da_gravacao_se_perdeu() -> None:
         "job_id": "a",
         "etapa": "transcricao",
         "posicao": 0,
-        "espera_s": 2.0,
+        "espera_s": 4.0,
     }
 
 
@@ -480,6 +673,7 @@ def test_posicao_inicial_resiste_a_chegada_de_job_mais_antigo() -> None:
     fila = FilaLocal()
     for job in ("ocupante", "b", "a"):
         fila.job(job)
+    fila.job("a", "1970-01-01T00:00:00Z")
     fila.pedir("ocupante")
     fila.pedir("b")
     fila.pedir("a")

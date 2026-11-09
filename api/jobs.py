@@ -885,7 +885,8 @@ def espera_da_gpu(
             )
             and agora_s - p["visto_em"] <= 3 * 60
         ),
-        key=lambda p: (p["chegada"], p["job_id"], p["etapa"]),
+        # sorted é estável: no empate vale a ordem da espera, como no Workflows
+        key=lambda p: p["chegada"],
     )
 
 

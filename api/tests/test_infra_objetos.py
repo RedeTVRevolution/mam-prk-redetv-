@@ -298,7 +298,7 @@ def test_as_quatro_variaveis_do_florence_chegam_ao_job_com_os_padroes(
         (RAIZ / raiz / "main.tf").read_text().split('module "mam"')[1].split("\n}")[0]
     )
     for nome, padrao, expressao in (
-        ("modelo", '"base"', "var.florence_modelo"),
+        ("modelo", '"large"', "var.florence_modelo"),
         ("feixes", "1", "tostring(var.florence_feixes)"),
         ("lote", "16", "tostring(var.florence_lote)"),
         ("legendas", "1", "tostring(var.florence_legendas)"),

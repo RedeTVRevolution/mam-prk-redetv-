@@ -218,27 +218,31 @@ test('sem termo a tela diz o que fazer e não busca, nem confere o aviso do #404
   expect(screen.queryByText(/entrando na busca/)).toBeNull()
 })
 
-test('os chips ligados são os entendidos; mudar um refaz a busca pela URL', async () => {
+test('os chips vêm só da URL; mudar um refaz a busca', async () => {
   const usuario = userEvent.setup()
   await abrir('/busca?q=sapato')
   await screen.findByText('3 momentos em 2 vídeos')
-  expect(screen.getByRole('button', { name: 'Na imagem' }).getAttribute('aria-pressed')).toBe('true')
+  expect(screen.getByRole('button', { name: 'Na imagem' }).getAttribute('aria-pressed')).toBe('false')
   expect(screen.getByRole('button', { name: 'Fala' }).getAttribute('aria-pressed')).toBe('false')
 
   await usuario.click(screen.getByRole('button', { name: 'Fala' }))
   await usuario.click(screen.getByRole('button', { name: 'Marca' }))
 
   // Os chips seguem a URL: dois cliques seguidos ligam os dois, mesmo fora do entendido.
-  expect(location.search).toBe('?q=sapato&ev=imagem&ev=objeto&ev=fala&ev=marca')
-  await waitFor(() => expect(buscas.at(-1)?.getAll('ev')).toEqual(['imagem', 'objeto', 'fala', 'marca']))
+  expect(location.search).toBe('?q=sapato&ev=fala&ev=marca')
+  await waitFor(() => expect(buscas.at(-1)?.getAll('ev')).toEqual(['fala', 'marca']))
   expect(screen.getByRole('button', { name: 'Marca' }).getAttribute('aria-pressed')).toBe('true')
 })
 
-test('o último chip ligado não se desliga', async () => {
+test('desligar o último chip volta a todos os tipos', async () => {
+  const usuario = userEvent.setup()
   await abrir('/busca?q=sapato&ev=fala')
   await screen.findByText('3 momentos em 2 vídeos')
-  expect((screen.getByRole('button', { name: 'Fala' }) as HTMLButtonElement).disabled).toBe(true)
-  expect((screen.getByRole('button', { name: 'GC' }) as HTMLButtonElement).disabled).toBe(false)
+  expect((screen.getByRole('button', { name: 'Fala' }) as HTMLButtonElement).disabled).toBe(false)
+  await usuario.click(screen.getByRole('button', { name: 'Fala' }))
+  expect(location.search).toBe('?q=sapato')
+  await waitFor(() => expect(buscas.at(-1)?.getAll('ev')).toEqual([]))
+  expect(screen.getByRole('button', { name: 'Fala' }).getAttribute('aria-pressed')).toBe('false')
 })
 
 test('cada momento é uma cena com o vídeo, o programa, a data, o instante e o motivo (#400)', async () => {
@@ -386,12 +390,12 @@ test('trocar a ordem mantém a lista e mostra o "Atualizando" até a resposta (#
   expect(buscas.at(-1)?.get('ordem')).toBe('data')
 })
 
-test('limpar o ano tira o período que a API entendeu', async () => {
+test('limpar o ano escolhido pede todos os períodos', async () => {
   const usuario = userEvent.setup()
   resposta = () => HttpResponse.json(resultado({ entendida: { evidencias: ['objeto'], programa: null, desde: '2020-03-01', ate: '2024-12-31' } }))
-  await abrir('/busca?q=vestido')
+  await abrir('/busca?q=vestido&ano=2024')
   await screen.findByText('3 momentos em 2 vídeos')
-  expect(screen.getByRole('button', { name: 'Ano: 01/03/2020 a 31/12/2024' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Ano: 2024' })).toBeTruthy()
 
   await usuario.click(screen.getByRole('button', { name: 'Limpar ano' }))
 
@@ -399,14 +403,14 @@ test('limpar o ano tira o período que a API entendeu', async () => {
   await waitFor(() => expect(buscas.at(-1)?.get('sem_periodo')).toBe('true'))
 })
 
-test('o programa entendido aparece escolhido; escolher outro ano zera o mês', async () => {
+test('ignora programa e ano entendidos; escolher ano zera o mês', async () => {
   const usuario = userEvent.setup()
   resposta = () => HttpResponse.json(resultado({ entendida: { evidencias: ['objeto'], programa: 'TV Fama', desde: '2025-01-01', ate: '2025-12-31' } }))
   await abrir('/busca?q=vestido&mes=2025-05')
   await screen.findByText('3 momentos em 2 vídeos')
-  expect(screen.getByRole('button', { name: 'Programa: TV Fama' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Programa' })).toBeTruthy()
 
-  await usuario.click(screen.getByRole('button', { name: 'Ano: 2025' }))
+  await usuario.click(screen.getByRole('button', { name: 'Ano' }))
   await usuario.click(await screen.findByRole('option', { name: '2024' }))
 
   expect(location.search).toBe('?q=vestido&ano=2024')

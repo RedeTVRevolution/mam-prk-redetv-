@@ -284,7 +284,7 @@ _MOMENTO = {
 }
 _BUSCA = {
     "entendida": {
-        "evidencias": ["imagem", "citada"],
+        "evidencias": [],
         "programa": None,
         "desde": None,
         "ate": None,
@@ -798,15 +798,19 @@ OPERACOES: tuple[Operacao, ...] = (
         "/v1/busca",
         "Buscar momentos por texto",
         "Procura nos vídeos do sistema: pessoas, falas, textos na tela, objetos e "
-        "marcas. `q` é a consulta em português. Filtros: `ev` (repetível: `imagem`, "
+        "marcas. `q` é a frase em português, saneada e buscada inteira, sem interpretação "
+        "pelo Gemini nem Model Armor. Aspas delimitam uma frase exata; nomes inteiros do "
+        "catálogo acrescentam cláusulas de pessoa. Filtros: `ev` (repetível: `imagem`, "
         "`citada`, `fala`, `gc`, `objeto`, `marca`), `tipo` (`plano`, `fala`, "
         "`texto_na_tela`, `objeto`), `pessoa`, `marca`, `ordem` (`relevancia` ou "
         "`data`) e `limite` (1 a 50 vídeos). "
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
-        + " Limite de 30 consultas por minuto por chave. `plano_b` é `true` quando o "
-        "entendimento da consulta falhou e a busca caiu para palavras soltas.",
+        + " Limite de 30 consultas por minuto por chave. `ev` restringe também o texto "
+        "livre: `imagem` busca planos, `fala` falas e `gc` textos na tela; sem `ev`, todos "
+        "os tipos entram. `entendida` traz os filtros aplicados e `plano_b` fica `false`, "
+        "mantido por compatibilidade.",
         _BUSCA,
         (
             *_sem_chave("ler"),
@@ -824,7 +828,8 @@ OPERACOES: tuple[Operacao, ...] = (
         "Buscar momentos por imagem",
         "Acha os momentos do objeto que aparece na foto: o modelo da consulta dá o nome do "
         "objeto (e no máximo uma característica) e a busca segue como se esse termo tivesse "
-        "sido digitado; o termo vem em `entendida.termo_da_foto`. O corpo é "
+        "sido digitado, sem segunda chamada ao Gemini nem Model Armor; o termo vem em "
+        "`entendida.termo_da_foto`. O corpo é "
         "`multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 "
         "milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória "
         "e pelo modelo: não é guardada. "

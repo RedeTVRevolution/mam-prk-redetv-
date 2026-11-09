@@ -84,6 +84,19 @@ def registro_da_resposta_fora_do_esquema(modelo: str, motivo: str) -> str:
     )
 
 
+def registro_das_pessoas_fora_da_pauta(pautas: dict[str, list[str]]) -> str:
+    """Uma linha por resposta corrigida: os ids que o modelo citou na pauta sem declará-los
+    em `pessoas` e que saíram dela (pauta -> ids). Evento próprio: não conta no alerta."""
+    return json.dumps(
+        {
+            "severity": "WARNING",
+            "evento": "pessoas_fora_da_pauta_removidas",
+            "pautas": pautas,
+        },
+        ensure_ascii=False,
+    )
+
+
 def registro_da_falha_de_etapa(etapa: str, job_id: str, motivo: str) -> str:
     return json.dumps(
         {

@@ -1,5 +1,5 @@
-"""`make sondar-busca`: roda as consultas de `consultas_da_sonda.toml` na busca do dev (índice, Firestore e plano B
-reais, com o corte do serviço) e dá um veredito por consulta. Roda só com credenciais
+"""`make sondar-busca`: roda as consultas de `consultas_da_sonda.toml` na busca do dev (índice e Firestore
+reais, sem modelo, com o corte do serviço) e dá um veredito por consulta. Roda só com credenciais
 e fica fora do CI.
 
     python -m api.sondar_busca
@@ -18,7 +18,6 @@ O aceite (#258): a média, entre as consultas com anotação de pertinência (`t
 lista as consultas abaixo disso; a consulta sem anotação roda, mas fica fora da conta.
 """
 
-import logging
 import os
 import sys
 import tomllib
@@ -46,8 +45,7 @@ from api.busca import (
 )
 from api.gemini import Chamada, ErroHttp
 from api.jobs import Armazenamento
-from api.nuvem import CatalogoFirestore, ProgramasFirestore, RepositorioFirestore
-from api.programas import NomesDosProgramas
+from api.nuvem import CatalogoFirestore, RepositorioFirestore
 
 
 @dataclass(frozen=True)
@@ -196,16 +194,11 @@ def veredito(caso: Caso, videos: list[VideoDoResultado]) -> bool | None:
     )
 
 
-# O plano B do dev: o `criar_app` de `api/main.py` não recebe modelo nem Model Armor.
+# A sonda só busca por texto e não precisa do modelo da foto.
 # Importar o `api.main` montaria o app, que pede o ambiente inteiro.
 class _SemModelo:
     def gerar(self, chamada: Chamada) -> str:
         raise ErroHttp(503)
-
-
-class _SemModelArmor:
-    def acusa_injecao(self, texto: str) -> bool:
-        raise RuntimeError("Model Armor não ligado")
 
 
 class _SemQuadro:
@@ -240,8 +233,6 @@ def esquema_sem_campos(config: ConfigDaBusca, transporte: Transporte) -> str | N
 
 
 def main() -> int:
-    # O plano B registra a falta do Model Armor a cada consulta; aqui é o esperado.
-    logging.getLogger("api.entendimento_da_consulta").setLevel(logging.CRITICAL)
     cliente = firestore.Client(project=os.environ["GCP_PROJECT_ID"])
     config = ConfigDaBusca.do_ambiente(os.environ)
     transporte = transporte_http()
@@ -251,8 +242,6 @@ def main() -> int:
     busca = Busca(
         transporte=_SemModelo(),
         catalogo=CatalogoFirestore(cliente),
-        armor=_SemModelArmor(),
-        programas=NomesDosProgramas(ProgramasFirestore(cliente)),
         indice=AgentRetrieval(config, transporte),
         ranking=RankingEmOrdem(),
         repositorio=RepositorioFirestore(cliente),

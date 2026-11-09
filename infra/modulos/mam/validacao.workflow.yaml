@@ -1145,6 +1145,17 @@ atualiza_fila_gpu:
         assign:
           - dono: $${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
           - releituras_da_fila: 0
+          # O estado pode envelhecer alguns segundos nas releituras; o próximo pulso
+          # de 60 s lê de novo e limpa, sem alongar a janela do compare-and-swap.
+          - jobs_lidos: {}
+    - le_o_job_da_vaga:
+        call: le_job_da_fila
+        args:
+          job_id: $${job_id}
+        result: job_da_vaga
+    - guarda_o_job_da_vaga:
+        assign:
+          - jobs_lidos[job_id]: $${job_da_vaga}
     - rele_a_fila:
         assign:
           - documento_da_fila: {fields: {}}
@@ -1181,11 +1192,6 @@ atualiza_fila_gpu:
           - indice_do_pedido: 0
           - pedido: {}
           - novo: {}
-    - le_o_job_da_vaga:
-        call: le_job_da_fila
-        args:
-          job_id: $${job_id}
-        result: job_da_vaga
     - confere_o_job_da_vaga:
         assign:
           - ativo: $${job_da_vaga.estado == "analisando" or (etapa == "inventario_de_objetos" and job_da_vaga.estado == "concluido")}
@@ -1203,11 +1209,19 @@ atualiza_fila_gpu:
                         assign:
                           - item: $${entrada.mapValue.fields}
                           - meu: $${item.job_id.stringValue == job_id and item.dono.stringValue == dono and (etapa == null or item.etapa.stringValue == etapa)}
-                    - le_o_dono_da_vaga:
-                        call: le_job_da_fila
-                        args:
-                          job_id: $${item.job_id.stringValue}
-                        result: job_do_item
+                          - job_do_item: $${default(map.get(jobs_lidos, item.job_id.stringValue), null)}
+                    - le_se_ainda_nao_conhece_o_dono:
+                        switch:
+                          - condition: $${job_do_item == null}
+                            steps:
+                              - le_o_dono_da_vaga:
+                                  call: le_job_da_fila
+                                  args:
+                                    job_id: $${item.job_id.stringValue}
+                                  result: job_do_item
+                              - guarda_o_dono_da_vaga:
+                                  assign:
+                                    - jobs_lidos[item.job_id.stringValue]: $${job_do_item}
                     # Florence começa depois da análise: `concluido` é válido só nele.
                     # Falha, cancelamento ou Job apagado invalidam qualquer etapa.
                     - descarta_o_pedido_perdido:
@@ -1278,6 +1292,7 @@ atualiza_fila_gpu:
               - percorre_a_ordem:
                   for:
                     value: anterior
+                    index: indice_do_anterior
                     in: $${fila.espera}
                     steps:
                       - campos_da_ordem:
@@ -1285,7 +1300,7 @@ atualiza_fila_gpu:
                             - antes: $${anterior.mapValue.fields}
                       - veio_antes:
                           switch:
-                            - condition: $${antes.chegada.doubleValue < pedido.chegada.doubleValue or (antes.chegada.doubleValue == pedido.chegada.doubleValue and (antes.job_id.stringValue < job_id or (antes.job_id.stringValue == job_id and antes.etapa.stringValue < etapa)))}
+                            - condition: $${antes.chegada.doubleValue < pedido.chegada.doubleValue or (antes.chegada.doubleValue == pedido.chegada.doubleValue and indice_do_anterior < indice_do_pedido)}
                               assign:
                                 - posicao: $${posicao + 1}
     - guarda_a_posicao_inicial:
@@ -1351,10 +1366,13 @@ atualiza_fila_gpu:
                       - conta_a_releitura_da_fila:
                           assign:
                             - releituras_da_fila: $${releituras_da_fila + 1}
+                            - instante_da_releitura: $${sys.now()}
                       - espera_para_reler:
                           call: sys.sleep
                           args:
-                            seconds: 1
+                            # Os milissegundos do relógio dessincronizam os perdedores (1 a 3 s,
+                            # inteiro: a documentação do sys.sleep não garante fração).
+                            seconds: $${1 + int(instante_da_releitura * 1000) % 3}
                     next: rele_a_fila
             - repassa_a_falha_da_fila:
                 raise: $${erro_da_gravacao_da_fila}

@@ -159,9 +159,10 @@ def consolidar(
     }
 
     def pauta_da_janela(k: int, p: Pauta) -> Pauta:
-        # O esquema já recusa pauta com pessoa fora da Decupagem; isto só protege
-        # a Decupagem que chega sem passar por ele (montada ou alterada depois de
-        # validada): o id que a janela não tem fica de fora, com aviso.
+        # A resposta do modelo já chega sem id de pessoa que não declarou (`_validar`,
+        # api/gemini.py) e o esquema recusa a Decupagem que ainda o cite; isto só
+        # protege a Decupagem montada ou alterada depois de validada: o id que a
+        # janela não tem fica de fora, com aviso.
         conhecidas = [i for i in p.pessoas if i in mapa[k]]
         if len(conhecidas) < len(p.pessoas):
             log.warning(
