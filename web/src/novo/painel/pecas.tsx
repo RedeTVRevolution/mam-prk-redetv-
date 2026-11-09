@@ -78,9 +78,11 @@ export function Indicadores({ children }: { children: ReactNode }) {
 export function Indicador({
   rotulo,
   valor,
+  nota,
 }: {
   rotulo: string;
   valor: number | string;
+  nota?: string;
 }) {
   const texto = typeof valor === "number" ? numero(valor) : valor;
   return (
@@ -91,6 +93,7 @@ export function Indicador({
       <p className="mt-0.5 truncate text-xl font-semibold" title={texto}>
         {texto}
       </p>
+      {nota && <p className="mt-0.5 text-xs text-muted-foreground">{nota}</p>}
     </div>
   );
 }

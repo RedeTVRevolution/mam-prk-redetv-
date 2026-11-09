@@ -454,7 +454,8 @@ class DiaDeVideos(NumerosDeVideos):
 
 
 class ProgramaDeVideos(NumerosDeVideos):
-    programa: str
+    # `None` é a linha "Sem programa": o que o total tem a mais que os programas.
+    programa: str | None
 
 
 class QuemDeVideos(NumerosDeVideos):
@@ -616,6 +617,26 @@ def relatorio_de_videos(
         [u for u in por_programa if _tem_video(u) and u.programa is not None],
         lambda u: u.programa or "",
     )
+    sem_programa: list[ProgramaDeVideos] = []
+    if filtro.programa is None and filtro.usuario is None:
+        # A tabela por programa não guarda o vídeo sem programa: ele é a diferença para o total.
+        resto = _SomaDeUso()
+        for campo in (
+            "enviados",
+            "concluidos",
+            "falhos",
+            "horas",
+            "segundos",
+            "com_tempo",
+        ):
+            setattr(
+                resto,
+                campo,
+                getattr(total, campo)
+                - sum(getattr(s, campo) for s in programas.values()),
+            )
+        if resto.enviados or resto.concluidos or resto.falhos:
+            sem_programa = [ProgramaDeVideos(programa=None, **resto.videos())]
     return RelatorioDeVideos(
         desde=filtro.desde,
         ate=filtro.ate,
@@ -629,7 +650,8 @@ def relatorio_de_videos(
         por_programa=[
             ProgramaDeVideos(programa=p, **soma.videos())
             for p, soma in sorted(programas.items())
-        ],
+        ]
+        + sem_programa,
         por_usuario=[
             QuemDeVideos(**quem, **soma.videos())
             for quem, soma in _por_quem(base, emails, lambda s: s.enviados)

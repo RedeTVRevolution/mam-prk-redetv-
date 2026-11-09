@@ -467,6 +467,22 @@ def test_videos_por_dia_programa_e_usuario_com_o_tempo_medio() -> None:
     ]
 
 
+def test_a_soma_por_programa_bate_com_os_enviados_com_a_linha_sem_programa() -> None:
+    # O resumo por programa descarta o vídeo sem programa; o total (por pessoa) o tem.
+    uso = [
+        *USO,
+        _uso(1, quem=BIA, enviados=4, concluidos=2, horas=1.5, segundos=100),
+    ]
+    r = Mundo(["diretoria"], ResumosEmMemoria(uso=uso)).get("/videos").json()
+
+    assert sum(p["enviados"] for p in r["por_programa"]) == r["total"]["enviados"]
+    assert r["por_programa"][-1]["programa"] is None
+    assert (
+        r["por_programa"][-1]["enviados"],
+        r["por_programa"][-1]["horas_concluidas"],
+    ) == (4, 1.5)
+
+
 def test_o_concluido_sem_tempo_fica_fora_do_tempo_medio() -> None:
     # O fim gravado antes de o evento trazer o tempo: 2 concluídos, só 1 com tempo.
     resumos = ResumosEmMemoria(
