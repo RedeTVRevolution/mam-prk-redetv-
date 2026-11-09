@@ -13,7 +13,7 @@ clone=${AFK_CLONE:-$(dirname "$raiz")/mam-prk-redetv-afk}
 repo=$(git remote get-url origin | sed -E 's#^.*github\.com[:/]##; s#\.git$##')
 branch=afk/$(date +%Y-%m-%d-%H%M)
 
-plugin=$(jq -r '.plugins["mattpocock-skills@claude-plugins-official"][0].installPath // empty' ~/.claude/plugins/installed_plugins.json)
+plugin=$(jq -r '[.plugins | to_entries[] | select(.key | startswith("mattpocock-skills@")) | .value[0].installPath] | first // empty' ~/.claude/plugins/installed_plugins.json)
 [ -d "$plugin" ] || { echo "Plugin mattpocock-skills não encontrado neste Mac." >&2; exit 1; }
 
 segredo() { security find-generic-password -a "$USER" -s "$1" -w; }
