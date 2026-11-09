@@ -301,3 +301,19 @@ def test_lista_do_catalogo_pode_vir_da_copia_compartilhada() -> None:
         "Sabrina Sato e Leo Dias", catalogo=CatalogoEmMemoria(), todas=c.todas
     )
     assert set(achado.pessoas) == {sabrina, c.achar("Leo Dias")[0].id}
+
+
+def test_pessoas_param_no_teto_na_ordem_da_consulta() -> None:
+    c = CatalogoEmMemoria()
+    nomes = [
+        "Ana Lima",
+        "Bia Souza",
+        "Caio Reis",
+        "Davi Melo",
+        "Eva Rocha",
+        "Fabio Cruz",
+    ]
+    ids = {n: c.acrescentar(n, "apresentador", []).id for n in nomes}
+    ordem = list(reversed(nomes))  # a ordem da consulta difere da do catálogo
+    achado = entender(" e ".join(ordem), catalogo=c)
+    assert achado.pessoas == tuple(ids[n] for n in ordem[:5])

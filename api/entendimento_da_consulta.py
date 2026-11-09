@@ -17,6 +17,7 @@ MODELO_DA_CONSULTA = "gemini-3.5-flash-lite"
 ETAPA_DA_FOTO = "descricao_da_foto"
 MAXIMO_DO_TERMO_DA_FOTO = 60
 MAXIMO_DE_CARACTERES = 300
+MAXIMO_DE_PESSOAS = 5
 MAXIMO_DA_FRASE = 120
 TEMPO_DA_CONSULTA_S = 10.0  # teto da descrição da foto
 
@@ -97,16 +98,18 @@ def entender(
     saneada = sanear(consulta)
     frase, resto = separar_aspas(saneada)
     chave = normalizar(saneada)
-    pessoas = (
-        tuple(
-            p.id
+    achadas = (
+        sorted(
+            (achado.start(), p.id)
             for p in (todas or catalogo.todas)()
             if (nome := normalizar(p.nome))
-            and re.search(r"(?<!\w)" + re.escape(nome) + r"(?!\w)", chave)
+            and (achado := re.search(r"(?<!\w)" + re.escape(nome) + r"(?!\w)", chave))
         )
         if chave
-        else ()
+        else []
     )
+    # cada pessoa vira cláusulas no índice: o teto segura o custo de uma consulta longa
+    pessoas = tuple(dict.fromkeys(i for _, i in achadas))[:MAXIMO_DE_PESSOAS]
     return ConsultaEntendida(
         saneada=saneada, pessoas=pessoas, frase_exata=frase, texto_livre=resto
     )
