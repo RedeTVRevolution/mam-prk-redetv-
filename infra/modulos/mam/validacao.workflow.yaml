@@ -1242,7 +1242,8 @@ atualiza_fila_gpu:
                               - item.desde.doubleValue: $${agora}
                     - preserva_o_pedido:
                         assign:
-                          - fila[grupo]: '$${list.concat(fila[grupo], {"mapValue": {"fields": item}})}'
+                          - valor_do_item: {mapValue: {fields: '$${item}'}}
+                          - fila[grupo]: $${list.concat(fila[grupo], valor_do_item)}
     - inclui_o_pedido:
         switch:
           - condition: $${acao == "pedir" and ativo and not tem_vaga and not esta_na_espera and not outro_dono}
@@ -1301,7 +1302,8 @@ atualiza_fila_gpu:
               - ocupa_a_vaga:
                   assign:
                     - pedido.desde: {doubleValue: '$${agora}'}
-                    - fila.ocupadas: '$${list.concat(fila.ocupadas, {"mapValue": {"fields": pedido}})}'
+                    - valor_do_pedido: {mapValue: {fields: '$${pedido}'}}
+                    - fila.ocupadas: $${list.concat(fila.ocupadas, valor_do_pedido)}
                     - sem_o_pedido: []
                     - tem_vaga: true
               - retira_da_espera:

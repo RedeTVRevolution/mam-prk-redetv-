@@ -7,7 +7,8 @@ from typing import Any
 import pytest
 import yaml
 
-MODULO = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
+INFRA = Path(__file__).parents[2] / "infra"
+MODULO = INFRA / "modulos" / "mam"
 MAIN = MODULO / "main.tf"
 DEFINICAO = MODULO / "validacao.workflow.yaml"
 
@@ -1086,6 +1087,15 @@ def test_list_concat_anexa_um_item_e_nao_uma_lista() -> None:
     # `list.concat(l, ["x"])` anexa a lista inteira como um item: o updateMask do
     # Firestore recebe uma lista dentro da lista e o passo cai (dev, 2026-11-03).
     assert re.findall(r"list\.concat\([^,]+,\s*\[", _texto()) == []
+
+
+@pytest.mark.parametrize("arquivo", sorted(INFRA.rglob("*.workflow.yaml")))
+def test_expressoes_nao_contem_mapas_literais(arquivo: Path) -> None:
+    # Substitui só a interpolação do Terraform antes de conferir as expressões.
+    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "1", arquivo.read_text()).replace(
+        "$${", "${"
+    )
+    assert [e for e in _expressoes(renderizado) if "{" in e] == [], str(arquivo)
 
 
 def test_conta_da_orquestracao_grava_log_do_sys_log() -> None:
