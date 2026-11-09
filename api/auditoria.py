@@ -41,6 +41,7 @@ Acao = Literal[
     "programa.criado",
     "programa.alterado",
     "programa.apagado",
+    "video.editado",
 ]
 ACOES: tuple[Acao, ...] = get_args(Acao)
 
