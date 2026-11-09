@@ -129,7 +129,16 @@ def test_o_resultado_e_o_mesmo_do_calculo_antigo_que_lia_todos_os_jobs() -> None
         relatorio = relatorio_de_custo(
             base, {"bia": "bia@redetv.com.br"}, desde, ate, programa, usuario
         )
-        assert relatorio.model_dump(mode="json") == caso["relatorio"], caso["filtro"]
+        atual = relatorio.model_dump(mode="json")
+        atual.pop("faturamento_ate")  # o JSON é de antes deste campo (#523)
+        assert atual == caso["relatorio"], caso["filtro"]
+
+
+def test_devolve_o_dia_da_ultima_linha_do_faturamento_no_periodo() -> None:
+    assert _mundo().get("/custo").json()["faturamento_ate"] == "2026-12-01"
+    r = _mundo().get("/custo", ate="2026-11-30").json()
+    assert r["faturamento_ate"] == "2026-11-03"
+    assert _mundo(linhas=[]).get("/custo").json()["faturamento_ate"] is None
 
 
 def test_o_total_junta_os_jobs_e_o_custo_sem_dono() -> None:
@@ -400,6 +409,7 @@ def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None
             ],
             ["sem_dono", "2026-11", None, None, None, None, "1", "0", "0", "BRL"],
             ["moeda", None, None, None, None, None, "0", "0", "0", "BRL"],
+            ["ate", None, None, None, None, "2026-11-04", "0", "0", "0", "BRL"],
         ]
     )
 
@@ -418,6 +428,7 @@ def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None
         CustoSemDono("2026-11", None, 1.0),
     ]
     assert base.moedas == {"BRL"}
+    assert base.faturamento_ate == date(2026, 11, 4)
     # Uma consulta só, na região do painel, sobre as duas tabelas: a soma não passa pela API.
     assert len(transporte.corpos) == 1
     corpo = transporte.corpos[0]
