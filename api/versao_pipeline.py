@@ -23,7 +23,7 @@ from api import (
 from api.agent_retrieval import MODELO_DO_EMBEDDING
 from api.decupagem import VERSAO_ESQUEMA
 
-VERSAO_PIPELINE = "2026.11.6"
+VERSAO_PIPELINE = "2026.11.7"
 
 
 def _hash(texto: str) -> str:
@@ -71,7 +71,7 @@ def manifesto() -> dict[str, Any]:
             "objetos": {
                 "motor": "florence",
                 "modelo": None,
-                "florence": florence.NOME_DO_MODELO,
+                "florence": florence.MODELOS,
                 "tarefas": [florence.DETECCAO, florence.REGIOES],
                 "geracao": florence.GERACAO,
             },

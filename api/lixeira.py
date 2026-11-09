@@ -83,7 +83,7 @@ class ImpactoDoVideo(BaseModel):
     decupagem: int
     correcoes: int
     arquivos: ArquivosDoImpacto
-    # Outros Jobs com o mesmo conteúdo: a decupagem continua para eles.
+    # Outros Jobs com o mesmo conteúdo, só como informação.
     outros_jobs: list[OutroJob]
 
 
@@ -180,8 +180,7 @@ def calcular_impacto(
     arquivos: ArquivosDoJob,
 ) -> ImpactoDoVideo:
     contados = arquivos.contar(job.id)
-    # Os que estão na lixeira também contam: podem ser restaurados e ainda usam o
-    # processamento.
+    # Inclui os da lixeira: cada Job tem processamento próprio.
     parecidos = (
         repositorio.consultar(FiltroDeJobs(sha256=job.sha256, na_lixeira=None)).jobs
         if job.sha256 is not None

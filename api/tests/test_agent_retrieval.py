@@ -38,6 +38,7 @@ CONFIG = ConfigDaBusca(
     colecao="col-z",
     indice_da_descricao="ind-d",
     dimensao=256,
+    colecao_de_texto="col-texto",
 )
 
 
@@ -46,10 +47,16 @@ def test_config_vem_so_do_ambiente() -> None:
         "GCP_PROJECT_ID": "p",
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
+        "BUSCA_COLECAO_DE_TEXTO": "ct",
         "BUSCA_INDICE_DESCRICAO": "d",
         "BUSCA_DIMENSAO": "128",
     }
-    assert ConfigDaBusca.do_ambiente(ambiente) == ConfigDaBusca("p", "r", "c", "d", 128)
+    assert ConfigDaBusca.do_ambiente(ambiente) == ConfigDaBusca(
+        "p", "r", "c", "d", 128, "ct"
+    )
+    del ambiente["BUSCA_COLECAO_DE_TEXTO"]
+    with pytest.raises(KeyError, match="BUSCA_COLECAO_DE_TEXTO"):
+        ConfigDaBusca.do_ambiente(ambiente)
     with pytest.raises(KeyError):
         ConfigDaBusca.do_ambiente({})
 
@@ -65,6 +72,7 @@ def test_os_indices_ann_vem_do_ambiente_e_sem_a_variavel_ficam_ligados(
         "GCP_PROJECT_ID": "p",
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
+        "BUSCA_COLECAO_DE_TEXTO": "ct",
         "BUSCA_INDICE_DESCRICAO": "d",
         "BUSCA_DIMENSAO": "128",
     }
@@ -79,6 +87,7 @@ def test_valor_estranho_nos_indices_ann_levanta() -> None:
         "GCP_PROJECT_ID": "p",
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
+        "BUSCA_COLECAO_DE_TEXTO": "ct",
         "BUSCA_INDICE_DESCRICAO": "d",
         "BUSCA_DIMENSAO": "128",
         "BUSCA_INDICES_LIGADOS": "0",
@@ -231,7 +240,7 @@ def test_sem_os_indices_ann_buscar_calcula_o_vetor_da_consulta_na_regiao_da_busc
         }
     )
     AgentRetrieval(SEM_INDICES, transporte).buscar(
-        Consulta(texto="vestido", significado="vestido")
+        Consulta(texto="vestido", significado="vestido", filtros=Filtros(tipo="plano"))
     )
     [(_, url, corpo), (_, caminho, busca)] = transporte.chamadas
     assert url == (
@@ -373,7 +382,9 @@ def test_sem_os_indices_ann_a_colecao_nasce_sem_indice() -> None:
     assert indices_da_colecao(SEM_INDICES) == {}
     transporte = TransporteFalso({"name": "op", "done": True})
     criar_colecao(SEM_INDICES, transporte, _nao_dorme)
-    [(metodo, caminho, _)] = transporte.chamadas
+    [(metodo, caminho, _), (_, texto, esquema)] = transporte.chamadas
+    assert texto.endswith("collectionId=col-texto")
+    assert esquema is not None and "vectorSchema" not in esquema
     assert (metodo, caminho) == (
         "POST",
         "projects/proj-x/locations/reg-y/collections?collectionId=col-z",
@@ -440,6 +451,7 @@ def test_buscar_devolve_os_registros_gravados() -> None:
         inicio_ms=0,
         fim_ms=10,
         categoria="roupa",
+        texto="vestido",
         cor_base=["vermelho"],
         dono="c",
         data_de_exibicao=date(2026, 1, 2),
@@ -447,7 +459,7 @@ def test_buscar_devolve_os_registros_gravados() -> None:
     transporte = TransporteFalso()
     adaptador = AgentRetrieval(CONFIG, transporte)
     adaptador.gravar("j", [registro])
-    [_, (metodo, caminho, corpo)] = transporte.chamadas  # a consulta do apagar, vazia
+    [_, _, (metodo, caminho, corpo)] = transporte.chamadas
     assert (metodo, caminho.endswith("/dataObjects:batchCreate")) == ("POST", True)
     assert corpo is not None
     [pedido] = corpo["requests"]
@@ -455,14 +467,16 @@ def test_buscar_devolve_os_registros_gravados() -> None:
     assert pedido["dataObjectId"] == "m-j-objeto-0"
     assert pedido["dataObject"]["data"]["cor_base"] == ["vermelho"]
     assert pedido["dataObject"]["data"]["data_de_exibicao"] == 20260102
-    assert pedido["dataObject"]["data"]["significado"] == "objeto"
+    assert "significado" not in pedido["dataObject"]["data"]
 
     # O índice devolve só os campos pedidos: o Registro volta inteiro mesmo assim.
     gravado = pedido["dataObject"]["data"]
     data = {c: v for c, v in gravado.items() if c in CAMPOS_DO_REGISTRO}
     assert data != gravado
     transporte.resposta = {"results": [{"results": [{"dataObject": {"data": data}}]}]}
-    [achado] = adaptador.buscar(Consulta(texto="vestido", filtros=Filtros(dono="c")))
+    [achado] = adaptador.buscar(
+        Consulta(texto="vestido", filtros=Filtros(tipo="objeto", dono="c"))
+    )
     assert achado == registro
 
 
@@ -507,10 +521,27 @@ def test_o_pedido_de_texto_vai_normalizado_ao_campo_normalizado(consulta: str) -
     }
 
 
+@pytest.mark.parametrize(
+    "consulta, esperado",
+    [
+        ("(CARRO OR carros)", "(carro OR carros)"),
+        ("(MÃE OR MÃES) (PAI OR PAIS)", "(mae OR maes) (pai OR pais)"),
+        ("  Angélica,\tSATO  ", "angelica, sato"),
+        ("(CARRO or carros)", "(carro or carros)"),
+    ],
+)
+def test_normaliza_os_termos_preservando_or_exato_e_parenteses(
+    consulta: str, esperado: str
+) -> None:
+    pedido = pedido_de_busca(CONFIG, Consulta(texto=consulta))
+    assert _buscas(pedido)["textSearch"]["structuredQuery"]["text"]["text"] == esperado
+
+
 def test_gravar_comeca_lendo_o_indice_do_video() -> None:
     transporte = TransporteFalso()
     AgentRetrieval(CONFIG, transporte).gravar("j", [])
-    [(metodo, caminho, corpo)] = transporte.chamadas
+    [(metodo, caminho, corpo), (_, texto, _)] = transporte.chamadas
+    assert "/col-texto/" in texto
     assert metodo == "POST"
     assert caminho.endswith("/dataObjects:query")
     assert corpo is not None and corpo["filter"] == {"job_id": {"$eq": "j"}}
@@ -523,12 +554,14 @@ def test_apagar_consulta_os_nomes_pagina_a_pagina_e_apaga_em_lote() -> None:
             {"dataObjects": [{"name": n} for n in nomes[:2]], "nextPageToken": "p2"},
             {"dataObjects": [{"name": nomes[2]}]},
             {},
+            {},
         ]
     )
     transporte = TransporteFalso()
     AgentRetrieval(CONFIG, _Sequencia(transporte, respostas)).apagar("j")
-    [(_, c1, _), (_, _, corpo2), (_, c3, corpo3)] = transporte.chamadas
+    [(_, c1, _), (_, _, corpo2), (_, c3, corpo3), (_, texto, _)] = transporte.chamadas
     colecao = "projects/proj-x/locations/reg-y/collections/col-z"
+    assert "/col-texto/" in texto
     assert c1 == f"{colecao}/dataObjects:query"
     assert corpo2 is not None and corpo2["pageToken"] == "p2"
     assert c3 == f"{colecao}/dataObjects:batchDelete"
@@ -550,8 +583,9 @@ def _nao_dorme(_: float) -> None:
 def test_criar_colecao_cria_a_colecao_e_so_o_indice_ann_da_descricao() -> None:
     transporte = TransporteFalso({"name": "op", "done": True})
     criar_colecao(CONFIG, transporte, _nao_dorme)
-    [(m1, c1, corpo1), (m2, c2, corpo2)] = transporte.chamadas
+    [(m1, c1, corpo1), (m2, c2, corpo2), (_, texto, _)] = transporte.chamadas
     base = "projects/proj-x/locations/reg-y/collections"
+    assert texto.endswith("collectionId=col-texto")
     assert (m1, c1) == ("POST", f"{base}?collectionId=col-z")
     assert corpo1 is not None and corpo1["dataSchema"]["properties"]["dono"]
     assert (m2, c2) == ("POST", f"{base}/col-z/indexes?indexId=ind-d")
@@ -565,6 +599,7 @@ def test_criar_colecao_espera_cada_operacao_antes_da_seguinte() -> None:
             {"name": "op-colecao", "done": False},
             {"name": "op-colecao", "done": True},
             {"name": "op-d", "done": True},
+            {"name": "op-texto", "done": True},
         ]
     )
     transporte = TransporteFalso()
@@ -574,6 +609,7 @@ def test_criar_colecao_espera_cada_operacao_antes_da_seguinte() -> None:
         ("POST", "collections?collectionId=col-z"),
         ("GET", "op-colecao"),
         ("POST", "indexes?indexId=ind-d"),
+        ("POST", "collections?collectionId=col-texto"),
     ]
     assert len(esperas) == 1
 
@@ -613,6 +649,9 @@ class _ColecaoNoAr:
             raise JaExiste(caminho)
         if metodo == "PATCH":
             return {"name": "op-patch", "done": True}
+        if "/col-texto" in caminho:
+            assert CONFIG.colecao_de_texto is not None
+            return esquema_da_colecao(replace(CONFIG, colecao=CONFIG.colecao_de_texto))
         return {"dataSchema": self.esquema}
 
     def patches(self) -> list[dict[str, Any] | None]:
@@ -679,26 +718,34 @@ def test_conferir_esquema_lista_os_campos_de_texto_que_faltam() -> None:
     assert conferir_esquema(CONFIG, sem_campo) == ["texto_da_busca"]
 
 
-def test_apagar_colecao_leva_os_indices_e_os_objetos_e_espera() -> None:
-    transporte = TransporteFalso({"name": "op", "done": True})
-    apagar_colecao(CONFIG, transporte, _nao_dorme)
-    # Sem force, o DELETE só funciona com a coleção sem índices e sem objetos.
-    assert transporte.chamadas == [
-        ("DELETE", "projects/proj-x/locations/reg-y/collections/col-z?force=true", None)
-    ]
-
-
-def test_significado_e_a_descricao_ou_o_texto_do_registro() -> None:
-    base: dict[str, Any] = {"id": "j:x:0", "job_id": "j", "inicio_ms": 0, "fim_ms": 1}
-    plano = Registro(tipo="plano", descricao="estúdio", texto="t", **base)
-    fala = Registro(tipo="fala", texto="boa noite", **base)
+def test_apagar_colecao_esvazia_antes_do_delete_e_espera() -> None:
+    nome = f"{CONFIG.caminho_da_colecao}/dataObjects/m-exemplo"
+    respostas = iter(
+        [
+            {"dataObjects": [{"name": nome}], "nextPageToken": "p2"},
+            {},
+            {},
+            {"name": "op", "done": True},
+        ]
+    )
     transporte = TransporteFalso()
-    AgentRetrieval(CONFIG, transporte).gravar("j", [plano, fala])
-    corpo = transporte.chamadas[-1][2]
-    assert corpo is not None
-    assert [r["dataObject"]["data"]["significado"] for r in corpo["requests"]] == [
+    apagar_colecao(CONFIG, _Sequencia(transporte, respostas), _nao_dorme)
+    assert [m for m, _, _ in transporte.chamadas] == ["POST", "POST", "POST", "DELETE"]
+    assert transporte.chamadas[1][2] == {"pageSize": 1000, "pageToken": "p2"}
+    assert transporte.chamadas[2][2] == {"requests": [{"name": nome}]}
+    assert transporte.chamadas[3][1] == f"{CONFIG.caminho_da_colecao}?force=true"
+
+
+def test_significado_e_a_descricao_ou_o_texto_do_plano() -> None:
+    registros = [
+        _reg("j:p0", "plano", descricao="estúdio", texto="t"),
+        _reg("j:p1", "plano", texto="boa noite"),
+        _reg("j:p2", "plano"),
+    ]
+    assert [_lido(r)["significado"] for r in registros] == [
         "estúdio",
         "boa noite",
+        "plano",
     ]
 
 
@@ -741,7 +788,12 @@ def test_so_do_significado_volta_o_que_esta_perto_e_tem_palavras_bastantes() -> 
         }
     )
     adaptador = AgentRetrieval(config, transporte)
-    consulta = Consulta(texto="terno", significado="terno", cortar_significado=True)
+    consulta = Consulta(
+        texto="terno",
+        significado="terno",
+        cortar_significado=True,
+        filtros=Filtros(tipo="plano"),
+    )
     assert [r.id for r in adaptador.buscar(consulta)] == ["pelo-texto", "perto"]
     [(_, _, corpo)] = transporte.chamadas
     assert corpo is not None
@@ -776,6 +828,7 @@ def test_corte_vem_do_ambiente_e_sem_ele_nao_ha_corte() -> None:
         "GCP_PROJECT_ID": "p",
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
+        "BUSCA_COLECAO_DE_TEXTO": "ct",
         "BUSCA_INDICE_DESCRICAO": "d",
         "BUSCA_DIMENSAO": "128",
     }
@@ -803,7 +856,9 @@ def test_o_destaque_vai_ao_indice_e_volta_na_busca() -> None:
     transporte = TransporteFalso(
         {"results": [{"results": [{"dataObject": {"data": dados}}]}]}
     )
-    [achado] = AgentRetrieval(CONFIG, transporte).buscar(Consulta(texto="carro"))
+    [achado] = AgentRetrieval(CONFIG, transporte).buscar(
+        Consulta(texto="carro", filtros=Filtros(tipo="objeto"))
+    )
     assert achado.destaque == 3
 
 
@@ -850,6 +905,7 @@ def test_cota_de_escrita_vem_do_ambiente_e_sem_ela_nao_ha_ritmo() -> None:
         "GCP_PROJECT_ID": "p",
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
+        "BUSCA_COLECAO_DE_TEXTO": "ct",
         "BUSCA_INDICE_DESCRICAO": "d",
         "BUSCA_DIMENSAO": "128",
     }
@@ -1002,6 +1058,7 @@ def test_409_apaga_o_video_e_grava_tudo_de_novo(erros: tuple[Exception, ...]) ->
     recusadas = ["batchCreate"] * len(erros)
     assert _operacoes(falso) == [
         "query",
+        "query",
         *recusadas,
         "query",
         "batchCreate",
@@ -1014,7 +1071,13 @@ def test_409_de_novo_depois_de_regravar_sobe() -> None:
     falso, transporte = _com_409(JaExiste("x"), JaExiste("x"))
     with pytest.raises(JaExiste):
         _indice(transporte, _Relogio()).gravar("j", _registros(3))
-    assert _operacoes(falso) == ["query", "batchCreate", "query", "batchCreate"]
+    assert _operacoes(falso) == [
+        "query",
+        "query",
+        "batchCreate",
+        "query",
+        "batchCreate",
+    ]
 
 
 def _anota_os_lotes(relogio: _Relogio, envios: list[tuple[float, int]]) -> Any:
@@ -1160,7 +1223,11 @@ def test_orcamento_conta_a_apagada_junto_com_a_criada() -> None:
     def transporte(
         metodo: str, caminho: str, corpo: dict[str, Any] | None
     ) -> dict[str, Any]:
-        return {"dataObjects": lixo} if caminho.endswith(":query") else {}
+        return (
+            {"dataObjects": lixo}
+            if caminho.endswith("/col-texto/dataObjects:query")
+            else {}
+        )
 
     AgentRetrieval(
         replace(CONFIG, cota_de_escrita=3000),
@@ -1245,14 +1312,14 @@ def test_plano_igual_nao_faz_nada() -> None:
     assert montar_plano([r], [_lido(r)]).vazio
 
 
-def test_plano_mudar_o_texto_da_fala_apaga_e_cria() -> None:
+def test_plano_mudar_o_texto_da_fala_so_atualiza() -> None:
     antes = _reg("j:fala:fal000", texto="a")
     depois = _reg("j:fala:fal000", texto="b")
     plano = montar_plano([depois], [_lido(antes)])
     assert (plano.criar, plano.apagar, plano.atualizar) == (
-        [depois],
-        [depois.id],
         [],
+        [],
+        [depois],
     )
 
 
@@ -1327,18 +1394,23 @@ def test_ler_indice_pede_so_os_campos_do_esquema_e_pagina() -> None:
                 "nextPageToken": "p2",
             },
             {"dataObjects": [{"name": "c/dataObjects/b", "data": _lido(r2)}]},
+            {},
         ]
     )
     transporte = TransporteFalso()
     lidos = AgentRetrieval(CONFIG, _Sequencia(transporte, respostas)).ler_indice("j")
     assert [d["id"] for d in lidos] == [r1.id, r2.id]
-    [(_, caminho, corpo1), (_, _, corpo2)] = transporte.chamadas
+    [(_, caminho, corpo1), (_, _, corpo2), (_, texto, corpo3)] = transporte.chamadas
     assert caminho.endswith("/dataObjects:query")
     assert corpo1 is not None and corpo2 is not None
     assert corpo1["filter"] == {"job_id": {"$eq": "j"}}
     campos = corpo1["outputFields"]["dataFields"]
     assert campos == list(esquema_da_colecao(CONFIG)["dataSchema"]["properties"])
     assert corpo2["pageToken"] == "p2"
+    assert "/col-texto/" in texto
+    assert (
+        corpo3 is not None and "significado" not in corpo3["outputFields"]["dataFields"]
+    )
 
 
 class _ColecaoEmMemoria:
@@ -1374,7 +1446,7 @@ class _ColecaoEmMemoria:
             achados = [
                 {"name": n, "data": d}
                 for n, d in self.objetos.items()
-                if d["job_id"] == job
+                if d["job_id"] == job and n.startswith(colecao + "/dataObjects/")
             ]
             return {"dataObjects": achados}
         if operacao == "batchCreate":
@@ -1412,12 +1484,12 @@ def test_revisao_com_10_correcoes_grava_no_maximo_50_objetos() -> None:
     indice.gravar("j", _video(500))
     assert len(colecao.objetos) == 1000
     colecao.escritos = 0
-    # 10 correções: 5 mudam o texto de uma fala (apaga e cria) e 5 mudam só as pessoas.
+    # 10 correções: 5 mudam o texto de uma fala (atualiza) e 5 mudam só as pessoas.
     mudancas = {f"j:fala:f{i}": {"texto": f"corrigida {i}"} for i in range(5)} | {
         f"j:fala:f{i}": {"pessoas": ["maria"]} for i in range(5, 10)
     }
     indice.gravar("j", _video(500, **mudancas))
-    assert colecao.escritos == 5 * 2 + 5 <= 50
+    assert colecao.escritos == 5 + 5 <= 50
     assert len(colecao.objetos) == 1000
 
 
@@ -1427,15 +1499,19 @@ def test_gravar_de_novo_sem_mudanca_so_le() -> None:
     indice.gravar("j", _video(3))
     colecao.operacoes.clear()
     indice.gravar("j", _video(3))
-    assert colecao.operacoes == ["query"]
+    assert colecao.operacoes == ["query", "query"]
 
 
 def test_gravar_apaga_o_que_sumiu_e_o_objeto_de_nome_que_nao_e_o_do_id() -> None:
     colecao = _ColecaoEmMemoria()
     indice = _indice(colecao, _Relogio())
     indice.gravar("j", _video(2))
-    colecao.objetos["c/dataObjects/antigo"] = _lido(_reg("j:fala:f0", texto="fala 0"))
-    colecao.objetos["c/dataObjects/outro"] = _lido(_reg("j:fala:velha"))
+    colecao.objetos[f"{CONFIG.caminho_da_colecao}/dataObjects/antigo"] = _lido(
+        _reg("j:fala:f0", texto="fala 0")
+    )
+    colecao.objetos[f"{CONFIG.caminho_da_colecao}/dataObjects/outro"] = _lido(
+        _reg("j:fala:velha")
+    )
     indice.gravar("j", _video(2)[1:])
     ids = sorted(d["id"] for d in colecao.objetos.values())
     assert ids == ["j:fala:f1", "j:plano:p0", "j:plano:p1"]
@@ -1467,9 +1543,12 @@ def test_falha_no_meio_e_nova_rodada_chegam_ao_mesmo_indice(operacao: str) -> No
 
 @pytest.mark.parametrize("queda", range(1, 4))
 def test_queda_no_meio_so_tira_da_busca_o_que_muda_de_significado(queda: int) -> None:
-    # f0 muda o texto (apaga e cria), f1 só as pessoas (atualiza), f2 sai, p3 é novo:
-    # query, batchDelete, batchCreate, batchUpdate. Só f0 pode faltar depois da queda.
-    mudancas = {"j:fala:f0": {"texto": "corrigida"}, "j:fala:f1": {"pessoas": ["m"]}}
+    # p0 muda a descrição (apaga e cria), f1 só as pessoas (atualiza), f2 sai, p3 é novo.
+    # Só p0 pode faltar depois da queda.
+    mudancas = {
+        "j:plano:p0": {"descricao": "corrigida"},
+        "j:fala:f1": {"pessoas": ["m"]},
+    }
     novo = [r for r in _video(4, **mudancas) if r.id not in ("j:fala:f2", "j:fala:f3")]
     colecao = _ColecaoEmMemoria()
     indice = _indice(colecao, _Relogio())
@@ -1480,7 +1559,7 @@ def test_queda_no_meio_so_tira_da_busca_o_que_muda_de_significado(queda: int) ->
         indice.gravar("j", novo)
     depois = {d["id"] for d in colecao.objetos.values()}
     fica = antes & {r.id for r in novo}
-    assert fica - depois <= {"j:fala:f0"}
+    assert fica - depois <= {"j:plano:p0"}
     indice.gravar("j", novo)
     assert {d["id"] for d in colecao.objetos.values()} == {r.id for r in novo}
 
@@ -1501,11 +1580,11 @@ def test_as_atualizacoes_tambem_passam_pelo_orcamento() -> None:
         )
 
     indice().gravar("j", _video(5))
-    assert [n for _, n in orcamento.historico] == [10]
+    assert [n for _, n in orcamento.historico] == [5, 5]
     pessoas = {f"j:fala:f{i}": {"pessoas": ["maria"]} for i in range(5)}
     indice().gravar("j", _video(5, **pessoas))
     assert colecao.operacoes[-1] == "batchUpdate"
-    assert [n for _, n in orcamento.historico] == [10, 5]
+    assert [n for _, n in orcamento.historico] == [5, 5, 5]
 
 
 def test_atualizacoes_vao_em_lotes_de_ate_1000() -> None:
@@ -1515,7 +1594,7 @@ def test_atualizacoes_vao_em_lotes_de_ate_1000() -> None:
     pessoas = {f"j:fala:f{i}": {"pessoas": ["maria"]} for i in range(1200)}
     colecao.operacoes.clear()
     indice.gravar("j", _video(1200, **pessoas)[:1200])
-    assert colecao.operacoes == ["query", "batchUpdate", "batchUpdate"]
+    assert colecao.operacoes == ["query", "query", "batchUpdate", "batchUpdate"]
 
 
 def test_objeto_novo_leva_sistema_e_lixeira_e_o_esquema_e_o_filtro_os_declaram() -> (
@@ -1543,7 +1622,7 @@ def test_marcar_lixeira_atualiza_so_os_objetos_do_video_que_mudam() -> None:
 
     colecao.operacoes.clear()
     indice.marcar_lixeira("j", True)
-    assert colecao.operacoes == ["query", "batchUpdate"]
+    assert colecao.operacoes == ["query", "batchUpdate", "query", "batchUpdate"]
     assert {
         d["na_lixeira"] for d in colecao.objetos.values() if d["job_id"] == "j"
     } == {True}
@@ -1554,7 +1633,7 @@ def test_marcar_lixeira_atualiza_so_os_objetos_do_video_que_mudam() -> None:
     # De novo: nada a escrever. E o resto dos dados fica como estava.
     colecao.operacoes.clear()
     indice.marcar_lixeira("j", True)
-    assert colecao.operacoes == ["query"]
+    assert colecao.operacoes == ["query", "query"]
     indice.marcar_lixeira("j", False)
     restaurado = {d["id"]: d for d in colecao.objetos.values() if d["job_id"] == "j"}
     assert restaurado == {r.id: _lido(r) for r in _video(3)}
@@ -1585,12 +1664,14 @@ def test_marcar_lixeira_divide_em_lotes_e_reserva_a_cota() -> None:
     relogio = _Relogio()
     config = replace(CONFIG, cota_de_escrita=3000)
     indice = _indice(colecao, relogio, config)
-    indice.gravar("j", _video(800))  # 1.600 objetos
+    indice.gravar("j", _registros(1600))  # 1.600 objetos
     colecao.operacoes.clear()
     antes = relogio.agora
     indice.marcar_lixeira("j", True)
     assert colecao.operacoes.count("batchUpdate") == 2  # lotes de 1.000
-    assert relogio.agora > antes  # 1.600 + 1.600 passam de 90% da cota por minuto
+    assert (
+        relogio.agora > antes
+    )  # 1.600 + 1.600 na coleção de texto passam de 90% da cota
 
 
 def test_o_indice_que_ja_existe_com_outros_filtros_e_apontado_sem_apagar_nada() -> None:
@@ -1643,7 +1724,7 @@ def test_preencher_filtros_da_aos_antigos_so_o_que_falta_e_repetir_nao_escreve()
 
     colecao.operacoes.clear()
     assert indice.preencher_filtros("j", "Playout", True) == 6
-    assert colecao.operacoes == ["query", "batchUpdate"]
+    assert colecao.operacoes == ["query", "batchUpdate", "query", "batchUpdate"]
     do_j = [d for d in colecao.objetos.values() if d["job_id"] == "j"]
     assert {(d["sistema"], d["na_lixeira"]) for d in do_j} == {("Playout", True)}
     # O resto dos dados não muda, nem o `significado` (o vetor não se refaz).
@@ -1654,7 +1735,7 @@ def test_preencher_filtros_da_aos_antigos_so_o_que_falta_e_repetir_nao_escreve()
 
     colecao.operacoes.clear()
     assert indice.preencher_filtros("j", "Playout", True) == 0
-    assert colecao.operacoes == ["query"]
+    assert colecao.operacoes == ["query", "query"]
 
 
 def test_preencher_filtros_nao_troca_o_valor_que_a_lixeira_ja_pos() -> None:
@@ -1689,8 +1770,185 @@ def test_preencher_filtros_reserva_a_cota_de_escrita() -> None:
     relogio = _Relogio()
     config = replace(CONFIG, cota_de_escrita=3000)
     indice = _indice(colecao, relogio, config)
-    indice.gravar("j", _video(800))
+    indice.gravar("j", _registros(1600))
     _sem_os_campos(colecao)
     antes = relogio.agora
     indice.preencher_filtros("j", "Playout", False)
     assert relogio.agora > antes
+
+
+@pytest.mark.parametrize("ligados", [True, False])
+@pytest.mark.parametrize("tipo", ["plano", "fala", "texto_na_tela", "objeto", None])
+def test_buscar_roteia_tipo_e_so_embute_o_significado_dos_planos(
+    ligados: bool, tipo: Any
+) -> None:
+    config = replace(CONFIG, indices_ligados=ligados)
+    transporte = TransporteFalso(
+        {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
+    )
+    AgentRetrieval(config, transporte).buscar(
+        Consulta(texto="terno", significado="paletó", filtros=Filtros(tipo=tipo))
+    )
+    buscas = [(c, b) for _, c, b in transporte.chamadas if c.endswith(":batchSearch")]
+    assert {c.split("/collections/")[1].split("/")[0] for c, _ in buscas} == (
+        {"col-z"}
+        if tipo == "plano"
+        else {"col-texto"}
+        if tipo
+        else {"col-z", "col-texto"}
+    )
+    for caminho, corpo in buscas:
+        assert corpo is not None
+        campos = set(_buscas(corpo))
+        assert campos == (
+            {"textSearch"}
+            if "/col-texto/" in caminho
+            else {"textSearch", "semanticSearch" if ligados else "vectorSearch"}
+        )
+    assert sum(c.endswith(":predict") for _, c, _ in transporte.chamadas) == (
+        1 if not ligados and tipo in (None, "plano") else 0
+    )
+
+
+@pytest.mark.parametrize("ligados", [True, False])
+@pytest.mark.parametrize("tipo", ["fala", "texto_na_tela", "objeto"])
+def test_tipo_de_texto_sem_texto_devolve_vazio_sem_chamar_api(
+    ligados: bool, tipo: Any
+) -> None:
+    transporte = TransporteFalso()
+    assert (
+        AgentRetrieval(replace(CONFIG, indices_ligados=ligados), transporte).buscar(
+            Consulta(significado="terno", filtros=Filtros(tipo=tipo))
+        )
+        == []
+    )
+    assert transporte.chamadas == []
+
+
+@pytest.mark.parametrize("ligados", [True, False])
+def test_busca_livre_roda_as_colecoes_juntas_intercala_corta_e_so_filtra_o_vetor(
+    ligados: bool,
+) -> None:
+    barreira = threading.Barrier(2)
+    chamados: list[str] = []
+
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        if caminho.endswith(":predict"):
+            return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
+        chamados.append(caminho)
+        assert all(b["topK"] == 3 for b in _buscas(corpo).values())
+        barreira.wait(timeout=2)
+        if "/col-texto/" in caminho:
+            achados = [_achado("t1", "oi"), _achado("t2", "olá")]
+        else:
+            achados = [
+                _achado("longe", "plano distante", (1, 0.9)),
+                _achado("p1", "plano perto", (1, 0.1)),
+                _achado("p2", "outro plano", (1, 0.1)),
+            ]
+        return {"results": [{"results": achados}]}
+
+    indice = AgentRetrieval(
+        replace(
+            CONFIG, indices_ligados=ligados, distancia_maxima=0.25, palavras_minimas=2
+        ),
+        transporte,
+    )
+    achados = indice.buscar(
+        Consulta(texto="terno", significado="paletó", cortar_significado=True, limite=3)
+    )
+    assert len(chamados) == 2
+    assert [r.id for r in achados] == ["p1", "t1", "p2"]
+
+
+def test_gravar_divide_migra_os_antigos_e_texto_mudado_so_atualiza() -> None:
+    transporte = _ColecaoEmMemoria()
+    indice = AgentRetrieval(CONFIG, transporte)
+    registros = [_reg("j:p", "plano", descricao="estúdio")] + [
+        _reg(f"j:{tipo}", tipo, texto="terno")
+        for tipo in ("fala", "texto_na_tela", "objeto")
+    ]
+    # Antes da migração os quatro tipos estavam na coleção de vetor.
+    for r in registros:
+        transporte.objetos[
+            f"{CONFIG.caminho_da_colecao}/dataObjects/m-{r.id.replace(':', '-')}"
+        ] = _lido(r) | {"significado": r.descricao or r.texto}
+    indice.gravar("j", registros)
+    assert len(transporte.objetos) == 4
+    for nome, dados in transporte.objetos.items():
+        assert ("/col-z/" in nome) == (dados["tipo"] == "plano")
+        assert ("significado" in dados) == (dados["tipo"] == "plano")
+    transporte.operacoes.clear()
+    indice.gravar("j", registros)
+    assert transporte.operacoes == ["query", "query"]
+    transporte.operacoes.clear()
+    indice.gravar(
+        "j", [r if r.tipo == "plano" else replace(r, texto="paletó") for r in registros]
+    )
+    assert transporte.operacoes == ["query", "query", "batchUpdate"]
+    assert all(
+        d["texto"] == "paletó"
+        for d in transporte.objetos.values()
+        if d["tipo"] != "plano"
+    )
+
+
+@pytest.mark.parametrize("operacao", ["apagar", "marcar_lixeira", "preencher_filtros"])
+def test_manutencao_e_orcamento_passam_pelas_duas_colecoes(operacao: str) -> None:
+    reservas: list[tuple[str, int]] = []
+
+    class OrcamentoPorColecao:
+        def reservar(
+            self, colecao: str, objetos: int, limite: float, agora: float
+        ) -> float:
+            reservas.append((colecao, objetos))
+            return 0.0
+
+    transporte = _ColecaoEmMemoria()
+    indice = AgentRetrieval(
+        replace(CONFIG, cota_de_escrita=3000),
+        transporte,
+        orcamento=OrcamentoPorColecao(),
+    )
+    indice.gravar("j", _video(1))
+    assert reservas == [("col-z", 1), ("col-texto", 1)]
+    reservas.clear()
+    if operacao == "apagar":
+        indice.apagar("j")
+        assert transporte.objetos == {}
+    elif operacao == "marcar_lixeira":
+        indice.marcar_lixeira("j", True)
+        assert all(d["na_lixeira"] for d in transporte.objetos.values())
+    else:
+        for dados in transporte.objetos.values():
+            del dados["na_lixeira"]
+        assert indice.preencher_filtros("j", "legado", True) == 2
+        assert all(
+            d["na_lixeira"] and d["sistema"] == "legado"
+            for d in transporte.objetos.values()
+        )
+    assert reservas == [("col-z", 1), ("col-texto", 1)]
+
+
+def test_ritmo_local_tambem_tem_uma_cota_por_colecao() -> None:
+    relogio = _Relogio()
+    indice = _indice(_ColecaoEmMemoria(), relogio, replace(CONFIG, cota_de_escrita=2))
+    indice.gravar("j", _video(1))
+    assert relogio.esperas == []
+
+
+@pytest.mark.parametrize("ligados", [True, False])
+def test_cria_as_duas_colecoes_texto_sem_vetor_significado_nem_indice(
+    ligados: bool,
+) -> None:
+    transporte = TransporteFalso()
+    criar_colecao(replace(CONFIG, indices_ligados=ligados), transporte)
+    criacoes = [(c, b) for m, c, b in transporte.chamadas if "collectionId=" in c]
+    assert len(criacoes) == 2
+    caminho, esquema = criacoes[1]
+    assert caminho.endswith("collectionId=col-texto")
+    assert esquema is not None and "vectorSchema" not in esquema
+    propriedades = esquema["dataSchema"]["properties"]
+    assert "significado" not in propriedades
+    assert set(CAMPOS_DE_FILTRO + ["texto_da_busca"]) <= set(propriedades)
+    assert not any("/col-texto/indexes" in c for _, c, _ in transporte.chamadas)

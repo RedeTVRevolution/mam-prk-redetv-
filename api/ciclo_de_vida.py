@@ -36,6 +36,9 @@ TRANSICOES: dict[Estado, frozenset[Estado]] = {
 }
 FINAIS = frozenset(e for e, destinos in TRANSICOES.items() if not destinos)
 
+# Manter em acordo com o age = 7 do bucket aceitos em infra/modulos/mam/main.tf.
+PRAZO_DO_REPROCESSAMENTO = timedelta(days=7)
+
 
 class TransicaoProibida(Exception):
     def __init__(self, de: Estado, para: Estado) -> None:
@@ -338,6 +341,12 @@ def reprocessar(
 
     def mudar(job: Job) -> dict[str, Any]:
         lido[:] = [job]
+        if agora - job.criado_em >= PRAZO_DO_REPROCESSAMENTO:
+            raise NaoReprocessavel(
+                "O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou: "
+                "a cópia em alta resolução e o áudio não ficam guardados no MAM. "
+                "Para reprocessar, envie o vídeo de novo a partir do arquivo da RedeTV."
+            )
         partida = etapa_de_partida(job, etapa_escolhida)
         ordem = _ordem_das_etapas()
         etapas = {
@@ -348,6 +357,7 @@ def reprocessar(
             "etapa_atual": partida,
             "etapas": etapas,
             "reprocessamentos": job.reprocessamentos + 1,
+            "inicio_da_passada": agora,
             "atualizado_em": agora,
         }
         if job.estado == "falhou":
@@ -472,6 +482,7 @@ def desfazer_reprocessamento(
             "etapa_atual",
             "etapas",
             "reprocessamentos",
+            "inicio_da_passada",
             "indexacao",
         )
         return {
@@ -516,6 +527,7 @@ def tomar_a_rodada(
     rodada_id: str,
     *,
     so_se_pedida: bool = False,
+    so_copia: bool = False,
 ) -> Job | None:
     """Toma a vez de indexar o vídeo e devolve o Job lido, com a `versao_pedida` a alcançar.
 
@@ -523,6 +535,7 @@ def tomar_a_rodada(
     (ela pega na volta o que se pediu depois) ou, com `so_se_pedida`, se não há pedido
     pendente: `indexacao` em `pendente` (o fim da análise) ou `versao_pedida` à frente da
     `versao_indexada`. Sem `so_se_pedida` (`make reindexar`), sempre há uma versão a mais.
+    Com `so_copia`, só toma a exclusão, sem pedir uma versão da busca.
     """
 
     def mudar(job: Job) -> dict[str, Any] | None:
@@ -538,10 +551,12 @@ def tomar_a_rodada(
         )
         if so_se_pedida and not pedida:
             return None
-        return {
-            "versao_pedida": max(job.versao_pedida, job.versao_indexada + 1),
+        mudancas: dict[str, Any] = {
             "rodada_da_indexacao": RodadaDaIndexacao(id=rodada_id, em=agora),
         }
+        if not so_copia:
+            mudancas["versao_pedida"] = max(job.versao_pedida, job.versao_indexada + 1)
+        return mudancas
 
     return repositorio.trocar(job_id, mudar)
 
@@ -553,8 +568,9 @@ def fechar_a_rodada(
     alvo: int,
     *,
     indexado: bool,
-    indexacao: Indexacao,
+    indexacao: Indexacao | None,
     agora: datetime,
+    so_copia: bool = False,
 ) -> Job | None:
     """Fecha a rodada de `rodada_id`, que mirava `alvo`; devolve o Job gravado.
 
@@ -562,7 +578,7 @@ def fechar_a_rodada(
     rodada segue aberta (`rodada_da_indexacao` não vem vazia) e a `indexacao` continua
     `pendente`: quem chamou indexa de novo. Sem `indexado`, ou sem pedido novo, solta a vez e
     grava `indexacao`. `None` se a rodada não é mais desta execução (venceu e outra tomou) ou
-    o Job sumiu.
+    o Job sumiu. Com `so_copia`, só solta a exclusão, preservando a fila da busca.
     """
 
     def mudar(job: Job) -> dict[str, Any] | None:
@@ -571,6 +587,8 @@ def fechar_a_rodada(
         r = job.rodada_da_indexacao
         if r is None or r.id != rodada_id:
             return None
+        if so_copia:
+            return {"rodada_da_indexacao": None}
         if not indexado:
             return {"rodada_da_indexacao": None, "indexacao": indexacao}
         indexada = max(job.versao_indexada, alvo)

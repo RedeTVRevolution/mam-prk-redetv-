@@ -12,7 +12,7 @@
 # `make preencher-taxa-diaria`, que refaz o último ano. Ver README.
 #
 # Particionada por dia: a parte 2 filtra por período. Sem cluster: a tabela tem poucas linhas
-# (dia × programa × versão × ~25 tipos).
+# (dia × Job × ~25 tipos).
 resource "google_bigquery_table" "taxa_de_correcao_por_dia" {
   dataset_id          = google_bigquery_dataset.decupagens.dataset_id
   table_id            = local.tabela_da_taxa_de_correcao
@@ -28,6 +28,7 @@ resource "google_bigquery_table" "taxa_de_correcao_por_dia" {
     { name = "tipo", type = "STRING", mode = "REQUIRED", description = "Tipo de correção (pessoa.renomear, pauta.titulo...)" },
     { name = "correcoes", type = "INTEGER", mode = "REQUIRED", description = "Correções em vigor que passaram a valer no dia" },
     { name = "itens", type = "INTEGER", mode = "REQUIRED", description = "Itens do tipo nas decupagens revisadas no dia" },
+    { name = "job_id", type = "STRING", mode = "NULLABLE", description = "Job revisado; nulo apenas nas linhas anteriores à nova carga do histórico (#509)" },
   ])
 }
 

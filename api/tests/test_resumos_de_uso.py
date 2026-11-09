@@ -398,7 +398,7 @@ def test_o_terraform_agenda_o_sql_com_a_conta_dos_resumos() -> None:
 
 def test_as_tabelas_do_terraform_sao_as_que_o_sql_cria() -> None:
     criadas = _tabelas_do_sql()
-    listadas = re.search(r"resumos_de_uso = \[(.*?)\]", TF, re.DOTALL)
+    listadas = re.search(r"resumos_de_uso\s*=\s*\[(.*?)\]", TF, re.DOTALL)
     assert listadas is not None
 
     assert sorted(criadas) == sorted(re.findall(r'"(\w+)"', listadas.group(1)))

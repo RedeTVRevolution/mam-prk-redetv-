@@ -4,8 +4,9 @@ Para cada variação, roda o Job de objetos com GPU sobre os quadros já gravado
 (com as variáveis `FLORENCE_*` da variação e um destino próprio), converte o bruto com o
 Gemini e guarda ao lado do resultado de hoje, sem sobrescrevê-lo, em
 `<job>/objetos/medicao/<variacao>/`: `bruto.json`, `inventario.json` e `medida.json`.
-A variação `hoje` (sem nenhuma variável) é a base: o critério de qualidade das outras é
-calculado contra o inventário convertido dela. No fim imprime a tabela.
+A variação `hoje` é a base: se inventário e medida já estão gravados, são reutilizados
+sem dispará-la nem regravar sua pasta. Sem os dois, roda com o ambiente atual do Job.
+O critério das outras usa esse inventário. No fim imprime a tabela.
 
     python -m api.medir_florence JOB_ID [VARIACAO ...]
 
@@ -32,7 +33,7 @@ from api.comparar_objetos import (
     FaltaNoAmbiente,
     exigir_do_ambiente,
 )
-from api.decupagem import Decupagem
+from api.decupagem import Decupagem, ObjetoDoInventario
 from api.florence import ObjetosDaDecupagem
 from api.gemini import SessaoHttp, Transporte, TransporteVertex
 from api.inventario import Inventarios, converter_do_florence
@@ -54,6 +55,23 @@ VARIACOES: dict[str, dict[str, str]] = {
     "repetidos": {"FLORENCE_PULAR_REPETIDOS": "6"},
     "guloso+lote8": {"FLORENCE_FEIXES": "1", "FLORENCE_LOTE": "8"},
     "guloso+lote16": {"FLORENCE_FEIXES": "1", "FLORENCE_LOTE": "16"},
+    "large+guloso+lote16": {
+        "FLORENCE_MODELO": "large",
+        "FLORENCE_FEIXES": "1",
+        "FLORENCE_LOTE": "16",
+        "FLORENCE_LEGENDAS": "1",
+    },
+    "base+guloso+lote16": {
+        "FLORENCE_MODELO": "base",
+        "FLORENCE_FEIXES": "1",
+        "FLORENCE_LOTE": "16",
+        "FLORENCE_LEGENDAS": "1",
+    },
+    "guloso+lote16+sem-legendas": {
+        "FLORENCE_FEIXES": "1",
+        "FLORENCE_LOTE": "16",
+        "FLORENCE_LEGENDAS": "0",
+    },
     "guloso+lote8+tokens256": {
         "FLORENCE_FEIXES": "1",
         "FLORENCE_LOTE": "8",
@@ -154,6 +172,8 @@ class Resultado:
 class Armazem(Protocol):
     def ler_decupagem(self, job_id: str) -> Decupagem | None: ...
 
+    def ler_texto(self, objeto: str) -> str | None: ...
+
     def ler_resultado(
         self, job_id: str, destino: str | None = None
     ) -> ObjetosDaDecupagem | None: ...
@@ -193,7 +213,8 @@ def medir(
     variacoes: Mapping[str, Mapping[str, str]],
     dormir: Callable[[float], None] = time.sleep,
 ) -> list[Resultado]:
-    """A base (`hoje`) roda primeiro, mesmo que não tenha sido pedida. Uma variação que
+    """Reusa inventário e medida de `hoje` gravados, sem disparar nem regravar a base;
+    se faltar um deles, roda a base primeiro, mesmo sem pedi-la. Uma variação que
     falha (a memória da GPU, por exemplo) vira `erro` na tabela e as outras seguem. Se a
     base falha, as outras não rodam: não haveria contra o que medir o critério."""
     decupagem = armazem.ler_decupagem(job_id)
@@ -211,6 +232,24 @@ def medir(
             continue
         destino = objeto_da_medicao(job_id, nome, "bruto.json")
         try:
+            if nome == BASE:
+                texto = armazem.ler_texto(
+                    objeto_da_medicao(job_id, BASE, "inventario.json")
+                )
+                medida_gravada = armazem.ler_texto(
+                    objeto_da_medicao(job_id, BASE, "medida.json")
+                )
+                if texto is not None and medida_gravada is not None:
+                    inventario = {
+                        int(i): [ObjetoDoInventario.model_validate(o) for o in objetos]
+                        for i, objetos in json.loads(texto).items()
+                    }
+                    dados = json.loads(medida_gravada)
+                    resultado.medida = Medida(
+                        **{c: dados[c] for c in Medida.__dataclass_fields__}
+                    )
+                    resultado.inventario = inventario
+                    continue
             disparador.rodar(job_id, destino, ambiente)
             bruto = armazem.ler_resultado(job_id, destino)
             if bruto is None or bruto.segundos is None:

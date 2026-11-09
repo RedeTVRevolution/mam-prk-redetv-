@@ -106,8 +106,37 @@ def _registrar(
     que o Job ainda está lá. Uma falha do repositório vai ao log e devolve `None`, para
     não transformar em erro uma Correção que já foi gravada.
     """
+
+    def mudar(job: Job) -> dict[str, Any] | None:
+        if job.estado != "concluido":
+            return None
+        if isinstance(valor, CopiaNoBigQuery):
+            atual = job.copia_bigquery
+            return {
+                campo: valor.model_copy(
+                    update={
+                        # Só o ArrayUnion acrescenta anos; um snapshot velho não os tira.
+                        "anos": atual.anos if atual else [],
+                        "particoes_conhecidas": (
+                            valor.estado == "copiado"
+                            or bool(atual and atual.particoes_conhecidas)
+                        )
+                        and set(valor.anos).issubset(atual.anos if atual else [])
+                        and (
+                            valor.estado == "pendente"
+                            or bool(
+                                atual
+                                and atual.estado == "pendente"
+                                and atual.em == valor.desde
+                            )
+                        ),
+                    }
+                )
+            }
+        return {campo: valor}
+
     try:
-        return repositorio.transitar(job_id, "concluido", {campo: valor})
+        return repositorio.trocar(job_id, mudar)
     except Exception:
         log.exception("estado de %s não gravado para %s", campo, job_id)
         return None
@@ -150,15 +179,19 @@ def _uma_rodada(
     """Uma passada pelo índice e pela cópia com o `job` lido agora. Não grava o estado final
     da indexação: quem fecha a rodada o grava. Nunca levanta por falha do índice ou da cópia."""
     inicio = relogio()
+    ultima_copia = job.copia_bigquery or CopiaNoBigQuery(estado="pendente", em=inicio)
     _registrar(
         repositorio, job.id, "indexacao", Indexacao(estado="pendente", em=inicio)
     )
+    pendente = None
     if copia:
-        _registrar(
+        pendente = _registrar(
             repositorio,
             job.id,
             "copia_bigquery",
-            CopiaNoBigQuery(estado="pendente", em=inicio),
+            ultima_copia.model_copy(
+                update={"estado": "pendente", "em": inicio, "desde": None}
+            ),
         )
     estado: EstadoDaIndexacao = "falhou"
     estado_da_copia: EstadoDaCopia = "falhou"
@@ -193,7 +226,24 @@ def _uma_rodada(
                 linhas = linhas_da_decupagem(
                     job.id, decupagem, job.programa, job.data_exibicao, inicio
                 )
-                copia.gravar(job.id, linhas)
+                if pendente is None:
+                    raise RuntimeError("estado pendente da cópia não gravado")
+                ultima_copia = pendente.copia_bigquery or CopiaNoBigQuery(
+                    estado="pendente", em=inicio
+                )
+                if job.data_exibicao:
+                    ano = job.data_exibicao.year
+                    ultima_copia = ultima_copia.model_copy(
+                        update={"anos": sorted(set(ultima_copia.anos) | {ano})}
+                    )
+                    repositorio.acrescentar_ano_da_copia(job.id, ano)
+                copia.gravar(
+                    job.id,
+                    linhas,
+                    anos=ultima_copia.anos
+                    if ultima_copia.particoes_conhecidas
+                    else None,
+                )
                 estado_da_copia = "copiado"
             except Exception:
                 log.exception("cópia para o BigQuery falhou para %s", job.id)
@@ -209,7 +259,9 @@ def _uma_rodada(
             repositorio,
             job.id,
             "copia_bigquery",
-            CopiaNoBigQuery(estado=estado_da_copia, em=fim, desde=inicio),
+            ultima_copia.model_copy(
+                update={"estado": estado_da_copia, "em": fim, "desde": inicio}
+            ),
         )
     return _Resultado(
         Indexacao(estado=estado, em=fim, desde=inicio),

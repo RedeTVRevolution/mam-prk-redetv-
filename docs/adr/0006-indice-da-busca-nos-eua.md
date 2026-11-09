@@ -12,7 +12,7 @@ O índice da descrição está no ar desde 1/11/2026 (#122). O do quadro-chave f
 
 O vetor do quadro é o do plano: a indexação manda o quadro-chave principal do plano e a descrição, juntos, ao Gemini Embedding 2 (`gemini-embedding-2`, endpoint global, o mesmo caminho do Gemini da [ADR 0001](0001-gemini-endpoint-global.md)), que devolve um vetor só, reduzido à dimensão da coleção (`embedContentConfig.outputDimensionality`, 256; o campo no topo do pedido está obsoleto na API v1) e normalizado. As chamadas de um vídeo correm em paralelo (`CHAMADAS_SIMULTANEAS`), porque a reindexação de uma Correção roda dentro do pedido HTTP. Só o registro de plano leva o vetor; plano sem quadro, ou cujo quadro não lê ou cujo embedding falha, fica só com o vetor da descrição. Custo do embedding, a conferir na página de preços da Vertex (as fontes achadas divergem e nenhuma é oficial): texto a US$ 0,20 por milhão de tokens e imagem a cerca de US$ 0,45 por milhão, ou seja, ~US$ 0,0001 por quadro. Com um plano a cada 6 s (600 planos por hora de vídeo, premissa, não medida), dá em torno de US$ 0,07 por hora de vídeo, e cada reindexação (a cada Correção que passa a valer) o paga de novo para o vídeo inteiro.
 
-Todo registro tem vetor, e não só os planos, ao contrário do que o #117 decidiu. O embedding automático do Agent Retrieval recusa o registro sem o campo do modelo ("Field path 'descricao' not found") ou com ele vazio ("The text content is empty"). O modelo usa o campo `significado`: a descrição do plano ou o texto da fala, do texto na tela ou do objeto. Esse campo não volta na busca. Assim a busca por significado também acha falas e objetos; o custo extra (o embedding de cada registro e 256 números a mais no índice) é desprezível na PoC.
+**Histórico, substituído pela decisão de 7/11/2026 (#505):** Todo registro tem vetor, e não só os planos, ao contrário do que o #117 decidiu. O embedding automático do Agent Retrieval recusa o registro sem o campo do modelo ("Field path 'descricao' not found") ou com ele vazio ("The text content is empty"). O modelo usa o campo `significado`: a descrição do plano ou o texto da fala, do texto na tela ou do objeto. Esse campo não volta na busca. Assim a busca por significado também acha falas e objetos; o custo extra (o embedding de cada registro e 256 números a mais no índice) é desprezível na PoC.
 
 Medição do Mac, em São Paulo, 1/11/2026 (`make medir-busca CONSULTAS=100`, 16 registros, dimensão 256). É só uma aproximação: o caminho real sai do Cloud Run em `southamerica-east1`. A busca híbrida (texto, significado e filtros, fundidos por RRF, com o índice ANN) deu p50 de 262 ms e p95 de 322 ms. O filtro composto devolveu só o objeto da Sabrina, e a cor filtra de verdade.
 
@@ -39,3 +39,46 @@ Em 6/11/2026, o Bruno decidiu que a busca visual e os planos parecidos são ruin
 Esta decisão desfaz a de 5/11/2026 acima para o dev: `indices_da_busca_ligados` volta a `true` na raiz do dev (`infra/main.tf`), porque o teto de 100 mil registros do KNN (cerca de 44 h de vídeo) é pequeno demais. O índice não é recurso do Terraform: depois do apply, uma pessoa roda `make criar-colecao-da-busca`, que cria só o `momentos-descricao-ann` (idempotente). O `momentos-quadro-ann` que já existir no dev não é apagado pelo código; apague-o à mão no console. Os vetores do quadro já gravados na coleção ficam sem uso, e a reindexação os troca.
 
 Em 7/11/2026 a gravação deixou de apagar o vídeo inteiro a cada vez (#418, #470): `AgentRetrieval.gravar` lê o índice do vídeo, monta o plano (`montar_plano`) e aplica, nessa ordem, `batchDelete` (até 1.000 por lote), `batchCreate` (até 200) e `batchUpdate` (`updateMask` `data`, até 1.000) só no que mudou. Id novo cria, id que sumiu apaga, `significado` diferente apaga e cria (o `batchUpdate` não refaz o embedding automático), outro campo diferente atualiza. Objeto lido com nome que não é o que o id dá hoje (`_id_do_objeto`) é apagado e o registro entra pelo nome certo. Toda escrita, o `batchUpdate` incluso, reserva no orçamento da cota (#460). Uma queda no meio só pode deixar fora da busca, até a rodada seguinte, os objetos que são apagados e criados de novo (o nome é o mesmo, então o velho sai antes); o resto fica como antes ou já atualizado, e rodar de novo termina o trabalho, porque a comparação parte do índice. O pedido do ticket sobre o vetor do quadro só para o que mudou não se aplica: o vetor do quadro saiu em 6/11/2026 (#476). O `PlanoDeReindexacao.planos_com_quadro_novo` ficou sem uso na gravação.
+
+## Duas coleções: só o plano com vetor (7/11/2026, #505)
+
+A decisão do Bruno divide a busca em duas coleções na mesma região, `us-east4`:
+`momentos` guarda só planos, com o vetor da descrição e o índice ANN
+`momentos-descricao-ann`; `momentos-texto` guarda falas, textos na tela e objetos,
+com o mesmo `dataSchema` exceto `significado`, sem `vectorSchema` nem índice.
+Os nomes vêm do módulo Terraform, por `BUSCA_COLECAO` e `BUSCA_COLECAO_DE_TEXTO`.
+A coleção nova guarda os mesmos dados já aprovados pelo jurídico em 1/11/2026,
+na mesma região, e está coberta por essa aprovação.
+
+O motivo é custo: por hora de vídeo são cerca de 389 planos, 381 falas, 743 objetos
+e 423 textos na tela. Só cerca de 20% dos registros precisam de vetor. Retirar os
+outros reduz o crescimento das CU do índice ANN e paga embedding automático só
+nos planos. A coleção sem índice ANN não cobra CU, conforme o faturamento do dev.
+O BigQuery foi descartado como motor de busca; a cópia continua com todos os registros.
+
+A perda é aceita: sinônimo ou conceito deixa de achar fala, texto na tela e objeto.
+"Paletó" não acha um objeto descrito como "terno". A descrição do plano leva o
+inventário (`_inventario_em_texto`), então ainda pode achar o plano por significado,
+no momento do plano, sem prometer o instante exato do objeto.
+
+O roteamento e a fusão ficam no `AgentRetrieval`, preservando `IndiceDaBusca` e
+`api/busca.py`: `tipo=plano` usa texto e significado na coleção vetorial; os outros
+tipos usam apenas palavra na coleção de texto. Sem tipo, consulta as duas em
+paralelo, intercala as posições com `_intercalar` e corta no limite da consulta.
+A coleção de texto só é chamada quando há texto. O corte de distância e o embedding
+da consulta no KNN valem só para planos. O teto de 100 mil registros do KNN e o
+aviso em 80 mil passam a contar só a coleção de planos, depois da migração.
+Cada coleção tem sua própria cota de escrita, com o mesmo valor configurado.
+
+Confirmado pelo Bruno no dev em **8/11/2026**: POST só com `dataSchema`, sem
+`vectorSchema`, criou em cerca de 4 s; `batchCreate` e `batchSearch` com `textSearch`
+responderam 200 e acharam o objeto. O DELETE de coleção com objetos falha com
+`FAILED_PRECONDITION / COLLECTION_HAS_DATA_OBJECTS`: é preciso esvaziá-la antes,
+mesmo com `force=true`. `apagar_colecao` faz isso; a migração apenas move registros,
+sem apagar coleções.
+
+A implantação, a reindexação dos concluídos na lixeira, as contagens por tipo e
+as medições de antes/depois estão em [Implantação e migração do #505](../migracao-da-busca-505.md).
+A validação no dev e a latência ficam pendentes da execução humana. Mesmo depois
+dela, poucos milhares de registros no dev não demonstram a latência do
+`textSearch` sem índice com milhões de registros, que continua sem medição.

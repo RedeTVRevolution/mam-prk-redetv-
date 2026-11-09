@@ -19,7 +19,7 @@ locals {
   # Quantos dias para trás (contando o de hoje em São Paulo) cada rodada refaz. O evento chega
   # em minutos e cai no dia dele; a folga cobre uma rodada que falhou e a virada do dia.
   janela_dos_resumos_em_dias = 2
-  resumos_de_uso = ["uso_por_dia_e_usuario", "uso_por_dia", "uso_por_usuario", "uso_por_dia_e_programa", "correcoes_por_dia", "chamadas_de_api_por_dia"]
+  resumos_de_uso             = ["uso_por_dia_e_usuario", "uso_por_dia", "uso_por_usuario", "uso_por_dia_e_programa", "correcoes_por_dia", "chamadas_de_api_por_dia"]
   # As que a web lê (PAINEL_TABELA_*): a API do painel não conhece o nome de nenhuma.
   tabelas_do_painel_na_web = {
     por_dia_e_usuario  = "uso_por_dia_e_usuario"
@@ -55,9 +55,9 @@ resource "google_bigquery_data_transfer_config" "resumos_de_uso" {
   service_account_name = google_service_account.resumos_de_uso.email
   params = {
     query = templatefile("${path.module}/resumos_de_uso.sql", {
-      prefixo            = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}."
-      tabela_de_eventos  = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.eventos_de_uso.table_id}"
-      inicio_da_janela   = "TIMESTAMP(DATE_SUB(CURRENT_DATE('America/Sao_Paulo'), INTERVAL ${local.janela_dos_resumos_em_dias - 1} DAY), 'America/Sao_Paulo')"
+      prefixo           = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}."
+      tabela_de_eventos = "${var.projeto}.${google_bigquery_dataset.decupagens.dataset_id}.${google_bigquery_table.eventos_de_uso.table_id}"
+      inicio_da_janela  = "TIMESTAMP(DATE_SUB(CURRENT_DATE('America/Sao_Paulo'), INTERVAL ${local.janela_dos_resumos_em_dias - 1} DAY), 'America/Sao_Paulo')"
     })
   }
   depends_on = [

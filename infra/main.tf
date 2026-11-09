@@ -46,16 +46,6 @@ variable "imagem_validacao" {
   type        = string
 }
 
-variable "imagem_transcricao" {
-  description = "Imagem do Job de transcrição (--target transcricao), de preferência pelo digest"
-  type        = string
-}
-
-variable "imagem_ocr" {
-  description = "Imagem do Job de OCR da tela (--target ocr), de preferência pelo digest"
-  type        = string
-}
-
 variable "imagem_transcricao_gpu" {
   description = "Imagem do Job de transcrição com GPU (--target transcricao-gpu), de preferência pelo digest"
   type        = string
@@ -95,6 +85,16 @@ variable "dominio" {
   default     = ""
 }
 
+variable "vagas_de_gpu" {
+  description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
+  type        = number
+  default     = 3
+  validation {
+    condition     = floor(var.vagas_de_gpu) == var.vagas_de_gpu && var.vagas_de_gpu >= 1
+    error_message = "vagas_de_gpu é um inteiro a partir de 1."
+  }
+}
+
 module "mam" {
   source = "./modulos/mam"
 
@@ -103,15 +103,18 @@ module "mam" {
   admins_emergencia            = var.admins_emergencia
   imagem                       = var.imagem
   imagem_validacao             = var.imagem_validacao
-  imagem_transcricao           = var.imagem_transcricao
-  imagem_ocr                   = var.imagem_ocr
   imagem_transcricao_gpu       = var.imagem_transcricao_gpu
   imagem_ocr_gpu               = var.imagem_ocr_gpu
   imagem_objetos               = var.imagem_objetos
+  florence_modelo              = var.florence_modelo
+  florence_feixes              = var.florence_feixes
+  florence_lote                = var.florence_lote
+  florence_legendas            = var.florence_legendas
   dominio                      = var.dominio
   waf_ativo                    = var.waf_ativo
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
+  vagas_de_gpu                 = var.vagas_de_gpu
 
   # O índice ANN da descrição (~R$ 290/mês; ADR 0006): o KNN sem índice aceita só 100 mil
   # registros, uns 44 h de vídeo.
@@ -241,6 +244,10 @@ output "busca_regiao" {
 
 output "busca_colecao" {
   value = module.mam.busca_colecao
+}
+
+output "busca_colecao_de_texto" {
+  value = module.mam.busca_colecao_de_texto
 }
 
 output "busca_colecao_de_medida" {
@@ -448,16 +455,6 @@ moved {
 }
 
 moved {
-  from = google_cloud_run_v2_job.transcricao
-  to   = module.mam.google_cloud_run_v2_job.transcricao
-}
-
-moved {
-  from = google_cloud_run_v2_job.ocr
-  to   = module.mam.google_cloud_run_v2_job.ocr
-}
-
-moved {
   from = google_cloud_run_v2_job.transcricao_gpu
   to   = module.mam.google_cloud_run_v2_job.transcricao_gpu
 }
@@ -470,16 +467,6 @@ moved {
 moved {
   from = google_cloud_run_v2_job.objetos_gpu
   to   = module.mam.google_cloud_run_v2_job.objetos_gpu
-}
-
-moved {
-  from = google_cloud_run_v2_job_iam_member.orquestracao_roda_transcricao
-  to   = module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_transcricao
-}
-
-moved {
-  from = google_cloud_run_v2_job_iam_member.orquestracao_roda_ocr
-  to   = module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_ocr
 }
 
 moved {

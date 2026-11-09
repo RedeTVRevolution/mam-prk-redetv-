@@ -195,6 +195,9 @@ class RepositorioQuePublicaOFim:
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        return self._repositorio.obter_fila_gpu()
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         return self._repositorio.obter_varios(job_ids)
 
@@ -205,6 +208,9 @@ class RepositorioQuePublicaOFim:
         if job is not None and job.estado != de:
             publicar_fim(job, self._webhooks, self._publicador, self._relogio())
         return job
+
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
+        self._repositorio.acrescentar_ano_da_copia(job_id, ano)
 
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
@@ -273,6 +279,9 @@ class RepositorioQueRegistraOFim:
     def obter(self, job_id: str) -> Job | None:
         return self._repositorio.obter(job_id)
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        return self._repositorio.obter_fila_gpu()
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         return self._repositorio.obter_varios(job_ids)
 
@@ -283,6 +292,9 @@ class RepositorioQueRegistraOFim:
         if job is not None and job.estado != de and job.estado in FIM_DE_JOB:
             registrar_o_fim(self._eventos, job, self._relogio())
         return job
+
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
+        self._repositorio.acrescentar_ano_da_copia(job_id, ano)
 
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]

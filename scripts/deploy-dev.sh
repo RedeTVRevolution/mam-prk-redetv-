@@ -53,7 +53,7 @@ scripts/aplicar-sem-destruir.sh -target=module.mam.google_artifact_registry_repo
   -target=module.mam.google_artifact_registry_repository_iam_member.build_envia \
   -target=module.mam.google_artifact_registry_repository.mam_gpu \
   -target=module.mam.google_artifact_registry_repository_iam_member.build_envia_gpu \
-  -var imagem=pendente -var imagem_validacao=pendente -var imagem_transcricao=pendente -var imagem_ocr=pendente \
+  -var imagem=pendente -var imagem_validacao=pendente \
   -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente -var imagem_objetos=pendente
 # O nome do repositório vem do Terraform, o único lugar que monta os nomes.
 REPOSITORIO=$(tf output -raw repositorio)
@@ -61,10 +61,6 @@ COMMIT=$(git rev-parse --short HEAD)
 WEB="$REPOSITORIO/web:$COMMIT"
 # A imagem do Job de validação (#38).
 VALIDACAO="$REPOSITORIO/validacao:$COMMIT"
-# A imagem do Job de transcrição (#104), com o modelo do Whisper dentro.
-TRANSCRICAO="$REPOSITORIO/transcricao:$COMMIT"
-# A imagem do Job de OCR da tela (#106), com os modelos do PaddleOCR dentro.
-OCR="$REPOSITORIO/ocr:$COMMIT"
 # O cache das camadas (#211): uma tag por alvo no mesmo repositório, sobrescrita a cada montagem.
 CACHE="$REPOSITORIO/cache"
 # As imagens dos Jobs com GPU (E1, ADR 0007, #238) e o cache delas ficam no repositório da
@@ -106,11 +102,11 @@ marcar() { # <repo/imagem@digest> <tag>: põe a tag no digest, movendo-a se já 
 for imagem in "$TRANSCRICAO_GPU_ANTES" "$OCR_GPU_ANTES" "$OBJETOS_GPU_ANTES"; do
   [[ -z $imagem ]] || marcar "$imagem" "$TAG_DA_VOLTA"
 done
-# O Cloud Build constrói, em paralelo e com cache, e envia as sete imagens (cloudbuild.yaml), como a mam-build.
+# O Cloud Build constrói, em paralelo e com cache, e envia as cinco imagens (cloudbuild.yaml), como a mam-build.
 gc builds submit . --region "$GCP_REGION" --suppress-logs \
   --service-account "$(tf output -raw conta_build)" \
   --gcs-source-staging-dir "gs://$(tf output -raw bucket_fontes)/fontes" \
-  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_TRANSCRICAO=$TRANSCRICAO,_OCR=$OCR,_CACHE=$CACHE,_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_OBJETOS_GPU=$OBJETOS_GPU,_CACHE_GPU=$CACHE_GPU,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
+  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_CACHE=$CACHE,_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_OBJETOS_GPU=$OBJETOS_GPU,_CACHE_GPU=$CACHE_GPU,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
 # Pelo digest da imagem linux/amd64, não pelo do índice OCI que o buildx envia: o índice
 # leva a atestação de proveniência SLSA, com a hora do build, e muda a cada build mesmo com a
 # imagem igual. Mesma imagem, mesmo digest, nenhuma revisão nova e nenhum teste de GPU à toa;
@@ -141,18 +137,15 @@ digest() { # <repo:tag>
 }
 IMAGEM=$(digest "$WEB")
 IMAGEM_VALIDACAO=$(digest "$VALIDACAO")
-IMAGEM_TRANSCRICAO=$(digest "$TRANSCRICAO")
-IMAGEM_OCR=$(digest "$OCR")
 IMAGEM_TRANSCRICAO_GPU=$(digest "$TRANSCRICAO_GPU")
 IMAGEM_OCR_GPU=$(digest "$OCR_GPU")
 IMAGEM_OBJETOS=$(digest "$OBJETOS_GPU")
 scripts/aplicar-sem-destruir.sh -var "imagem=$IMAGEM" -var "imagem_validacao=$IMAGEM_VALIDACAO" \
-  -var "imagem_transcricao=$IMAGEM_TRANSCRICAO" -var "imagem_ocr=$IMAGEM_OCR" \
   -var "imagem_transcricao_gpu=$IMAGEM_TRANSCRICAO_GPU" -var "imagem_ocr_gpu=$IMAGEM_OCR_GPU" \
   -var "imagem_objetos=$IMAGEM_OBJETOS"
 
-# O que o apply acabou de publicar está em uso: as sete imagens, pelo digest que o Cloud Run usa.
-for imagem in "$IMAGEM" "$IMAGEM_VALIDACAO" "$IMAGEM_TRANSCRICAO" "$IMAGEM_OCR" \
+# O que o apply acabou de publicar está em uso: as cinco imagens, pelo digest que o Cloud Run usa.
+for imagem in "$IMAGEM" "$IMAGEM_VALIDACAO" \
   "$IMAGEM_TRANSCRICAO_GPU" "$IMAGEM_OCR_GPU" "$IMAGEM_OBJETOS"; do
   marcar "$imagem" "$TAG_EM_USO"
 done

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -8,7 +9,7 @@ from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.indice_da_busca import IndiceEmMemoria
+from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
 from api.jobs import Job, RepositorioEmMemoria
 from api.lixeira import ArquivosContados, ArquivosEmMemoria
 from api.main import criar_app
@@ -35,7 +36,12 @@ def _na_lixeira(id: str = "j1", em: datetime = BASE, **extra: Any) -> Job:
 
 
 class Mundo:
-    def __init__(self, *jobs: Job, login_em: datetime | None = AGORA) -> None:
+    def __init__(
+        self,
+        *jobs: Job,
+        login_em: datetime | None = AGORA,
+        apagar_dados: Callable[[str], None] | None = None,
+    ) -> None:
         self.jobs = RepositorioEmMemoria()
         for job in jobs or (_na_lixeira(),):
             self.jobs.salvar(job)
@@ -67,6 +73,7 @@ class Mundo:
                 arquivos=self.arquivos,
                 indice=self.indice,
                 relogio=lambda: self.agora,
+                apagar_dados_da_purga=apagar_dados,
             )
         )
         for id in ("j1", "j2"):
@@ -83,7 +90,7 @@ class Mundo:
     def registros(self) -> list[Any]:
         return self.auditoria.consultar(FiltroDeAuditoria()).registros
 
-    def purga(self) -> Purga:
+    def purga(self, apagar_dados: Callable[[str], None] | None = None) -> Purga:
         return Purga(
             self.jobs,
             self.correcoes,
@@ -91,13 +98,18 @@ class Mundo:
             self.indice,
             self.auditoria,
             lambda: self.agora,
+            apagar_dados=apagar_dados,
         )
 
 
-def test_depois_da_purga_nao_sobra_arquivo_correcao_nem_job_mas_a_auditoria_fica() -> (
-    None
-):
+@pytest.mark.parametrize("copia_limpa", [0, 1])
+def test_depois_da_purga_nao_sobra_arquivo_correcao_nem_job_mas_a_auditoria_fica(
+    copia_limpa: int,
+) -> None:
     mundo = Mundo()
+    mundo.arquivos.por_job["j1"] = ArquivosContados(
+        decupagem=1, copia_limpa=copia_limpa, proxy=1, quadros=3
+    )
 
     resposta = mundo.purgar()
 
@@ -118,8 +130,12 @@ def test_depois_da_purga_nao_sobra_arquivo_correcao_nem_job_mas_a_auditoria_fica
     assert registro.motivo == "duplicado"
     assert registro.detalhes["correcoes"] == 2
     assert registro.detalhes["decupagem"] == 1
-    assert registro.detalhes["arquivos"] == {"copia_limpa": 1, "proxy": 1, "quadros": 3}
-    assert registro.detalhes["conteudo_compartilhado"] is False
+    assert registro.detalhes["arquivos"] == {
+        "copia_limpa": copia_limpa,
+        "proxy": 1,
+        "quadros": 3,
+    }
+    assert "conteudo_compartilhado" not in registro.detalhes
 
 
 def test_a_purga_tira_os_momentos_do_indice() -> None:
@@ -132,33 +148,33 @@ def test_a_purga_tira_os_momentos_do_indice() -> None:
     assert apagados == ["j1"]
 
 
-def test_com_outro_job_na_mesma_chave_de_conteudo_so_o_job_e_removido() -> None:
+def test_mesmo_sha256_apaga_arquivos_e_indice_so_do_job_purgado() -> None:
     mundo = Mundo(_na_lixeira(), _job("j2"))
-    apagados: list[str] = []
-    mundo.indice.apagar = apagados.append  # type: ignore[method-assign, assignment]
+    for id in ("j1", "j2"):
+        mundo.indice.gravar(
+            id,
+            [Registro(id=f"{id}:fala", tipo="fala", job_id=id, inicio_ms=0, fim_ms=1)],
+        )
 
     resposta = mundo.purgar()
 
     assert resposta.status_code == 200
     assert mundo.jobs.obter("j1") is None
     assert mundo.jobs.obter("j2") is not None
-    assert mundo.arquivos.contar("j1") == ArquivosContados(
-        decupagem=1, copia_limpa=1, proxy=1, quadros=3
-    )
-    assert apagados == []
+    assert mundo.arquivos.contar("j1") == ArquivosContados()
+    assert mundo.arquivos.contar("j2").quadros == 3
+    assert [r.job_id for r in mundo.indice.buscar(Consulta())] == ["j2"]
     # As correções são do Job removido; as do outro ficam.
     assert mundo.correcoes.listar("j1") == []
     assert len(mundo.correcoes.listar("j2")) == 1
     detalhes = mundo.registros()[0].detalhes
-    assert detalhes["conteudo_compartilhado"] is True
-    assert detalhes["decupagem"] == 0
-    assert detalhes["arquivos"] == {"copia_limpa": 0, "proxy": 0, "quadros": 0}
+    assert "conteudo_compartilhado" not in detalhes
+    assert detalhes["decupagem"] == 1
+    assert detalhes["arquivos"] == {"copia_limpa": 1, "proxy": 1, "quadros": 3}
     assert detalhes["correcoes"] == 2
 
 
-def test_outro_job_na_lixeira_com_o_mesmo_conteudo_tambem_guarda_o_processamento() -> (
-    None
-):
+def test_mesmo_sha256_na_lixeira_preserva_so_o_outro_job() -> None:
     mundo = Mundo(_na_lixeira(), _na_lixeira("j2"))
     apagados: list[str] = []
     mundo.indice.apagar = apagados.append  # type: ignore[method-assign, assignment]
@@ -166,9 +182,10 @@ def test_outro_job_na_lixeira_com_o_mesmo_conteudo_tambem_guarda_o_processamento
     assert mundo.purgar().status_code == 200
 
     assert mundo.jobs.obter("j1") is None
-    assert mundo.arquivos.contar("j1").quadros == 3
-    assert apagados == []
-    assert mundo.registros()[0].detalhes["conteudo_compartilhado"] is True
+    assert mundo.arquivos.contar("j1") == ArquivosContados()
+    assert mundo.arquivos.contar("j2").quadros == 3
+    assert apagados == ["j1"]
+    assert mundo.jobs.obter("j2") is not None
 
 
 def test_nome_errado_da_422_e_nada_e_apagado() -> None:

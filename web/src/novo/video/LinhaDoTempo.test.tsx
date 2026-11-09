@@ -47,6 +47,17 @@ afterAll(() => servidor.close())
 const faixa = (nome: string) => screen.getByRole('group', { name: nome })
 const chip = (nome: RegExp) => within(screen.getByRole('group', { name: 'Faixas da linha do tempo' })).getByRole('button', { name: nome })
 
+test('os seletores de Textos e Falas podem quebrar linha sem rolagem horizontal', async () => {
+  await abrirVideo()
+
+  const seletores = screen.getByRole('group', { name: 'Faixas da linha do tempo' })
+  for (const nome of [/^Textos,/, /^Falas,/]) expect(seletores.contains(chip(nome))).toBe(true)
+  // O jsdom não mede layout: a barra precisa crescer quando os sete seletores não cabem.
+  expect(seletores.classList.contains('flex-wrap')).toBe(true)
+  expect(seletores.classList.contains('overflow-x-auto')).toBe(false)
+  expect(seletores.classList.contains('h-9')).toBe(false)
+})
+
 test('os sete chips trazem a contagem; ligam e desligam a faixa; a régua tem os cortes', async () => {
   const usuario = userEvent.setup()
   await abrirVideo()

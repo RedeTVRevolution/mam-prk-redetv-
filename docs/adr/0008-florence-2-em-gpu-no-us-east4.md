@@ -14,5 +14,26 @@ A etapa de inventário de objetos (objetos de cena: veículo, produto, eletrôni
 
 Alternativas recusadas:
 - **Florence-2 da Microsoft com código remoto:** exige executar código baixado em tempo de execução.
-- **Florence-2 em CPU:** seria mais um Job lento em CPU por quadro, sem plano B que compense; a decisão de plano B (`motor_objetos=gemini`) fica no Workflows.
+- **Florence-2 em CPU:** seria mais um Job lento em CPU por quadro. Como na decisão de 07/11/2026 da ADR 0007, não há plano B em CPU: o Florence espera na fila FIFO e, se falhar, a decupagem segue sem inventário. `motor_objetos=gemini` é uma escolha de configuração, não um desvio automático.
 - **Outra região:** o jurídico aprovou `us-east4`.
+
+## Revisão de 07/11/2026 — base, geração gulosa e lote 16 (#490)
+
+No FAMA (Job `98502242109e4280b7073b07a3ebe573`, 421 quadros), as medições com o Florence-2-large foram:
+
+| Variação | Tempo | Destaque 3 que sumiu |
+| --- | --- | --- |
+| Hoje: 3 feixes, lote 1, com legendas | 863 s | — |
+| Guloso, lote 1 | 727 s | 16 |
+| Guloso + lote 8 | 376 s | 15 |
+| Guloso + lote 16 | 318 s (2,7×) | 8 |
+| Sem legendas | 414 s (2,1×) | 10 |
+| Guloso + lote 16 + sem legendas | 237 s (3,6×) | 18 |
+
+A decisão é geração gulosa (`num_beams=1`), lote 16, mantendo `<OD>` e `<DENSE_REGION_CAPTION>`. Tirar as legendas economiza só cerca de 80 s além do guloso com lote 16, longe da meta de 5×, e dobra os objetos de destaque 3 perdidos. Sem elas, o inventário perde cor e marca dos objetos de cena, prejudicando buscas como “carro vermelho”. O lote 8 é mais lento e não foi melhor; boa parte da diferença nos perdidos entre lotes é ruído da conversão pelo Gemini. A leitura dos quadros corre junto da inferência, com uma thread e no máximo dois lotes à frente, preservando a ordem.
+
+O padrão do Terraform passa a ser o **Florence-2-base**, revisão `00921df66db728a9ceb750f5eca43e5c203a2051`; a imagem leva os 11 arquivos de cada modelo em `/modelo/base` e `/modelo/large`, com revisão fixa e SHA-256 conferido antes de instalar as dependências. O large mantém a revisão acima. Para voltar ao large, basta `florence_modelo = "large"` no Terraform e publicar de novo, sem reconstruir a imagem. Sem `FLORENCE_MODELO`, o padrão do código continua large; cada resultado grava o repositório e a revisão que rodaram. A conferência da construção continua só com o large em CPU, e a publicação testa o base na GPU, procurando o carro da amostra.
+
+O base tem 0,23 bilhão de parâmetros, contra 0,77 do large, e mAP zero-shot no COCO de 34,7 contra 37,5. Ainda não foi medido no nosso conteúdo: depois da publicação, Bruno compara `large+guloso+lote16` e `base+guloso+lote16` no FAMA contra a referência `hoje` já gravada (863 s, large, 3 feixes, lote 1). A medição reaproveita `hoje/inventario.json` e `hoje/medida.json` sem disparar nem regravar a referência; sem os dois arquivos, roda `hoje` com o ambiente atual do Job. Se o base perder bem mais objetos de destaque 3, volta-se ao large pela variável.
+
+`torch.compile` e o cache de compilação foram estudados e recusados em 07/11/2026: exigiriam compilador C na imagem, compilariam a cada execução do Job e só funcionam em parte com o Florence.

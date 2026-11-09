@@ -6,9 +6,11 @@ comercial (marca e tipo de inserção). Cada gravação troca todas as linhas do
 """
 
 import json
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
+from time import monotonic, sleep
 from typing import Any, Protocol
 
 import google.auth
@@ -18,6 +20,7 @@ from api.decupagem import Decupagem
 from api.indice_da_busca import registros_da_decupagem
 
 URL_BASE = "https://bigquery.googleapis.com/bigquery/v2"
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -51,7 +54,13 @@ class LinhaDoMomento:
 
 
 class CopiaDosMomentos(Protocol):
-    def gravar(self, job_id: str, linhas: list[LinhaDoMomento]) -> None:
+    def gravar(
+        self,
+        job_id: str,
+        linhas: list[LinhaDoMomento],
+        *,
+        anos: list[int] | None = None,
+    ) -> None:
         """As linhas do vídeo; as que já havia dele saem."""
 
 
@@ -154,7 +163,13 @@ class CopiaEmMemoria:
     def __init__(self) -> None:
         self.por_job: dict[str, list[LinhaDoMomento]] = {}
 
-    def gravar(self, job_id: str, linhas: list[LinhaDoMomento]) -> None:
+    def gravar(
+        self,
+        job_id: str,
+        linhas: list[LinhaDoMomento],
+        *,
+        anos: list[int] | None = None,
+    ) -> None:
         self.por_job[job_id] = list(linhas)
 
     def total(self) -> int:
@@ -164,6 +179,7 @@ class CopiaEmMemoria:
 # O corpo de um POST em `projects/<projeto>/queries` (`jobs.query`); devolve a resposta em
 # JSON. Com `jobId`, é a próxima página de uma consulta (`jobs.getQueryResults`, um GET em
 # `queries/<jobId>`) e o resto do dicionário vai na URL.
+# Com `jobReference`, consulta o estado (`jobs.get`); com `cancelar`, pede o cancelamento.
 Transporte = Callable[[dict[str, Any]], dict[str, Any]]
 
 
@@ -204,9 +220,28 @@ class CopiaBigQuery:
         self._config = config
         self._transporte = transporte
 
-    def gravar(self, job_id: str, linhas: list[LinhaDoMomento]) -> None:
+    def gravar(
+        self,
+        job_id: str,
+        linhas: list[LinhaDoMomento],
+        *,
+        anos: list[int] | None = None,
+    ) -> None:
         c = self._config
         tabela = f"`{c.projeto}.{c.dataset}.{c.tabela}`"
+        filtro = ""
+        parametros = []
+        if anos is not None:
+            predicados = ["t.data_de_exibicao IS NULL"]
+            for ano in sorted(set(anos)):
+                predicados.append(
+                    f"t.data_de_exibicao BETWEEN @inicio_{ano} AND @fim_{ano}"
+                )
+                parametros += [
+                    _parametro(f"inicio_{ano}", f"{ano:04}-01-01", "DATE"),
+                    _parametro(f"fim_{ano}", f"{ano:04}-12-31", "DATE"),
+                ]
+            filtro = f" AND ({' OR '.join(predicados)})"
         consulta = f"""
 MERGE {tabela} AS t
 USING (
@@ -230,7 +265,7 @@ USING (
   FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
 ) AS s
 ON FALSE
-WHEN NOT MATCHED BY SOURCE AND t.job_id = @job_id THEN DELETE
+WHEN NOT MATCHED BY SOURCE AND t.job_id = @job_id{filtro} THEN DELETE
 WHEN NOT MATCHED THEN INSERT
   (job_id, programa, data_de_exibicao, tipo, inicio_ms, fim_ms, pessoas, marca,
    tipo_de_insercao, texto, versao_pipeline, gravado_em, duracao_do_video_ms)
@@ -239,6 +274,7 @@ VALUES
    s.marca, s.tipo_de_insercao, s.texto, s.versao_pipeline, s.gravado_em,
    s.duracao_do_video_ms)
 """
+        inicio = monotonic()
         resposta = self._transporte(
             {
                 "query": consulta,
@@ -253,11 +289,40 @@ VALUES
                             [_json_da_linha(x) for x in linhas], ensure_ascii=False
                         ),
                     ),
+                    *parametros,
                 ],
             }
         )
-        if not resposta.get("jobComplete", False):
-            raise RuntimeError(f"cópia de {job_id} não terminou no prazo")
+        if resposta.get("jobComplete", False):
+            return
+        referencia = resposta.get("jobReference")
+        if not referencia:
+            raise RuntimeError(f"cópia de {job_id} sem referência do MERGE")
+        referencia = {"location": c.regiao, **referencia}
+        cancelamento_pedido = False
+        while True:
+            if monotonic() - inicio >= 900:
+                # O ano já foi registrado; a próxima cópia limpa até um commit atrasado.
+                raise RuntimeError(f"cópia de {job_id} não terminou no prazo")
+            if monotonic() - inicio >= 300 and not cancelamento_pedido:
+                try:
+                    self._transporte({"jobReference": referencia, "cancelar": True})
+                    cancelamento_pedido = True
+                except Exception:
+                    log.exception("cancelamento do MERGE de %s não confirmado", job_id)
+            try:
+                estado = self._transporte({"jobReference": referencia})["status"]
+            except Exception:
+                # Uma falha de transporte não prova que o MERGE parou de poder gravar.
+                log.exception("estado do MERGE de %s não confirmado", job_id)
+            else:
+                if estado["state"] == "DONE":
+                    if estado.get("errorResult"):
+                        raise RuntimeError(
+                            f"cópia de {job_id} falhou: {estado['errorResult']}"
+                        )
+                    return
+            sleep(5)
 
 
 def _parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
@@ -277,7 +342,18 @@ def transporte_http(projeto: str) -> Transporte:
 
     def chamar(corpo: dict[str, Any]) -> dict[str, Any]:
         url = f"{URL_BASE}/projects/{projeto}/queries"
-        if "jobId" in corpo:
+        if "jobReference" in corpo:
+            referencia = corpo["jobReference"]
+            url = (
+                f"{URL_BASE}/projects/{referencia['projectId']}"
+                f"/jobs/{referencia['jobId']}"
+            )
+            parametros = {"location": referencia["location"]}
+            if corpo.get("cancelar"):
+                resposta = sessao.post(f"{url}/cancel", params=parametros, timeout=150)
+            else:
+                resposta = sessao.get(url, params=parametros, timeout=150)
+        elif "jobId" in corpo:
             pagina = dict(corpo)
             url += f"/{pagina.pop('jobId')}"
             resposta = sessao.get(url, params=pagina, timeout=150)

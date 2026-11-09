@@ -37,6 +37,7 @@ import { dataEHora, MAXIMO_DO_ANDAMENTO, type EtapaDoJob, type Job, type PaginaD
 import { relogio } from '../../linhaDoTempo.ts'
 import { enderecoDasEntradas, navegar } from '../../rotas.ts'
 import { urlSegura } from '../../urlSegura.ts'
+import { AVISO_DO_REPROCESSAMENTO, prazoDeReprocessamentoVencido } from '../comum/regras.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
@@ -318,6 +319,7 @@ export default function Entradas({
   const consultas = useQueryClient()
   const [abertas, setAbertas] = useState<string[]>([])
   const [pedido, setPedido] = useState<Aberto | null>(null)
+  const [agoraDoPedido, setAgoraDoPedido] = useState(Date.now)
   const [aviso, setAviso] = useState<string | null>(null)
   const rolagem = useRef<HTMLDivElement>(null)
   useAtalhos(ATALHOS)
@@ -376,8 +378,16 @@ export default function Entradas({
   }
 
   const alternar = (id: string) => setAbertas((atuais) => (atuais.includes(id) ? atuais.filter((a) => a !== id) : [...atuais, id]))
-  const pedir = (id: string, tipo: Aberto['tipo']) => {
+  const pedir = (job: Job, tipo: Aberto['tipo']) => {
+    const atual = Date.now()
+    setAgoraDoPedido(atual)
+    if (prazoDeReprocessamentoVencido(job, atual)) {
+      setAviso(AVISO_DO_REPROCESSAMENTO)
+      setPedido(null)
+      return
+    }
     setAviso(null)
+    const id = job.id
     setPedido(pedido?.id === id && pedido.tipo === tipo ? null : { id, tipo })
   }
   const mudar = (parte: Partial<FiltrosDasEntradas>) => irPara({ ...filtros, ...parte })
@@ -457,8 +467,10 @@ export default function Entradas({
             const aberta = abertas.includes(job.id)
             const doPedido = pedido?.id === job.id ? pedido.tipo : null
             const partida = etapaDeReprocesso(job)
+            const prazoVencido = prazoDeReprocessamentoVencido(job, Math.max(agora, agoraDoPedido))
             const falhaDoArquivo = job.estado === 'falhou' && partida === null
             const interrompido = job.codigo_falha === 'processamento_interrompido'
+            const tempo = tempoDaEntradaMs(job, agora)
             const aoTeclar = (e: KeyboardEvent<HTMLTableRowElement>) => {
               if (e.target !== e.currentTarget || e.key !== 'Enter') return
               e.preventDefault()
@@ -485,7 +497,7 @@ export default function Entradas({
                   <td className={cn(CELULA, 'hidden md:table-cell')}>
                     <ReguaDeEtapas job={job} agora={agora} />
                   </td>
-                  <td className={cn(CELULA, 'hidden text-right font-mono text-xs tabular-nums sm:table-cell')}>{relogio(tempoDaEntradaMs(job, agora))}</td>
+                  <td className={cn(CELULA, 'hidden text-right font-mono text-xs tabular-nums sm:table-cell')}>{tempo === null ? '—' : relogio(tempo)}</td>
                   <td className={CELULA} onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-wrap justify-end gap-1.5">
                       {falhaDoArquivo && <span className="text-right text-xs text-muted-foreground">Envie o arquivo de novo</span>}
@@ -494,18 +506,23 @@ export default function Entradas({
                           type="button"
                           size="sm"
                           variant={interrompido ? 'default' : 'secondary'}
+                          disabled={prazoVencido}
+                          aria-describedby={prazoVencido ? `prazo-${job.id}` : undefined}
                           aria-label={`${interrompido ? 'Retomar' : 'Reprocessar'} ${job.nome}`}
-                          onClick={() => pedir(job.id, 'falha')}
+                          onClick={() => pedir(job, 'falha')}
                         >
                           {interrompido ? <IconPlayerPlay aria-hidden /> : <IconRotateClockwise aria-hidden />}
                           {interrompido ? 'Retomar' : 'Reprocessar'}
                         </Button>
                       )}
                       {podeEscolherEtapa && job.estado === 'concluido' && !emAndamento(job) && (
-                        <Button type="button" size="sm" variant="secondary" aria-label={`Reprocessar ${job.nome} a partir de uma etapa`} onClick={() => pedir(job.id, 'etapa')}>
+                        <Button type="button" size="sm" variant="secondary" disabled={prazoVencido} aria-describedby={prazoVencido ? `prazo-${job.id}` : undefined} aria-label={`Reprocessar ${job.nome} a partir de uma etapa`} onClick={() => pedir(job, 'etapa')}>
                           <IconRefresh aria-hidden />
                           Reprocessar…
                         </Button>
+                      )}
+                      {prazoVencido && ((podeReprocessar && partida) || (podeEscolherEtapa && job.estado === 'concluido' && !emAndamento(job))) && (
+                        <p id={`prazo-${job.id}`} className="text-xs text-muted-foreground">{AVISO_DO_REPROCESSAMENTO}</p>
                       )}
                     </div>
                   </td>

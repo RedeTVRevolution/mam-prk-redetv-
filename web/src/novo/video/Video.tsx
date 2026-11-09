@@ -45,14 +45,16 @@ import { ESTADOS_QUE_VAO_PARA_A_LIXEIRA } from '../../lixeira.ts'
 import { NomesDoCatalogo } from '../../nomesDoCatalogo.ts'
 import { type ItemDoPainel, itensDoPainel, nomeNormalizado } from '../../painel.ts'
 import { consultaNova } from '../../busca.ts'
-import { criarCacheDeQuadros } from '../../quadros.ts'
+import { criarCacheDeQuadros, urlDoQuadroDaBusca } from '../../quadros.ts'
 import { guardado, guardarResultado, lerResultado, passoNoResultado, rotuloDaBusca } from '../../resultadoDaBusca.ts'
 import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
 import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
 import { urlSegura } from '../../urlSegura.ts'
 import { useApi } from '../consultas.ts'
+import { AVISO_DO_REPROCESSAMENTO, prazoDeReprocessamentoVencido } from '../comum/regras.ts'
 import { Button } from '../ui/button.tsx'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { Kbd } from '../ui/kbd.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
@@ -238,8 +240,13 @@ export function Video({
     () => (d && historico.data ? marcasDosItens(d, itens, historico.data) : undefined),
     [d, itens, historico.data],
   )
-  // As URLs assinadas dos quadros valem alguns minutos: o cache evita pedir de novo a cada linha.
-  const urlDoQuadro = useMemo(() => criarCacheDeQuadros((arquivo) => cliente.quadro(arquivo)), [cliente])
+  // O mesmo cache da busca, por cliente e Job, sobrevive à remontagem do inspetor.
+  const urlDoQuadro = useMemo(() => {
+    const url = urlDoQuadroDaBusca(api)
+    // O lote omite vídeos na lixeira; o endpoint individual permite ao Administrador vê-los.
+    const local = criarCacheDeQuadros((arquivo) => cliente.quadro(arquivo))
+    return (caminho: string) => url(job.id, caminho).catch(() => local(caminho))
+  }, [api, job.id, cliente])
 
   const [selecionada, setSelecionada] = useState<string | null>(null)
   const [detalhe, setDetalhe] = useState(false)
@@ -964,9 +971,11 @@ export function Video({
             aoAlternarGaveta={alternarGaveta}
             aoAbrirDialogo={setDialogo}
           />
-          {job.etapa_atual && (job.estado === 'analisando' || finalizando(job)) && (
+          {(job.posicao_na_fila_gpu != null || (job.etapa_atual && (job.estado === 'analisando' || finalizando(job)))) && (
             <p role="status" className="shrink-0 border-b px-3 py-1.5 text-sm text-andamento">
-              {`${reprocessou ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
+              {job.posicao_na_fila_gpu != null
+                ? `Na fila da GPU · posição ${job.posicao_na_fila_gpu}`
+                : job.etapa_atual && `${reprocessou ? 'Reprocessando: ' : ''}${nomeDaEtapa(job.etapa_atual)} em andamento.`}
               {reprocessou && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
             </p>
           )}
@@ -1236,6 +1245,9 @@ function BarraDoVideo({
 }) {
   const api = useApi()
   const [baixando, setBaixando] = useState<'video' | 'json' | null>(null)
+  const [download, setDownload] = useState<{ url: string; expira_em: string; aviso: string } | null>(null)
+  const [agora, setAgora] = useState(Date.now)
+  const prazoVencido = prazoDeReprocessamentoVencido(job, agora)
   const [falha, setFalha] = useState<{ de: 'video' | 'json'; codigo: string } | null>(null)
   const concluido = job.estado === 'concluido'
   const titulo = [job.programa, job.data_exibicao ? dataDeExibicao(job.data_exibicao) : null].filter(Boolean).join(' · ')
@@ -1243,12 +1255,16 @@ function BarraDoVideo({
   const podeReprocessar = pode.reprocessar && concluido && !finalizando(job)
   const podeApagar = pode.apagar && ESTADOS_QUE_VAO_PARA_A_LIXEIRA.includes(job.estado)
 
-  async function baixar(de: 'video' | 'json') {
+  async function baixar(de: 'video' | 'json', confirmado = false) {
     setFalha(null)
     setBaixando(de)
+    if (confirmado) setDownload(null)
     try {
-      if (de === 'video') baixarPelaUrl((await api.job(job.id).baixarVideo()).url)
-      else baixarDecupagem(job.nome, await api.job(job.id).baixarDecupagem())
+      if (de === 'video') {
+        const resposta = confirmado && download && Date.now() < Date.parse(download.expira_em) ? download : await api.job(job.id).baixarVideo()
+        if (confirmado) baixarPelaUrl(resposta.url)
+        else setDownload(resposta)
+      } else baixarDecupagem(job.nome, await api.job(job.id).baixarDecupagem())
     } catch (e) {
       if (!(e instanceof SessaoExpirada)) setFalha({ de, codigo: codigoDoErro(e) })
     } finally {
@@ -1298,7 +1314,7 @@ function BarraDoVideo({
             </BotaoDeIcone>
           )}
           {concluido && (
-            <BotaoDeIcone rotulo="Baixar vídeo" aria-busy={baixando === 'video'} disabled={baixando === 'video'} onClick={() => void baixar('video')}>
+            <BotaoDeIcone rotulo="Baixar vídeo (480p)" aria-busy={baixando === 'video'} disabled={baixando === 'video'} onClick={() => void baixar('video')}>
               <IconDownload size={18} stroke={1.75} aria-hidden />
             </BotaoDeIcone>
           )}
@@ -1323,7 +1339,7 @@ function BarraDoVideo({
             </Tooltip>
           )}
           {(podeReprocessar || podeApagar) && (
-            <DropdownMenu>
+            <DropdownMenu onOpenChange={(aberto) => aberto && setAgora(Date.now())}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
@@ -1340,9 +1356,12 @@ function BarraDoVideo({
               </Tooltip>
               <DropdownMenuContent align="end" className="w-64">
                 {podeReprocessar && (
-                  <DropdownMenuItem onSelect={() => aoAbrirDialogo('reprocessar')}>
-                    <IconRefresh size={16} stroke={1.75} aria-hidden /> Reprocessar…
-                  </DropdownMenuItem>
+                  <>
+                    <DropdownMenuItem disabled={prazoVencido} aria-describedby={prazoVencido ? `prazo-${job.id}` : undefined} onSelect={() => aoAbrirDialogo('reprocessar')}>
+                      <IconRefresh size={16} stroke={1.75} aria-hidden /> Reprocessar…
+                    </DropdownMenuItem>
+                    {prazoVencido && <p id={`prazo-${job.id}`} className="px-2 py-1 text-xs text-muted-foreground">{AVISO_DO_REPROCESSAMENTO}</p>}
+                  </>
                 )}
                 {podeApagar && (
                   <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => aoAbrirDialogo('lixeira')}>
@@ -1354,6 +1373,16 @@ function BarraDoVideo({
           )}
         </div>
       </div>
+      <Dialog open={download !== null} onOpenChange={(aberto) => !aberto && setDownload(null)}>
+        {download && (
+          <DialogContent>
+            <DialogTitle>Baixar vídeo (480p)</DialogTitle>
+            <DialogDescription className="break-all">{job.nome}</DialogDescription>
+            <p>{download.aviso}</p>
+            <Button onClick={() => void baixar('video', true)}>Baixar versão de 480p</Button>
+          </DialogContent>
+        )}
+      </Dialog>
       {falha && (
         <AvisoDeFalha
           className="m-2 shrink-0"
@@ -1499,7 +1528,7 @@ function Transporte({
   }
 
   return (
-    <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-t px-1 sm:gap-1 sm:px-2">
+    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-0.5 border-t px-1 py-1 sm:gap-1 sm:px-2">
       <BotaoDeIcone rotulo="Recuar 5 s" atalho="J" onClick={() => aoSaltar(-SALTO_LONGO_S)}>
         <IconArrowBackUp size={18} stroke={1.75} aria-hidden />
       </BotaoDeIcone>

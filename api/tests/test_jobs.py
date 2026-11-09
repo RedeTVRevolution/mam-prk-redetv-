@@ -55,7 +55,7 @@ class ArmazenamentoFalso:
         return f"https://storage.exemplo/proxy/{job_id}?validade={int(validade.total_seconds())}"
 
     def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
-        return f"https://storage.exemplo/copia-limpa/{job_id}?nome={nome}&validade={int(validade.total_seconds())}"
+        return f"https://storage.exemplo/proxy/{job_id}?nome={nome}&validade={int(validade.total_seconds())}"
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         return f"https://storage.exemplo/quadros/{job_id}/{caminho}?validade={int(validade.total_seconds())}"
@@ -139,6 +139,24 @@ def test_criar_job_devolve_202_com_url_assinada_e_job_aguardando_upload() -> Non
     assert guardado["estado"] == "aguardando_upload"
 
 
+def test_criacao_grava_e_expoe_o_inicio_da_passada_com_a_data_de_criacao() -> None:
+    ambiente = Ambiente()
+
+    resposta = ambiente.criar()
+
+    assert resposta.status_code == 202
+    corpo = resposta.json()
+    job = ambiente.repositorio.obter(corpo["id"])
+    assert job is not None
+    assert job.inicio_da_passada == job.criado_em == INICIO
+    assert corpo["inicio_da_passada"] == corpo["criado_em"]
+    for rota in (f"/v1/jobs/{job.id}", "/v1/jobs", f"/v1/jobs/andamento?ids={job.id}"):
+        publico = ambiente.cliente.get(rota, headers=AUTORIZACAO).json()
+        if isinstance(publico, list):
+            [publico] = publico
+        assert publico["inicio_da_passada"] == corpo["criado_em"]
+
+
 def test_tipo_diferente_de_mp4_recebe_415_e_nada_e_criado() -> None:
     ambiente = Ambiente()
 
@@ -216,6 +234,8 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "etapa_atual",
         "etapas",
         "reprocessamentos",
+        "inicio_da_passada",
+        "reprocessavel_ate",
         "enviado_por",
         "estado",
         "codigo_falha",
@@ -958,3 +978,14 @@ def test_repeticao_que_grava_o_job_que_faltou_usa_a_hora_de_agora() -> None:
     assert repeticao.json()["url_de_upload"] is not None
     guardado = ambiente.repositorio.obter(primeira["id"])
     assert guardado is not None and guardado.criado_em == INICIO + timedelta(hours=30)
+
+
+def test_prazo_do_reprocessamento_vem_no_job_na_listagem_e_no_andamento() -> None:
+    ambiente = Ambiente()
+    job_id = ambiente.criar().json()["id"]
+    for rota in (f"/v1/jobs/{job_id}", "/v1/jobs", f"/v1/jobs/andamento?ids={job_id}"):
+        resposta = ambiente.cliente.get(rota, headers=AUTORIZACAO)
+        assert resposta.status_code == 200
+        corpo = resposta.json()
+        job = corpo[0] if isinstance(corpo, list) else corpo
+        assert job["reprocessavel_ate"] == "2026-11-05T12:00:00Z"

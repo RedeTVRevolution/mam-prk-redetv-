@@ -421,7 +421,7 @@ O painel direito de hoje mistura o momento atual, as abas e a lista numa coluna 
 
 - **Agora:** o que está na tela no tempo do cursor, em uma linha por tipo, com o ícone e a cor dele. Clicar em um item filtra a lista por ele.
 - **Tipos:** cada tipo é uma aba com ícone, cor e contagem (zero aparece como zero). Na opção A, as abas ficam verticais na borda; na B, viram seções; na C, chips no topo da lista.
-- **Seguir a reprodução:** ligado, a lista acompanha o vídeo. O item atual tem a barra de 3 px em `foco` e fundo `elevado`. Rolar à mão desliga o seguir, e um botão "Voltar ao tempo atual" aparece.
+- **Seguir a reprodução:** ligado, a lista acompanha o vídeo. O item atual tem a barra de 3 px em `foco` e fundo `elevado`. Rolar à mão desliga o seguir, e o botão de seguir da barra religa.
 - **Detalhe:** clicar no item abre o detalhe no próprio inspetor, sem diálogo: evidência (GC, fala ou rosto), tempo, confiança e as ações de correção. `Esc` volta à lista.
 - **Ações do vídeo:** reprocessar, baixar, histórico e quem acessou ficam na barra de cima do player, como botões de ícone com dica. Saem do inspetor.
 

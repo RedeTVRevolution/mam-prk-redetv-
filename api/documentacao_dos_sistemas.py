@@ -188,6 +188,7 @@ _JOB = {
     "reprocessamentos": 0,
     "enviado_por": {"tipo": "sistema", "nome": "sistema-legado"},
     "criado_em": "2026-11-03T21:00:00.000000Z",
+    "reprocessavel_ate": "2026-11-10T21:00:00.000000Z",
     "atualizado_em": INSTANTE,
 }
 
@@ -372,6 +373,7 @@ OPERACOES: tuple[Operacao, ...] = (
             "cortes_ms": None,
             "taxa_de_quadros": None,
             "criado_em": INSTANTE,
+            "reprocessavel_ate": "2026-11-10T21:14:05.120000Z",
             "url_de_upload": "https://storage.googleapis.com/BUCKET/"
             + ID_DO_JOB
             + "?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Signature=...",
@@ -534,12 +536,18 @@ OPERACOES: tuple[Operacao, ...] = (
         "GET",
         "/v1/jobs/{job_id}/download",
         "URL para baixar o vídeo",
-        "Uma URL assinada, de 5 minutos, da cópia limpa do vídeo, com o nome original "
-        "do arquivo. Só existe com o Job `concluido`; cada pedido fica na auditoria. "
+        "Uma URL assinada, de 5 minutos, do proxy de 480p, com o nome do arquivo "
+        "sem extensão seguido de `.480p.mp4`. A resposta traz o aviso de que a cópia "
+        "em alta resolução está no arquivo da RedeTV. Só existe com o Job `concluido`; "
+        "cada pedido fica na auditoria antes da resposta. "
         "Escopo `ler`.",
         {
             "url": "https://storage.googleapis.com/BUCKET/...",
             "expira_em": INSTANTE,
+            "aviso": (
+                "A cópia em alta resolução está no arquivo da RedeTV. "
+                "Este download é a versão de 480p processada pelo MAM."
+            ),
         },
         (*_sem_chave("ler"), _NAO_ACHOU, _NAO_CONCLUIDO, _INDISPONIVEL),
     ),

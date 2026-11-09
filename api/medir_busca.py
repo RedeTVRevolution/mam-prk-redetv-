@@ -1,4 +1,4 @@
-"""`make medir-busca` (#117): indexa as 3 Decupagens de exemplo, confere o filtro composto
+"""`make medir-busca` (#117): indexa só planos de exemplo, confere o filtro composto
 e mede a latência da busca híbrida. Roda só com credenciais e fica fora do CI.
 
     python -m api.medir_busca [CONSULTAS] [DIMENSAO ...]
@@ -6,7 +6,7 @@ e mede a latência da busca híbrida. Roda só com credenciais e fica fora do CI
 Cada dimensão pede uma coleção própria (a dimensão dos vetores é fixa na criação): a da
 configuração (`BUSCA_DIMENSAO`) é usada como está; cada uma das outras, uma de cada vez,
 ganha a coleção temporária `BUSCA_COLECAO_DE_MEDIDA` (o nome vem do `infra/modulos/mam/main.tf`) com
-os seus índices, apagada no fim com tudo o que tiver dentro, mesmo se a medição falhar.
+os seus índices, esvaziada e apagada no fim, mesmo se a medição falhar.
 
 A medição herda `BUSCA_INDICES_LIGADOS`: com `false` (o dev) a coleção nasce sem índice e a
 latência é a do KNN, com o `predict` do embedding da consulta; só com `true` mede o índice
@@ -19,6 +19,7 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from datetime import date
 from time import perf_counter
 
 from api.agent_retrieval import (
@@ -28,20 +29,19 @@ from api.agent_retrieval import (
     criar_colecao,
     transporte_http,
 )
-from api.exemplos_da_busca import EXEMPLOS, SABRINA
+from api.exemplos_da_busca import EXEMPLOS, OUTRA, SABRINA
 from api.indice_da_busca import Consulta, Filtros, IndiceDaBusca
 
-CONSULTA = "vestido vermelho da Sabrina Sato"
+CONSULTA = "Sabrina Sato no estúdio"
 
 
 @dataclass(frozen=True)
 class Medicao:
     dimensao: int
     registros: int
-    so_o_objeto_da_sabrina: bool
-    # O vestido dela é vermelho: pedir azul não pode voltar nada. Servido pelo índice ANN,
-    # um filtro que ele não aceita pode ser ignorado sem erro.
-    cor_filtra: bool
+    so_o_plano_da_sabrina: bool
+    # Pessoa ausente não pode voltar.
+    pessoa_filtra: bool
     tempos_s: list[float]
 
     @property
@@ -60,12 +60,17 @@ def percentil(tempos: list[float], p: int) -> float:
     return ordenados[posicao - 1]
 
 
-def _consulta(cor: str = "vermelho", significado: str = CONSULTA) -> Consulta:
-    """ "vestido vermelho da Sabrina Sato" como o entendimento da consulta a entregaria:
-    filtros exatos, o texto que sobra e o significado da frase inteira."""
+def _consulta(pessoa: str = SABRINA, significado: str = CONSULTA) -> Consulta:
+    """O plano da Sabrina, com pessoa, programa e data como filtros exatos."""
     return Consulta(
-        filtros=Filtros(tipo="objeto", categoria="roupa", cor_base=cor, dono=SABRINA),
-        texto="vestido",
+        filtros=Filtros(
+            tipo="plano",
+            pessoa=pessoa,
+            programa="Exemplo",
+            exibido_desde=date(2026, 10, 30),
+            exibido_ate=date(2026, 10, 30),
+        ),
+        texto="estúdio",
         significado=significado,
         limite=10,
     )
@@ -77,19 +82,40 @@ def medir(
     consultas: int,
     relogio: Callable[[], float] = perf_counter,
 ) -> Medicao:
-    """Indexa os exemplos, mede `consultas` buscas e apaga os exemplos no fim."""
+    """Indexa só os planos, mede `consultas` buscas e apaga os exemplos no fim."""
     if consultas < 1:
         raise ValueError("é preciso ao menos uma consulta para medir")
+    exemplos = [
+        *EXEMPLOS,
+        replace(EXEMPLOS[0], job_id="ex-sabrina-outro-programa", programa="Outro"),
+        replace(
+            EXEMPLOS[0],
+            job_id="ex-sabrina-antes",
+            data_de_exibicao=date(2026, 10, 29),
+        ),
+        replace(
+            EXEMPLOS[0],
+            job_id="ex-sabrina-depois",
+            data_de_exibicao=date(2026, 10, 31),
+        ),
+    ]
     try:
-        for exemplo in EXEMPLOS:
-            indice.gravar(exemplo.job_id, exemplo.registros())
+        for exemplo in exemplos:
+            indice.gravar(
+                exemplo.job_id, [r for r in exemplo.registros() if r.tipo == "plano"]
+            )
         registros = indice.total()
         achados = indice.buscar(_consulta())
         so_a_sabrina = len(achados) == 1 and (
-            (achados[0].job_id, achados[0].dono, achados[0].cor_base)
-            == ("ex-sabrina", SABRINA, ["vermelho"])
+            (
+                achados[0].job_id,
+                achados[0].pessoas,
+                achados[0].programa,
+                achados[0].data_de_exibicao,
+            )
+            == ("ex-sabrina", [SABRINA, OUTRA], "Exemplo", date(2026, 10, 30))
         )
-        cor_filtra = not indice.buscar(_consulta(cor="azul"))
+        pessoa_filtra = not indice.buscar(_consulta(pessoa="cat-ausente"))
         tempos: list[float] = []
         for n in range(consultas):
             # Texto novo a cada vez: sem índice ANN, o embedding é guardado por texto.
@@ -97,9 +123,9 @@ def medir(
             inicio = relogio()
             indice.buscar(consulta)
             tempos.append(relogio() - inicio)
-        return Medicao(dimensao, registros, so_a_sabrina, cor_filtra, tempos)
+        return Medicao(dimensao, registros, so_a_sabrina, pessoa_filtra, tempos)
     finally:
-        for exemplo in EXEMPLOS:
+        for exemplo in exemplos:
             indice.apagar(exemplo.job_id)
 
 
@@ -108,11 +134,13 @@ def _sim(ok: bool) -> str:
 
 
 def tabela(medicoes: list[Medicao]) -> str:
-    linhas = ["dimensão | registros | só a Sabrina | cor filtra | p50 (ms) | p95 (ms)"]
+    linhas = [
+        "dimensão | registros | só a Sabrina | pessoa filtra | p50 (ms) | p95 (ms)"
+    ]
     for m in medicoes:
         linhas.append(
-            f"{m.dimensao:>8} | {m.registros:>9} | {_sim(m.so_o_objeto_da_sabrina):>12}"
-            f" | {_sim(m.cor_filtra):>10} | {m.p50_s * 1000:>8.0f} | {m.p95_s * 1000:>8.0f}"
+            f"{m.dimensao:>8} | {m.registros:>9} | {_sim(m.so_o_plano_da_sabrina):>12}"
+            f" | {_sim(m.pessoa_filtra):>10} | {m.p50_s * 1000:>8.0f} | {m.p95_s * 1000:>8.0f}"
         )
     return "\n".join(linhas)
 
@@ -126,20 +154,23 @@ def main(argumentos: list[str]) -> int:
     medicoes: list[Medicao] = []
     for dimensao in dimensoes:
         temporaria = dimensao != config.dimensao
-        alvo = replace(medida, dimensao=dimensao) if temporaria else config
+        alvo = replace(
+            medida if temporaria else config, dimensao=dimensao, colecao_de_texto=None
+        )
         try:
             # Dentro do try: se um índice falhar ao nascer, a coleção não fica no ar.
             if temporaria:
                 criar_colecao(alvo, transporte)
-            medicoes.append(
-                medir(AgentRetrieval(alvo, transporte), dimensao, consultas)
-            )
+            indice = AgentRetrieval(alvo, transporte)
+            medicoes.append(medir(indice, dimensao, consultas))
         finally:
             if temporaria:
                 apagar_colecao(alvo, transporte)
     print("modo:", "índice ANN" if config.indices_ligados else "KNN, sem índice")
     print(tabela(medicoes))
-    return 0 if all(m.so_o_objeto_da_sabrina and m.cor_filtra for m in medicoes) else 1
+    return (
+        0 if all(m.so_o_plano_da_sabrina and m.pessoa_filtra for m in medicoes) else 1
+    )
 
 
 if __name__ == "__main__":

@@ -236,7 +236,7 @@ def test_o_arquivo_do_repositorio_esta_no_lugar_combinado() -> None:
 
 
 def test_esquema_sem_campo_de_texto_falha_nomeando_o_campo() -> None:
-    config = ConfigDaBusca("p", "r", "c", "d", 128)
+    config = ConfigDaBusca("p", "r", "c", "d", 128, "ct")
     sem_campos = {"dataSchema": {"properties": {"texto": {"type": "string"}}}}
     com_campos = {
         "dataSchema": {"properties": {c: {"type": "string"} for c in CAMPOS_DE_TEXTO}}
@@ -244,3 +244,22 @@ def test_esquema_sem_campo_de_texto_falha_nomeando_o_campo() -> None:
     erro = esquema_sem_campos(config, lambda m, c, b: sem_campos)
     assert erro is not None and all(repr(c) in erro for c in CAMPOS_DE_TEXTO)
     assert esquema_sem_campos(config, lambda m, c, b: com_campos) is None
+
+
+def test_sonda_confere_tambem_o_esquema_da_colecao_de_texto() -> None:
+    config = ConfigDaBusca("p", "r", "c", "d", 128, "ct")
+    chamados: list[str] = []
+
+    def transporte(metodo: str, caminho: str, corpo: object) -> dict[str, object]:
+        chamados.append(caminho)
+        return {
+            "dataSchema": {
+                "properties": {"texto_da_busca": {"type": "string"}}
+                if caminho.endswith("/c")
+                else {}
+            }
+        }
+
+    erro = esquema_sem_campos(config, transporte)
+    assert erro is not None and "ct" in erro and "texto_da_busca" in erro
+    assert len(chamados) == 2

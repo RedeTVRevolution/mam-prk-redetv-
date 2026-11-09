@@ -83,22 +83,22 @@ class Mundo:
         return [r for r in pagina.registros if r.acao == acao]
 
 
-def test_baixar_o_video_devolve_a_copia_limpa_com_o_nome_e_grava_video_baixado() -> (
-    None
-):
+def test_baixar_o_video_devolve_o_proxy_com_aviso_e_grava_video_baixado() -> None:
     mundo = Mundo()
 
     resposta = mundo.cliente.get("/v1/jobs/j1/download", headers=ANA)
 
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert corpo["url"].startswith(
-        "https://storage.exemplo/copia-limpa/j1?nome=Programa"
-    )
-    assert "nome=Programa Ação.mp4&" in corpo["url"]
+    assert corpo["url"].startswith("https://storage.exemplo/proxy/j1?nome=Programa")
+    assert "nome=Programa Ação.480p.mp4&" in corpo["url"]
     # A validade do vídeo não muda com a das imagens (#408): 5 min.
     assert corpo["url"].endswith("&validade=300")
     assert corpo["expira_em"] == "2026-11-01T12:05:00Z"
+    assert corpo["aviso"] == (
+        "A cópia em alta resolução está no arquivo da RedeTV. "
+        "Este download é a versão de 480p processada pelo MAM."
+    )
     [registro] = mundo.registros("video.baixado")
     assert (registro.uid, registro.email) == ("ana", "ana@redetv.com.br")
     assert (registro.alvo_id, registro.alvo_nome) == ("j1", "Programa Ação.mp4")
@@ -135,7 +135,9 @@ def test_chave_de_sistema_tambem_fica_registrada_com_o_nome_do_sistema() -> None
     mundo = Mundo()
     chave = {"X-API-Key": mundo.chave}
 
-    assert mundo.cliente.get("/v1/jobs/j1/download", headers=chave).status_code == 200
+    resposta = mundo.cliente.get("/v1/jobs/j1/download", headers=chave)
+    assert resposta.status_code == 200
+    assert "480p processada pelo MAM" in resposta.json()["aviso"]
     assert mundo.cliente.get("/v1/jobs/j1/reproducao", headers=chave).status_code == 200
 
     [baixado] = mundo.registros("video.baixado")

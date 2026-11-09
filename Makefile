@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -112,10 +112,10 @@ apagar-referencias-web:
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.apagar_referencias_web
 
-# Cassete do Gemini (#10): chamada real no dev sobre um clipe sintético, com as
+# Cassetes da busca (#507) e do Gemini (#10): chamadas reais no dev, com as
 # credenciais ADC de quem roda. Regrave a cada troca de modelo, esquema ou instrução.
 # O bucket vem do Terraform (output bucket_clipes_ouro), salvo se já vier no ambiente.
-gravar-cassetes:
+gravar-cassetes: gravar-cassete-da-busca
 	set -a && . ./.env && set +a && \
 	BUCKET_CLIPES_OURO="$${BUCKET_CLIPES_OURO:-$$(terraform -chdir=infra output -raw bucket_clipes_ouro)}" \
 	uv run --locked python -m api.cassete
@@ -129,11 +129,16 @@ gravar-cassetes:
 AMBIENTE_DA_BUSCA = set -a && . ./.env && set +a && \
 	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
 	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
+	BUSCA_COLECAO_DE_TEXTO="$${BUSCA_COLECAO_DE_TEXTO:-$$(terraform -chdir=infra output -raw busca_colecao_de_texto)}" \
 	BUSCA_COLECAO_DE_MEDIDA="$${BUSCA_COLECAO_DE_MEDIDA:-$$(terraform -chdir=infra output -raw busca_colecao_de_medida)}" \
 	BUSCA_INDICE_DESCRICAO="$${BUSCA_INDICE_DESCRICAO:-$$(terraform -chdir=infra output -raw busca_indice_descricao)}" \
 	BUSCA_INDICES_LIGADOS="$${BUSCA_INDICES_LIGADOS:-$$(terraform -chdir=infra output -raw busca_indices_ligados || echo terraform_output_falhou)}" \
 	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}" \
 	BUSCA_COTA_DE_ESCRITA="$${BUSCA_COTA_DE_ESCRITA:-$$(terraform -chdir=infra output -raw busca_cota_de_escrita)}"
+
+# Contrato do OR entre formas (#507): chamada real, separada do cassete do Gemini.
+gravar-cassete-da-busca:
+	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.cassete busca
 
 # Coleção de momentos e índices ANN da busca, no Agent Retrieval; idempotente.
 criar-colecao-da-busca:
@@ -199,7 +204,7 @@ preencher-filtros-da-busca:
 # Copia no BigQuery (#260) as decupagens dos Jobs concluídos, ou a de um Job: make copiar-para-bigquery [JOB=<id>].
 # Troca as linhas do vídeo; repetir dá o mesmo resultado. Nomes vêm do Terraform, salvo se já vierem no ambiente.
 copiar-para-bigquery:
-	set -a && . ./.env && set +a && \
+	$(AMBIENTE_DA_BUSCA) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \

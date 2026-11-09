@@ -111,7 +111,7 @@ def calcular(
     programa: str | None = None,
 ) -> list[LinhaDaTaxa]:
     """As linhas do período `[desde, ate)`, em ordem de programa, versão e tipo."""
-    return calcular_com_itens(
+    por_job = calcular_com_itens(
         repositorio,
         lambda job_id: _itens_da_decupagem(decupagens, job_id),
         correcoes,
@@ -120,6 +120,24 @@ def calcular(
         ate,
         programa,
     )
+    somas: dict[tuple[str | None, str | None, str], tuple[int, int]] = {}
+    for _, linha in por_job:
+        chave = (linha.programa, linha.versao_pipeline, linha.tipo)
+        antes = somas.get(chave, (0, 0))
+        somas[chave] = (antes[0] + linha.correcoes, antes[1] + linha.itens)
+    return [
+        LinhaDaTaxa(
+            programa=p,
+            versao_pipeline=v,
+            tipo=t,
+            correcoes=n,
+            itens=itens,
+            taxa_de_correcao=round(n / itens, 4) if itens else None,
+        )
+        for (p, v, t), (n, itens) in sorted(
+            somas.items(), key=lambda kv: tuple(x or "" for x in kv[0])
+        )
+    ]
 
 
 def calcular_com_itens(
@@ -130,8 +148,8 @@ def calcular_com_itens(
     desde: datetime | None = None,
     ate: datetime | None = None,
     programa: str | None = None,
-) -> list[LinhaDaTaxa]:
-    """O mesmo cálculo, com a contagem de itens vinda de `itens_do_job` (a decupagem
+) -> list[tuple[str, LinhaDaTaxa]]:
+    """O cálculo por Job, com a contagem de itens vinda de `itens_do_job` (a decupagem
     inteira, ou o objeto de contagem gravado com ela, #455). `itens_do_job` levanta
     `ServicoIndisponivel`, `ValueError`, `KeyError` ou `TypeError` se não lê."""
     pulsados = {
@@ -141,8 +159,7 @@ def calcular_com_itens(
     }
     # Só os vídeos com correção ou pulso no período; o acervo não é percorrido.
     candidatos = pulsados | correcoes.jobs_com_correcao(desde, ate)
-    # (programa, versão, tipo) -> (correções, itens)
-    somas: dict[tuple[str | None, str | None, str], tuple[int, int]] = {}
+    linhas: list[tuple[str, LinhaDaTaxa]] = []
     for job in sorted(repositorio.obter_varios(candidatos), key=lambda j: j.id):
         if job.estado != "concluido" or (programa and job.programa != programa):
             continue
@@ -163,22 +180,20 @@ def calcular_com_itens(
             log.warning("decupagem de %s não lida: fora da taxa", job.id)
             continue
         for tipo, (n, itens) in do_job.items():
-            chave = (job.programa, contagem.versao_pipeline or None, tipo)
-            antes = somas.get(chave, (0, 0))
-            somas[chave] = (antes[0] + n, antes[1] + itens)
-    return [
-        LinhaDaTaxa(
-            programa=p,
-            versao_pipeline=v,
-            tipo=t,
-            correcoes=n,
-            itens=itens,
-            taxa_de_correcao=round(n / itens, 4) if itens else None,
-        )
-        for (p, v, t), (n, itens) in sorted(
-            somas.items(), key=lambda kv: tuple(x or "" for x in kv[0])
-        )
-    ]
+            linhas.append(
+                (
+                    job.id,
+                    LinhaDaTaxa(
+                        programa=job.programa,
+                        versao_pipeline=contagem.versao_pipeline or None,
+                        tipo=tipo,
+                        correcoes=n,
+                        itens=itens,
+                        taxa_de_correcao=round(n / itens, 4) if itens else None,
+                    ),
+                )
+            )
+    return linhas
 
 
 def _em_vigor_no_periodo(

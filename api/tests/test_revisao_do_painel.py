@@ -2,6 +2,7 @@
 carrega, o espelho das medidas e a tabela do Terraform."""
 
 import re
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -203,6 +204,41 @@ def _linhas_do_bigquery(medidas: list[RevisaoNoVideo]) -> list[list[Any]]:
 
 def test_a_resposta_do_bigquery_vira_o_mesmo_agregado() -> None:
     fonte = RevisaoBigQuery(CONFIG, _Transporte(_linhas_do_bigquery(MEDIDAS)))
+
+    assert fonte.tempo(None, None, None, None) == agregar(MEDIDAS)
+
+
+def test_o_sql_da_os_mesmos_quatro_graos_que_o_agregado_em_memoria() -> None:
+    banco = sqlite3.connect(":memory:")
+    try:
+        banco.execute(
+            "CREATE TABLE revisao (job_id, uid, email, ativo_s REAL, duracao_s REAL)"
+        )
+        banco.execute("CREATE TABLE jobs (id, programa, duracao_ms REAL)")
+        banco.executemany(
+            "INSERT INTO revisao VALUES (?, ?, ?, ?, ?)",
+            [(m.job_id, m.uid, m.email, m.ativo_s, m.duracao_s) for m in MEDIDAS],
+        )
+        banco.executemany(
+            "INSERT INTO jobs VALUES (?, ?, ?)",
+            [
+                (m.job_id, m.programa, m.duracao_s * 1000 if m.duracao_s else None)
+                for m in {m.job_id: m for m in MEDIDAS}.values()
+            ],
+        )
+        sql, _ = RevisaoBigQuery(CONFIG, _Transporte([])).consulta(
+            None, None, None, None
+        )
+        sql = (
+            sql.replace("`proj.decupagens.revisao`", "revisao")
+            .replace("`proj.decupagens.jobs`", "jobs")
+            .replace("CAST(NULL AS STRING)", "CAST(NULL AS TEXT)")
+        )
+        sql = re.sub(r"\bIF\(", "IIF(", sql)
+        linhas = [list(linha) for linha in banco.execute(sql)]
+    finally:
+        banco.close()
+    fonte = RevisaoBigQuery(CONFIG, _Transporte(linhas))
 
     assert fonte.tempo(None, None, None, None) == agregar(MEDIDAS)
 

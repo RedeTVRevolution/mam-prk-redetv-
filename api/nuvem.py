@@ -102,7 +102,7 @@ _CAMPOS_DA_LISTA = frozenset(
         "id", "nome", "tamanho_bytes", "estado", "criado_por", "criado_em", "atualizado_em",
         "codigo_falha", "duracao_s", "timecode_origem", "taxa_de_quadros", "capa", "programa",
         "data_exibicao", "indexacao", "copia_bigquery", "etapa_atual", "etapas",
-        "reprocessamentos", "criado_por_email", "sistema", "palavras", "lixeira",
+        "reprocessamentos", "inicio_da_passada", "criado_por_email", "sistema", "palavras", "lixeira",
     }
 )  # fmt: skip
 # Candidatos mínimos por leitura quando a página já está cheia e falta achar o próximo aprovado.
@@ -323,6 +323,11 @@ class RepositorioFirestore:
 
         return self._sob_disputa(trocar)
 
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
+        _documento(self._colecao, job_id).update(
+            {"copia_bigquery.anos": firestore.ArrayUnion([ano])}
+        )
+
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
     ) -> Job | None:
@@ -350,6 +355,10 @@ class RepositorioFirestore:
     def obter(self, job_id: str) -> Job | None:
         doc = _documento(self._colecao, job_id).get()
         return Job(**(doc.to_dict() or {})) if doc.exists else None
+
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        doc = self._cliente.collection("fila_gpu").document("vagas").get()
+        return doc.to_dict() or {}
 
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         # Em lotes: sem período, a taxa pede todos os vídeos revisados do acervo, e
@@ -1154,6 +1163,14 @@ class TiposDeObjetoFirestore:
 
         trocar(self._cliente.transaction())
 
+    def purgar(self, job_id: str) -> bool:
+        """Subtrai a contribuição antes de apagar; repetir não subtrai duas vezes."""
+        referencia = _documento(self._por_job, job_id)
+        existia = referencia.get().exists
+        self.registrar(job_id, {})
+        referencia.delete()
+        return bool(existia)
+
     def buscar(self, q: str, limite: int = LIMITE_PADRAO) -> list[TipoDeObjeto]:
         prefixo = normalizar(q)
         consulta = self._colecao.where(filter=FieldFilter("chave", ">=", prefixo))
@@ -1663,6 +1680,15 @@ class ObjetosStorage:
             conteudo, content_type="application/json"
         )
 
+    def ler_texto(self, objeto: str) -> str | None:
+        """Lê um JSON solto; só a ausência devolve None."""
+        try:
+            return bytes(
+                self._cliente.bucket(self._decupagens).blob(objeto).download_as_bytes()
+            ).decode("utf-8")
+        except NotFound:
+            return None
+
 
 # O navegador guarda o quadro por 1 dia (#410); `private` deixa fora os caches compartilhados.
 # O `make cache-dos-quadros` aplica o mesmo valor aos quadros já gravados.
@@ -1705,12 +1731,19 @@ class ArquivosNoStorage:
         )
 
     def apagar(self, job_id: str) -> None:
+        # A regra de 7 dias do bucket pode apagar a cópia limpa ou o áudio entre a
+        # listagem e o `delete()`: o objeto que sumiu já está apagado (#502).
         for bucket in (self._aceitos, self._decupagens):
             for blob in self._cliente.list_blobs(bucket, prefix=f"{job_id}/"):
-                blob.delete()
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
-        if blob.exists():
-            blob.delete()
+                try:
+                    blob.delete()
+                except NotFound:
+                    pass
+        for objeto in (objeto_da_decupagem(job_id), f"{job_id}.comparacao.json"):
+            try:
+                self._cliente.bucket(self._decupagens).blob(objeto).delete()
+            except NotFound:
+                pass
 
 
 # Quadros guardados por instância: uns 50 por página da grade, com folga para o acervo.
@@ -1774,7 +1807,7 @@ class ArmazenamentoStorage:
         return url
 
     def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
-        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_do_proxy(job_id))
         url: str = blob.generate_signed_url(
             version="v4",
             expiration=validade,

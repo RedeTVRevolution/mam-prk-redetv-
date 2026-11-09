@@ -819,7 +819,8 @@ class Busca:
             clausulas.append(
                 _Clausula(
                     Consulta(
-                        filtros=replace(base, tipo="objeto", marca=marca), texto=marca
+                        filtros=replace(base, tipo="objeto", marca=marca),
+                        texto=normalizar(marca),
                     ),
                     lambda r: _motivo(r, nome),
                 )
@@ -924,9 +925,13 @@ class Busca:
     ) -> SemAparicao:
         """Quantas vezes a pessoa sem aparição é citada, no mesmo programa e período."""
         base = _base(e)
-        na_fala = consultar(Consulta(filtros=replace(base, tipo="fala"), texto=quem))
+        na_fala = consultar(
+            Consulta(filtros=replace(base, tipo="fala"), texto=normalizar(quem))
+        )
         na_tela = consultar(
-            Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=quem)
+            Consulta(
+                filtros=replace(base, tipo="texto_na_tela"), texto=normalizar(quem)
+            )
         )
         return SemAparicao(
             pessoa_id=pessoa,
@@ -1143,14 +1148,16 @@ def _clausulas_das_mencoes(
     if "fala" in evidencias or "citada" in evidencias:
         clausulas.append(
             _Clausula(
-                Consulta(filtros=replace(base, tipo="fala"), texto=quem),
+                Consulta(filtros=replace(base, tipo="fala"), texto=normalizar(quem)),
                 lambda r: _motivo(r, nome),
             )
         )
     if "gc" in evidencias or "citada" in evidencias:
         clausulas.append(
             _Clausula(
-                Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=quem),
+                Consulta(
+                    filtros=replace(base, tipo="texto_na_tela"), texto=normalizar(quem)
+                ),
                 lambda r: _motivo(r, nome),
             )
         )

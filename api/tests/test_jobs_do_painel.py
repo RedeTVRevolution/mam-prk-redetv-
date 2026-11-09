@@ -103,6 +103,25 @@ def test_o_job_criado_chega_com_programa_dono_e_data() -> None:
     }
 
 
+def test_a_consulta_nao_recria_o_purgado_nem_com_fim_atrasado() -> None:
+    b = _banco()
+    _evento(b, "e1", "envio", "2026-11-01T12:00:00+00:00", job_id="v1")
+    _evento(b, "e2", "envio", "2026-11-01T12:00:00+00:00", job_id="v2")
+    _rodar(b)
+    b.execute("DELETE FROM jobs_do_painel WHERE id = 'v1'")
+    _evento(b, "p1", "purga", "2026-11-01T12:01:00+00:00", job_id="v1")
+    _rodar(b)
+    assert set(_linhas(b)) == {"v2"}
+
+    _evento(
+        b, "f1", "fim_de_processamento", "2026-11-05T12:00:00+00:00",
+        job_id="v1", estado="concluido",
+    )  # fmt: skip
+    _rodar(b, "'2026-11-04T00:00:00+00:00'")
+    _rodar(b, "'2026-11-04T00:00:00+00:00'")
+    assert set(_linhas(b)) == {"v2"}
+
+
 def test_o_job_concluido_traz_estado_duracao_e_dia_do_fim() -> None:
     b = _banco()
     _evento(b, "e1", "envio", "2026-11-01T12:00:00+00:00", job_id="v1", programa="Hoje")

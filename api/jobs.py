@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import PurePath
 from typing import Annotated, Any, Literal, Protocol, Self
 from urllib.parse import quote
 
@@ -42,7 +43,12 @@ from api.catalogo_apagado import (
     sem_catalogo_apagado,
 )
 from api.catalogo_dos_jobs import atualizar_catalogo_do_job
-from api.ciclo_de_vida import JaTerminou, pedir_indexacao, transitar
+from api.ciclo_de_vida import (
+    PRAZO_DO_REPROCESSAMENTO,
+    JaTerminou,
+    pedir_indexacao,
+    transitar,
+)
 from api.ciclo_de_vida import cancelar as cancelar_job
 from api.correcoes import (
     Autoria,
@@ -184,6 +190,9 @@ class CopiaNoBigQuery(BaseModel):
     estado: EstadoDaCopia
     em: datetime
     desde: datetime | None = None
+    anos: list[int] = Field(default_factory=list)
+    # Só fica completo depois do primeiro MERGE sem filtro, inclusive se não há data.
+    particoes_conhecidas: bool = False
 
 
 NomeDaEtapa = Literal[
@@ -273,6 +282,8 @@ class Job(BaseModel):
     etapas: dict[NomeDaEtapa, Etapa] = {}
     # Quantas vezes o Job foi reprocessado a partir da etapa que falhou (#147).
     reprocessamentos: int = 0
+    # Início da passada atual; `None` em Job anterior ao campo.
+    inicio_da_passada: datetime | None = None
     # Em qual `reprocessamentos` o fim `falhou` deste Job já foi avisado (webhook e evento de
     # uso) por `api.fim_do_job`, o caminho do `falhou` que o Workflows grava; `None` se nunca.
     fim_avisado_no_reprocessamento: int | None = None
@@ -362,7 +373,9 @@ class JobResumido(BaseModel):
     # As etapas iniciadas, da primeira à última.
     etapas: list[EtapaPublica] = []
     reprocessamentos: int = 0
+    inicio_da_passada: datetime | None = None
     enviado_por: EnviadoPor
+    reprocessavel_ate: datetime
     criado_em: datetime
     atualizado_em: datetime
 
@@ -379,12 +392,14 @@ class JobResumido(BaseModel):
             **job.model_dump(include=campos),
             etapas=[EtapaPublica(nome=n, **e.model_dump()) for n, e in etapas],
             enviado_por=enviado_por,
+            reprocessavel_ate=job.criado_em + PRAZO_DO_REPROCESSAMENTO,
         )
 
 
 class JobPublico(JobResumido):
     """O detalhe de um Job: o resumo mais os cortes de câmera."""
 
+    posicao_na_fila_gpu: int | None = None
     # Cortes de câmera, em ms: os riscos da régua do Visualizador.
     cortes_ms: list[int] | None = None
 
@@ -438,6 +453,13 @@ class AcessosAoVideo(Protocol):
 class Reproducao(BaseModel):
     url: str
     expira_em: datetime
+
+
+class DownloadDoVideo(Reproducao):
+    aviso: str = (
+        "A cópia em alta resolução está no arquivo da RedeTV. "
+        "Este download é a versão de 480p processada pelo MAM."
+    )
 
 
 ARQUIVO_DO_QUADRO = r"^[A-Za-z0-9][A-Za-z0-9_-]*\.jpg$"
@@ -653,6 +675,10 @@ class RepositorioDeJobs(Protocol):
 
     def obter(self, job_id: str) -> Job | None: ...
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        """O documento `fila_gpu/vagas`; vazio quando ainda não existe."""
+        ...
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         """Os Jobs que existem entre `job_ids`, numa leitura em lote, em qualquer ordem."""
         ...
@@ -665,6 +691,10 @@ class RepositorioDeJobs(Protocol):
         Devolve o Job gravado, ou `None` se ele não existe ou já saiu de `de`.
         Quem decide as transições é `api.ciclo_de_vida`; use `transitar` de lá.
         """
+        ...
+
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
+        """Acrescenta o ano possível da cópia atomicamente, sem remover os anteriores."""
         ...
 
     def trocar(
@@ -709,7 +739,7 @@ class Armazenamento(Protocol):
         ...
 
     def url_de_download(self, job_id: str, nome: str, validade: timedelta) -> str:
-        """URL assinada de leitura da cópia limpa, que o navegador baixa como `nome`."""
+        """URL assinada de leitura do proxy 480p, que o navegador baixa como `nome`."""
         ...
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
@@ -734,6 +764,9 @@ class RepositorioEmMemoria:
     def obter(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        return {}
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         return [self._jobs[i] for i in dict.fromkeys(job_ids) if i in self._jobs]
 
@@ -745,6 +778,18 @@ class RepositorioEmMemoria:
             return None
         self._jobs[job_id] = job.model_copy(update=mudancas)
         return self._jobs[job_id]
+
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
+        job = self._jobs[job_id]
+        assert job.copia_bigquery is not None
+        copia = job.copia_bigquery
+        self._jobs[job_id] = job.model_copy(
+            update={
+                "copia_bigquery": copia.model_copy(
+                    update={"anos": sorted(set(copia.anos) | {ano})}
+                )
+            }
+        )
 
     def trocar(
         self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
@@ -787,12 +832,18 @@ class RepositorioIndisponivel:
     def obter(self, job_id: str) -> Job | None:
         raise ServicoIndisponivel
 
+    def obter_fila_gpu(self) -> dict[str, Any]:
+        raise ServicoIndisponivel
+
     def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
         raise ServicoIndisponivel
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
     ) -> Job | None:
+        raise ServicoIndisponivel
+
+    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
         raise ServicoIndisponivel
 
     def trocar(
@@ -811,6 +862,31 @@ class RepositorioIndisponivel:
 
     def contar_criados(self, criado_por: str, desde: datetime) -> int:
         raise ServicoIndisponivel
+
+
+def espera_da_gpu(
+    repositorio: RepositorioDeJobs, agora: datetime
+) -> list[dict[str, Any]]:
+    """Pedidos válidos na ordem do Workflows; vagas ocupadas não contam como espera."""
+    pedidos = repositorio.obter_fila_gpu().get("espera", [])
+    jobs = {j.id: j for j in repositorio.obter_varios({p["job_id"] for p in pedidos})}
+    agora_s = agora.timestamp()
+    return sorted(
+        (
+            p
+            for p in pedidos
+            if p["job_id"] in jobs
+            and (
+                jobs[p["job_id"]].estado == "analisando"
+                or (
+                    p["etapa"] == "inventario_de_objetos"
+                    and jobs[p["job_id"]].estado == "concluido"
+                )
+            )
+            and agora_s - p["visto_em"] <= 3 * 60
+        ),
+        key=lambda p: (p["chegada"], p["job_id"], p["etapa"]),
+    )
 
 
 class ArmazenamentoIndisponivel:
@@ -1066,6 +1142,7 @@ def criar_rotas(
             programa=novo.programa,
             data_exibicao=novo.data_exibicao,
             criado_em=agora,
+            inicio_da_passada=agora,
             atualizado_em=agora,
         )
         # A repetição lê antes de gravar (muitas ao mesmo tempo brigariam pelo mesmo
@@ -1220,6 +1297,14 @@ def criar_rotas(
     ) -> Response:
         job = _enxerga(chamador, repositorio.obter(job_id))
         publico = JobPublico.de(job)
+        publico.posicao_na_fila_gpu = next(
+            (
+                n
+                for n, pedido in enumerate(espera_da_gpu(repositorio, relogio()), 1)
+                if pedido["job_id"] == job_id
+            ),
+            None,
+        )
         publico.capa_url = _url_da_capa(job)
         etag = _etag(publico)
         cabecalhos = {"ETag": etag, "Cache-Control": "private, no-cache"}
@@ -1261,12 +1346,13 @@ def criar_rotas(
     @rotas.get("/{job_id}/download")
     def baixar_video(
         job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
-    ) -> Reproducao:
+    ) -> DownloadDoVideo:
         job = obter_concluido(job_id, chamador)
-        url = armazenamento.url_de_download(job.id, job.nome, VALIDADE_DO_DOWNLOAD)
+        nome = f"{PurePath(job.nome).stem}.480p.mp4"
+        url = armazenamento.url_de_download(job.id, nome, VALIDADE_DO_DOWNLOAD)
         # O registro vem antes da resposta: sem ele a URL não sai (503).
         acessos.baixou(chamador, job, "video.baixado")
-        return Reproducao(url=url, expira_em=relogio() + VALIDADE_DO_DOWNLOAD)
+        return DownloadDoVideo(url=url, expira_em=relogio() + VALIDADE_DO_DOWNLOAD)
 
     @rotas.post("/quadros")
     def quadros_em_lote(

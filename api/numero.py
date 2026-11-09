@@ -75,13 +75,15 @@ def mesma_palavra(a: str, b: str) -> bool:
 
 
 def com_as_formas(texto: str) -> str:
-    """O texto com cada palavra seguida das outras formas dela, para o índice;
-    a pontuação fica de fora, que o índice não a usa."""
+    """Formas normalizadas em grupos OR; palavras repetidas e pontuação ficam de fora."""
     saida: list[str] = []
     vistas: set[str] = set()
     for palavra in re.findall(r"\w+", texto):
-        for forma in [palavra, *sorted(formas(palavra) - {palavra.casefold()})]:
-            if forma.casefold() not in vistas:
-                vistas.add(forma.casefold())
-                saida.append(forma)
+        digitada = normalizar(palavra)
+        if digitada in vistas:
+            continue
+        vistas.add(digitada)
+        outras = {normalizar(forma) for forma in formas(palavra)} - {digitada}
+        grupo = [digitada, *sorted(outras)]
+        saida.append(f"({' OR '.join(grupo)})" if outras else digitada)
     return " ".join(saida)

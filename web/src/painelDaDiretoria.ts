@@ -85,6 +85,7 @@ export interface EstadoNaFila {
 
 export interface FilaAgora {
   por_estado: EstadoNaFila[]
+  esperando_gpu?: { quantidade: number; idade_do_mais_antigo_s: number }
 }
 
 /** Um item de `GET /v1/painel/filtros`: quem aparece no filtro de usuário. */

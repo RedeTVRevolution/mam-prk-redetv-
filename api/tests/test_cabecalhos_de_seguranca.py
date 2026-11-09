@@ -70,6 +70,19 @@ def test_valores_combinados() -> None:
     assert CABECALHOS_DE_SEGURANCA["Strict-Transport-Security"] == "max-age=31536000"
 
 
+def test_csp_permite_style_inline_so_em_elementos(cliente: TestClient) -> None:
+    resposta = cliente.get("/")
+    diretivas = {
+        d.split()[0]: d.split()[1:]
+        for d in resposta.headers["Content-Security-Policy"].split("; ")
+    }
+
+    assert diretivas["style-src-elem"] == ["'self'", "'unsafe-inline'"]
+    assert diretivas["default-src"] == ["'self'"]
+    assert "style-src" not in diretivas
+    assert "style-src-attr" not in diretivas
+
+
 def test_csp_tem_o_storage_em_img_media_e_connect_src() -> None:
     diretivas = {
         d.split()[0]: d.split()[1:]

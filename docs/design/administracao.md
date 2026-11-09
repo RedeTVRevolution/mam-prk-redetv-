@@ -33,18 +33,23 @@ O que **não** é do administrador: reprocessar o que falhou é do Editor e do C
 | Ligado ao vídeo | Na lixeira | Na purga |
 | --- | --- | --- |
 | Original MP4 | Não é nosso: fica no storage da RedeTV | Idem |
-| Cópia limpa, proxy de reprodução e quadros-chave (Cloud Storage) | Guardados | Apagados |
+| Cópia limpa e áudio (Cloud Storage) | Podem sair a partir de 7 dias da criação dos objetos, de forma assíncrona, mesmo fora da lixeira | Apagados, se ainda existirem |
+| Proxy de reprodução e quadros-chave (Cloud Storage) | Guardados | Apagados |
 | Proxies de escalonamento e de análise | Já somem pela regra de ciclo de vida de 30 dias | — |
 | Decupagem do modelo e das janelas | Guardadas | Apagadas |
 | Correções | Guardadas | Apagadas, com o registro da purga no histórico |
 | Momentos no índice da busca | Saem da busca na hora, por um filtro do servidor ("não está na lixeira"); a restauração é instantânea | Apagados do índice |
-| Eventos no BigQuery (painel) | Guardados | Guardados: os números do passado não mudam. O painel mostra "vídeo apagado" no lugar do nome |
+| Momentos no BigQuery (tabela atual e antiga, enquanto existir) | Guardados | Linhas do vídeo apagadas |
+| Jobs e medidas de revisão do painel (BigQuery) | Guardados | Linhas do vídeo apagadas; um marcador confirmado impede a consulta agendada de recriá-las |
+| Tipos de objeto (Firestore) | Guardados | Contribuição subtraída dos totais e documento do vídeo apagado |
+| Tempo de revisão (Firestore) | Guardado | Todas as medidas do vídeo apagadas |
+| Eventos de uso e auditoria | Guardados | Guardados por desenho |
 | Job | Marcado como apagado, invisível para quem não é administrador | Removido |
 
 ### Três cuidados que o código atual impõe
 
-- **Correções só se acrescentam.** O repositório de correções "só acrescenta, nunca altera nem apaga" (`api/correcoes.py:495`), e o glossário diz que a saída do modelo nunca é apagada. Essas regras valem para o trabalho do dia a dia, e a lixeira as respeita: ela não apaga nada. A purga é a única exceção, feita só por um processo da própria purga, que deixa o registro dela no histórico. **Decisão a registrar numa ADR.**
-- **Dois jobs podem dividir um processamento.** A chave de conteúdo faz dois jobs com o mesmo arquivo usarem o mesmo processamento (`videos/{chave}`, plano, "Resiliência e duplicidade"). Apagar um job apaga o job e o acesso de quem o enviou. O processamento, os arquivos e o índice só são purgados quando nenhum job aponta mais para eles. A tela avisa: "Este arquivo também foi enviado pelo sistema X; a decupagem continua para ele."
+- **Correções só se acrescentam.** O repositório de correções "só acrescenta, nunca altera nem apaga" (`api/correcoes.py:495`), e o glossário diz que a saída do modelo nunca é apagada. Essas regras valem para o trabalho do dia a dia, e a lixeira as respeita: ela não apaga nada. A purga é a exceção que apaga saídas do modelo e correções, feita só pelo processo da própria purga, com registro no histórico (ADR 0010). A retenção de 7 dias da cópia limpa e do áudio é a segunda exceção e só alcança arquivos de entrada (ADR 0017).
+- **Cada Job tem arquivos e índice próprios.** Mesmo com SHA-256 igual, os Jobs processam separadamente. A purga apaga os arquivos e trechos do Job escolhido, preservando os dos outros. O impacto lista os outros envios como informação, sem zerar a contagem de arquivos.
 - **Pessoa do catálogo tem dado biométrico.** Apagar uma pessoa do catálogo apaga também as fotos de rosto que ela tenha (ADR 0005, hoje [0012](../adr/0012-sem-referencias-de-rosto-na-web.md): a busca na web saiu e a migração apagou as antigas). Rosto é dado sensível pela LGPD, então essas fotos não esperam os 30 dias: saem já no envio para a lixeira. Nas decupagens, as aparições confirmadas pelo rosto voltam a "não identificado"; as confirmadas por GC ou fala mantêm o nome. Antes de apagar, a tela oferece **fundir** com outra pessoa, que é o caso mais comum (nome duplicado); a permissão é `catalogo.fundir` (Curador e Administrador). Renomear a pessoa em todos os vídeos pede `correcao.aprovar` (Curador).
 
 ### Outros apagamentos

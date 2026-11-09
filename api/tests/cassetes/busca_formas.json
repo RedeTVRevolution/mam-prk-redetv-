@@ -1,0 +1,46 @@
+{
+  "origem": "pendente",
+  "pedido": {
+    "searches": [
+      {
+        "textSearch": {
+          "topK": 20,
+          "outputFields": {
+            "dataFields": [
+              "id",
+              "tipo",
+              "job_id",
+              "inicio_ms",
+              "fim_ms",
+              "programa",
+              "data_de_exibicao",
+              "pessoas",
+              "categoria",
+              "tipo_do_objeto",
+              "cor_base",
+              "cor",
+              "marca",
+              "dono",
+              "relacao",
+              "texto",
+              "descricao",
+              "quadro",
+              "destaque",
+              "sistema",
+              "na_lixeira"
+            ]
+          },
+          "structuredQuery": {
+            "text": {
+              "text": "(gravata OR gravatas)",
+              "fields": [
+                "texto_da_busca"
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "resultados": null
+}

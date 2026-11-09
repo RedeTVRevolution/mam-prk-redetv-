@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, onTestFinished, test, vi } from 'vitest'
+import type { ParDeQuadro } from '../../api.ts'
 import { type ItemDoPainel, itensPorTipo } from '../../painel.ts'
 import { abrirVideo, irPara, pauseMock, playMock, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
@@ -78,9 +79,10 @@ let decupagem: object = DECUPAGEM
 const quadrosPedidos: string[] = []
 const servidor = setupServer(
   ...rotasDoVideo(() => ({ timecode_origem: null, taxa_de_quadros: null, cortes_ms: [] }), () => decupagem),
-  http.get('/v1/jobs/j1/quadros/:arquivo', ({ params }) => {
-    quadrosPedidos.push(String(params.arquivo))
-    return HttpResponse.json({ url: `https://exemplo.test/${String(params.arquivo)}`, expira_em: '2999-01-01T00:00:00Z' })
+  http.post('/v1/jobs/quadros', async ({ request }) => {
+    const { quadros } = (await request.json()) as { quadros: ParDeQuadro[] }
+    quadrosPedidos.push(...quadros.map((q) => q.arquivo))
+    return HttpResponse.json(quadros.map((q) => ({ ...q, url: `https://exemplo.test/${q.arquivo}`, expira_em: '2999-01-01T00:00:00Z' })))
   }),
 )
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
@@ -482,7 +484,7 @@ test('o bloco do objeto na faixa leva à seção Objetos com a ocorrência selec
   expect(lista('Objetos').getByRole('button', { name: 'sandália, 08:20 a 08:30' }).getAttribute('aria-pressed')).toBe('true')
 })
 
-test('rolar a lista à mão deixa de seguir a reprodução e mostra "Voltar ao tempo atual"', async () => {
+test('rolar a lista à mão desliga o seguir sem botão flutuante, e o botão da barra religa', async () => {
   const player = await abrirVideo()
   const usuario = await abrirSecao('Falas')
   irPara(player, 220)
@@ -492,8 +494,9 @@ test('rolar a lista à mão deixa de seguir a reprodução e mostra "Voltar ao t
   fireEvent.wheel(lista('Falas').getByRole('list').parentElement as HTMLElement)
 
   expect(inspetor().getByRole('button', { name: 'Seguir a reprodução' }).getAttribute('aria-pressed')).toBe('false')
-  await usuario.click(inspetor().getByRole('button', { name: 'Voltar ao tempo atual' }))
-  expect(inspetor().getByRole('button', { name: 'Seguindo a reprodução' })).toBeTruthy()
+  expect(inspetor().queryByRole('button', { name: 'Voltar ao tempo atual' })).toBeNull()
+  await usuario.click(inspetor().getByRole('button', { name: 'Seguir a reprodução' }))
+  expect(inspetor().getByRole('button', { name: 'Seguindo a reprodução' }).getAttribute('aria-pressed')).toBe('true')
 })
 
 test('as linhas pedem a URL do quadro delas; a sem quadro não pede nada; o detalhe reaproveita a URL', async () => {

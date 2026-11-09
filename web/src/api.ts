@@ -105,7 +105,7 @@ export interface ClienteDoJob {
   quadro(arquivo: string): Promise<Reproducao>
   decupagem(): Promise<Decupagem>
   /** URL assinada para baixar o MP4; o download vai à auditoria (`video.baixado`). */
-  baixarVideo(): Promise<Reproducao>
+  baixarVideo(): Promise<Reproducao & { aviso: string }>
   /** O arquivo JSON da decupagem, pela rota do servidor que registra o download. */
   baixarDecupagem(): Promise<Blob>
   /** As passadas de comparação do Job (exige `decupagem.ver`). */
@@ -343,6 +343,8 @@ export interface ClienteDaApi {
   quadros(pares: ParDeQuadro[]): Promise<QuadroDoLote[]>
   criarJob(corpo: object): Promise<JobCriado>
   programas(): Promise<string[]>
+  /** Os rótulos e vocabulários das correções; exige só login. */
+  catalogoDeCorrecoes(): Promise<CatalogoDeCorrecoes>
   /**
    * `GET /v1/busca`: vídeos com os momentos em que a consulta aparece. `cursor` é o `proximo` da
    * página anterior (vale 15 min, só para a mesma consulta; vencido, a API responde 422).
@@ -465,6 +467,8 @@ export function criarClienteDaApi(
     return { ...((await resposta.json()) as T), agrupamento }
   }
 
+  const catalogoDeCorrecoes = () => chamar<CatalogoDeCorrecoes>('/v1/correcoes/catalogo')
+
   function job(id: string): ClienteDoJob {
     const base = `/v1/jobs/${id}`
     return {
@@ -479,7 +483,7 @@ export function criarClienteDaApi(
       pulsoDeRevisao: async (evento) => {
         await pedir(`${base}/revisao/pulso`, { post: true, corpo: { evento } })
       },
-      catalogo: () => chamar('/v1/correcoes/catalogo'),
+      catalogo: catalogoDeCorrecoes,
       historico: () => chamar(`${base}/correcoes`),
       fila: () => chamar(`${base}/fila`),
       corrigir: (corpo) => chamar(`${base}/correcoes`, { post: true, corpo }),
@@ -660,6 +664,7 @@ export function criarClienteDaApi(
       },
       criarPessoa: (nome, apelidos) => chamar('/v1/admin/programas/pessoas', { post: true, corpo: { nome, apelidos } }),
     },
+    catalogoDeCorrecoes,
     job,
   }
 }

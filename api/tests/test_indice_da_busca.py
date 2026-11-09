@@ -19,6 +19,7 @@ from api.indice_da_busca import (
     Registro,
     registros_da_decupagem,
 )
+from api.numero import com_as_formas
 
 
 def _indice() -> IndiceEmMemoria:
@@ -79,7 +80,7 @@ def test_texto_casa_sem_acento_nem_maiuscula() -> None:
     assert {r.job_id for r in achados} == {"ex-sapato"}
 
 
-def test_texto_casa_qualquer_palavra_inteira_como_o_indice_real() -> None:
+def test_texto_exige_todos_os_grupos_e_aceita_or_dentro_deles() -> None:
     indice = IndiceEmMemoria()
     indice.gravar(
         "j",
@@ -115,8 +116,24 @@ def test_texto_casa_qualquer_palavra_inteira_como_o_indice_real() -> None:
         return {r.id for r in indice.buscar(Consulta(texto=texto))}
 
     assert ids("ANGELICA") == {"a"}
-    assert ids("angelica vestido") == {"a", "b"}
+    assert ids("angelica vestido") == set()
+    assert ids("(angelica OR vestido)") == {"a", "b"}
+    assert ids("(angelica OR vestido) azul") == {"a", "b"}
+    assert ids("(angelica OR vestido) (vinho OR branca)") == set()
+    assert ids("(angelica OR vestido OR calça)") == {"a", "b", "c"}
+    assert ids("(angelica or vestido)") == set()
     assert ids("vest") == set()  # palavra inteira, não pedaço
+
+
+def test_formas_com_espaco_perdem_o_singular_e_com_or_o_acham() -> None:
+    indice = IndiceEmMemoria()
+    registro = Registro(
+        id="a", tipo="fala", job_id="j", inicio_ms=0, fim_ms=1, texto="carro"
+    )
+    indice.gravar("j", [registro])
+
+    assert indice.buscar(Consulta(texto="carro carros")) == []
+    assert indice.buscar(Consulta(texto=com_as_formas("carro"))) == [registro]
 
 
 def test_registros_tem_um_por_plano_fala_texto_e_objeto() -> None:

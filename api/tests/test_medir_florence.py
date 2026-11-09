@@ -127,6 +127,10 @@ class ArmazemFalso:
         self.decupagem: Decupagem | None = decupagem_com_planos(["q/a.jpg"])
         self.resultados: dict[tuple[str, str | None], ObjetosDaDecupagem] = {}
         self.textos: dict[str, str] = {}
+        self.gravacoes: list[str] = []
+
+    def ler_texto(self, objeto: str) -> str | None:
+        return self.textos.get(objeto)
 
     def ler_decupagem(self, job_id: str) -> Decupagem | None:
         return self.decupagem
@@ -137,6 +141,7 @@ class ArmazemFalso:
         return self.resultados.get((job_id, destino))
 
     def gravar_texto(self, objeto: str, conteudo: str) -> None:
+        self.gravacoes.append(objeto)
         self.textos[objeto] = conteudo
 
 
@@ -195,6 +200,66 @@ def test_tempo_por_quadro_e_criterio_contra_a_base() -> None:
     assert base.medida.segundos_por_quadro == 2.0 and base.criterio is None
     assert guloso.medida.segundos_por_quadro == 0.5
     assert guloso.criterio.passa  # o transporte falso devolve o mesmo inventário
+
+
+def test_reaproveita_a_base_gravada_sem_disparar_nem_regravar_hoje() -> None:
+    armazem = ArmazemFalso()
+    inventario = json.dumps({"0": [_obj("cadeira histórica", destaque=3).model_dump()]})
+    medida = json.dumps(
+        {
+            "variacao": "hoje",
+            "ambiente": {},
+            "quadros": 421,
+            "segundos": 863.0,
+            "segundos_por_quadro": 2.05,
+            "criterio": None,
+        }
+    )
+    armazem.textos = {
+        objeto_da_medicao("j1", BASE, "inventario.json"): inventario,
+        objeto_da_medicao("j1", BASE, "medida.json"): medida,
+    }
+    guardados = dict(armazem.textos)
+    disparador = DisparadorFalso(armazem)
+
+    base, guloso = _medir(armazem, disparador, [BASE, "guloso"])
+
+    assert disparador.pedidos == [
+        (objeto_da_medicao("j1", "guloso", "bruto.json"), {"FLORENCE_FEIXES": "1"})
+    ]
+    assert all("/hoje/" not in caminho for caminho in armazem.gravacoes)
+    assert all(armazem.textos[c] == texto for c, texto in guardados.items())
+    assert base.medida.segundos == 863.0
+    assert base.inventario[0][0].nome == "cadeira histórica"
+    assert guloso.criterio.destaque_3_perdidos == ["plano 0: cadeira histórica (movel)"]
+
+
+@pytest.mark.parametrize("arquivo", ["inventario.json", "medida.json"])
+def test_base_incompleta_roda_e_grava_como_antes(arquivo: str) -> None:
+    armazem = ArmazemFalso()
+    armazem.textos[objeto_da_medicao("j1", BASE, arquivo)] = "{}"
+    disparador = DisparadorFalso(armazem)
+
+    (base,) = _medir(armazem, disparador, [])
+
+    assert base.erro is None and base.medida.segundos == 8.0
+    assert disparador.pedidos == [(objeto_da_medicao("j1", BASE, "bruto.json"), {})]
+    assert len(armazem.gravacoes) == 2
+
+
+def test_base_gravada_invalida_nao_e_sobrescrita_nem_usada_no_criterio() -> None:
+    armazem = ArmazemFalso()
+    armazem.textos = {
+        objeto_da_medicao("j1", BASE, "inventario.json"): "{}",
+        objeto_da_medicao("j1", BASE, "medida.json"): "{}",
+    }
+    disparador = DisparadorFalso(armazem)
+
+    base, guloso = _medir(armazem, disparador, ["guloso"])
+
+    assert base.erro is not None
+    assert guloso.erro == "a base `hoje` falhou"
+    assert disparador.pedidos == [] and armazem.gravacoes == []
 
 
 def test_grava_cada_variacao_so_na_pasta_da_medicao_sem_tocar_no_job() -> None:
@@ -294,6 +359,24 @@ def test_a_tabela_aponta_o_reprovado() -> None:
 def test_toda_variacao_so_usa_variaveis_florence() -> None:
     assert VARIACOES[BASE] == {}
     assert all(v.startswith("FLORENCE_") for a in VARIACOES.values() for v in a)
+
+
+@pytest.mark.parametrize("modelo", ["base", "large"])
+def test_variacoes_dos_dois_modelos_explicitam_o_ambiente(modelo: str) -> None:
+    assert VARIACOES[f"{modelo}+guloso+lote16"] == {
+        "FLORENCE_MODELO": modelo,
+        "FLORENCE_FEIXES": "1",
+        "FLORENCE_LOTE": "16",
+        "FLORENCE_LEGENDAS": "1",
+    }
+
+
+def test_variacao_medida_sem_legendas_fica_registrada() -> None:
+    assert VARIACOES["guloso+lote16+sem-legendas"] == {
+        "FLORENCE_FEIXES": "1",
+        "FLORENCE_LOTE": "16",
+        "FLORENCE_LEGENDAS": "0",
+    }
 
 
 def test_o_disparador_soma_as_variaveis_da_variacao_ao_job() -> None:

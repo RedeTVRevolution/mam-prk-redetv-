@@ -67,3 +67,17 @@ test('mais de 100 quadros viram pedidos de 100, e o que veio sem URL recusa só 
   expect(todos.slice(0, 100).every((r) => r.status === 'fulfilled')).toBe(true)
   expect(todos[100]!.status).toBe('rejected')
 })
+
+test('clientes diferentes não compartilham URLs do mesmo quadro e Job (#495)', async () => {
+  const quadros = vi.fn((pares: { job: string; arquivo: string }[]) =>
+    Promise.resolve(pares.map((p) => ({ ...p, url: 'u', expira_em: '2999-01-01T00:00:00Z' }))),
+  )
+  const ana = { quadros } as unknown as ClienteDaApi
+  const bia = { quadros } as unknown as ClienteDaApi
+
+  await urlDoQuadroDaBusca(ana)('j1', 'quadros/a.jpg')
+  await urlDoQuadroDaBusca(ana)('j1', 'quadros/a.jpg')
+  expect(quadros).toHaveBeenCalledTimes(1)
+  await urlDoQuadroDaBusca(bia)('j1', 'quadros/a.jpg')
+  expect(quadros).toHaveBeenCalledTimes(2)
+})

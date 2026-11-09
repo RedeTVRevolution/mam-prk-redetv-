@@ -45,16 +45,6 @@ variable "imagem_validacao" {
   type        = string
 }
 
-variable "imagem_transcricao" {
-  description = "Imagem do Job de transcrição (--target transcricao), de preferência pelo digest"
-  type        = string
-}
-
-variable "imagem_ocr" {
-  description = "Imagem do Job de OCR da tela (--target ocr), de preferência pelo digest"
-  type        = string
-}
-
 variable "imagem_transcricao_gpu" {
   description = "Imagem do Job de transcrição com GPU (--target transcricao-gpu), de preferência pelo digest"
   type        = string
@@ -76,8 +66,18 @@ variable "janelas_em_paralelo" {
   default     = 4
 }
 
+variable "vagas_de_gpu" {
+  description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
+  type        = number
+  default     = 3
+  validation {
+    condition     = floor(var.vagas_de_gpu) == var.vagas_de_gpu && var.vagas_de_gpu >= 1
+    error_message = "vagas_de_gpu é um inteiro a partir de 1."
+  }
+}
+
 variable "espera_gpu_minutos" {
-  description = "Espera total por GPU ou cota, em minutos, antes do plano B em CPU"
+  description = "Proteção contra falta de GPU ou cota fora da fila, em minutos, antes de falhar a etapa"
   type        = number
   default     = 27
 }
@@ -126,15 +126,18 @@ module "mam" {
   admins_emergencia            = var.admins_emergencia
   imagem                       = var.imagem
   imagem_validacao             = var.imagem_validacao
-  imagem_transcricao           = var.imagem_transcricao
-  imagem_ocr                   = var.imagem_ocr
   imagem_transcricao_gpu       = var.imagem_transcricao_gpu
   imagem_ocr_gpu               = var.imagem_ocr_gpu
   imagem_objetos               = var.imagem_objetos
+  florence_modelo              = var.florence_modelo
+  florence_feixes              = var.florence_feixes
+  florence_lote                = var.florence_lote
+  florence_legendas            = var.florence_legendas
   dominio                      = var.dominio
   waf_ativo                    = var.waf_ativo
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
+  vagas_de_gpu                 = var.vagas_de_gpu
   janelas_em_paralelo          = var.janelas_em_paralelo
   espera_gpu_minutos           = var.espera_gpu_minutos
   limite_de_falhas_por_etapa   = var.limite_de_falhas_por_etapa
@@ -228,6 +231,10 @@ output "busca_regiao" {
 
 output "busca_colecao" {
   value = module.mam.busca_colecao
+}
+
+output "busca_colecao_de_texto" {
+  value = module.mam.busca_colecao_de_texto
 }
 
 output "busca_colecao_de_medida" {

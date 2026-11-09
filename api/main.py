@@ -63,6 +63,7 @@ from api.correcoes import (
     RepositorioDeCorrecoesEmMemoria,
 )
 from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
+from api.dados_da_purga import dados_do_ambiente
 from api.decupagem import Decupagem
 from api.entendimento_da_consulta import ModelArmor
 from api.eventos_de_uso import (
@@ -270,6 +271,7 @@ _STORAGE = "https://storage.googleapis.com"
 CABECALHOS_DE_SEGURANCA = {
     "Content-Security-Policy": (
         "default-src 'self'; "
+        "style-src-elem 'self' 'unsafe-inline'; "
         f"img-src 'self' {_STORAGE}; "
         f"media-src 'self' {_STORAGE}; "
         f"connect-src 'self' {_STORAGE} https://identitytoolkit.googleapis.com "
@@ -362,6 +364,7 @@ def criar_app(
     idempotencia: RepositorioDeIdempotencia | None = None,
     eventos: Eventos | None = None,
     pasta_web: Path = PASTA_WEB,
+    apagar_dados_da_purga: Callable[[str], None] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV", dependencies=[Depends(conferir_ids_e_consultas)])
 
@@ -689,6 +692,7 @@ def criar_app(
                 indice_da_busca,
                 repositorio_de_auditoria,
                 relogio,
+                apagar_dados=apagar_dados_da_purga,
             ),
             repositorio_de_jobs,
             relogio,
@@ -847,6 +851,9 @@ if _projeto:
         ),
         copia=copia_do_ambiente(os.environ),
         tipos_de_objeto=TiposDeObjetoFirestore(firestore.Client(project=_projeto)),
+        apagar_dados_da_purga=dados_do_ambiente(
+            firestore.Client(project=_projeto), os.environ
+        ).apagar,
         limites_da_imagem=LimitesDaImagem(
             max_bytes=int(
                 os.environ.get("BUSCA_IMAGEM_MAX_BYTES") or LimitesDaImagem.max_bytes

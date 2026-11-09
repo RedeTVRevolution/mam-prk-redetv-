@@ -100,16 +100,17 @@ export function emAndamento(job: Job): boolean {
 }
 
 /**
- * Na etapa atual, o tempo desde que ela começou (ou desde o envio, se ainda não há etapa);
- * terminado, o tempo total do envio até a última etapa.
+ * Na etapa atual, o tempo desde que ela começou (ou desde o início da passada);
+ * terminado, o tempo da passada até a última etapa. `null` no legado reprocessado sem início.
  */
-export function tempoDaEntradaMs(job: Job, agora: number): number {
-  const criado = new Date(job.criado_em).getTime()
+export function tempoDaEntradaMs(job: Job, agora: number): number | null {
+  if (!job.inicio_da_passada && (job.reprocessamentos ?? 0) > 0) return null
+  const inicio = new Date(job.inicio_da_passada ?? job.criado_em).getTime()
   if (emAndamento(job)) {
     const etapa = job.etapas?.find((e) => e.nome === job.etapa_atual)
-    return Math.max(agora - (etapa ? new Date(etapa.inicio).getTime() : criado), 0)
+    return Math.max(agora - (etapa ? new Date(etapa.inicio).getTime() : inicio), 0)
   }
   const fins = (job.etapas ?? []).flatMap((e) => (e.fim ? [new Date(e.fim).getTime()] : []))
   const fim = fins.length ? Math.max(...fins) : new Date(job.atualizado_em ?? job.criado_em).getTime()
-  return Math.max(fim - criado, 0)
+  return Math.max(fim - inicio, 0)
 }

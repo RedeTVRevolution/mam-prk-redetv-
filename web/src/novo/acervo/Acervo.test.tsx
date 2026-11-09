@@ -27,6 +27,7 @@ interface JobApi {
   etapa_atual?: string | null
   indexacao?: { estado: string; em: string } | null
   etapas?: { nome: string; inicio: string; fim?: string | null }[]
+  reprocessavel_ate: string
   criado_em: string
   atualizado_em: string
 }
@@ -41,6 +42,7 @@ function job(extra: Partial<JobApi>): JobApi {
     programa: null,
     data_exibicao: null,
     enviado_por: { tipo: 'pessoa', nome: 'ana@redetv.com.br' },
+    reprocessavel_ate: '2999-01-01T00:00:00Z',
     criado_em: '2026-10-29T15:00:00Z',
     atualizado_em: '2026-10-29T15:00:00Z',
     ...extra,
@@ -111,6 +113,7 @@ afterEach(() => {
   criacoes.length = 0
   chamadas.length = 0
   pedacosEnviados.length = 0
+  vi.restoreAllMocks()
 })
 afterAll(() => {
   servidor.close()
@@ -940,4 +943,18 @@ test('reabrir o diálogo começa um envio novo, sem o aviso do anterior; U tamb�
 
   expect(reaberto.queryByText(/Envio concluído/)).toBeNull()
   expect((reaberto.getByLabelText(/^Data de exibição/) as HTMLInputElement).value).toBe('')
+})
+
+
+test.each([false, true])('o menu mantém reprocessar vencido desabilitado e mostra o motivo (vence com a tela aberta: %s)', async (venceDepois) => {
+  const agora = Date.now()
+  jobs = [job({ estado: 'concluido', reprocessavel_ate: new Date(agora + (venceDepois ? 60_000 : -60_000)).toISOString() })]
+  await abrir({ permissoes: ['video.reprocessar_etapa'] })
+  const acoes = await screen.findByRole('button', { name: 'Ações de clipe.mp4' })
+  vi.spyOn(Date, 'now').mockReturnValue(agora + 60_000)
+  await userEvent.click(acoes)
+  const menu = await screen.findByRole('menu')
+
+  expect(within(menu).getByRole('menuitem', { name: /Reprocessar…/ }).getAttribute('aria-disabled')).toBe('true')
+  expect(menu.textContent).toContain('O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou: a cópia em alta resolução e o áudio não ficam guardados no MAM. Para reprocessar, envie o vídeo de novo a partir do arquivo da RedeTV.')
 })
