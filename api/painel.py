@@ -341,12 +341,11 @@ def escolhe_o_grupo(
     grupo pedido que dê mais de `MAXIMO_DE_PONTOS` pontos é 422. O `desde` do filtro conta: o
     gráfico começa nele (veja `_dias_do_intervalo`)."""
     dias = list(dias)
-    if dias and desde is not None and desde < min(dias):
-        dias.append(desde)
     if agrupar == "auto":
-        tamanho = (max(dias) - min(dias)).days + 1 if dias else 0
+        primeiro = min([*dias, *([desde] if desde else [])], default=None)
+        tamanho = (max(dias) - primeiro).days + 1 if dias and primeiro else 0
         return next((g for ate, g in FAIXAS_DO_AUTO if tamanho <= ate), "trimestre")
-    pontos = len(_dias_do_intervalo(dias, agrupar))
+    pontos = len(_dias_do_intervalo(dias, agrupar, desde))
     if pontos > MAXIMO_DE_PONTOS:
         raise HTTPException(
             422,
