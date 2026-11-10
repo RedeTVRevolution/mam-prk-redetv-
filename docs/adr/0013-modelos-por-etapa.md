@@ -1,11 +1,11 @@
-# Modelos por etapa: o Gemini mais barato no volume, o 3.8 Flash só nas pessoas sem nome
+# Modelos por etapa: o Gemini mais barato em toda a decupagem
 
 Em 5/11/2026, o Bruno decidiu os modelos de cada etapa da decupagem. A regra geral é usar o Gemini mais barato que der conta do trabalho, hoje o 3.5 Flash-Lite. Um modelo mais caro só entra com um ganho medido que pague a diferença.
 
 | Etapa | Modelo | Modo (ADR 0004) | Onde está |
 |---|---|---|---|
 | Análise por janelas (o volume) | Gemini 3.5 Flash-Lite | Flex | `MODELO` em `api/gemini.py` |
-| Pessoas sem nome (modelo forte) | Gemini 3.8 Flash, até 8 pessoas por vídeo | Standard, com cache (#414) | `MODELO_FORTE` em `api/modelo_forte.py`; o limite é `limite_de_pessoas_do_modelo_forte` no Terraform |
+| Pessoas sem nome (modelo forte) | Gemini 3.5 Flash-Lite (era o 3.8 Flash até 09/11/2026, #539), até 8 pessoas por vídeo | Standard, com cache (#414) | `MODELO_FORTE` em `api/modelo_forte.py`; o limite é `limite_de_pessoas_do_modelo_forte` no Terraform |
 | Inventário de objetos | Florence-2 large na GPU L4, com conversão pelo 3.5 Flash-Lite | Flex (#402) | `motor_objetos = florence` e `modelo_objetos` no Terraform (ADR 0008, ADR 0009) |
 | Entendimento da consulta da busca, e o termo da foto na busca por imagem (ADR 0015) | Gemini 3.5 Flash-Lite | Standard (a pessoa espera na tela) | `MODELO_DA_CONSULTA` em `api/entendimento_da_consulta.py` |
 | Vetores da busca | `gemini-embedding-001` só na descrição dos planos (#505); falas, textos na tela e objetos sem vetor | — | `MODELO_DO_EMBEDDING` em `api/agent_retrieval.py` (o `gemini-embedding-2` do quadro saiu em 6/11/2026, ADR 0006) |
@@ -13,7 +13,7 @@ Em 5/11/2026, o Bruno decidiu os modelos de cada etapa da decupagem. A regra ger
 
 **Sem juiz automático.** A avaliação diária por rubrica (#255) saiu em 6/11/2026 (#407): a qualidade do dia a dia fica com a conferência dos curadores, que o Bruno considera muito melhor que a do Gemini. O juiz nunca chegou a funcionar no dev (o `gemini-2.5-flash` dava 404 no serviço de avaliação).
 
-**O escalonamento fica desligado.** O código sabe reanalisar as janelas com dúvida e uma amostra delas (`api/escalonamento.py`), mas a análise do Job não passa `fracao_escalonada` (`api/analise.py`). E a reanálise, se fosse ligada, repetiria a mesma chamada da primeira passada: o mesmo modelo, o mesmo proxy e 1 quadro por segundo (`api/analise_por_janelas.py`). Hoje o 3.8 Flash só entra na decupagem pelo modelo forte. O alerta `limiar_de_escalonadas_pct`, que ficava sempre em zero, foi removido em 5/11/2026; se o escalonamento for ligado, o campo `pct_escalonadas` do log `video_concluido` continua lá para um alerta novo.
+**O escalonamento fica desligado.** O código sabe reanalisar as janelas com dúvida e uma amostra delas (`api/escalonamento.py`), mas a análise do Job não passa `fracao_escalonada` (`api/analise.py`). E a reanálise, se fosse ligada, repetiria a mesma chamada da primeira passada: o mesmo modelo, o mesmo proxy e 1 quadro por segundo (`api/analise_por_janelas.py`). Desde 09/11/2026 (#539) o modelo forte também é o Flash-Lite (ADR 0005), então nenhuma etapa da decupagem usa o 3.8 Flash. O alerta `limiar_de_escalonadas_pct`, que ficava sempre em zero, foi removido em 5/11/2026; se o escalonamento for ligado, o campo `pct_escalonadas` do log `video_concluido` continua lá para um alerta novo.
 
 ## Por quê
 
