@@ -117,7 +117,9 @@ def test_o_banco_de_seguranca_tem_as_mesmas_agendas_de_backup() -> None:
 
 
 def test_o_banco_principal_vem_da_variavel_e_chega_a_todo_servico_e_job() -> None:
-    assert re.search(r'variable "banco_firestore" \{[^}]*default\s+= "mam"', TF)
+    assert re.search(
+        r'variable "banco_firestore" \{[^}]*default\s+= "mam-principal"', TF
+    )
     assert "name                    = var.banco_firestore" in _bloco(
         'resource "google_firestore_database" "mam"'
     )

@@ -68,7 +68,7 @@ variable "janelas_em_paralelo" {
 
 variable "banco_firestore" {
   type        = string
-  default     = "mam"
+  default     = "mam-principal"
   description = "Nome do banco principal do Firestore (#536)."
 }
 

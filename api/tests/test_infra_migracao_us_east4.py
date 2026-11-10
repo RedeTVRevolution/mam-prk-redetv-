@@ -124,7 +124,9 @@ def test_os_nomes_novos_derivam_da_regiao_e_so_o_modulo_os_monta() -> None:
         "${local.marca_da_regiao}" in seguranca
         and "${local.marca_da_regiao}" in faturamento
     )
-    assert re.search(r'variable "banco_firestore" \{[^}]*default\s+= "mam"', main)
+    assert re.search(
+        r'variable "banco_firestore" \{[^}]*default\s+= "mam-principal"', main
+    )
 
 
 def test_os_outputs_que_o_wizard_le() -> None:
@@ -149,3 +151,18 @@ def test_os_bancos_novos_mantem_protecao_e_recuperacao() -> None:
             "delete_protection_state" in corpo and "DELETE_PROTECTION_ENABLED" in corpo
         )
         assert "POINT_IN_TIME_RECOVERY_ENABLED" in corpo
+
+
+def test_os_nomes_padrao_dos_bancos_passam_na_regra_do_firestore() -> None:
+    # A API recusa o ID com menos de 4 caracteres ("mam" derrubou o apply da troca em 10/11).
+    regra = re.compile(r"^[a-z][a-z0-9-]{2,61}[a-z0-9]$")
+    for arquivo in (
+        RAIZ / "infra" / "main.tf",
+        RAIZ / "infra" / "ambientes" / "prod" / "main.tf",
+        MODULO / "main.tf",
+    ):
+        padrao = re.search(
+            r'variable "banco_firestore" \{[^}]*default\s+= "([^"]+)"',
+            arquivo.read_text(),
+        )
+        assert padrao and regra.match(padrao.group(1)), arquivo
