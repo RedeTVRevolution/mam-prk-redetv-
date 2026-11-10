@@ -23,3 +23,4 @@ docs/design/referencia/
 comparacao-passadas/
 # Relatórios do make regressao (#254).
 regressao-da-versao/
+.migracao-us-east4/
