@@ -118,6 +118,14 @@ def _frase(*partes: str | None) -> str | None:
     return texto or None
 
 
+def _rotulo_canonico(canonico: str, sem_valor: str, original: str | None) -> str | None:
+    """O rótulo canônico para a descrição indexada; nada se não diz nada (`outro`,
+    `indefinido`) ou se repete o texto original."""
+    if canonico == sem_valor or canonico == (original or "").casefold():
+        return None
+    return canonico
+
+
 # A categoria como a tela a mostra (`web/src/painel.ts`), para a consulta em português casar.
 NOME_DA_CATEGORIA: dict[CategoriaDeObjeto, str] = {
     "roupa": "roupa",
@@ -216,6 +224,13 @@ def registros_da_decupagem(
                 pessoas=na_imagem(plano),
                 descricao=_frase(
                     plano.ambiente,
+                    _rotulo_canonico(plano.ambiente_canonico, "outro", plano.ambiente),
+                    plano.enquadramento,
+                    _rotulo_canonico(
+                        plano.enquadramento_canonico,
+                        "indefinido",
+                        plano.enquadramento,
+                    ),
                     plano.acao,
                     ", ".join(plano.objetos),
                     _inventario_em_texto(plano.inventario),

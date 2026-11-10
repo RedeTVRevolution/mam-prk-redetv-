@@ -205,7 +205,7 @@ export function inventarioDoVideo(
 ): { categoria: CategoriaDeObjeto; nome: string; objetos: ObjetoDoVideo[] }[] {
   const porChave = new Map<string, ObjetoDoVideo>()
   for (const p of planos) {
-    const plano = { id: p.id, ambiente: p.ambiente, inicio_ms: p.inicio_ms, fim_ms: p.fim_ms }
+    const plano = { id: p.id, ambiente: p.ambiente_canonico ?? p.ambiente, inicio_ms: p.inicio_ms, fim_ms: p.fim_ms }
     for (const o of p.inventario ?? []) {
       if (o.caixas.length === 0) continue
       const chave = [nomeNormalizado(o.nome), o.categoria, o.cor ?? ''].join('|')
@@ -362,9 +362,9 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
     itens.push({
       chave: `plano-${i}`,
       tipo: 'plano',
-      titulo: p.ambiente,
+      titulo: p.ambiente_canonico ?? p.ambiente,
       quadro: p.quadro ?? null,
-      linhas: p.acao ? [p.acao] : [],
+      linhas: [p.enquadramento_canonico, p.acao].filter((l): l is string => !!l && l !== 'indefinido'),
       selos: [],
       inicio_ms: p.inicio_ms,
       fim_ms: p.fim_ms,

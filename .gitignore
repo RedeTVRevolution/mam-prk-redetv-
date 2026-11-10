@@ -1,12 +1,12 @@
 .DS_Store
 .env
 .afk/
-.venv/
+.venv
 __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-node_modules/
+node_modules
 dist/
 .terraform/
 *.tfstate*
