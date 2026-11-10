@@ -302,6 +302,50 @@ def test_a_separacao_de_uma_pessoa_na_tela_impede_a_juncao_no_reprocessamento(
     assert [p.id for p in decupagens.gravada.pessoas] == ["pes01", "pes02"]
 
 
+def test_pessoa_renomeada_na_tela_nao_entra_na_juncao_do_reprocessamento(
+    tmp_path: Path,
+) -> None:
+    nao_identificado = json.dumps(
+        {
+            "resultado": "nao_identificado",
+            "nome": None,
+            "prova": None,
+            "tempo_da_prova": None,
+        }
+    )
+    chave = chave_da_pessoa(decupagem(DUAS_SEM_NOME).pessoas[1])
+    renomeacao = _separacao(chave, chave).model_copy(
+        update={
+            "tipo": "pessoa.renomear",
+            "item_id": "pes02",
+            "depois": "Maria Souza",
+            "antes": "",
+            "ancora": Ancora(
+                versao="v",
+                tipo_do_item="pessoa",
+                identidade=chave,
+                inicio_ms=0,
+                fim_ms=1,
+            ),
+        }
+    )
+
+    class Renomeacoes:
+        def listar(self, job_id: str) -> list[Correcao]:
+            return [renomeacao]
+
+    _, decupagens = identificar(
+        decupagem(DUAS_SEM_NOME),
+        nao_identificado,
+        nao_identificado,
+        tmp_path=tmp_path,
+        correcoes=Renomeacoes(),
+    )
+
+    assert decupagens.gravada is not None
+    assert [p.id for p in decupagens.gravada.pessoas] == ["pes01", "pes02"]
+
+
 def _separacao(separada: str, outra: str) -> Correcao:
     return Correcao(
         id="c1",

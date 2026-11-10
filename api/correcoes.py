@@ -1798,6 +1798,19 @@ def pares_proibidos(correcoes: Sequence[Correcao]) -> set[frozenset[str]]:
     return pares
 
 
+def pessoas_corrigidas(correcoes: Sequence[Correcao]) -> set[str]:
+    """As identidades (`chave_da_pessoa`) das pessoas com alguma Correção em vigor: a
+    junção automática do reprocessamento as deixa fora (#547)."""
+    estado = estado_das(list(correcoes))
+    return {
+        c.ancora.identidade
+        for c in correcoes
+        if c.ancora.tipo_do_item == "pessoa"
+        and c.tipo != "desfazer"
+        and estado.em_vigor(c.id)
+    }
+
+
 def _leva_os_objetos(
     resultado: dict[str, Any],
     pessoa: dict[str, Any],

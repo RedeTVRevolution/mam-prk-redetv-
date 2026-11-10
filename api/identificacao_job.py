@@ -21,7 +21,7 @@ from api import log_estruturado
 from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import rodar_etapa
-from api.correcoes import Correcao, pares_proibidos
+from api.correcoes import Correcao, pares_proibidos, pessoas_corrigidas
 from api.decupagem import Decupagem
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs
@@ -112,6 +112,9 @@ def executar(
         nova = juntar_sem_nome(
             nova,
             proibidos=pares_proibidos(correcoes.listar(job_id)) if correcoes else (),
+            corrigidas=pessoas_corrigidas(correcoes.listar(job_id))
+            if correcoes
+            else (),
             julgar=juiz_do_modelo(transporte, quadros_em=quadros_em, job_id=job_id),
         )
         decupagens.gravar_decupagem(job_id, nova.model_dump_json())

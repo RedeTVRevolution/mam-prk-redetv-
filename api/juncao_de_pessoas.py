@@ -155,9 +155,10 @@ def _proibida(a: Pessoa, b: Pessoa, proibidos: Collection[frozenset[str]]) -> bo
     return any(frozenset({x, y}) in proibidos for x in _chaves(a) for y in _chaves(b))
 
 
-def _candidata(p: Pessoa) -> bool:
+def _candidata(p: Pessoa, corrigidas: Collection[str] = ()) -> bool:
     return (
-        nao_identificado(p.nome)
+        not (_chaves(p) & set(corrigidas))
+        and nao_identificado(p.nome)
         and p.estado_do_nome is None
         and p.catalogo_id is None
         and p.origem != "revisao"
@@ -178,11 +179,13 @@ class _Aresta:
 
 
 def planejar(
-    decupagem: Decupagem, proibidos: Collection[frozenset[str]] = ()
+    decupagem: Decupagem,
+    proibidos: Collection[frozenset[str]] = (),
+    corrigidas: Collection[str] = (),
 ) -> tuple[list[Pessoa], list[_Aresta], list[_Aresta]]:
     """As candidatas, os pares que se unem sem perguntar e os da faixa ambígua."""
     candidatas = sorted(
-        (p for p in decupagem.pessoas if _candidata(p)), key=lambda p: p.id
+        (p for p in decupagem.pessoas if _candidata(p, corrigidas)), key=lambda p: p.id
     )
     diretas: list[_Aresta] = []
     duvidosas: list[_Aresta] = []
@@ -202,12 +205,15 @@ def juntar_sem_nome(
     decupagem: Decupagem,
     *,
     proibidos: Collection[frozenset[str]] = (),
+    corrigidas: Collection[str] = (),
     julgar: Juiz | None = None,
 ) -> Decupagem:
     """Une as pessoas sem nome que são a mesma. `proibidos` são pares de chaves
-    (`chave_da_pessoa`) que uma pessoa separou na tela; `julgar` decide a faixa
+    (`chave_da_pessoa`) que uma pessoa separou na tela; `corrigidas`, as chaves das
+    pessoas com Correção em vigor (renomeada, confirmada...): não se unem a ninguém, ou
+    o nome dado a uma se espalharia pela juntada; `julgar` decide a faixa
     ambígua (sem ele, ninguém nela é unido)."""
-    candidatas, arestas, duvidosas = planejar(decupagem, proibidos)
+    candidatas, arestas, duvidosas = planejar(decupagem, proibidos, corrigidas)
     if julgar is not None and duvidosas:
         perguntadas = duvidosas[:LIMITE_DE_PARES]
         vereditos = julgar([(e.a, e.b) for e in perguntadas])
