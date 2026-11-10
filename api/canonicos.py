@@ -12,6 +12,9 @@ from typing import Any
 from api.comparador import normalizar
 from api.decupagem import Ambiente, Enquadramento
 
+# Termos que só valem como palavra inteira ("media" não casa com "mediante").
+_PALAVRA_INTEIRA = {"media"}
+
 # Começos de palavra do texto normalizado (sem acento nem maiúscula) -> valor.
 _ENQUADRAMENTOS: list[tuple[tuple[str, ...], Enquadramento]] = [
     (
@@ -19,11 +22,14 @@ _ENQUADRAMENTOS: list[tuple[tuple[str, ...], Enquadramento]] = [
         "primeiríssimo plano",
     ),
     (("detalhe",), "detalhe"),
-    (("conjunto",), "plano de conjunto"),
+    (("conjunto", "corpo inteiro"), "plano de conjunto"),
     (("americano",), "plano americano"),
-    (("geral", "aberto", "panoramic", "wide"), "plano geral"),
-    (("medio", "medium"), "plano médio"),
-    (("primeiro plano", "close", "fechado", "proximo"), "primeiro plano"),
+    (("geral", "aberto", "amplo", "panoramic", "wide"), "plano geral"),
+    (("medio", "medium", "media"), "plano médio"),
+    (
+        ("primeiro plano", "close", "fechado", "proximo", "aproximado"),
+        "primeiro plano",
+    ),
 ]
 
 _AMBIENTES: list[tuple[tuple[str, ...], Ambiente]] = [
@@ -41,7 +47,20 @@ _AMBIENTES: list[tuple[tuple[str, ...], Ambiente]] = [
         ("escritorio", "empresa", "sala de reuniao", "delegacia", "tribunal"),
         "escritório",
     ),
-    (("loja", "mercado", "shopping", "restaurante", "comercio", "feira"), "comércio"),
+    (
+        (
+            "loja",
+            "mercado",
+            "supermercado",
+            "padaria",
+            "lanchonete",
+            "shopping",
+            "restaurante",
+            "comercio",
+            "feira",
+        ),
+        "comércio",
+    ),
     (
         ("casa", "residencia", "sala de estar", "cozinha", "quarto", "apartamento"),
         "residência",
@@ -54,6 +73,7 @@ _AMBIENTES: list[tuple[tuple[str, ...], Ambiente]] = [
         (
             "rua",
             "externa",
+            "externo",
             "exterior",
             "avenida",
             "praca",
@@ -66,13 +86,17 @@ _AMBIENTES: list[tuple[tuple[str, ...], Ambiente]] = [
 ]
 
 
+def _regex(termo: str) -> str:
+    return rf"\b{re.escape(termo)}" + (r"\b" if termo in _PALAVRA_INTEIRA else "")
+
+
 def _classificar[T](
     texto: str, regras: list[tuple[tuple[str, ...], T]], padrao: T
 ) -> T:
     normal = normalizar(texto)
     for trechos, valor in regras:
         # No começo de uma palavra: "rio" não casa com "criado".
-        if any(re.search(rf"\b{re.escape(t)}", normal) for t in trechos):
+        if any(re.search(_regex(t), normal) for t in trechos):
             return valor
     return padrao
 
