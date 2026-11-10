@@ -106,6 +106,8 @@ export const TIPOS_FORA_DESTE_TICKET = [
   'descartar',
   'aprovar',
   'recusar',
+  // O botão "Separar pessoa" (#547) ainda não está no painel; a API já aceita.
+  'pessoa.separar',
 ]
 
 const MOTIVOS: Record<string, string> = {
