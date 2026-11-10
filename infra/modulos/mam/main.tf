@@ -38,8 +38,13 @@ variable "regiao_da_busca" {
 # escrito no código: a API o recebe por FIRESTORE_BANCO e o Workflows pelo templatefile.
 variable "banco_firestore" {
   type        = string
-  default     = "mam"
+  default     = "mam-principal"
   description = "Nome do banco principal do Firestore."
+  # A API só aceita de 4 a 63 caracteres ("mam" foi recusado no apply da troca, 10/11).
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{2,61}[a-z0-9]$", var.banco_firestore))
+    error_message = "O ID do banco do Firestore tem de 4 a 63 caracteres: minúsculas, dígitos e hífen, começando por letra."
+  }
 }
 
 # Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Com a troca para us-east4

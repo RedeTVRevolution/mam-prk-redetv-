@@ -40,7 +40,7 @@ run "plano" {
     error_message = "Os datasets novos levam a região no nome."
   }
   assert {
-    condition     = output.banco_firestore == "mam" && output.banco_de_seguranca == "mam-seguranca-useast4"
+    condition     = output.banco_firestore == "mam-principal" && output.banco_de_seguranca == "mam-seguranca-useast4"
     error_message = "Os bancos do Firestore são nomeados."
   }
 }
