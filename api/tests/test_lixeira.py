@@ -1,6 +1,6 @@
 import re
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -149,7 +149,7 @@ def test_restaurado_tudo_volta() -> None:
 def test_o_job_guarda_quando_quem_e_por_que_e_a_lista_mostra_os_dias_ate_a_purga() -> (
     None
 ):
-    mundo = Mundo()
+    mundo = Mundo(_job(programa="TV Fama", data_exibicao=date(2026, 10, 21)))
     mundo.enviar(motivo="  duplicado ")
     mundo.agora = BASE + timedelta(days=4, hours=1)
 
@@ -163,6 +163,8 @@ def test_o_job_guarda_quando_quem_e_por_que_e_a_lista_mostra_os_dias_ate_a_purga
         "enviado_em": "2026-11-02T12:00:00Z",
         "motivo": "duplicado",
         "dias_ate_a_purga": 26,
+        "programa": "TV Fama",
+        "data_exibicao": "2026-10-21",
     }
 
 

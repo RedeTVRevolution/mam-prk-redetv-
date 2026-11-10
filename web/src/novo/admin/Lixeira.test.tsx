@@ -15,12 +15,14 @@ interface Item {
   enviado_em: string
   motivo: string
   dias_ate_a_purga: number
+  programa?: string | null
+  data_exibicao?: string | null
 }
 
 const ADMIN = { uid: 'u1', email: 'ana@redetv.com.br', papeis: ['administrador'], permissoes: ['decupagem.ver', 'lixeira.gerir'] }
 
 const itens = (): Item[] => [
-  { tipo: 'video', id: 'j1', nome: 'TV Fama 21/10/2026.mp4', enviado_por: 'ana@redetv.com.br', enviado_em: '2026-10-28T17:02:00Z', motivo: 'duplicado', dias_ate_a_purga: 26 },
+  { tipo: 'video', id: 'j1', nome: 'TV Fama 21/10/2026.mp4', enviado_por: 'ana@redetv.com.br', enviado_em: '2026-10-28T17:02:00Z', motivo: 'duplicado', dias_ate_a_purga: 26, programa: 'TV Fama', data_exibicao: '2026-10-21' },
   { tipo: 'pessoa', id: 'p1', nome: 'Sabrina S.', enviado_por: 'rui@redetv.com.br', enviado_em: '2026-10-27T12:40:00Z', motivo: 'fundida', dias_ate_a_purga: 1 },
   { tipo: 'marca', id: 'm1', nome: 'Marca Z', enviado_por: 'rui@redetv.com.br', enviado_em: '2026-10-20T12:40:00Z', motivo: 'errada', dias_ate_a_purga: 0 },
 ]
@@ -96,6 +98,17 @@ test('a tabela mostra item, tipo, quem, quando, a purga em palavras e o motivo',
   expect(within(await linhaDe('Sabrina')).getByText('em 1 dia')).toBeTruthy()
   expect(within(await linhaDe('Marca Z')).getByText('hoje')).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Lixeira' }).getAttribute('href')).toBe('/admin/lixeira')
+})
+
+test('a tabela mostra programa e data de exibição, com travessão quando não há', async () => {
+  await abrir()
+  const tabela = await screen.findByRole('table', { name: 'Lixeira' })
+  expect(within(tabela).getByRole('columnheader', { name: 'Programa' })).toBeTruthy()
+  expect(within(tabela).getByRole('columnheader', { name: 'Exibição' })).toBeTruthy()
+  const v = await linhaDe('TV Fama')
+  expect(within(v).getByText('TV Fama', { selector: 'td' })).toBeTruthy()
+  expect(within(v).getByText('21/10/2026')).toBeTruthy()
+  expect(within(await linhaDe('Sabrina')).getAllByText('—')).toHaveLength(2)
 })
 
 test('o filtro por tipo traz Tudo e os tipos que a API devolveu', async () => {

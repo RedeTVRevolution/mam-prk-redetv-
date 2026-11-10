@@ -279,9 +279,12 @@ def criar_rotas_dos_usuarios(
             raise HTTPException(
                 409, "Você não pode tirar de si mesmo o papel de Administrador"
             )
+        # Grava pelo guardado: o de emergência pode tirar um papel que a lista mantém.
+        if guardados is None or _em_ordem(guardados) != pedido.papeis:
+            papeis.salvar(uid, pedido.papeis)
+        # Audita só o que mudou de fato (os efetivos).
         if _em_ordem(antes) == _em_ordem(depois):
             return da_lista(conta)
-        papeis.salvar(uid, pedido.papeis)
         try:
             registrar(
                 pessoa, "papeis.alterados", conta, {"antes": antes, "depois": depois}

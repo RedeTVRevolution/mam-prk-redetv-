@@ -295,6 +295,33 @@ def test_admin_de_emergencia_pode_trocar_os_proprios_papeis_sem_o_administrador(
     assert mundo.papeis.obter(conta.uid) == ["curador"]
 
 
+def test_admin_de_emergencia_com_administrador_guardado_pode_tirar_o_guardado() -> None:
+    mundo = Mundo()
+    conta = mundo.contas.criar("emerg@redetv.com", "Emerg")
+    mundo.papeis.salvar(conta.uid, ["administrador"])
+    cliente = TestClient(
+        criar_app(
+            VerificadorFalso({"admin": Usuario(uid="adm", email="adm@redetv.com")}),
+            RepositorioEmMemoria(),
+            ArmazenamentoFalso(),
+            papeis=mundo.papeis,
+            admins_emergencia="emerg@redetv.com",
+            auditoria=mundo.auditoria,
+            contas=mundo.contas,
+        )
+    )
+
+    resposta = cliente.put(
+        f"{ROTA}/{conta.uid}/papeis", json={"papeis": []}, headers=ADMIN
+    )
+
+    assert resposta.status_code == 200
+    # Os efetivos não mudam (a lista de emergência o mantém), mas o guardado sai.
+    assert mundo.papeis.obter(conta.uid) == []
+    assert resposta.json()["papeis"] == ["administrador"]
+    assert mundo.registros() == []
+
+
 class AuditoriaQueFalha(RepositorioDeAuditoriaEmMemoria):
     def acrescentar(self, registro: RegistroDeAuditoria) -> None:
         raise RuntimeError("Firestore fora")

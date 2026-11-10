@@ -542,6 +542,31 @@ def test_a_soma_por_programa_bate_com_os_enviados_com_a_linha_sem_programa() -> 
     ) == (4, 1.5)
 
 
+def test_csv_de_videos_traz_a_quebra_por_programa_com_a_linha_sem_programa() -> None:
+    uso = [
+        *USO,
+        _uso(1, quem=BIA, enviados=4, concluidos=2, horas=1.5, segundos=100),
+    ]
+    mundo = Mundo(["diretoria"], ResumosEmMemoria(uso=uso))
+
+    linhas = list(csv.reader(io.StringIO(mundo.get("/videos", formato="csv").text)))
+
+    por_programa = [l for l in linhas[1:] if l[4]]
+    assert [(l[0], l[1], l[2], l[4], l[5]) for l in por_programa] == [
+        ("2026-11-01", "", "", "Fala", "1"),
+        ("2026-11-01", "", "", "Hoje", "2"),
+        ("2026-11-01", "", "", "Sem programa", "4"),
+        ("2026-11-03", "", "", "Hoje", "0"),
+    ]
+    assert por_programa[2][6:] == ["2", "0", "1.5", "100"]
+    # A soma da quebra bate com os enviados do relatório.
+    enviados = mundo.get("/videos").json()["total"]["enviados"]
+    assert sum(int(l[5]) for l in por_programa) == enviados
+    # Com filtro de usuário não há quebra por programa.
+    de_usuario = mundo.get("/videos", formato="csv", usuario="bia").text
+    assert "Sem programa" not in de_usuario
+
+
 def test_o_concluido_sem_tempo_fica_fora_do_tempo_medio() -> None:
     # O fim gravado antes de o evento trazer o tempo: 2 concluídos, só 1 com tempo.
     resumos = ResumosEmMemoria(
@@ -661,8 +686,9 @@ def test_csv_de_videos_e_de_buscas_e_a_base_do_filtro() -> None:
         "600",
     ]
     assert linhas[2][1:3] == ["sistema", "cms"]
-    # Os dois do dia 1 e o do dia 3; a linha só com login fica fora.
-    assert len(linhas) == 4
+    # Os dois do dia 1 e o do dia 3 (a linha só com login fica fora), mais a quebra por
+    # programa: Hoje e Fala no dia 1 e Hoje no dia 3.
+    assert len(linhas) == 7
 
     por_programa = list(
         csv.reader(

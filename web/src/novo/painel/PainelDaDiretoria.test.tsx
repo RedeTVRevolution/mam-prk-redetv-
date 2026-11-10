@@ -608,7 +608,8 @@ test("a aba Vídeos mostra os totais e as tabelas por dia, programa e usuário",
   expect(
     screen.getByText("Horas de vídeo concluídas").nextSibling?.textContent,
   ).toBe("3,5");
-  const programas = linhasDe(await tabela("Vídeos por programa"));
+  const tabelaDeProgramas = await tabela("Vídeos por programa");
+  const programas = linhasDe(tabelaDeProgramas);
   expect(programas[0][0]).toBe("TV Fama");
   // Sem tempo médio, um traço.
   expect(programas[0][5]).toBe("—");
@@ -618,13 +619,19 @@ test("a aba Vídeos mostra os totais e as tabelas por dia, programa e usuário",
   expect(
     screen.getByText(/um vídeo que falhou e depois concluiu aparece nas duas/),
   ).toBeTruthy();
-  expect(
-    screen.getAllByText("Tempo médio até concluir").length,
-  ).toBeGreaterThan(0);
+  const tabelaDeUsuarios = await tabela("Vídeos por usuário");
+  for (const t of [dias, tabelaDeProgramas, tabelaDeUsuarios]) {
+    const colunas = within(t)
+      .getAllByRole("columnheader")
+      .map((c) => c.textContent);
+    expect(colunas.slice(-1)).toEqual(["Tempo médio até concluir"]);
+    expect(colunas).toContain("Falhas");
+  }
+  expect(screen.queryByText("Tempo médio de processamento")).toBeNull();
   expect(
     screen.getByText(/com a espera na fila e as novas tentativas/),
   ).toBeTruthy();
-  const quem = linhasDe(await tabela("Vídeos por usuário"));
+  const quem = linhasDe(tabelaDeUsuarios);
   expect(quem.map((l) => l[0])).toEqual([
     "ana@redetv.com.br",
     "ingestao (sistema)",
