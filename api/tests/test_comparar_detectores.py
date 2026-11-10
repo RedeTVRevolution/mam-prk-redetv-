@@ -1,6 +1,8 @@
 """A medição dos detectores de corte contra cortes marcados à mão (#545)."""
 
-from api.comparar_detectores import Medida, medir
+from pathlib import Path
+
+from api.comparar_detectores import Medida, NaoInstalado, comparar, medir
 
 
 def test_precisao_e_cobertura_com_tolerancia() -> None:
@@ -16,6 +18,20 @@ def test_sem_detectar_nada_a_precisao_e_vazia_e_a_cobertura_zero() -> None:
     m = medir([], [1_000], tolerancia_ms=200)
 
     assert (m.precisao, m.cobertura) == (None, 0.0)
+
+
+def test_a_tabela_mostra_cada_detector_e_o_que_nao_esta_instalado() -> None:
+    def ausente(_: Path) -> list[int]:
+        raise NaoInstalado("scenedetect")
+
+    texto = comparar(
+        Path("v.mp4"),
+        [1_000, 5_000],
+        detectores={"bom": lambda _: [1_000, 5_000], "outro": ausente},
+    )
+
+    assert "bom" in texto and "100%" in texto
+    assert "outro" in texto and "não instalado" in texto
 
 
 def test_cada_corte_marcado_so_vale_uma_vez() -> None:
