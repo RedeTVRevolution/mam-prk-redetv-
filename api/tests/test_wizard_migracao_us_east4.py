@@ -249,3 +249,38 @@ def test_erro_de_permissao_na_contagem_para(tmp_path: Path) -> None:
     r = _bash(tmp_path, "contagem_do_bucket b", fake_gcloud=GCLOUD_SEM_PERMISSAO)
     assert r.returncode == 1
     assert "permission denied" in r.stderr
+
+
+def test_condicoes_do_banco_pega_o_titulo_antigo_e_ignora_o_banco_novo(
+    tmp_path: Path,
+) -> None:
+    # Na nuvem as condições de SP têm o título so-o-banco-default; o Terraform novo usa
+    # so-o-banco-principal. O filtro é pela expressão, e a remoção leva o título real.
+    def cond(titulo: str, banco: str) -> dict[str, str]:
+        return {
+            "title": titulo,
+            "expression": f'resource.name == "projects/p/databases/{banco}"',
+        }
+
+    politica = {
+        "bindings": [
+            {
+                "role": "roles/datastore.user",
+                "members": ["sa:a", "sa:b"],
+                "condition": cond("so-o-banco-default", "(default)"),
+            },
+            {
+                "role": "roles/datastore.user",
+                "members": ["sa:a"],
+                "condition": cond("so-o-banco-principal", "mam"),
+            },
+            {"role": "roles/viewer", "members": ["sa:a"]},
+        ]
+    }
+    r = _bash(tmp_path, "condicoes_do_banco p '(default)'", json.dumps(politica))
+    assert r.returncode == 0, r.stderr
+    exp = 'resource.name == "projects/p/databases/(default)"'
+    assert r.stdout.splitlines() == [
+        f"sa:a|roles/datastore.user|so-o-banco-default|{exp}",
+        f"sa:b|roles/datastore.user|so-o-banco-default|{exp}",
+    ]

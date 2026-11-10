@@ -286,6 +286,14 @@ contagem_do_bucket() {
 
 # ler_lista lê a entrada, uma linha por item, na variável global LISTA (sem linhas vazias).
 LISTA=()
+# Lê a política IAM do projeto na entrada e imprime "membro|papel|titulo|expressao" de cada condição
+# presa ao banco. Filtra pela expressão: o título na nuvem (so-o-banco-default) não é o do Terraform novo.
+condicoes_do_banco() { # PROJETO BANCO
+  jq -r --arg e "resource.name == \"projects/$1/databases/$2\"" \
+    '.bindings[] | select(.condition.expression == $e)
+     | .role as $r | .condition.title as $t | .condition.expression as $x | .members[] | "\(.)|\($r)|\($t)|\($x)"'
+}
+
 ler_lista() {
   local linha
   LISTA=()
@@ -452,6 +460,14 @@ passo_1() {
     || { warn "Fique na main, igual à origin/main, com o PR da troca já mesclado."; exit 1; }
   [[ -z "$(git status --porcelain)" ]] || { warn "A árvore do git tem mudanças; limpe antes."; exit 1; }
   printf '  %s✓%s main igual à origin/main\n' "$GREEN" "$RESET"
+  # O CD do merge lê GCP_REGION ao começar (a antiga). Se o plan dele rodasse depois do state rm do
+  # passo 2, criaria tudo de novo em $REGIAO_ANTIGA sem destruir nada, e o apply passaria.
+  local rodando
+  rodando=$(gh run list --workflow ci.yml --branch main --limit 20 --json status \
+    --jq '[.[] | select(.status != "completed")] | length') \
+    || { warn "Não consegui ler os runs do CI pelo gh (gh auth login)."; exit 1; }
+  (( rodando == 0 )) || { warn "$rodando run(s) do CI na main ainda correndo. Espere o publicar acabar (falhar no plan)."; exit 1; }
+  printf '  %s✓%s nenhum run do CI na main correndo\n' "$GREEN" "$RESET"
   # Execuções ainda correndo nos Workflows antigos.
   local ativos=0 w n
   for w in $(gcloud workflows list --location "$REGIAO_ANTIGA" --format='value(name.basename())'); do
@@ -790,25 +806,23 @@ passo_10() {
   ler_lista < <(datasets_da_regiao "$L")
   apagar_grupo "Datasets do BigQuery" apaga_dataset ${LISTA[@]+"${LISTA[@]}"}
 
-  # As condições antigas do IAM do projeto (title so-o-banco-principal) valem só para o banco principal
+  # As condições antigas do IAM do projeto (title so-o-banco-default; o novo é so-o-banco-principal) valem só para o banco principal
   # de SP. O state rm do passo 2 as soltou do Terraform e elas ficaram na nuvem. Só entram as que citam
   # o banco antigo: as sem condição e as do banco novo são as que o Terraform criou de novo.
   local principal_antigo politica
   # Sem banco antigo (passo repetido depois de apagá-lo) não sobra condição a tirar.
   principal_antigo=$(pares_de_bancos 2>/dev/null | awk '$1 == "principal" { print $2 }') || principal_antigo=""
   politica=$(gcloud projects get-iam-policy "$P" --format=json)
-  apaga_condicao() { # "membro|papel|expressao"
-    local membro papel expressao arq
-    IFS='|' read -r membro papel expressao <<<"$1"
+  apaga_condicao() { # "membro|papel|titulo|expressao"
+    local membro papel titulo expressao arq
+    IFS='|' read -r membro papel titulo expressao <<<"$1"
     arq=$(mktemp)
-    jq -n --arg e "$expressao" '{title: "so-o-banco-principal", expression: $e}' >"$arq"
+    jq -n --arg t "$titulo" --arg e "$expressao" '{title: $t, expression: $e}' >"$arq"
     gcloud projects remove-iam-policy-binding "$P" --member="$membro" --role="$papel" \
       --condition-from-file="$arq" >/dev/null
     rm -f "$arq"
   }
-  ler_lista < <(jq -r --arg e "resource.name == \"projects/$P/databases/$principal_antigo\"" \
-    '.bindings[] | select(.condition.title == "so-o-banco-principal" and .condition.expression == $e)
-     | .role as $r | .condition.expression as $x | .members[] | "\(.)|\($r)|\($x)"' <<<"$politica")
+  ler_lista < <(condicoes_do_banco "$P" "$principal_antigo" <<<"$politica")
   apagar_grupo "Condições antigas do IAM no banco principal de $L" apaga_condicao ${LISTA[@]+"${LISTA[@]}"}
 
   apaga_banco() {
