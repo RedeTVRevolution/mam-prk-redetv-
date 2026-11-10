@@ -323,3 +323,23 @@ def test_texto_na_tela_fica_com_a_janela_em_cujo_nucleo_comeca() -> None:
         (290_000, 295_000),
         (305_000, 306_000),
     ]
+
+
+def test_a_pessoa_sem_nome_guarda_a_janela_de_origem_e_a_com_nome_nao() -> None:
+    r0 = decupagem(
+        pessoas=[
+            pessoa("a", "Não identificado, blusa vermelha", [(10_000, 20_000)]),
+            pessoa("b", "Ana", [(30_000, 40_000)]),
+        ]
+    )
+    r1 = decupagem(
+        pessoas=[pessoa("a", "Não identificado, blusa vermelha", [(310_000, 320_000)])]
+    )
+
+    c = consolidar(VIDEO, [(J0, r0), (J1, r1)], [])
+
+    assert [(p.nome[:3], p.janela) for p in c.pessoas] == [
+        ("Não", 0),
+        ("Ana", None),
+        ("Não", 1),
+    ]

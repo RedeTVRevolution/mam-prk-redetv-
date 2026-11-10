@@ -27,6 +27,7 @@ import {
   type ItemDoPainel,
   gruposDePlanos,
   inventarioDoVideo,
+  resumoDasContagens,
   itensPorTipo,
   NAO_IDENTIFICADO,
   nomeNormalizado,
@@ -64,6 +65,9 @@ export interface AcoesDeCorrecao {
   corrigir: (i: ItemDoPainel) => void
   remover: (i: ItemDoPainel) => void
   acrescentar: (pessoa: string) => void
+  /** "Separar pessoa": só a que a junção automática formou (#547). */
+  pessoaJuntada: (pessoa: string) => boolean
+  separar: (pessoa: string) => void
   /** Juntar e dividir pautas (só no modo de revisão): marcar para juntar (M) e dividir no ponto do player (D). */
   pautas?: { marcada: (i: ItemDoPainel) => boolean; alternar: (i: ItemDoPainel) => void; dividir: (i: ItemDoPainel) => void }
   /** "Renomear em todos os vídeos" (Curador) e "Fundir com…": só para a pessoa do catálogo, e só se a permissão deixa. */
@@ -142,7 +146,9 @@ function linhasDaSecao(
       if (aberta) linhas.push(...o.ocorrencias.map((x) => item(x, true)))
     }
     for (const g of inventario) {
-      const objetos = g.objetos.filter((o) => casa(`${o.nome} ${o.cor ?? ''} ${o.marca ?? ''} ${g.nome}`, filtro))
+      const objetos = g.objetos.filter((o) =>
+        casa(`${o.nome} ${o.ocorrencias.map((x) => x.nome).join(' ')} ${o.cores.map((c) => c.valor).join(' ')} ${o.marcas.map((m) => m.valor).join(' ')} ${g.nome}`, filtro),
+      )
       if (objetos.length > 0) linhas.push({ tipo: 'categoria', chave: `categoria:${g.categoria}`, nome: g.nome })
       for (const o of objetos) {
         const chave = `inventario:${o.chave}`
@@ -765,7 +771,9 @@ function LinhaDoInventario({
   aoAlternar: () => void
 }) {
   const { objeto } = linha
-  const detalhes = [objeto.cor, objeto.marca].filter(Boolean).join(' · ')
+  // Um tipo reúne cores e marcas: com várias, "azul 5, branco 4" são os planos de cada uma (a visão não funde as ocorrências).
+  const valores = (c: typeof objeto.cores, limite = 3) => (c.length > 1 ? resumoDasContagens(c, limite) : (c[0]?.valor ?? ''))
+  const detalhes = [valores(objeto.cores), valores(objeto.marcas, 2)].filter(Boolean).join(' · ')
   const nome = detalhes ? `${objeto.nome} (${detalhes})` : objeto.nome
   const quantos = `${objeto.planos.length} ${objeto.planos.length === 1 ? 'plano' : 'planos'}`
   return (
@@ -1022,7 +1030,7 @@ function Detalhe({
   const rotuloDoTipo = SECOES.find((s) => s.tipo === tipo)?.rotulo ?? ''
   const marca = acoes?.marcas?.[item.chave]
   const edicao =
-    acoes?.edicao && (acoes.edicao.chave === item.chave || (item.pessoa && ['acrescentar', 'fundir', 'renomear'].some((m) => acoes.edicao?.chave === `${m}:${item.pessoa}`)))
+    acoes?.edicao && (acoes.edicao.chave === item.chave || (item.pessoa && ['acrescentar', 'separar', 'fundir', 'renomear'].some((m) => acoes.edicao?.chave === `${m}:${item.pessoa}`)))
       ? acoes.edicao
       : null
   const { dono } = item.objeto ?? {}
@@ -1107,6 +1115,11 @@ function Detalhe({
           {acoes && item.tipo === 'aparicao' && item.pessoa && (
             <Button type="button" variant="secondary" onClick={() => acoes.acrescentar(item.pessoa as string)}>
               <IconPlus size={16} stroke={1.75} aria-hidden /> {`Acrescentar aparição de ${item.titulo}`}
+            </Button>
+          )}
+          {item.tipo === 'aparicao' && item.pessoa && acoes?.pessoaJuntada(item.pessoa) && (
+            <Button type="button" variant="secondary" onClick={() => acoes.separar(item.pessoa as string)}>
+              Separar pessoa
             </Button>
           )}
           {item.tipo === 'aparicao' && item.pessoa && acoes?.renomear && acoes.pessoaDoCatalogo(item.pessoa) && edicao?.chave !== `renomear:${item.pessoa}` && (

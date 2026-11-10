@@ -9,6 +9,7 @@ termina bem, para o Workflows seguir.
 
 import logging
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -20,14 +21,17 @@ from api import log_estruturado
 from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import rodar_etapa
+from api.correcoes import Correcao, pares_proibidos
 from api.decupagem import Decupagem
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs
+from api.juncao_de_pessoas import juiz_do_modelo, juntar_sem_nome
 from api.modelo_forte import LIMITE_DE_PESSOAS, olhar_pessoas_sem_nome
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
     ProgramasFirestore,
+    RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
     TranscricoesStorage,
 )
@@ -46,6 +50,10 @@ class DecupagensDaIdentificacao(Protocol):
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None: ...
 
 
+class CorrecoesDaIdentificacao(Protocol):
+    def listar(self, job_id: str) -> list[Correcao]: ...
+
+
 class TranscricoesDaIdentificacao(Protocol):
     def ler_transcricao(self, job_id: str) -> Transcricao | None: ...
 
@@ -61,6 +69,7 @@ def executar(
     *,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
     perfis: Perfis | None = None,
+    correcoes: CorrecoesDaIdentificacao | None = None,
 ) -> str:
     """Devolve `ignorado`, `sem_alteracao`, `incompleto` ou `identificado`.
 
@@ -77,11 +86,15 @@ def executar(
         if decupagem is None or not decupagens.baixar_copia_limpa(job_id, copia):
             return "sem_alteracao"
         falhas: list[Exception] = []
+
+        def quadros_em(instantes: Sequence[int]) -> list[bytes]:
+            return extrair_quadros(copia, instantes)
+
         try:
             nova = olhar_pessoas_sem_nome(
                 decupagem,
                 transporte=transporte,
-                quadros_em=lambda instantes: extrair_quadros(copia, instantes),
+                quadros_em=quadros_em,
                 job_id=job_id,
                 programa=job.programa,
                 perfis=perfis,
@@ -93,6 +106,14 @@ def executar(
         except (AnaliseFalhou, FalhaNosQuadros):
             # Sem o modelo forte a Decupagem fica como está.
             return "sem_alteracao"
+        # A junção das pessoas sem nome é o último passo, depois do modelo forte: assim
+        # uma pessoa nomeada por ele nunca absorve outra e o nome nunca se espalha. As
+        # separações que uma pessoa fez na tela ainda valem num reprocessamento (#547).
+        nova = juntar_sem_nome(
+            nova,
+            proibidos=pares_proibidos(correcoes.listar(job_id)) if correcoes else (),
+            julgar=juiz_do_modelo(transporte, quadros_em=quadros_em, job_id=job_id),
+        )
         decupagens.gravar_decupagem(job_id, nova.model_dump_json())
         return "incompleto" if falhas else "identificado"
 
@@ -120,6 +141,7 @@ def main() -> None:
         TranscricoesStorage(ClienteStorage(project=projeto), aceitos),
         catalogo,
         Path(os.environ["TMPDIR"]),
+        correcoes=RepositorioDeCorrecoesFirestore(cliente_do_firestore(projeto)),
         perfis=perfis_dos_programas(
             ProgramasFirestore(cliente_do_firestore(projeto)), catalogo
         ),

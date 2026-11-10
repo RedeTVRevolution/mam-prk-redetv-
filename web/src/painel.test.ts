@@ -6,6 +6,7 @@ import {
   deltaParaUmTerco,
   gruposDePlanos,
   inventarioDoVideo,
+  resumoDasContagens,
   itensDoPainel,
   itensDaAba,
   objetosDaAba,
@@ -13,7 +14,7 @@ import {
   vizinhoNoPainel,
 } from './painel.ts'
 import { faixasDoVisualizador } from './linhaDoTempo.ts'
-import type { Decupagem } from './decupagem.ts'
+import type { CorBase, Decupagem } from './decupagem.ts'
 
 const D: Decupagem = {
   pautas: [
@@ -285,10 +286,11 @@ test('o inventário do vídeo junta o mesmo objeto de vários planos e guarda os
       { ambiente: 'varanda', inicio_ms: 9_000, fim_ms: 12_000 },
     ],
   })
-  expect(utensilio.objetos.map((o) => [o.nome, o.cor, o.planos.length])).toEqual([
-    ['caneca', 'branco', 2],
-    ['caneca', 'azul', 1],
+  // A cor é atributo: a caneca branca e a azul são um item só, com a contagem por cor.
+  expect(utensilio.objetos.map((o) => [o.nome, o.planos.length, o.cores])).toEqual([
+    ['caneca', 2, [{ valor: 'branco', planos: 2 }, { valor: 'azul', planos: 1 }]],
   ])
+  expect(utensilio.objetos[0].ocorrencias.map((x) => x.cor)).toEqual(['branco', 'branco', 'azul'])
   // A caixa que o player mostra é a maior de todas as ocorrências.
   expect(utensilio.objetos[0].caixa.quadro).toBe('q-c.jpg')
 })
@@ -377,4 +379,51 @@ test('os grupos de planos recorrentes mostram o nome, a contagem e o tempo total
   ])
   const itens = itensDoPainel({ ...D, planos }).filter((i) => i.tipo === 'plano')
   expect(itens.map((i) => i.grupo)).toEqual(['rec02', 'rec01', 'rec01', 'rec02', 'rec01', undefined])
+
+const item = (nome: string, tipo_canonico: string | undefined, cor: CorBase | null, marca: string | null = null) => ({
+  nome,
+  tipo_canonico,
+  categoria: 'roupa' as const,
+  cor,
+  marca,
+  caixas: [caixa('q.jpg', 0.1)],
+  destaque: 1 as const,
+})
+const planoCom = (id: string, ...inventario: ReturnType<typeof item>[]) => ({
+  id, ambiente: 'x', inicio_ms: 0, fim_ms: 1, inventario,
+})
+
+test('o inventário do vídeo agrupa por tipo canônico e conta os planos por cor e marca', () => {
+  const [roupa] = inventarioDoVideo([
+    planoCom('a', item('camiseta', 'camisa', 'azul', 'Nike'), item('blusa', 'camisa', 'branco')),
+    planoCom('b', item('camisa', 'camisa', 'azul')),
+    planoCom('c', item('Camiseta polo', 'camisa', 'azul', 'Nike')),
+  ])
+
+  expect(roupa.objetos).toHaveLength(1)
+  const [camisa] = roupa.objetos
+  expect(camisa).toMatchObject({ tipo: 'camisa', nome: 'camisa' })
+  expect(camisa.planos).toHaveLength(3)
+  expect(camisa.cores).toEqual([{ valor: 'azul', planos: 3 }, { valor: 'branco', planos: 1 }])
+  expect(camisa.marcas).toEqual([{ valor: 'Nike', planos: 2 }])
+  expect(resumoDasContagens(camisa.cores)).toBe('azul 3, branco 1')
+  // Cada ocorrência segue com o texto bruto, a cor e a marca que tinha.
+  expect(camisa.ocorrencias.map((o) => [o.nome, o.cor, o.marca ?? null])).toEqual([
+    ['camiseta', 'azul', 'Nike'],
+    ['blusa', 'branco', null],
+    ['camisa', 'azul', null],
+    ['Camiseta polo', 'azul', 'Nike'],
+  ])
+})
+
+test('dois nomes desconhecidos diferentes continuam separados, e o plural e a cor no nome juntam o mesmo', () => {
+  const [roupa] = inventarioDoVideo([
+    planoCom('a', item('xablau raro', 'outro', null), item('coisa estranha', undefined, null)),
+    planoCom('b', item('Xablau Raros', undefined, null), item('xablau raro vermelho', undefined, 'vermelho')),
+  ])
+
+  expect(roupa.objetos.map((o) => [o.nome, o.tipo, o.planos.length])).toEqual([
+    ['xablau raro', null, 2],
+    ['coisa estranha', null, 1],
+  ])
 })

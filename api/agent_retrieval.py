@@ -32,6 +32,7 @@ from api.busca import _intercalar
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.orcamento_de_escrita import Orcamento
+from api.tipo_do_objeto import termos_do_tipo
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +70,10 @@ CAMPO_DO_TEXTO_DA_BUSCA = "texto_da_busca"
 # O que `_registro` lê de cada resultado: os campos do Registro. `significado` e
 # `texto_da_busca` só servem à indexação e ficam de fora para a consulta trazer menos
 # bytes.
-CAMPOS_DO_REGISTRO = [campo.name for campo in fields(Registro)]
+# `tipo_canonico` não é campo do índice (#544): só entra nas palavras do texto da busca.
+CAMPOS_DO_REGISTRO = [
+    campo.name for campo in fields(Registro) if campo.name != "tipo_canonico"
+]
 CAMPOS_DE_TEXTO = [CAMPO_DO_TEXTO_DA_BUSCA]
 # Declarados nos índices na criação: são eles que filtram junto com a busca.
 CAMPOS_DE_FILTRO = [
@@ -585,9 +589,10 @@ def _dados(r: Registro) -> dict[str, Any]:
         "sistema": r.sistema,
     }
     # O que a tela mostra fica em `texto` e `descricao`; esta é só para o `textSearch`.
+    termos = termos_do_tipo(r.tipo_canonico)  # o tipo e os sinônimos (#544)
     if r.texto or r.descricao:
         opcionais[CAMPO_DO_TEXTO_DA_BUSCA] = normalizar(
-            " ".join(p for p in (r.texto, r.descricao) if p)
+            " ".join(p for p in (r.texto, r.descricao, termos) if p)
         )
     return dados | {k: v for k, v in opcionais.items() if v is not None}
 

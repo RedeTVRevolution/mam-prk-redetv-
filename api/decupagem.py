@@ -13,6 +13,8 @@ from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from api.taxonomia_de_objetos import OPCOES_DE_TIPO, OUTRO
+
 VersaoEsquema = Literal["1.2", "1.3", "1.4", "1.5"]
 VERSAO_ESQUEMA: VersaoEsquema = "1.5"  # o mypy cobra se o tipo mudar sozinho
 
@@ -116,6 +118,24 @@ FONTES_ANTIGAS = frozenset({"contexto"})
 EstadoDoNome = Literal["confirmado", "palpite"]
 
 
+class OrigemDaJuncao(_Estrito):
+    """Uma das pessoas "não identificado" que a junção (#547) uniu numa só.
+
+    Guarda o que a separação (`pessoa.separar`) precisa para devolvê-la: as
+    aparições, as pautas e os objetos que eram dela. O servidor grava; o modelo
+    não conhece.
+    """
+
+    id: Id
+    chave: Texto  # a identidade da pessoa de origem: descrição@início-fim
+    nome: Rotulo
+    janela: int | None = None
+    motivo: Rotulo | None = None  # por que se uniu à base; vazio na própria base
+    na_imagem: list[Aparicao] = []
+    pautas: list[Id] = []
+    objetos: list[Id] = []
+
+
 class Pessoa(_Estrito):
     id: Id
     nome: Rotulo = Field(
@@ -133,6 +153,12 @@ class Pessoa(_Estrito):
     estado_do_nome: EstadoDoNome | None = None
     # A pessoa do catálogo (#108); o servidor grava, o modelo não conhece.
     catalogo_id: Id | None = None
+    # A janela da análise de onde a pessoa sem nome veio; o servidor grava na
+    # consolidação (#547). Sem ela (Decupagem antiga, janela única), duas pessoas
+    # contam como da mesma janela.
+    janela: int | None = None
+    # As pessoas que a junção uniu nesta; vazia se ninguém foi unido.
+    origens: list[OrigemDaJuncao] = []
     na_imagem: list[Aparicao] = Field(
         description="Aparições: a pessoa visível na imagem. Foto num gráfico, logo "
         "ou QR code não é aparição."
@@ -198,6 +224,20 @@ CORES_BASE = get_args(CorBase)
 RELACOES_DO_OBJETO = get_args(RelacaoDoObjeto)
 
 
+# O tipo canônico do objeto (#544), de uma lista fechada (`api/taxonomia_de_objetos.json`). O
+# esquema do modelo leva o enum; a leitura aceita qualquer texto, para uma lista que mude depois
+# não derrubar uma Decupagem já gravada: o que não está na lista vale `outro`.
+TipoCanonico = Annotated[
+    str,
+    Field(
+        max_length=100,
+        json_schema_extra={"enum": OPCOES_DE_TIPO},
+        description="O tipo da lista que melhor descreve o objeto, ao lado do nome "
+        "livre; `outro` só quando nenhum servir.",
+    ),
+]
+
+
 class Objeto(_Estrito):
     id: Id
     categoria: CategoriaDeObjeto = Field(
@@ -230,6 +270,7 @@ class Objeto(_Estrito):
         min_length=1, description="Intervalos em que o objeto está visível."
     )
     quadro: str | None = None  # o JPEG da primeira ocorrência (#115)
+    tipo_canonico: TipoCanonico = OUTRO
 
     @model_validator(mode="after")
     def _dono_e_relacao_juntos(self) -> Self:
@@ -259,6 +300,7 @@ class ObjetoDoInventario(_Estrito):
     cor: CorBase | None = None
     marca: Rotulo | None = None
     caixas: list[CaixaDoQuadro] = Field(min_length=1)
+    tipo_canonico: TipoCanonico = OUTRO
     # De 1 a 3, calculado pelo servidor a partir da maior caixa (`api/inventario.py`).
     destaque: int = Field(ge=1, le=3)
 
@@ -513,6 +555,8 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "origem",
         "estado_do_nome",
         "catalogo_id",
+        "janela",
+        "origens",
         "quadro",
         "quadros",
         "texto_original",
@@ -576,6 +620,7 @@ def esquema_do_modelo() -> dict[str, Any]:
     lista vazia), para o modelo não pular nenhum."""
     esquema = Decupagem.model_json_schema()
     del esquema["$defs"]["Video"], esquema["$defs"]["CorrecaoDescartada"]
+    del esquema["$defs"]["OrigemDaJuncao"]
     # O inventário é do servidor: as definições dele saem junto com o campo.
     for nome in ("CaixaDoQuadro", "ObjetoDoInventario", "GeradorDoInventario"):
         del esquema["$defs"][nome]

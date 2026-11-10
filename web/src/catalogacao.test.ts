@@ -5,6 +5,7 @@ import type { CatalogoDeCorrecoes } from './catalogo.ts'
 import {
   aindaIndexando,
   editorDeNovaAparicao,
+  editorDeSeparacao,
   editorDoItem,
   marcasDosItens,
   motivoDaRemocao,
@@ -186,6 +187,7 @@ test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os da
   caminhos.add('objeto.nao_existe')
   caminhos.add('desfazer')
   for (const t of editorDeNovaAparicao(D.pessoas[0], 0, catalogo).tiposPossiveis) caminhos.add(t)
+  for (const t of editorDeSeparacao(JUNTADA).tiposPossiveis) caminhos.add(t)
 
   const trecho = { inicio_ms: 0, fim_ms: 1_000 }
   for (const aba of ABAS_DO_TRECHO)
@@ -287,6 +289,31 @@ test('as alças mandam nos tempos, com os décimos, no lugar dos campos', () => 
 test('plano e fala não têm tempos para as alças', () => {
   expect(editor('plano-0')!.intervalo).toBeUndefined()
   expect(editor('fala-0')!.intervalo).toBeUndefined()
+})
+
+const JUNTADA = {
+  id: 'p9',
+  nome: 'Não identificado, blusa vermelha',
+  na_imagem: [],
+  citada_na_fala: [],
+  citada_no_texto: [],
+  origens: [
+    { id: 'pes01', chave: 'nao identificado, blusa vermelha@10000-20000', nome: 'Não identificado, blusa vermelha', janela: 0, motivo: null, na_imagem: [] },
+    { id: 'pes02', chave: 'nao identificado, blusa vermelha@40000-50000', nome: 'Não identificado, blusa vermelha, calvo', janela: 1, motivo: 'modelo forte: sim (0.62)', na_imagem: [] },
+  ],
+}
+
+test('separar pessoa lista cada origem com o motivo da junção e pede a separação da escolhida', () => {
+  const e = editorDeSeparacao(JUNTADA)
+
+  expect(e.campos[0].opcoes?.map((o) => o.rotulo)).toEqual([
+    'Não identificado, blusa vermelha (00:10–00:20), a base da junção',
+    'Não identificado, blusa vermelha, calvo (00:40–00:50), modelo forte: sim (0.62)',
+  ])
+  expect(e.pedidos({ origem: JUNTADA.origens[1].chave })).toEqual([
+    { tipo: 'pessoa.separar', item_id: 'p9', valor: JUNTADA.origens[1].chave },
+  ])
+  expect(e.pedidos({ origem: '' })).toBeNull()
 })
 
 test('acrescentar aparição pede tempos e evidência e vai para a pessoa', () => {

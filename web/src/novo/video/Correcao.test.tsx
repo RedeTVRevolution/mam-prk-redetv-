@@ -46,13 +46,14 @@ const consultas: string[] = []
 const criados: { nome: string }[] = []
 let historico: Record<string, unknown>[] = []
 let cargas = 0
+let decupagem: Record<string, unknown> = DECUPAGEM
 
 const servidor = setupServer(
   ...rotasDoVideo(
     () => ({ duracao_s: 120, cortes_ms: [] }),
     () => {
       cargas += 1
-      return DECUPAGEM
+      return decupagem
     },
   ),
   http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
@@ -78,6 +79,7 @@ beforeEach(() => {
   criados.length = 0
   historico = []
   cargas = 0
+  decupagem = DECUPAGEM
 })
 afterEach(() => {
   servidor.resetHandlers()
@@ -416,6 +418,58 @@ test('acrescentar aparição grava e cancela pelos botões', async () => {
   await waitFor(() => expect(correcoes).toHaveLength(1))
   expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.acrescentar_aparicao', item_id: 'p1' })
   expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({ evidencia: 'rosto' })
+})
+
+test('separar pessoa: mostra o motivo de cada origem e grava pessoa.separar', async () => {
+  const origem = (id: string, nome: string, inicio: number, motivo: string | null) => ({
+    id,
+    chave: `${nome.toLowerCase()}@${inicio}-${inicio + 10_000}`,
+    nome,
+    janela: 0,
+    motivo,
+    na_imagem: [],
+  })
+  decupagem = {
+    ...DECUPAGEM,
+    pessoas: [
+      ...DECUPAGEM.pessoas,
+      {
+        id: 'p2',
+        nome: 'Não identificado, blusa vermelha',
+        na_imagem: [
+          { inicio_ms: 70_000, fim_ms: 80_000, evidencia: 'visto' },
+          { inicio_ms: 90_000, fim_ms: 100_000, evidencia: 'visto' },
+        ],
+        citada_na_fala: [],
+        citada_no_texto: [],
+        origens: [
+          origem('pes02', 'Não identificado, blusa vermelha', 70_000, null),
+          origem('pes03', 'Não identificado, blusa vermelha, calvo', 90_000, 'modelo forte: sim (0.62)'),
+        ],
+      },
+    ],
+  }
+  const usuario = await abrirItem('Pessoas', /^não identificado.*01:10 a 01:20/i, /^não identificado/i)
+  await usuario.click(detalhe().getByRole('button', { name: 'Separar pessoa' }))
+  const formulario = await screen.findByRole('form', { name: 'Separar Não identificado, blusa vermelha' })
+  await usuario.click(within(formulario).getByRole('combobox', { name: 'Pessoa a separar' }))
+  expect(screen.getByRole('option', { name: /calvo \(01:30–01:40\), modelo forte: sim \(0.62\)/ })).toBeTruthy()
+  await usuario.click(screen.getByRole('option', { name: /calvo/ }))
+  await usuario.click(within(formulario).getByRole('button', { name: 'Salvar' }))
+
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+  expect(correcoes[0]).toMatchObject({
+    tipo: 'pessoa.separar',
+    item_id: 'p2',
+    valor: 'não identificado, blusa vermelha, calvo@90000-100000',
+    versao: 'v1',
+  })
+})
+
+test('separar pessoa não aparece na pessoa que a junção não formou', async () => {
+  await abrirAparicao()
+
+  expect(detalhe().queryByRole('button', { name: 'Separar pessoa' })).toBeNull()
 })
 
 test('as alças aparecem na faixa e movem os tempos de 0,1 s; Enter grava, Esc descarta', async () => {
