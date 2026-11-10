@@ -28,7 +28,6 @@ from api.entendimento_da_consulta import sanear
 from api.espera import sorteio_uniforme
 from api.gemini import (
     MODELO,
-    MODO_STANDARD,
     AnaliseFalhou,
     Chamada,
     Transporte,
@@ -399,7 +398,6 @@ def juiz_do_modelo(
                     esquema=esquema_da_resposta(),
                     rotulos={"job_id": job_id, "etapa": ETAPA},
                     imagens=tuple(quadros_em([_instante(por_id[i]) for i in pessoas])),
-                    modo=MODO_STANDARD,
                 ),
                 _validar,
                 dormir=dormir,

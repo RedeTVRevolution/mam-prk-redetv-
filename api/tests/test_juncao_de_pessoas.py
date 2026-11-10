@@ -329,6 +329,9 @@ def test_o_lote_vai_numa_chamada_com_um_quadro_de_cada_pessoa() -> None:
     assert chamada.imagens == (b"jpeg-105000", b"jpeg-405000")  # o meio da aparição
     assert chamada.rotulos == {"job_id": "job-1", "etapa": ETAPA}
     assert chamada.video_uri == ""
+    assert (
+        chamada.modo == "flex"
+    )  # só a busca e a identificação pedem Standard (ADR 0004)
     assert "<descricao>" in chamada.texto
 
 

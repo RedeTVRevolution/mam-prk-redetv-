@@ -44,7 +44,7 @@ def manifesto() -> dict[str, Any]:
             "analise": gemini.MODO_FLEX,
             "inventario": gemini.MODO_FLEX,
             "modelo_forte": gemini.MODO_STANDARD,
-            "juncao_de_pessoas": gemini.MODO_STANDARD,
+            "juncao_de_pessoas": gemini.MODO_FLEX,
         },
         "instrucoes": {
             "analise": _hash(gemini.INSTRUCAO),
