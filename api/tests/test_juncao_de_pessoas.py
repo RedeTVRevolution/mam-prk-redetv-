@@ -1,24 +1,41 @@
 """Junção das pessoas sem nome entre as janelas (#547)."""
 
+import json
 from collections import Counter
 from collections.abc import Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from api import identificacao_job
+from api.analise_por_janelas import analisar_video
+from api.catalogo import CatalogoEmMemoria
 from api.decupagem import Decupagem, Pessoa
 from api.gemini import ErroHttp
+from api.jobs import Job, RepositorioEmMemoria
 from api.juncao_de_pessoas import (
     ETAPA,
+    Veredito,
     chave_da_pessoa,
     juiz_do_modelo,
     juntar_sem_nome,
 )
 from api.quadros import FalhaNosQuadros
+from api.tests.test_analise_por_janelas import (
+    URI,
+    VIDEO,
+    ModeloFalso,
+    intervalo,
+    resposta,
+)
 from api.tests.test_gemini import TransporteFalso
 
 NAO = "Não identificado, "
+BASE = datetime(2026, 11, 10, tzinfo=UTC)
 
 
 def pessoa(
@@ -120,9 +137,7 @@ def test_mesma_janela_com_aparicoes_sobrepostas_nunca_se_junta_nem_por_transitiv
 
     # A pes03 se une a uma delas, nunca às duas.
     assert len(r.pessoas) == 2
-    assert not any(
-        {"pes01", "pes02"} <= {o.id for o in p.origens} for p in r.pessoas
-    )
+    assert not any({"pes01", "pes02"} <= {o.id for o in p.origens} for p in r.pessoas)
 
 
 def test_sobreposicao_entre_janelas_diferentes_nao_proibe_nada() -> None:
@@ -188,7 +203,9 @@ def test_pares_proibidos_por_uma_pessoa_na_tela_sao_respeitados() -> None:
     assert ids(r) == ["pes01", "pes02"]
 
 
-def test_pautas_e_donos_de_objetos_vao_para_a_pessoa_juntada_e_a_origem_lembra() -> None:
+def test_pautas_e_donos_de_objetos_vao_para_a_pessoa_juntada_e_a_origem_lembra() -> (
+    None
+):
     d = decupagem(
         [
             pessoa("pes01", 0, [(100_000, 110_000)]),
@@ -273,7 +290,7 @@ def test_o_juiz_nao_e_chamado_para_o_que_ja_se_decide() -> None:
         ]
     )
 
-    def julgar(pares: Sequence[tuple[Pessoa, Pessoa]]) -> list[str]:
+    def julgar(pares: Sequence[tuple[Pessoa, Pessoa]]) -> list[Veredito]:
         raise AssertionError("não devia perguntar")
 
     assert len(juntar_sem_nome(d, julgar=julgar).pessoas) == 1
@@ -333,10 +350,131 @@ def test_resposta_do_modelo_fora_do_esquema_ou_falha_deixa_tudo_separado() -> No
 def test_par_nao_respondido_ou_numero_de_par_que_nao_existe_nao_junta() -> None:
     d = _par_ambiguo()
     sem_resposta = TransporteFalso('{"respostas": []}')
-    inexistente = TransporteFalso(*['{"respostas": [{"par": 9, "resposta": "sim"}]}'] * 5)
+    inexistente = TransporteFalso(
+        *['{"respostas": [{"par": 9, "resposta": "sim"}]}'] * 5
+    )
 
     assert len(juntar_sem_nome(d, julgar=_juiz(sem_resposta)).pessoas) == 2
     assert len(juntar_sem_nome(d, julgar=_juiz(inexistente)).pessoas) == 2
+
+
+# ---- fluxo completo: da análise por janelas à Decupagem gravada -----------------
+
+
+def _janela_com_a_pessoa(inicio_ctx: int, fim_ctx: int) -> str:
+    """O modelo falso: só as janelas 0 e 1 veem a mesma pessoa sem nome."""
+    base = json.loads(resposta())
+    if inicio_ctx == 0:
+        quando, pauta = (100_000, 110_000), (60_000, 200_000)
+    elif inicio_ctx == 290_000:
+        quando, pauta = (400_000, 410_000), (350_000, 450_000)
+    else:
+        return json.dumps(base)
+    base["pessoas"] = [
+        {
+            "id": "p1",
+            "nome": "Não identificado, blusa vermelha",
+            "fontes_do_nome": [],
+            "na_imagem": [
+                {
+                    **intervalo(*quando),
+                    "evidencia": "visto",
+                    "papel": "apresentador",
+                    "visual": "blusa vermelha",
+                }
+            ],
+            "citada_na_fala": [],
+            "citada_no_texto": [],
+        }
+    ]
+    base["pautas"] = [
+        {
+            "id": "a",
+            "titulo": "Tema",
+            "resumo": "resumo",
+            "pessoas": ["p1"],
+            "locais": [],
+            **intervalo(*pauta),
+        }
+    ]
+    return json.dumps(base)
+
+
+class _Decupagens:
+    def __init__(self, atual: Decupagem) -> None:
+        self.atual = atual
+        self.gravada: Decupagem | None = None
+
+    def ler_decupagem(self, job_id: str) -> Decupagem:
+        return self.atual
+
+    def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
+        return True
+
+    def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
+        self.gravada = Decupagem.model_validate_json(conteudo)
+
+
+class _Transcricoes:
+    def ler_transcricao(self, job_id: str) -> None:
+        return None
+
+
+def test_fluxo_completo_varias_janelas_ate_a_decupagem_gravada(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        identificacao_job, "extrair_quadros", lambda video, ms: [b"jpeg"] * len(ms)
+    )
+    modelo = ModeloFalso(_janela_com_a_pessoa)
+    consolidada = analisar_video(
+        modelo, video_uri=URI, job_id="job-1", video=VIDEO, dormir=lambda _s: None
+    )
+    # Depois da análise: duas pessoas sem nome, cada uma com a janela de origem.
+    assert [(p.nome[:3], p.janela) for p in consolidada.pessoas] == [
+        ("Não", 0),
+        ("Não", 1),
+    ]
+    repo = RepositorioEmMemoria()
+    repo.salvar(
+        Job(
+            id="job-1",
+            nome="a.mp4",
+            tamanho_bytes=10,
+            estado="concluido",
+            criado_por="u",
+            criado_em=BASE,
+            atualizado_em=BASE,
+        )
+    )
+    decupagens = _Decupagens(consolidada)
+    sem_resposta = TransporteFalso(
+        json.dumps(
+            {
+                "resultado": "nao_identificado",
+                "nome": None,
+                "prova": None,
+                "tempo_da_prova": None,
+            }
+        )
+    )
+
+    resultado = identificacao_job.executar(
+        "job-1",
+        repo,
+        decupagens,
+        sem_resposta,
+        _Transcricoes(),
+        CatalogoEmMemoria(),
+        tmp_path,
+    )
+
+    assert resultado == "identificado"
+    assert decupagens.gravada is not None
+    [p] = decupagens.gravada.pessoas
+    assert [o.janela for o in p.origens] == [0, 1]
+    assert [len(x.pessoas) for x in decupagens.gravada.pautas] == [1, 1]
+    assert {i for x in decupagens.gravada.pautas for i in x.pessoas} == {p.id}
 
 
 # ---- propriedades -------------------------------------------------------------

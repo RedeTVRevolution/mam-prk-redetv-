@@ -1755,10 +1755,17 @@ def _separar(resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao) -> 
     ainda = {i for o in restantes for i in o["pautas"]}
     for pauta in _pautas(resultado):
         if pauta.get("id") in origem["pautas"]:
-            ids = [i for i in pauta.get("pessoas", []) if i != pessoa["id"] or pauta["id"] in ainda]
+            ids = [
+                i
+                for i in pauta.get("pessoas", [])
+                if i != pessoa["id"] or pauta["id"] in ainda
+            ]
             pauta["pessoas"] = list(dict.fromkeys([*ids, novo_id]))
     for objeto in _objetos(resultado):
-        if objeto.get("id") in origem["objetos"] and objeto.get("pessoa") == pessoa["id"]:
+        if (
+            objeto.get("id") in origem["objetos"]
+            and objeto.get("pessoa") == pessoa["id"]
+        ):
             objeto["pessoa"] = novo_id
     resultado.setdefault("_separadas", []).append((pessoa["id"], novo_id))
 
@@ -1962,7 +1969,9 @@ def _juntar_as_do_mesmo_nome(
     para: dict[Any, Any] = {}
     absorvidas: list[dict[str, Any]] = []
     separadas = {frozenset(par) for par in resultado.get("_separadas", [])}
-    for membros in (s for g in grupos.values() for s in _sem_separadas(g, separadas, renomeadas)):
+    for membros in (
+        s for g in grupos.values() for s in _sem_separadas(g, separadas, renomeadas)
+    ):
         if len(membros) < 2:
             continue
         base, *outras = membros

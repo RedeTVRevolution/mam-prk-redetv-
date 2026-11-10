@@ -20,7 +20,9 @@ def _aparicao(inicio: int, fim: int) -> dict[str, Any]:
     return {"inicio_ms": inicio, "fim_ms": fim, "evidencia": "visto", "papel": None}
 
 
-def _origem(id: str, chave: str, aparicao: dict[str, Any], **campos: Any) -> dict[str, Any]:
+def _origem(
+    id: str, chave: str, aparicao: dict[str, Any], **campos: Any
+) -> dict[str, Any]:
     return {
         "id": id,
         "chave": chave,

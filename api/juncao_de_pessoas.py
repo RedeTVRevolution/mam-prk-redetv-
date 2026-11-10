@@ -46,14 +46,33 @@ PESO_DO_TEMPO = 0.15
 HORIZONTE_DO_TEMPO_MS = 600_000
 LIMIAR_DE_JUNCAO = 0.85  # daqui para cima junta sem perguntar ao modelo
 LIMIAR_DA_DUVIDA = 0.55  # daqui até o de junção, o modelo decide
-LIMITE_DE_PARES = 20  # pares por vídeo na chamada ao modelo; os de menor pontuação ficam
+LIMITE_DE_PARES = (
+    20  # pares por vídeo na chamada ao modelo; os de menor pontuação ficam
+)
 MODELO_DA_JUNCAO = MODELO  # o modelo forte, o Flash-Lite (#539)
 ETAPA = "juncao_de_pessoas"  # o rótulo de custo da chamada
 MAXIMO_DO_DADO = 200
 
 Veredito = Literal["sim", "nao", "incerto"]
 Juiz = Callable[[Sequence[tuple[Pessoa, Pessoa]]], Sequence[Veredito]]
-_SEM_PALAVRA = frozenset("de da do das dos e com um uma o a em na no".split())
+_SEM_PALAVRA = frozenset(
+    [
+        "de",
+        "da",
+        "do",
+        "das",
+        "dos",
+        "e",
+        "com",
+        "um",
+        "uma",
+        "o",
+        "a",
+        "em",
+        "na",
+        "no",
+    ]
+)
 
 
 def chave_da_pessoa(pessoa: Pessoa) -> str:
@@ -159,6 +178,27 @@ class _Aresta:
         return (-self.pontuacao, self.a.id, self.b.id)
 
 
+def planejar(
+    decupagem: Decupagem, proibidos: Collection[frozenset[str]] = ()
+) -> tuple[list[Pessoa], list[_Aresta], list[_Aresta]]:
+    """As candidatas, os pares que se unem sem perguntar e os da faixa ambígua."""
+    candidatas = sorted(
+        (p for p in decupagem.pessoas if _candidata(p)), key=lambda p: p.id
+    )
+    diretas: list[_Aresta] = []
+    duvidosas: list[_Aresta] = []
+    for i, a in enumerate(candidatas):
+        for b in candidatas[i + 1 :]:
+            if not _compativeis(a, b) or _proibida(a, b, proibidos):
+                continue
+            nota = pontuar(a, b)
+            if nota >= LIMIAR_DE_JUNCAO:
+                diretas.append(_Aresta(nota, a, b, f"descrição parecida ({nota:.2f})"))
+            elif nota >= LIMIAR_DA_DUVIDA:
+                duvidosas.append(_Aresta(nota, a, b, f"modelo forte: sim ({nota:.2f})"))
+    return candidatas, diretas, sorted(duvidosas, key=lambda e: e.ordem)
+
+
 def juntar_sem_nome(
     decupagem: Decupagem,
     *,
@@ -168,22 +208,8 @@ def juntar_sem_nome(
     """Une as pessoas sem nome que são a mesma. `proibidos` são pares de chaves
     (`chave_da_pessoa`) que uma pessoa separou na tela; `julgar` decide a faixa
     ambígua (sem ele, ninguém nela é unido)."""
-    candidatas = sorted(
-        (p for p in decupagem.pessoas if _candidata(p)), key=lambda p: p.id
-    )
-    arestas: list[_Aresta] = []
-    duvidosas: list[_Aresta] = []
-    for i, a in enumerate(candidatas):
-        for b in candidatas[i + 1 :]:
-            if not _compativeis(a, b) or _proibida(a, b, proibidos):
-                continue
-            nota = pontuar(a, b)
-            if nota >= LIMIAR_DE_JUNCAO:
-                arestas.append(_Aresta(nota, a, b, f"descrição parecida ({nota:.2f})"))
-            elif nota >= LIMIAR_DA_DUVIDA:
-                duvidosas.append(_Aresta(nota, a, b, f"modelo forte: sim ({nota:.2f})"))
+    candidatas, arestas, duvidosas = planejar(decupagem, proibidos)
     if julgar is not None and duvidosas:
-        duvidosas.sort(key=lambda e: e.ordem)
         perguntadas = duvidosas[:LIMITE_DE_PARES]
         vereditos = julgar([(e.a, e.b) for e in perguntadas])
         arestas += [
