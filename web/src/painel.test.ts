@@ -335,3 +335,18 @@ test('o inventário do vídeo conta o plano uma vez, leva ao plano da maior caix
   expect(cadeiras.caixa.quadro).toBe('q-b.jpg')
   expect(cadeiras.planoDaCaixa.id).toBe('b')
 })
+
+test('o plano mostra o ambiente e o enquadramento canônicos, e o texto original na decupagem antiga', () => {
+  const d: Decupagem = {
+    ...D,
+    planos: [
+      { id: 'a', ambiente: 'Estúdio de TV', ambiente_canonico: 'estúdio', enquadramento: 'Close-up', enquadramento_canonico: 'primeiro plano', inicio_ms: 0, fim_ms: 5_000 },
+      { id: 'b', ambiente: 'rua', enquadramento_canonico: 'indefinido', inicio_ms: 5_000, fim_ms: 9_000 },
+    ],
+  }
+
+  const [a, b] = itensDoPainel(d).filter((i) => i.tipo === 'plano')
+
+  expect([a.titulo, a.linhas]).toEqual(['estúdio', ['primeiro plano']])
+  expect([b.titulo, b.linhas]).toEqual(['rua', []])
+})
