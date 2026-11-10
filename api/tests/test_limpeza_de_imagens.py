@@ -28,7 +28,7 @@ SAIDA_DO_TERRAFORM = {
             "tag_da_volta": "volta",
         }
     },
-    "repositorio": {"value": "southamerica-east1-docker.pkg.dev/p/mam"},
+    "repositorio": {"value": "us-east4-docker.pkg.dev/p/mam"},
     "repositorio_gpu": {"value": REPO},
 }
 

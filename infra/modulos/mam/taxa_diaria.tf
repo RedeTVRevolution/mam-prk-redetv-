@@ -91,7 +91,7 @@ resource "google_cloud_run_v2_job" "taxa_diaria" {
         }
         env {
           name  = "BIGQUERY_REGIAO"
-          value = var.regiao_do_bigquery
+          value = var.regiao
         }
       }
     }

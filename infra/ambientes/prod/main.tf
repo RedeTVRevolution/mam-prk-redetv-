@@ -68,7 +68,7 @@ variable "janelas_em_paralelo" {
 
 variable "banco_firestore" {
   type        = string
-  default     = "(default)"
+  default     = "mam"
   description = "Nome do banco principal do Firestore (#536)."
 }
 
@@ -270,6 +270,18 @@ output "busca_distancia_maxima" {
 
 output "busca_palavras_minimas" {
   value = module.mam.busca_palavras_minimas
+}
+
+output "regiao" {
+  value = module.mam.regiao
+}
+
+output "buckets" {
+  value = module.mam.buckets
+}
+
+output "datasets_bigquery" {
+  value = module.mam.datasets_bigquery
 }
 
 output "banco_firestore" {

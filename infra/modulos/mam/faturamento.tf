@@ -5,9 +5,13 @@
 # `_iam_member`, que acrescenta. Um `_iam_policy`, um `_iam_binding` ou um bloco `access` aqui
 # apagaria esse acesso no deploy seguinte, e a exportação pararia calada. Recurso novo, sem
 # `moved`: nunca existiu fora do módulo.
+locals {
+  dataset_do_faturamento = "faturamento_${local.marca_da_regiao}"
+}
+
 resource "google_bigquery_dataset" "faturamento" {
-  dataset_id                 = "faturamento"
-  location                   = var.regiao_do_bigquery
+  dataset_id                 = local.dataset_do_faturamento
+  location                   = var.regiao
   delete_contents_on_destroy = false
   depends_on                 = [google_project_service.apis]
 }
