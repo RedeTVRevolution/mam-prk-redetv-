@@ -80,20 +80,17 @@ def _achados(indice: IndiceEmMemoria, texto: str, **filtros: Any) -> list[str]:
 
 
 @pytest.mark.parametrize("versao", ["1.2", "1.4", "1.5"])
-def test_quem_busca_o_tipo_acha_o_sinonimo_e_o_termo_exato_continua_achando(
-    versao: str,
-) -> None:
+def test_a_busca_casa_o_nome_bruto_sem_tipo_nem_sinonimo(versao: str) -> None:
     indice = _indice(versao)
 
-    assert _achados(indice, "sapato") == [
-        "j:inventario:pla001:0",
-        "j:inventario:pla001:1",
-    ]
-    # O termo exato continua achando o seu (e os do mesmo tipo: a busca é pelo tipo).
-    assert "j:inventario:pla001:0" in _achados(indice, "mocassim")
-    # O objeto da análise também: "camisa" acha camiseta e blusa.
-    assert _achados(indice, "camisa") == ["j:objeto:obj01:0", "j:objeto:obj02:0"]
-    assert "j:objeto:obj01:0" in _achados(indice, "camiseta")
+    # Decisão de 10/11/2026: "tênis" acha só tênis e "mocassim" só mocassim.
+    assert _achados(indice, "mocassim") == ["j:inventario:pla001:0"]
+    assert _achados(indice, "tênis") == ["j:inventario:pla001:1"]
+    # O tipo canônico e os sinônimos não entram no texto: nada de "sapato" nem "camisa".
+    assert _achados(indice, "sapato") == []
+    assert _achados(indice, "camisa") == []
+    assert _achados(indice, "camiseta") == ["j:objeto:obj01:0"]
+    assert _achados(indice, "blusa") == ["j:objeto:obj02:0"]
 
 
 @pytest.mark.parametrize("versao", ["1.2", "1.5"])
@@ -110,12 +107,12 @@ def test_mesmo_tipo_com_donos_e_cores_diferentes_nao_cruza_os_atributos() -> Non
     indice = _indice()
 
     # Dono da camiseta azul (cat1) com a cor da blusa vermelha: nada.
-    assert _achados(indice, "camisa", dono="cat1", cor_base="vermelho") == []
-    assert _achados(indice, "camisa", dono="cat2", cor_base="azul") == []
-    assert _achados(indice, "camisa", dono="cat1", cor_base="azul") == [
+    assert _achados(indice, "camiseta", dono="cat1", cor_base="vermelho") == []
+    assert _achados(indice, "blusa", dono="cat2", cor_base="azul") == []
+    assert _achados(indice, "camiseta", dono="cat1", cor_base="azul") == [
         "j:objeto:obj01:0"
     ]
-    assert _achados(indice, "camisa", dono="cat2", cor_base="vermelho") == [
+    assert _achados(indice, "blusa", dono="cat2", cor_base="vermelho") == [
         "j:objeto:obj02:0"
     ]
 

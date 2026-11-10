@@ -18,7 +18,7 @@ from api.decupagem import (
     _Intervalo,
     id_posicional,
 )
-from api.tipo_do_objeto import termos_do_tipo, tipo_canonico_de
+from api.tipo_do_objeto import tipo_canonico_de
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
 
@@ -37,8 +37,8 @@ class Registro:
     categoria: str | None = None
     tipo_do_objeto: str | None = None
     # O tipo da lista fechada (#544), ao lado do texto bruto de `tipo_do_objeto`. Não é um
-    # campo do índice: as palavras dele e dos sinônimos entram no texto da busca
-    # (`termos_do_tipo`), e a cópia do BigQuery ganha a coluna.
+    # campo do índice e não entra no texto da busca (decisão de 10/11/2026: a busca casa
+    # o nome bruto); a cópia do BigQuery ganha a coluna e a tela agrupa por ele.
     tipo_canonico: str | None = None
     cor_base: list[str] = field(default_factory=list)
     cor: str | None = None
@@ -419,12 +419,7 @@ class IndiceEmMemoria:
             for r in registros:
                 if not _casa(r, consulta.filtros):
                     continue
-                palavras_do_registro = set(
-                    palavras(
-                        _frase(r.texto, r.descricao, termos_do_tipo(r.tipo_canonico))
-                        or ""
-                    )
-                )
+                palavras_do_registro = set(palavras(_frase(r.texto, r.descricao) or ""))
                 if all(grupo & palavras_do_registro for grupo in da_consulta):
                     achados.append(r)
         return achados[: consulta.limite]

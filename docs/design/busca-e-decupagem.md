@@ -105,7 +105,7 @@ Uma lista nova, `objetos`, no topo da decupagem, ao lado de `pessoas`. Os objeto
 | Campo | Regra |
 | --- | --- |
 | `categoria` | Lista fechada: `roupa`, `calcado`, `acessorio`, `na_mao`, `em_cena`, `veiculo`, `outro` |
-| `tipo` | Texto curto e no singular ("sandália", "vestido", "bolsa", "troféu"). A busca resolve sinônimos ("sapato" acha "scarpin") |
+| `tipo` | Texto curto e no singular ("sandália", "vestido", "bolsa", "troféu"). A busca casa o nome como está: "tênis" acha só tênis e "mocassim" só mocassim (o tipo canônico e os sinônimos da taxonomia não entram na busca; decisão de 10/11/2026) |
 | `cor_base` | Lista fechada, até 2 cores: `vermelho`, `laranja`, `amarelo`, `verde`, `azul`, `roxo`, `rosa`, `marrom`, `bege`, `preto`, `branco`, `cinza`, `dourado`, `prateado`, `estampado`. É o que a busca filtra |
 | `cor` | Texto livre com o tom ("vinho", "azul-marinho"). É o que a tela mostra |
 | `marca` | Só se o logo ou o nome estiver legível na imagem. Nunca deduzida |
