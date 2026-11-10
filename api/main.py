@@ -65,6 +65,7 @@ from api.correcoes import (
 from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
 from api.dados_da_purga import dados_do_ambiente
 from api.decupagem import Decupagem
+from api.edicao_do_video import criar_rotas_da_edicao
 from api.eventos_de_uso import (
     Eventos,
     SemEventos,
@@ -634,6 +635,15 @@ def criar_app(
         criar_rotas_da_aprovacao(
             repositorio_de_aprovacao,
             repositorio_de_auditoria,
+            relogio,
+        )
+    )
+    v1.include_router(
+        criar_rotas_da_edicao(
+            repositorio_de_jobs,
+            repositorio_de_programas,
+            repositorio_de_auditoria,
+            disparo_da_indexacao or DisparoDaIndexacaoIndisponivel(),
             relogio,
         )
     )

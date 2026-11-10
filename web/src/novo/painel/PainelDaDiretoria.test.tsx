@@ -71,6 +71,14 @@ const VIDEOS = {
       horas_concluidas: 3.5,
       tempo_medio_s: null,
     },
+    {
+      programa: null,
+      enviados: 0,
+      concluidos: 0,
+      falhos: 0,
+      horas_concluidas: 0,
+      tempo_medio_s: null,
+    },
   ],
   por_usuario: [
     {
@@ -554,6 +562,16 @@ test("a aba Vídeos mostra os totais e as tabelas por dia, programa e usuário",
   expect(programas[0][0]).toBe("TV Fama");
   // Sem tempo médio, um traço.
   expect(programas[0][5]).toBe("—");
+  expect(programas[1][0]).toBe("Sem programa");
+  expect(screen.getAllByText("Falhas").length).toBeGreaterThan(0);
+  expect(screen.queryByText("Com falha")).toBeNull();
+  expect(
+    screen.getByText(/um vídeo que falhou e depois concluiu aparece nas duas/),
+  ).toBeTruthy();
+  expect(screen.getAllByText("Tempo médio até concluir").length).toBeGreaterThan(0);
+  expect(
+    screen.getByText(/com a espera na fila e as novas tentativas/),
+  ).toBeTruthy();
   const quem = linhasDe(await tabela("Vídeos por usuário"));
   expect(quem.map((l) => l[0])).toEqual([
     "ana@redetv.com.br",

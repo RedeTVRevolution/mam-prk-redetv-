@@ -145,7 +145,8 @@ export interface DiaDeVideos extends NumerosDeVideos {
 }
 
 export interface ProgramaDeVideos extends NumerosDeVideos {
-  programa: string
+  /** `null` é a linha "Sem programa". */
+  programa: string | null
 }
 
 export interface QuemDeVideos extends NumerosDeVideos {
