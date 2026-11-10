@@ -80,3 +80,53 @@ def test_correcao_com_valor_fora_da_lista_vira_outro_sem_perder_o_texto() -> Non
     p = _corrigir_ambiente(modelo, "submarino")
 
     assert (p["ambiente"], p["ambiente_canonico"]) == ("submarino", "outro")
+
+
+def test_decupagem_antiga_regravada_com_os_padroes_volta_a_ser_reconhecida() -> None:
+    # Regravada pelo modelo Pydantic, a Decupagem antiga traz `indefinido` e `outro`.
+    modelo = _modelo(
+        _plano(
+            "pla01",
+            0,
+            10000,
+            ambiente="Estúdio de TV",
+            enquadramento="Close-up",
+            ambiente_canonico="outro",
+            enquadramento_canonico="indefinido",
+        )
+    )
+
+    [p] = _mundo(modelo).decupagem()["planos"]
+
+    assert (p["ambiente_canonico"], p["enquadramento_canonico"]) == (
+        "estúdio",
+        "primeiro plano",
+    )
+
+
+def test_correcao_de_outro_campo_do_plano_mantem_o_canonico_do_modelo() -> None:
+    modelo = _modelo(
+        _plano(
+            "pla01",
+            0,
+            10000,
+            ambiente="no set",
+            ambiente_canonico="estúdio",
+            enquadramento_canonico="plano geral",
+        )
+    )
+    mundo = _mundo(modelo)
+    mundo.corrigir(
+        tipo="plano.limpo",
+        item_id="pla01",
+        valor="true",
+        versao=versao_do_modelo(json.dumps(modelo).encode()),
+    )
+
+    [p] = mundo.decupagem()["planos"]
+
+    assert p["origem"] == "revisao"
+    assert (p["ambiente_canonico"], p["enquadramento_canonico"]) == (
+        "estúdio",
+        "plano geral",
+    )

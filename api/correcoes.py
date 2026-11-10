@@ -2344,7 +2344,7 @@ def decupagem_entregue(
     entregue = aplicar(modelo, versao, correcoes)
     entregue["versao_decupagem"] = versao
     _com_tipo_canonico(modelo, entregue)
-    com_os_canonicos(entregue)
+    com_os_canonicos(modelo, entregue)
     return entregue
 
 
