@@ -56,7 +56,12 @@ export interface ObjetoDoInventario {
 
 export interface Plano extends Intervalo {
   id: string
+  /** O texto livre do modelo (ou da Correção). */
   ambiente: string
+  /** O valor da lista fechada; ausente em decupagem que não passou pela leitura nova. */
+  ambiente_canonico?: string
+  enquadramento?: string | null
+  enquadramento_canonico?: string
   acao?: string | null
   objetos?: string[]
   /** Ausente em decupagem antiga ou quando a etapa de inventário falhou. */

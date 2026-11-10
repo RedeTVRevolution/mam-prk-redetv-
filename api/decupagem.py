@@ -292,6 +292,35 @@ class GeradorDoInventario(_Estrito):
     modelo: Rotulo
 
 
+# Os valores canônicos (#545); o dicionário do acervo mora em `api/canonicos.py`.
+Enquadramento = Literal[
+    "plano geral",
+    "plano de conjunto",
+    "plano americano",
+    "plano médio",
+    "primeiro plano",
+    "primeiríssimo plano",
+    "detalhe",
+    "indefinido",
+]
+
+Ambiente = Literal[
+    "estúdio",
+    "externa",
+    "bastidor",
+    "residência",
+    "escritório",
+    "estádio",
+    "aeroporto",
+    "veículo",
+    "hospital",
+    "comércio",
+    "palco",
+    "natureza",
+    "outro",
+]
+
+
 class Plano(_Intervalo):
     id: Id
     ambiente: Rotulo = Field(description="Local: estúdio, aeroporto, estádio, rua…")
@@ -304,6 +333,14 @@ class Plano(_Intervalo):
     )
     acao: Texto | None = None
     enquadramento: Rotulo | None = None
+    enquadramento_canonico: Enquadramento = Field(
+        default="indefinido",
+        description="O enquadramento na escala usual, um dos valores da lista.",
+    )
+    ambiente_canonico: Ambiente = Field(
+        default="outro",
+        description="O ambiente, um dos valores da lista; `outro` se nenhum serve.",
+    )
     movimento_camera: Rotulo | None = None
     externa: bool | None = None
     periodo: Literal["dia", "noite"] | None = None
