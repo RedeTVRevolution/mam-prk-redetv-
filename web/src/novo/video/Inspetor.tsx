@@ -25,6 +25,7 @@ import {
   contem,
   type DadosDoObjeto,
   type ItemDoPainel,
+  gruposDePlanos,
   inventarioDoVideo,
   itensPorTipo,
   NAO_IDENTIFICADO,
@@ -115,6 +116,7 @@ function linhasDaSecao(
   inventario: Inventario,
   abertas: ReadonlySet<string>,
   filtro: string,
+  grupo: string,
 ): Linha[] {
   const doTipo = (t: string) => porTipo.get(t) ?? []
   const item = (i: ItemDoPainel, recuo = false): Linha => ({ tipo: 'item', chave: i.chave, item: i, recuo })
@@ -153,7 +155,7 @@ function linhasDaSecao(
   }
   const tipo = SECOES.find((s) => s.chave === secao)?.tipo ?? 'pauta'
   return doTipo(tipo)
-    .filter((i) => casa(textoDoItem(i), filtro))
+    .filter((i) => casa(textoDoItem(i), filtro) && (!grupo || i.grupo === grupo))
     .map((i) => item(i))
 }
 
@@ -226,6 +228,9 @@ export function Inspetor({
   const inventario = useMemo(() => (d ? inventarioDoVideo(d.planos) : []), [d])
   const [abertas, setAbertas] = useState<ReadonlySet<string>>(new Set())
   const [filtro, setFiltro] = useState('')
+  // O grupo de planos recorrentes (#546) que a seção Planos mostra; vazio é todos.
+  const [grupo, setGrupo] = useState('')
+  const gruposDosPlanos = useMemo(() => (d ? gruposDePlanos(d.planos) : []), [d])
   const [seguir, setSeguir] = useState(true)
   const selecionado = itens.find((i) => i.chave === selecionada)
 
@@ -239,8 +244,8 @@ export function Inspetor({
 
   const filtroNormalizado = nomeNormalizado(filtro)
   const linhas = useMemo(
-    () => (d && secao ? linhasDaSecao(secao, d, porTipo, inventario, abertas, filtroNormalizado) : []),
-    [d, secao, porTipo, inventario, abertas, filtroNormalizado],
+    () => (d && secao ? linhasDaSecao(secao, d, porTipo, inventario, abertas, filtroNormalizado, grupo) : []),
+    [d, secao, porTipo, inventario, abertas, filtroNormalizado, grupo],
   )
   const navegaveis = useMemo(() => linhas.flatMap((l) => (l.tipo === 'item' ? [l.chave] : [])), [linhas])
 
@@ -284,6 +289,7 @@ export function Inspetor({
         const i = Math.min(Math.max(indiceDaSecao + (e.key === 'ArrowLeft' ? -1 : 1), 0), SECOES.length - 1)
         aoTrocarSecao(SECOES[i].chave)
         setFiltro('')
+        setGrupo('')
       },
     },
     {
@@ -358,6 +364,7 @@ export function Inspetor({
                       onClick={() => {
                         aoTrocarSecao(aberta ? null : s.chave)
                         setFiltro('')
+                        setGrupo('')
                       }}
                       className={cn('flex h-9 shrink-0 items-center gap-2 px-3 text-left text-sm font-medium hover:bg-card', aberta && 'bg-card')}
                     >
@@ -383,6 +390,23 @@ export function Inspetor({
                             <IconFocus2 size={18} stroke={1.75} aria-hidden />
                           </BotaoDeIcone>
                         </div>
+                        {s.chave === 'planos' && gruposDosPlanos.length > 0 && (
+                          <div className="flex h-10 shrink-0 items-center border-b px-2">
+                            <select
+                              value={grupo}
+                              aria-label="Grupo de planos"
+                              onChange={(e) => setGrupo(e.target.value)}
+                              className="h-7 min-w-0 flex-1 rounded-sm border border-strong bg-input px-2 text-sm text-foreground"
+                            >
+                              <option value="">Todos os planos</option>
+                              {gruposDosPlanos.map((g) => (
+                                <option key={g.id} value={g.id}>
+                                  {g.rotulo}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         {linhas.length === 0 ? (
                           <p className="px-3 py-8 text-center text-sm text-muted-foreground">
                             {filtro ? `Nada com “${filtro}” em ${s.rotulo.toLowerCase()}.` : s.vazio}

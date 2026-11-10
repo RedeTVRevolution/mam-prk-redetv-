@@ -85,6 +85,8 @@ export interface ItemDoPainel extends Intervalo {
   inventario?: ObjetoDoInventario[]
   /** O JPEG do momento (`null` sem quadro); só aparição, objeto e plano têm miniatura. */
   quadro?: string | null
+  /** O grupo de planos recorrentes (#546); só nos itens de plano que têm par. */
+  grupo?: string
 }
 
 const ABA_DO_TIPO: Record<TipoDoItem, Aba | null> = {
@@ -194,6 +196,32 @@ export interface ObjetoDoVideo {
   /** O plano da maior caixa: clicar leva a ele, para o player cair na cena que o quadro mostrou. */
   planoDaCaixa: PlanoDoObjeto
   planos: PlanoDoObjeto[]
+}
+
+export interface GrupoDePlanos {
+  id: string
+  /** "Estúdio, plano médio (rec01): 188 planos, 21 min" */
+  rotulo: string
+  planos: number
+}
+
+const duracaoDoGrupo = (ms: number): string => (ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
+
+/** Os grupos de planos recorrentes (#546), o maior primeiro: o ambiente e o enquadramento do primeiro plano, a contagem e o tempo total. */
+export function gruposDePlanos(planos: Plano[]): GrupoDePlanos[] {
+  const porId = new Map<string, Plano[]>()
+  for (const p of planos) if (p.plano_recorrente) porId.set(p.plano_recorrente, [...(porId.get(p.plano_recorrente) ?? []), p])
+  return [...porId]
+    .map(([id, doGrupo]) => {
+      const [primeiro] = doGrupo
+      const enquadramento = primeiro.enquadramento_canonico
+      const nome = [primeiro.ambiente_canonico ?? primeiro.ambiente, enquadramento && enquadramento !== 'indefinido' ? enquadramento : null]
+        .filter(Boolean)
+        .join(', ')
+      const tempo = duracaoDoGrupo(doGrupo.reduce((t, p) => t + (p.fim_ms - p.inicio_ms), 0))
+      return { id, planos: doGrupo.length, rotulo: `${nome.charAt(0).toUpperCase()}${nome.slice(1)} (${id}): ${doGrupo.length} planos, ${tempo}` }
+    })
+    .sort((a, b) => b.planos - a.planos || a.id.localeCompare(b.id))
 }
 
 /**
@@ -369,6 +397,7 @@ export function itensDoPainel(d: Decupagem): ItemDoPainel[] {
       inicio_ms: p.inicio_ms,
       fim_ms: p.fim_ms,
       ...(p.inventario?.length ? { inventario: p.inventario } : {}),
+      ...(p.plano_recorrente ? { grupo: p.plano_recorrente } : {}),
     }),
   )
   d.transcricao.forEach((f, i) =>

@@ -4,6 +4,7 @@ import {
   agora,
   deltaDeRolagem,
   deltaParaUmTerco,
+  gruposDePlanos,
   inventarioDoVideo,
   itensDoPainel,
   itensDaAba,
@@ -349,4 +350,31 @@ test('o plano mostra o ambiente e o enquadramento canônicos, e o texto original
 
   expect([a.titulo, a.linhas]).toEqual(['estúdio', ['primeiro plano']])
   expect([b.titulo, b.linhas]).toEqual(['rua', []])
+})
+
+test('os grupos de planos recorrentes mostram o nome, a contagem e o tempo total, o maior primeiro', () => {
+  const plano = (id: string, inicio_ms: number, fim_ms: number, plano_recorrente?: string) => ({
+    id,
+    ambiente: 'Estúdio de TV',
+    ambiente_canonico: 'estúdio',
+    enquadramento_canonico: 'plano médio',
+    inicio_ms,
+    fim_ms,
+    plano_recorrente,
+  })
+  const planos = [
+    plano('a', 0, 60_000, 'rec02'),
+    plano('b', 60_000, 120_000, 'rec01'),
+    plano('c', 120_000, 180_000, 'rec01'),
+    plano('d', 180_000, 190_000, 'rec02'),
+    plano('e', 190_000, 250_000, 'rec01'),
+    plano('f', 250_000, 260_000),
+  ]
+
+  expect(gruposDePlanos(planos).map((g) => g.rotulo)).toEqual([
+    'Estúdio, plano médio (rec01): 3 planos, 3 min',
+    'Estúdio, plano médio (rec02): 2 planos, 1 min',
+  ])
+  const itens = itensDoPainel({ ...D, planos }).filter((i) => i.tipo === 'plano')
+  expect(itens.map((i) => i.grupo)).toEqual(['rec02', 'rec01', 'rec01', 'rec02', 'rec01', undefined])
 })

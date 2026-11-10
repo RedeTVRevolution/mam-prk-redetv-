@@ -70,6 +70,8 @@ export interface Plano extends Intervalo {
   /** O JPEG do meio do plano. */
   quadro?: string | null
   origem?: 'modelo' | 'revisao'
+  /** O grupo dos planos da mesma câmera e do mesmo enquadramento (#546); ausente no plano sem par. */
+  plano_recorrente?: string | null
 }
 
 export interface Fala extends Intervalo {

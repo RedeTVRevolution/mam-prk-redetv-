@@ -651,3 +651,26 @@ test('Objetos lista o inventário dos planos por categoria, sem repetir, a conta
   expect(objetos.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['veículo nos planos'])
   expect(objetos.queryByRole('button', { name: /^camisa/ })).toBeNull()
 })
+
+test('Planos mostra os grupos recorrentes com a contagem e o tempo, e o filtro deixa só os planos do grupo', async () => {
+  decupagem = {
+    ...DECUPAGEM,
+    planos: [
+      { ...DECUPAGEM.planos[0], enquadramento_canonico: 'plano médio', plano_recorrente: 'rec01' },
+      { id: 'pl3', ambiente: 'Estúdio', enquadramento_canonico: 'plano médio', inicio_ms: 400_000, fim_ms: 460_000, plano_recorrente: 'rec01' },
+      DECUPAGEM.planos[1],
+    ],
+  }
+  await abrirVideo()
+  const usuario = await abrirSecao('Planos')
+  const planos = lista('Planos')
+
+  expect(planos.getAllByRole('button', { name: /^(Estúdio|Externa)/ })).toHaveLength(3)
+  const grupo = planos.getByRole('combobox', { name: 'Grupo de planos' })
+  expect(within(grupo).getAllByRole('option').map((o) => o.textContent)).toEqual(['Todos os planos', 'Estúdio, plano médio (rec01): 2 planos, 4 min'])
+
+  await usuario.selectOptions(grupo, 'rec01')
+
+  expect(planos.getAllByRole('button', { name: /^(Estúdio|Externa)/ })).toHaveLength(2)
+  expect(planos.queryByRole('button', { name: /^Externa/ })).toBeNull()
+})
