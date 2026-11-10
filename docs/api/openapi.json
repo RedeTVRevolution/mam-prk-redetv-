@@ -6505,6 +6505,43 @@
             ],
             "title": "Enquadramento"
           },
+          "enquadramento_canonico": {
+            "type": "string",
+            "enum": [
+              "plano geral",
+              "plano de conjunto",
+              "plano americano",
+              "plano médio",
+              "primeiro plano",
+              "primeiríssimo plano",
+              "detalhe",
+              "indefinido"
+            ],
+            "title": "Enquadramento Canonico",
+            "description": "O enquadramento na escala usual, um dos valores da lista.",
+            "default": "indefinido"
+          },
+          "ambiente_canonico": {
+            "type": "string",
+            "enum": [
+              "estúdio",
+              "externa",
+              "bastidor",
+              "residência",
+              "escritório",
+              "estádio",
+              "aeroporto",
+              "veículo",
+              "hospital",
+              "comércio",
+              "palco",
+              "natureza",
+              "outro"
+            ],
+            "title": "Ambiente Canonico",
+            "description": "O ambiente, um dos valores da lista; `outro` se nenhum serve.",
+            "default": "outro"
+          },
           "movimento_camera": {
             "anyOf": [
               {

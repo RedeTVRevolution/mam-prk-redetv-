@@ -26,6 +26,7 @@ from pydantic import (
 )
 
 from api import catalogo_de_correcoes as textos
+from api.canonicos import com_os_canonicos
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.comparador import normalizar
 from api.decupagem import (
@@ -2223,6 +2224,7 @@ def decupagem_entregue(
     versão do JSON do modelo em que elas se apoiam."""
     entregue = aplicar(modelo, versao, correcoes)
     entregue["versao_decupagem"] = versao
+    com_os_canonicos(entregue)
     return entregue
 
 

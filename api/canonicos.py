@@ -7,36 +7,10 @@ Correções). O que o dicionário não conhece cai em `indefinido` (enquadrament
 """
 
 import re
-from typing import Literal
+from typing import Any
 
 from api.comparador import normalizar
-
-Enquadramento = Literal[
-    "plano geral",
-    "plano de conjunto",
-    "plano americano",
-    "plano médio",
-    "primeiro plano",
-    "primeiríssimo plano",
-    "detalhe",
-    "indefinido",
-]
-
-Ambiente = Literal[
-    "estúdio",
-    "externa",
-    "bastidor",
-    "residência",
-    "escritório",
-    "estádio",
-    "aeroporto",
-    "veículo",
-    "hospital",
-    "comércio",
-    "palco",
-    "natureza",
-    "outro",
-]
+from api.decupagem import Ambiente, Enquadramento
 
 # Começos de palavra do texto normalizado (sem acento nem maiúscula) -> valor.
 _ENQUADRAMENTOS: list[tuple[tuple[str, ...], Enquadramento]] = [
@@ -80,3 +54,19 @@ def enquadramento_canonico(texto: str) -> Enquadramento:
 
 def ambiente_canonico(texto: str) -> Ambiente:
     return _classificar(texto, _AMBIENTES, "outro")
+
+
+def com_os_canonicos(entregue: dict[str, Any]) -> None:
+    """Preenche, nos planos da decupagem entregue, o que o modelo não trouxe.
+
+    O canônico do modelo vale; falta nos vídeos antigos, e o plano corrigido
+    (`origem: "revisao"`) tem o texto novo, que o canônico antigo não conhece.
+    """
+    for plano in entregue.get("planos", []):
+        corrigido = plano.get("origem") == "revisao"
+        for texto, canonico, f in (
+            ("ambiente", "ambiente_canonico", ambiente_canonico),
+            ("enquadramento", "enquadramento_canonico", enquadramento_canonico),
+        ):
+            if corrigido or canonico not in plano:
+                plano[canonico] = f(plano.get(texto) or "")

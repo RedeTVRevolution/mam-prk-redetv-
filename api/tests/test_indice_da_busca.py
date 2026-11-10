@@ -391,3 +391,25 @@ def test_registros_levam_o_sistema_e_a_lixeira_do_video() -> None:
     assert {(r.sistema, r.na_lixeira) for r in registros} == {("Playout", True)}
     padrao = registros_da_decupagem(exemplo.job_id, exemplo.decupagem, None, None)
     assert {(r.sistema, r.na_lixeira) for r in padrao} == {(None, False)}
+
+
+def test_o_plano_leva_os_rotulos_canonicos_e_o_texto_original_na_descricao() -> None:
+    d = _decupagem([], [], [])
+    plano = d.planos[0].model_copy(
+        update={
+            "ambiente": "Estúdio de TV",
+            "enquadramento": "Close-up",
+            "ambiente_canonico": "estúdio",
+            "enquadramento_canonico": "primeiro plano",
+        }
+    )
+    d = d.model_copy(update={"planos": [plano, *d.planos[1:]]})
+
+    [achado] = [
+        r.descricao
+        for r in registros_da_decupagem("j", d, None, None)
+        if r.tipo == "plano" and r.id.endswith(f":plano:{plano.id}")
+    ]
+
+    for trecho in ("Estúdio de TV", "estúdio", "Close-up", "primeiro plano"):
+        assert trecho in (achado or "")
