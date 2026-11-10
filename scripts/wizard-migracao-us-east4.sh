@@ -79,14 +79,14 @@ open_url() {
 # pause "msg" waits for the human to confirm they've done the manual part.
 pause() {
   printf '  %s%s%s ' "$DIM" "${1:-Press Enter to continue}" "$RESET"
-  read -r _ || true
+  read -r _ </dev/tty || true
 }
 
 # confirm "question" is a y/N gate; returns success on yes.
 confirm() {
   local reply=""
   printf '  %s? %s [y/N] ' "$YELLOW" "$1"
-  read -r reply || true
+  read -r reply </dev/tty || true
   [[ "$reply" =~ ^[Yy] ]]
 }
 
@@ -232,7 +232,7 @@ banco_principal_antigo() {
 # comparar_contagens ANTIGAS NOVAS: cada arquivo tem "chave valor..." por linha. Imprime uma
 # linha por chave (ok, DIFERE ou FALTA) e sai com erro se qualquer uma não bater.
 comparar_contagens() {
-  awk '
+  awk -v so_crescem=" ${CONTAGENS_QUE_SO_CRESCEM:-} " '
        FILENAME == ARGV[1] { a[$1] = substr($0, length($1) + 2); next }
        { b[$1] = substr($0, length($1) + 2) }
        END {
@@ -241,6 +241,7 @@ comparar_contagens() {
          for (k in todas) {
            if (!(k in a)) { printf "FALTA   %s: só no novo (%s)\n", k, b[k]; ruim = 1 }
            else if (!(k in b)) { printf "FALTA   %s: só no antigo (%s)\n", k, a[k]; ruim = 1 }
+           else if (index(so_crescem, " " k " ") && b[k] + 0 >= a[k] + 0) printf "ok      %s: antigo %s | novo %s (só cresce)\n", k, a[k], b[k]
            else if (a[k] != b[k]) { printf "DIFERE  %s: antigo %s | novo %s\n", k, a[k], b[k]; ruim = 1 }
            else printf "ok      %s: %s\n", k, a[k]
          }
@@ -361,6 +362,8 @@ PAPEIS_SEM_COPIA="${PAPEIS_SEM_COPIA:-fontes}"
 # Datasets cuja contagem só se mostra: a exportação do faturamento continua gravando no dataset
 # velho até o passo 7, então as linhas nunca batem exatas.
 DATASETS_SO_INFORMATIVOS="${DATASETS_SO_INFORMATIVOS:-faturamento}"
+# Contagens que só podem crescer: a aplicação nova já grava auditoria no banco novo depois da cópia.
+CONTAGENS_QUE_SO_CRESCEM="${CONTAGENS_QUE_SO_CRESCEM:-seguranca:auditoria}"
 DIR_ESTADO="${DIR_ESTADO:-.migracao-us-east4}"
 (umask 077 && mkdir -p "$DIR_ESTADO")
 ARQ_PASSO="$DIR_ESTADO/passo"
@@ -621,7 +624,8 @@ passo_6() {
   pares=$(pares_de_datasets)
   while read -r papel antigo novo; do step "$papel: $P:$antigo ($REGIAO_ANTIGA) → $P:$novo ($REGIAO_NOVA)"; done <<<"$pares"
   confirm "Estes são os pares certos?" || exit 1
-  while read -r papel antigo novo; do
+  # A lista vem pelo descritor 3: o bq pede o version_info no terminal e não pode ler a lista.
+  while read -r papel antigo novo <&3; do
     params=$(jq -cn --arg d "$antigo" --arg p "$P" \
       '{source_dataset_id: $d, source_project_id: $p, overwrite_destination_table: "true"}')
     printf '  %s$ bq mk --transfer_config --no_auto_scheduling --data_source=cross_region_copy --target_dataset=%s ...%s\n' \
@@ -629,6 +633,7 @@ passo_6() {
     confirm "Copiar $antigo → $novo?" || exit 1
     cfg=$(bq --project_id "$P" mk --transfer_config --no_auto_scheduling --data_source=cross_region_copy \
       --target_dataset="$novo" --display_name="migracao-us-east4-$antigo" --params="$params" \
+      --service_account_name="${GOOGLE_IMPERSONATE_SERVICE_ACCOUNT:?falta no .env}" \
       | tee /dev/stderr | grep -o "projects/[^']*" | head -n 1)
     [[ -n "$cfg" ]] || { warn "Não achei o nome da transferência na resposta do bq."; exit 1; }
     loc=${cfg#*/locations/}; loc=${loc%%/*}
@@ -645,7 +650,7 @@ passo_6() {
       || { warn "A cópia de $antigo terminou em $estado. A transferência $cfg ficou para você ver no console."; exit 1; }
     bq --project_id "$P" rm -f --transfer_config "$cfg"
     printf '  %s✓%s %s copiado\n' "$GREEN" "$RESET" "$antigo"
-  done <<<"$pares"
+  done 3<<<"$pares"
   # O que a cópia trouxe dos datasets de exportação: o passo 8 confere que nada disso some depois
   # que a exportação nova passa a gravar ali.
   : >"$DIR_ESTADO/copiado-so-informativo.txt"
@@ -794,8 +799,10 @@ passo_10() {
   ler_lista < <(gcloud artifacts repositories list --location "$L" --format='value(name.basename())')
   apagar_grupo "Repositórios do Artifact Registry" apaga_repositorio ${LISTA[@]+"${LISTA[@]}"}
 
-  apaga_modelo() { gcloud model-armor templates delete "$1" --location "$L" --quiet; }
-  ler_lista < <(gcloud model-armor templates list --location "$L" --format='value(name.basename())')
+  # O Model Armor só responde no endpoint da região; o global nega o acesso.
+  local armor="https://modelarmor.$L.rep.googleapis.com/"
+  apaga_modelo() { CLOUDSDK_API_ENDPOINT_OVERRIDES_MODELARMOR="$armor" gcloud model-armor templates delete "$1" --location "$L" --quiet; }
+  ler_lista < <(CLOUDSDK_API_ENDPOINT_OVERRIDES_MODELARMOR="$armor" gcloud model-armor templates list --location "$L" --format='value(name.basename())')
   apagar_grupo "Modelos do Model Armor" apaga_modelo ${LISTA[@]+"${LISTA[@]}"}
 
   apaga_bucket() { gcloud storage rm --recursive --all-versions "gs://$1"; }
