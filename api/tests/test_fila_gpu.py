@@ -104,6 +104,14 @@ class FilaLocal:
         self.ao_esperar: Callable[[], None] | None = None
         self.erro_no_aviso: int | None = None
 
+    @staticmethod
+    def url(dono: str, numero: int = 0) -> str:
+        """A URL que `create_callback_endpoint` devolve (região e workflow `1` do teste)."""
+        return (
+            "https://workflowexecutions.googleapis.com/v1/projects/350446661175"
+            f"/locations/1/workflows/1/executions/{dono}/callbacks/cb_{numero}"
+        )
+
     def job(
         self,
         nome: str,
@@ -132,7 +140,11 @@ class FilaLocal:
             len=len,
             string=str,
             text=SimpleNamespace(
-                match_regex=lambda texto, padrao: re.search(padrao, texto) is not None
+                match_regex=lambda texto, padrao: re.search(padrao, texto) is not None,
+                find_all=lambda texto, trecho: [
+                    {"index": m.start(), "match": trecho}
+                    for m in re.finditer(re.escape(trecho), texto)
+                ],
             ),
         )
         try:
@@ -277,7 +289,7 @@ class FilaLocal:
             self.logs.append(args)
             return None
         if nome == "events.create_callback_endpoint":
-            url = f"https://callback/{self.dono_atual}/{len(self.callbacks)}"
+            url = self.url(self.dono_atual, len(self.callbacks))
             self.callbacks[url] = self.dono_atual
             return {"url": url}
         if nome == "events.await_callback":
@@ -688,10 +700,10 @@ def test_liberar_a_vaga_avisa_quem_espera() -> None:
     fila.job("a")
     fila.job("b")
     fila.pedir("a")
-    assert fila.pedir("b", dono="b", url_do_aviso="cb-b")["vaga"] is False
+    assert fila.pedir("b", dono="b", url_do_aviso=fila.url("b"))["vaga"] is False
     assert fila.avisos == []
     fila.pedir("a", acao="liberar")
-    assert fila.avisos == ["cb-b"]
+    assert fila.avisos == [fila.url("b")]
     assert fila.pedir("b", dono="b")["vaga"] is True
 
 
@@ -705,14 +717,14 @@ def test_o_aviso_vai_so_as_vagas_livres_na_ordem_de_chegada() -> None:
     fila.pedir("a")
     fila.pedir("b")
     for job in ("e", "c", "d"):  # a ordem de gravação não é a de chegada
-        fila.pedir(job, dono=job, url_do_aviso=f"cb-{job}")
+        fila.pedir(job, dono=job, url_do_aviso=fila.url(job))
     assert fila.avisos == []
     fila.pedir("a", acao="liberar")
-    assert fila.avisos == ["cb-c"]
+    assert fila.avisos == [fila.url("c")]
     fila.avisos.clear()
     fila.pendentes.clear()
     fila.pedir("b", acao="liberar")
-    assert fila.avisos == ["cb-c", "cb-d"]
+    assert fila.avisos == [fila.url("c"), fila.url("d")]
 
 
 def test_quem_ocupa_a_ultima_vaga_nao_avisa_ninguem() -> None:
@@ -720,7 +732,7 @@ def test_quem_ocupa_a_ultima_vaga_nao_avisa_ninguem() -> None:
     for job in ("a", "b"):
         fila.job(job)
     fila.pedir("a")
-    fila.pedir("b", dono="b", url_do_aviso="cb-b")
+    fila.pedir("b", dono="b", url_do_aviso=fila.url("b"))
     fila.pedir("a", acao="renovar")
     assert fila.avisos == []
 
@@ -730,11 +742,11 @@ def test_execucao_encerrada_sai_da_fila_e_o_aviso_vai_ao_seguinte() -> None:
     for job in ("a", "b", "c"):
         fila.job(job)
     fila.pedir("a")
-    fila.pedir("b", dono="b", url_do_aviso="cb-b")
-    fila.pedir("c", dono="c", url_do_aviso="cb-c")
+    fila.pedir("b", dono="b", url_do_aviso=fila.url("b"))
+    fila.pedir("c", dono="c", url_do_aviso=fila.url("c"))
     fila.execucoes["b"] = "CANCELLED"
     fila.pedir("a", acao="liberar")
-    assert fila.avisos == ["cb-c"]
+    assert fila.avisos == [fila.url("c")]
     assert _jobs_da_espera(fila) == ["c"]
 
 
@@ -744,13 +756,55 @@ def test_aviso_que_falha_nao_derruba_quem_avisa(codigo: int) -> None:
     for job in ("a", "b"):
         fila.job(job)
     fila.pedir("a")
-    fila.pedir("b", dono="b", url_do_aviso="cb-b")
+    fila.pedir("b", dono="b", url_do_aviso=fila.url("b"))
     fila.erro_no_aviso = codigo
     assert fila.pedir("a", acao="liberar")["vaga"] is False
-    assert fila.avisos == ["cb-b"]
+    assert fila.avisos == [fila.url("b")]
     assert fila.itens("ocupadas") == []
     assert _jobs_da_espera(fila) == ["b"]
     assert not any(log.get("severity") == "ERROR" for log in fila.logs)
+
+
+@pytest.mark.parametrize(
+    "destino",
+    [
+        "https://evil.example/v1/projects/1/locations/1/workflows/1/executions/b/callbacks/x",
+        "http://workflowexecutions.googleapis.com/v1/projects/1/locations/1/workflows/1/executions/b/callbacks/x",
+        "https://workflowexecutions.googleapis.com.evil.example/v1/projects/1/locations/1/workflows/1/executions/b/callbacks/x",
+        "https://evil.example/?https://workflowexecutions.googleapis.com/v1/projects/1/locations/1/workflows/1/executions/b/callbacks/x",
+        # de outro workflow, de outra região e da execução de outro dono
+        "https://workflowexecutions.googleapis.com/v1/projects/1/locations/1/workflows/outro/executions/b/callbacks/x",
+        "https://workflowexecutions.googleapis.com/v1/projects/1/locations/outra/workflows/1/executions/b/callbacks/x",
+        "https://workflowexecutions.googleapis.com/v1/projects/1/locations/1/workflows/1/executions/outro/callbacks/x",
+        "https://workflowexecutions.googleapis.com/v1/projects/1/locations/1/workflows/1/executions/b/callbacks/x/../../y",
+        "https://workflowexecutions.googleapis.com/v1/projects/1/locations/1/workflows/1/executions/b/callbacks/x?a=b",
+    ],
+)
+def test_url_forjada_no_pedido_nao_recebe_o_token(destino: str) -> None:
+    # O pedido vem do Firestore, que outras contas gravam: a conta do workflow só manda o
+    # token OAuth2 ao endpoint de callback da execução dona do pedido.
+    fila = FilaLocal()
+    for job in ("a", "b", "c"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("b", dono="b", url_do_aviso=destino)
+    fila.pedir("c", dono="c", url_do_aviso=fila.url("c"))
+    fila.pedir("a", acao="liberar")
+    assert fila.avisos == []  # a vaga livre é uma só: o aviso recusado a gasta
+    assert any(
+        log.get("json", {}).get("evento") == "aviso_de_gpu_recusado"
+        for log in fila.logs
+    )
+
+
+def test_url_valida_do_proprio_dono_recebe_o_aviso() -> None:
+    fila = FilaLocal()
+    for job in ("a", "b"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("b", dono="exec-1_b", url_do_aviso=fila.url("exec-1_b"))
+    fila.pedir("a", acao="liberar")
+    assert fila.avisos == [fila.url("exec-1_b")]
 
 
 def test_item_sem_endpoint_da_versao_antiga_nao_recebe_aviso() -> None:

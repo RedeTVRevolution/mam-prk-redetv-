@@ -1501,9 +1501,26 @@ avisa_a_espera:
         assign:
           - avisados: $${list.concat(avisados, primeira)}
           - destino: $${default(map.get(espera[primeira], ["mapValue", "fields", "callback", "stringValue"]), "")}
+          - dono_do_destino: $${default(map.get(espera[primeira], ["mapValue", "fields", "dono", "stringValue"]), "")}
+    # O pedido vem do Firestore, que outras contas gravam: o token OAuth2 da conta do workflow
+    # só vai ao endpoint de callback da execução dona do pedido, neste workflow e nesta
+    # região. O projeto da URL é o número (documentação), por isso o trecho aceita qualquer
+    # identificador; a execução tem de ser a do dono, sem `?`, `#` nem `..` depois.
+    - confere_o_destino:
+        assign:
+          - destino_valido: $${destino != "" and text.match_regex(destino, "^https://workflowexecutions[.]googleapis[.]com/v1/projects/[A-Za-z0-9_.:-]+/locations/${regiao}/workflows/${workflow}/executions/[A-Za-z0-9_-]+/callbacks/[A-Za-z0-9_-]+$") and len(text.find_all(destino, "/executions/" + dono_do_destino + "/callbacks/")) == 1}
     - envia_se_tem_endpoint:
         switch:
-          - condition: $${destino != ""}
+          - condition: $${destino != "" and not destino_valido}
+            steps:
+              - registra_o_aviso_recusado:
+                  call: sys.log
+                  args:
+                    severity: WARNING
+                    json:
+                      evento: aviso_de_gpu_recusado
+                      dono: $${dono_do_destino}
+          - condition: $${destino_valido}
             steps:
               - envia_o_aviso:
                   try:

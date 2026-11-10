@@ -1253,6 +1253,9 @@ def test_quem_grava_a_fila_avisa_a_espera_sem_nunca_falhar_por_isso() -> None:
     avisa = _subworkflow(_texto(), "avisa_a_espera")
     assert "call: http.post" in avisa and "type: OAuth2" in avisa
     assert "sys.sleep" not in avisa and "raise" not in avisa
+    # O token só vai ao callback da execução dona do pedido, neste workflow e região.
+    assert "locations/${regiao}/workflows/${workflow}/executions/" in avisa
+    assert "aviso_de_gpu_recusado" in avisa and "condition: $${destino_valido}" in avisa
     # Sem `sys.sleep` periódico: só a releitura do compare-and-swap dorme na fila.
     assert fila.count("call: sys.sleep") == 1 and "espera_para_reler" in fila
     roda = _subworkflow(_texto(), "roda_o_job_com_gpu")
