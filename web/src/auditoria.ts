@@ -30,6 +30,7 @@ export const FRASE_DA_ACAO = {
   'programa.criado': 'Criou o programa',
   'programa.alterado': 'Alterou o programa',
   'programa.apagado': 'Apagou o programa',
+  'video.editado': 'Editou a data de exibição ou o programa do vídeo',
 } as const
 
 export type AcaoDaAuditoria = keyof typeof FRASE_DA_ACAO

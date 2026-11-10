@@ -69,6 +69,7 @@ import { ConfirmacaoDeRemocao, FormularioDeCorrecao } from './Correcao.tsx'
 import { FusaoDePessoa } from './FusaoDePessoa.tsx'
 import { RenomeacaoEmLote } from './RenomeacaoEmLote.tsx'
 import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
+import { EdicaoDoVideo } from './EdicaoDoVideo.tsx'
 import { criarInstante, type Instante, useNoInstante } from './instante.ts'
 import { type AcoesDeCorrecao, Inspetor } from './Inspetor.tsx'
 import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo, type TrechoMarcado } from './LinhaDoTempo.tsx'
@@ -1280,6 +1281,7 @@ function BarraDoVideo({
             {job.nome}
           </h1>
           {titulo && <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">{titulo}</span>}
+          {pode.editar && concluido && <EdicaoDoVideo job={job} />}
           {versaoDoPipeline !== undefined && (
             <Tooltip>
               <TooltipTrigger asChild>
