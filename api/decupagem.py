@@ -116,6 +116,24 @@ FONTES_ANTIGAS = frozenset({"contexto"})
 EstadoDoNome = Literal["confirmado", "palpite"]
 
 
+class OrigemDaJuncao(_Estrito):
+    """Uma das pessoas "não identificado" que a junção (#547) uniu numa só.
+
+    Guarda o que a separação (`pessoa.separar`) precisa para devolvê-la: as
+    aparições, as pautas e os objetos que eram dela. O servidor grava; o modelo
+    não conhece.
+    """
+
+    id: Id
+    chave: Texto  # a identidade da pessoa de origem: descrição@início-fim
+    nome: Rotulo
+    janela: int | None = None
+    motivo: Rotulo | None = None  # por que se uniu à base; vazio na própria base
+    na_imagem: list[Aparicao] = []
+    pautas: list[Id] = []
+    objetos: list[Id] = []
+
+
 class Pessoa(_Estrito):
     id: Id
     nome: Rotulo = Field(
@@ -133,6 +151,12 @@ class Pessoa(_Estrito):
     estado_do_nome: EstadoDoNome | None = None
     # A pessoa do catálogo (#108); o servidor grava, o modelo não conhece.
     catalogo_id: Id | None = None
+    # A janela da análise de onde a pessoa sem nome veio; o servidor grava na
+    # consolidação (#547). Sem ela (Decupagem antiga, janela única), duas pessoas
+    # contam como da mesma janela.
+    janela: int | None = None
+    # As pessoas que a junção uniu nesta; vazia se ninguém foi unido.
+    origens: list[OrigemDaJuncao] = []
     na_imagem: list[Aparicao] = Field(
         description="Aparições: a pessoa visível na imagem. Foto num gráfico, logo "
         "ou QR code não é aparição."
@@ -473,6 +497,8 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "origem",
         "estado_do_nome",
         "catalogo_id",
+        "janela",
+        "origens",
         "quadro",
         "quadros",
         "texto_original",
@@ -535,6 +561,7 @@ def esquema_do_modelo() -> dict[str, Any]:
     lista vazia), para o modelo não pular nenhum."""
     esquema = Decupagem.model_json_schema()
     del esquema["$defs"]["Video"], esquema["$defs"]["CorrecaoDescartada"]
+    del esquema["$defs"]["OrigemDaJuncao"]
     # O inventário é do servidor: as definições dele saem junto com o campo.
     for nome in ("CaixaDoQuadro", "ObjetoDoInventario", "GeradorDoInventario"):
         del esquema["$defs"][nome]
