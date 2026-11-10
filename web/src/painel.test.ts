@@ -379,6 +379,7 @@ test('os grupos de planos recorrentes mostram o nome, a contagem e o tempo total
   ])
   const itens = itensDoPainel({ ...D, planos }).filter((i) => i.tipo === 'plano')
   expect(itens.map((i) => i.grupo)).toEqual(['rec02', 'rec01', 'rec01', 'rec02', 'rec01', undefined])
+})
 
 const item = (nome: string, tipo_canonico: string | undefined, cor: CorBase | null, marca: string | null = null) => ({
   nome,
