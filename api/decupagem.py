@@ -325,6 +325,9 @@ class Plano(_Intervalo):
     quadros: list[str] = []
     # O inventário de objetos (#244): preenchido pelo servidor, fora do esquema da análise.
     inventario: list[ObjetoDoInventario] = []
+    # O grupo de planos da mesma câmera e do mesmo enquadramento (#546), um id curto por
+    # vídeo; `None` no plano sem par. O servidor grava, o modelo não conhece.
+    plano_recorrente: Id | None = None
 
 
 EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
@@ -518,6 +521,7 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "correcoes_descartadas",
         "inventario",
         "inventario_gerado_por",
+        "plano_recorrente",
         "versao_pipeline",
         "manifesto_do_pipeline",
     }

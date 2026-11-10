@@ -6606,6 +6606,18 @@
             "type": "array",
             "title": "Inventario",
             "default": []
+          },
+          "plano_recorrente": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plano Recorrente"
           }
         },
         "additionalProperties": false,
