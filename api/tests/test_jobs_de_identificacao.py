@@ -13,9 +13,11 @@ import pytest
 
 from api import identificacao_job
 from api.catalogo import CatalogoEmMemoria
+from api.correcoes import Ancora, Correcao
 from api.decupagem import Decupagem
 from api.gemini import ErroHttp
 from api.jobs import Job, RepositorioEmMemoria
+from api.juncao_de_pessoas import chave_da_pessoa
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_identificacao import decupagem, gc, pessoa, whisper
 
@@ -84,6 +86,7 @@ def identificar(
     com_copia: bool = True,
     tmp_path: Path,
     repo: RepositorioEmMemoria | None = None,
+    correcoes: Any = None,
 ) -> tuple[str, DecupagensEmMemoria]:
     decupagens = DecupagensEmMemoria(d, com_copia)
     resultado = identificacao_job.executar(
@@ -94,6 +97,7 @@ def identificar(
         TranscricoesEmMemoria(),
         CatalogoEmMemoria(),
         tmp_path,
+        correcoes=correcoes,
     )
     return resultado, decupagens
 
@@ -226,3 +230,135 @@ def test_erro_inesperado_deixa_a_etapa_falhou_e_sobe(tmp_path: Path) -> None:
         )
 
     assert_etapa(repo, "identificacao", "falhou")
+
+
+DUAS_SEM_NOME = [
+    pessoa(
+        "pes01",
+        "Não identificado, blusa vermelha",
+        [(100_000, 110_000)],
+        fontes_do_nome=[],
+        janela=0,
+    ),
+    pessoa(
+        "pes02",
+        "Não identificado, blusa vermelha",
+        [(400_000, 410_000)],
+        fontes_do_nome=[],
+        janela=1,
+    ),
+]
+
+
+def test_a_juncao_roda_depois_do_modelo_forte_e_a_decupagem_sai_com_as_origens(
+    tmp_path: Path,
+) -> None:
+    # O modelo forte não nomeia ninguém; a junção une as duas, sem o juiz.
+    nao_identificado = json.dumps(
+        {
+            "resultado": "nao_identificado",
+            "nome": None,
+            "prova": None,
+            "tempo_da_prova": None,
+        }
+    )
+
+    resultado, decupagens = identificar(
+        decupagem(DUAS_SEM_NOME), nao_identificado, nao_identificado, tmp_path=tmp_path
+    )
+
+    assert resultado == "identificado"
+    assert decupagens.gravada is not None
+    [p] = decupagens.gravada.pessoas
+    assert [o.id for o in p.origens] == ["pes01", "pes02"]
+
+
+def test_a_separacao_de_uma_pessoa_na_tela_impede_a_juncao_no_reprocessamento(
+    tmp_path: Path,
+) -> None:
+    nao_identificado = json.dumps(
+        {
+            "resultado": "nao_identificado",
+            "nome": None,
+            "prova": None,
+            "tempo_da_prova": None,
+        }
+    )
+    chaves = [chave_da_pessoa(p) for p in decupagem(DUAS_SEM_NOME).pessoas]
+
+    class Separacoes:
+        def listar(self, job_id: str) -> list[Correcao]:
+            return [_separacao(chaves[0], chaves[1])]
+
+    _, decupagens = identificar(
+        decupagem(DUAS_SEM_NOME),
+        nao_identificado,
+        nao_identificado,
+        tmp_path=tmp_path,
+        correcoes=Separacoes(),
+    )
+
+    assert decupagens.gravada is not None
+    assert [p.id for p in decupagens.gravada.pessoas] == ["pes01", "pes02"]
+
+
+def test_pessoa_renomeada_na_tela_nao_entra_na_juncao_do_reprocessamento(
+    tmp_path: Path,
+) -> None:
+    nao_identificado = json.dumps(
+        {
+            "resultado": "nao_identificado",
+            "nome": None,
+            "prova": None,
+            "tempo_da_prova": None,
+        }
+    )
+    chave = chave_da_pessoa(decupagem(DUAS_SEM_NOME).pessoas[1])
+    renomeacao = _separacao(chave, chave).model_copy(
+        update={
+            "tipo": "pessoa.renomear",
+            "item_id": "pes02",
+            "depois": "Maria Souza",
+            "antes": "",
+            "ancora": Ancora(
+                versao="v",
+                tipo_do_item="pessoa",
+                identidade=chave,
+                inicio_ms=0,
+                fim_ms=1,
+            ),
+        }
+    )
+
+    class Renomeacoes:
+        def listar(self, job_id: str) -> list[Correcao]:
+            return [renomeacao]
+
+    _, decupagens = identificar(
+        decupagem(DUAS_SEM_NOME),
+        nao_identificado,
+        nao_identificado,
+        tmp_path=tmp_path,
+        correcoes=Renomeacoes(),
+    )
+
+    assert decupagens.gravada is not None
+    assert [p.id for p in decupagens.gravada.pessoas] == ["pes01", "pes02"]
+
+
+def _separacao(separada: str, outra: str) -> Correcao:
+    return Correcao(
+        id="c1",
+        job_id="job-1",
+        autor_uid="u1",
+        autor_email="a@b.c",
+        criada_em=BASE,
+        motivo="duas pessoas",
+        tipo="pessoa.separar",
+        item_id="pes01",
+        antes=json.dumps([outra, separada]),
+        depois=separada,
+        ancora=Ancora(
+            versao="v", tipo_do_item="pessoa", identidade="x", inicio_ms=0, fim_ms=1
+        ),
+    )

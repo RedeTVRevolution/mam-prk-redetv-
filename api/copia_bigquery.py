@@ -51,6 +51,8 @@ class LinhaDoMomento:
     # A duração do vídeo todo, igual em todas as linhas dele (o sinal por programa, #287,
     # divide os eventos por ela).
     duracao_do_video_ms: int | None = None
+    # Só no objeto: o tipo da lista fechada (#544), ao lado do texto bruto em `texto`.
+    tipo_canonico: str | None = None
 
 
 class CopiaDosMomentos(Protocol):
@@ -89,6 +91,7 @@ def linhas_da_decupagem(
             ],
             marca=r.marca,
             texto=r.texto or r.descricao,
+            tipo_canonico=r.tipo_canonico,
             **base,
         )
         for r in registros_da_decupagem(job_id, decupagem, programa, data_de_exibicao)
@@ -261,18 +264,20 @@ USING (
     JSON_VALUE(l, '$.texto') AS texto,
     JSON_VALUE(l, '$.versao_pipeline') AS versao_pipeline,
     TIMESTAMP(JSON_VALUE(l, '$.gravado_em')) AS gravado_em,
-    CAST(JSON_VALUE(l, '$.duracao_do_video_ms') AS INT64) AS duracao_do_video_ms
+    CAST(JSON_VALUE(l, '$.duracao_do_video_ms') AS INT64) AS duracao_do_video_ms,
+    JSON_VALUE(l, '$.tipo_canonico') AS tipo_canonico
   FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
 ) AS s
 ON FALSE
 WHEN NOT MATCHED BY SOURCE AND t.job_id = @job_id{filtro} THEN DELETE
 WHEN NOT MATCHED THEN INSERT
   (job_id, programa, data_de_exibicao, tipo, inicio_ms, fim_ms, pessoas, marca,
-   tipo_de_insercao, texto, versao_pipeline, gravado_em, duracao_do_video_ms)
+   tipo_de_insercao, texto, versao_pipeline, gravado_em, duracao_do_video_ms,
+   tipo_canonico)
 VALUES
   (s.job_id, s.programa, s.data_de_exibicao, s.tipo, s.inicio_ms, s.fim_ms, s.pessoas,
    s.marca, s.tipo_de_insercao, s.texto, s.versao_pipeline, s.gravado_em,
-   s.duracao_do_video_ms)
+   s.duracao_do_video_ms, s.tipo_canonico)
 """
         inicio = monotonic()
         resposta = self._transporte(

@@ -69,7 +69,10 @@ CAMPO_DO_TEXTO_DA_BUSCA = "texto_da_busca"
 # O que `_registro` lê de cada resultado: os campos do Registro. `significado` e
 # `texto_da_busca` só servem à indexação e ficam de fora para a consulta trazer menos
 # bytes.
-CAMPOS_DO_REGISTRO = [campo.name for campo in fields(Registro)]
+# `tipo_canonico` não é campo do índice (#544): a busca casa o nome bruto, sem o tipo.
+CAMPOS_DO_REGISTRO = [
+    campo.name for campo in fields(Registro) if campo.name != "tipo_canonico"
+]
 CAMPOS_DE_TEXTO = [CAMPO_DO_TEXTO_DA_BUSCA]
 # Declarados nos índices na criação: são eles que filtram junto com a busca.
 CAMPOS_DE_FILTRO = [

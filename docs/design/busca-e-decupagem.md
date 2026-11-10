@@ -36,7 +36,7 @@ Na imagem ✓   Citada   Fala   GC   Objeto ✓   Marca     Programa ▾  Ano �
 
 | Consulta | Como é entendida | O que volta |
 | --- | --- | --- |
-| `sapato vermelho` | Objeto: categoria `calcado`, tipo `sapato` (que inclui scarpin, sandália, tênis, bota), cor base `vermelho` | Momentos em que um calçado vermelho está na imagem, com quem o usa. Tons da família (vinho, bordô) entram depois dos vermelhos puros |
+| `sapato vermelho` | Objeto: o nome "sapato" como está (sem scarpin, sandália, tênis ou bota; decisão de 10/11/2026), cor base `vermelho` | Momentos em que um sapato vermelho está na imagem, com quem o usa. Tons da família (vinho, bordô) entram depois dos vermelhos puros |
 | `Sabrina Sato` | Pessoa do catálogo, pelo nome, apelido ou grafia aproximada | Aparições, com a fonte do nome. As menções (fala e GC) aparecem num chip à parte, com a contagem |
 | `Sabrina Sato de vestido vermelho` | Pessoa + objeto, **ligados**: o vestido é da Sabrina | Só os momentos em que é ela que usa o vestido vermelho, e não alguém ao lado |
 | `"promoção imperdível"` | Frase exata na fala | Momentos da transcrição com a frase, com o trecho destacado por posição no texto |
@@ -105,7 +105,7 @@ Uma lista nova, `objetos`, no topo da decupagem, ao lado de `pessoas`. Os objeto
 | Campo | Regra |
 | --- | --- |
 | `categoria` | Lista fechada: `roupa`, `calcado`, `acessorio`, `na_mao`, `em_cena`, `veiculo`, `outro` |
-| `tipo` | Texto curto e no singular ("sandália", "vestido", "bolsa", "troféu"). A busca resolve sinônimos ("sapato" acha "scarpin") |
+| `tipo` | Texto curto e no singular ("sandália", "vestido", "bolsa", "troféu"). A busca casa o nome como está: "tênis" acha só tênis e "mocassim" só mocassim (o tipo canônico e os sinônimos da taxonomia não entram na busca; decisão de 10/11/2026) |
 | `cor_base` | Lista fechada, até 2 cores: `vermelho`, `laranja`, `amarelo`, `verde`, `azul`, `roxo`, `rosa`, `marrom`, `bege`, `preto`, `branco`, `cinza`, `dourado`, `prateado`, `estampado`. É o que a busca filtra |
 | `cor` | Texto livre com o tom ("vinho", "azul-marinho"). É o que a tela mostra |
 | `marca` | Só se o logo ou o nome estiver legível na imagem. Nunca deduzida |

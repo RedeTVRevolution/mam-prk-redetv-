@@ -27,6 +27,8 @@ import { baixarDecupagem, baixarPelaUrl } from '../../baixar.ts'
 import {
   aindaIndexando,
   editorDeNovaAparicao,
+  editorDeSeparacao,
+  juntada,
   editorDoItem,
   itemDaCorrecao,
   marcasDosItens,
@@ -108,7 +110,7 @@ function tocar(player: HTMLVideoElement) {
   Promise.resolve(player.play()).catch(() => {})
 }
 
-type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'fundir' | 'renomear' }
+type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'separar' | 'fundir' | 'renomear' }
 
 /**
  * O vídeo aberto: o `<video>` com o proxy assinado, as barras, a linha do tempo e o inspetor. O
@@ -726,6 +728,18 @@ export function Video({
             aoCancelar={fecharEdicao}
           />
         )
+    } else if (edicao.modo === 'separar') {
+      const pessoa = d.pessoas.find((p) => `separar:${p.id}` === edicao.chave)
+      if (pessoa && juntada(pessoa))
+        conteudoDaEdicao = (
+          <FormularioDeCorrecao
+            editor={editorDeSeparacao(pessoa)}
+            rotulo={`Separar ${pessoa.nome}`}
+            limiteDoMotivo={catalogoPronto.limites.motivo}
+            aoSalvar={gravar}
+            aoCancelar={fecharEdicao}
+          />
+        )
     } else if (item && edicao.modo === 'editar') {
       const editor = editorDoItem(d, item, catalogoPronto)
       if (editor) {
@@ -786,6 +800,15 @@ export function Video({
             setDescrevendo(false)
             setTemposDaAlca(null)
             setEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
+          },
+          pessoaJuntada: (id) => {
+            const p = d.pessoas.find((x) => x.id === id)
+            return !!p && juntada(p)
+          },
+          separar: (pessoa) => {
+            setDescrevendo(false)
+            setTemposDaAlca(null)
+            setEdicao({ chave: `separar:${pessoa}`, modo: 'separar' })
           },
           pautas: revisao.revisando
             ? {

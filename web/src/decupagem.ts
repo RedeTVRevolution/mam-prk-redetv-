@@ -11,9 +11,23 @@ export type Aparicao = Intervalo & {
   quadro?: string | null
 }
 
+/** #547: uma pessoa sem nome que a junção automática uniu a outra; o servidor grava. */
+export interface OrigemDaJuncao {
+  id: string
+  /** A identidade da origem (descrição@início-fim em ms): o valor da correção `pessoa.separar`. */
+  chave: string
+  nome: string
+  janela?: number | null
+  /** Por que se uniu à base; vazio na própria base. */
+  motivo?: string | null
+  na_imagem: Aparicao[]
+}
+
 export interface Pessoa {
   id: string
   nome: string
+  /** Só na pessoa que a junção formou (duas ou mais). */
+  origens?: OrigemDaJuncao[]
   origem?: 'modelo' | 'revisao'
   /** 1.2: de onde veio o nome; falta em 1.1 e em pessoa acrescentada pela revisão. */
   fontes_do_nome?: string[]
@@ -48,6 +62,8 @@ export interface CaixaDoQuadro {
 export interface ObjetoDoInventario {
   nome: string
   categoria: CategoriaDeObjeto
+  /** O tipo da lista fechada (#544), ao lado do nome livre; `outro` ou ausente (acervo antigo) agrupa pelo nome. */
+  tipo_canonico?: string
   cor?: CorBase | null
   marca?: string | null
   caixas: CaixaDoQuadro[]
@@ -56,7 +72,12 @@ export interface ObjetoDoInventario {
 
 export interface Plano extends Intervalo {
   id: string
+  /** O texto livre do modelo (ou da Correção). */
   ambiente: string
+  /** O valor da lista fechada; ausente em decupagem que não passou pela leitura nova. */
+  ambiente_canonico?: string
+  enquadramento?: string | null
+  enquadramento_canonico?: string
   acao?: string | null
   objetos?: string[]
   /** Ausente em decupagem antiga ou quando a etapa de inventário falhou. */
@@ -65,6 +86,8 @@ export interface Plano extends Intervalo {
   /** O JPEG do meio do plano. */
   quadro?: string | null
   origem?: 'modelo' | 'revisao'
+  /** O grupo dos planos da mesma câmera e do mesmo enquadramento (#546); ausente no plano sem par. */
+  plano_recorrente?: string | null
 }
 
 export interface Fala extends Intervalo {
@@ -123,6 +146,8 @@ export interface Objeto {
   id: string
   categoria: CategoriaDeObjeto
   tipo: string
+  /** O tipo da lista fechada (#544), ao lado do texto livre `tipo`. */
+  tipo_canonico?: string
   cor_base: CorBase[]
   /** O tom em palavras ("vermelho vivo"). */
   cor?: string | null
@@ -172,6 +197,7 @@ export interface ItemDoHistorico {
     | 'comercial.tipo'
     | 'comercial.acrescentar'
     | 'pessoa.nao_e'
+    | 'pessoa.separar'
     | 'pessoa.aparicao_para_mencao'
     | 'pessoa.mencao_para_aparicao'
     | 'pessoa.acrescentar_aparicao'

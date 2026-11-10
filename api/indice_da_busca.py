@@ -18,6 +18,7 @@ from api.decupagem import (
     _Intervalo,
     id_posicional,
 )
+from api.tipo_do_objeto import tipo_canonico_de
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
 
@@ -35,6 +36,10 @@ class Registro:
     # Só no registro de objeto.
     categoria: str | None = None
     tipo_do_objeto: str | None = None
+    # O tipo da lista fechada (#544), ao lado do texto bruto de `tipo_do_objeto`. Não é um
+    # campo do índice e não entra no texto da busca (decisão de 10/11/2026: a busca casa
+    # o nome bruto); a cópia do BigQuery ganha a coluna e a tela agrupa por ele.
+    tipo_canonico: str | None = None
     cor_base: list[str] = field(default_factory=list)
     cor: str | None = None
     marca: str | None = None
@@ -116,6 +121,14 @@ def palavras(texto: str) -> list[str]:
 def _frase(*partes: str | None) -> str | None:
     texto = " ".join(p for p in partes if p)
     return texto or None
+
+
+def _rotulo_canonico(canonico: str, sem_valor: str, original: str | None) -> str | None:
+    """O rótulo canônico para a descrição indexada; nada se não diz nada (`outro`,
+    `indefinido`) ou se repete o texto original."""
+    if canonico == sem_valor or canonico == (original or "").casefold():
+        return None
+    return canonico
 
 
 # A categoria como a tela a mostra (`web/src/painel.ts`), para a consulta em português casar.
@@ -216,6 +229,13 @@ def registros_da_decupagem(
                 pessoas=na_imagem(plano),
                 descricao=_frase(
                     plano.ambiente,
+                    _rotulo_canonico(plano.ambiente_canonico, "outro", plano.ambiente),
+                    plano.enquadramento,
+                    _rotulo_canonico(
+                        plano.enquadramento_canonico,
+                        "indefinido",
+                        plano.enquadramento,
+                    ),
                     plano.acao,
                     ", ".join(plano.objetos),
                     _inventario_em_texto(plano.inventario),
@@ -225,6 +245,9 @@ def registros_da_decupagem(
             )
         )
         for k, item in enumerate(plano.inventario):
+            tipo_do_item = tipo_canonico_de(
+                item.tipo_canonico, item.nome, [item.cor] if item.cor else []
+            )
             registros.append(
                 Registro(
                     id=f"{job_id}:inventario:{plano.id}:{k}",
@@ -233,6 +256,7 @@ def registros_da_decupagem(
                     fim_ms=plano.fim_ms,
                     categoria=item.categoria,
                     tipo_do_objeto=item.nome,
+                    tipo_canonico=tipo_do_item,
                     cor_base=[item.cor] if item.cor else [],
                     cor=item.cor,
                     marca=item.marca,
@@ -288,6 +312,11 @@ def registros_da_decupagem(
                     fim_ms=ocorrencia.fim_ms,
                     categoria=objeto.categoria,
                     tipo_do_objeto=objeto.tipo,
+                    tipo_canonico=tipo_canonico_de(
+                        objeto.tipo_canonico,
+                        objeto.tipo,
+                        [*objeto.cor_base, *([objeto.cor] if objeto.cor else [])],
+                    ),
                     cor_base=list(objeto.cor_base),
                     cor=objeto.cor,
                     marca=objeto.marca,

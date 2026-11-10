@@ -32,7 +32,15 @@ def unir_pessoas(
             posicao = None if chave is None else por_nome.get(chave)
             if posicao is None:
                 posicao = len(unidas)
-                unidas.append(p.model_copy(update={"id": f"pes{posicao + 1:02d}"}))
+                unidas.append(
+                    p.model_copy(
+                        update={
+                            "id": f"pes{posicao + 1:02d}",
+                            # Sem nome nunca cruza janela: a de origem é uma só (#547).
+                            **({"janela": janela} if chave is None else {}),
+                        }
+                    )
+                )
                 if chave is not None:
                     por_nome[chave] = posicao
             else:

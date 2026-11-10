@@ -125,6 +125,7 @@ const MOTIVOS: Record<string, string> = {
   'fala.texto': 'fala corrigida pelo editor',
   'texto_na_tela.texto': 'texto na tela corrigido pelo editor',
   'pessoa.nao_e': 'pessoa removida desta aparição pelo editor',
+  'pessoa.separar': 'pessoa separada pelo editor',
   'pessoa.acrescentar_aparicao': 'aparição acrescentada pelo editor',
   'pauta.juntar': 'pautas juntadas pelo editor',
   'pauta.dividir': 'pauta dividida pelo editor',
@@ -566,6 +567,28 @@ export function desfazivel(i: ItemDoHistorico): boolean {
   return (
     (i.estado === 'ativa' || i.estado === 'aprovada') &&
     !DECISOES.includes(i.tipo)
+  )
+}
+
+/** A pessoa que a junção automática formou: dá para separar uma das origens (#547). */
+export const juntada = (p: Pessoa): boolean => (p.origens?.length ?? 0) >= 2
+
+/** "Separar pessoa": escolhe a origem, com a descrição, o trecho e o motivo da junção. */
+export function editorDeSeparacao(pessoa: Pessoa): Editor {
+  const origens = pessoa.origens ?? []
+  const trecho = (chave: string) => {
+    const [, inicio, fim] = /@(\d+)-(\d+)$/.exec(chave) ?? []
+    return inicio ? ` (${relogio(Number(inicio))}–${relogio(Number(fim))})` : ''
+  }
+  const opcoes = origens.map((o) => ({
+    valor: o.chave,
+    rotulo: `${o.nome}${trecho(o.chave)}, ${o.motivo ?? 'a base da junção'}`,
+  }))
+  return montar(
+    [{ chave: 'origem', rotulo: 'Pessoa a separar', tipo: 'opcoes', opcoes }],
+    { origem: origens.at(-1)?.chave ?? '' },
+    ['pessoa.separar'],
+    (v) => (v.origem ? [{ tipo: 'pessoa.separar', item_id: pessoa.id, valor: String(v.origem) }] : null),
   )
 }
 

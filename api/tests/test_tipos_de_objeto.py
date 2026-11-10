@@ -1,7 +1,7 @@
 """O índice dos tipos de objeto (#308): a lista que o autocompletar consulta."""
 
 from api.tests.test_correcoes import AUTORIZACAO, Mundo
-from api.tipos_de_objeto import TiposDeObjetoEmMemoria
+from api.tipos_de_objeto import TiposDeObjetoEmMemoria, buscar_com_a_lista
 
 
 def test_busca_por_prefixo_sem_acento_nem_maiuscula() -> None:
@@ -53,3 +53,24 @@ def test_sem_login_a_rota_da_401() -> None:
     resposta = Mundo(["editor"]).cliente.get("/v1/objetos/tipos", params={"q": "a"})
 
     assert resposta.status_code == 401
+
+
+def test_o_autocompletar_sugere_os_tipos_da_lista_mesmo_sem_registro() -> None:
+    resposta = Mundo(["editor"]).cliente.get(
+        "/v1/objetos/tipos", params={"q": "CAM"}, headers=AUTORIZACAO
+    )
+
+    tipos = [t["tipo"] for t in resposta.json()]
+    assert resposta.status_code == 200
+    assert "camisa" in tipos and "câmera" in tipos
+    assert len(tipos) == len(set(tipos))
+
+
+def test_tipo_da_lista_e_o_ja_visto_aparecem_uma_vez_com_a_contagem_do_visto() -> None:
+    tipos = TiposDeObjetoEmMemoria()
+    tipos.registrar("j1", {"camisa": 5, "xablau": 1})
+
+    resultado = buscar_com_a_lista(tipos, "ca", 10)
+
+    assert resultado[0] == {"tipo": "camisa", "ocorrencias": 5}
+    assert [t["tipo"] for t in resultado].count("camisa") == 1

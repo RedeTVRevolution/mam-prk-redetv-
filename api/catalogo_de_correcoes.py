@@ -185,6 +185,18 @@ def ocorrencia(valor: str) -> str:
     return f"{ROTULOS_DAS_LISTAS[lista]} {_faixa(int(inicio), int(fim))}"
 
 
+def separacao(valor: str) -> str:
+    """A pessoa de origem que se separa (ou a lista das origens, no `antes`): a
+    descrição e o trecho em que aparece."""
+    if valor.startswith("["):
+        return "; ".join(separacao(c) for c in json.loads(valor))
+    descricao, _, faixa = valor.rpartition("@")
+    achado = _TEMPOS.match(faixa)
+    if not achado:
+        return valor
+    return f"{descricao} {_faixa(int(achado[1]), int(achado[2]))}"
+
+
 def tempos(valor: str) -> str:
     achado = _TEMPOS.match(valor)
     return _faixa(int(achado[1]), int(achado[2])) if achado else valor

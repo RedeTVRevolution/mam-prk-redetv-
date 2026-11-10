@@ -15,6 +15,7 @@ from api import (
     florence,
     gemini,
     inventario,
+    juncao_de_pessoas,
     modelo_forte,
     paddle,
     whisper,
@@ -22,7 +23,7 @@ from api import (
 from api.agent_retrieval import MODELO_DO_EMBEDDING
 from api.decupagem import VERSAO_ESQUEMA
 
-VERSAO_PIPELINE = "2026.11.9"
+VERSAO_PIPELINE = "2026.11.11"
 
 
 def _hash(texto: str) -> str:
@@ -43,10 +44,12 @@ def manifesto() -> dict[str, Any]:
             "analise": gemini.MODO_FLEX,
             "inventario": gemini.MODO_FLEX,
             "modelo_forte": gemini.MODO_STANDARD,
+            "juncao_de_pessoas": gemini.MODO_FLEX,
         },
         "instrucoes": {
             "analise": _hash(gemini.INSTRUCAO),
             "modelo_forte": _hash(modelo_forte.INSTRUCAO + modelo_forte.PESSOA),
+            "juncao_de_pessoas": _hash(juncao_de_pessoas.INSTRUCAO),
             "conversao_do_inventario": _hash(inventario.INSTRUCAO_DA_CONVERSAO),
             "olhar_do_inventario": _hash(inventario.INSTRUCAO_DO_OLHAR),
         },

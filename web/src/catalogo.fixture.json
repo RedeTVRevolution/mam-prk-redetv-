@@ -33,6 +33,10 @@
       "rotulo": "Não é esta pessoa"
     },
     {
+      "valor": "pessoa.separar",
+      "rotulo": "Separar pessoa"
+    },
+    {
       "valor": "pessoa.aparicao_para_mencao",
       "rotulo": "Aparição para menção"
     },

@@ -269,7 +269,7 @@ def test_bloco_video_vem_da_quarentena_e_nao_do_modelo() -> None:
 
 def test_versao_e_origem_vem_do_servidor() -> None:
     d = _rodar(TransporteFalso(BOA))
-    assert d.versao_esquema == "1.4"
+    assert d.versao_esquema == "1.5"
     assert d.pessoas[0].origem == "modelo"
 
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from api.auth import Chamador
 from api.comparador import normalizar
 from api.jobs import _exige
+from api.taxonomia_de_objetos import TIPOS_CANONICOS
 from api.texto_como_dado import LinhaDaConsulta
 
 LIMITE_PADRAO = 10
@@ -58,6 +59,22 @@ class TiposDeObjetoEmMemoria:
         return [{"tipo": t, "ocorrencias": n} for _, (t, n) in ordenados[:limite]]
 
 
+def buscar_com_a_lista(
+    tipos: TiposDeObjeto, q: str, limite: int = LIMITE_PADRAO
+) -> list[TipoDeObjeto]:
+    """Os já vistos (com a contagem) e, depois, os da lista fechada (#544) que ainda não
+    apareceram, com 0: o autocompletar da correção sugere tipos da lista."""
+    vistos = tipos.buscar(q, limite)
+    achados = {normalizar(t["tipo"]) for t in vistos}
+    prefixo = normalizar(q)
+    da_lista: list[TipoDeObjeto] = [
+        {"tipo": t, "ocorrencias": 0}
+        for t in TIPOS_CANONICOS
+        if normalizar(t).startswith(prefixo) and normalizar(t) not in achados
+    ]
+    return [*vistos, *da_lista][:limite]
+
+
 def criar_rotas_dos_tipos_de_objeto(tipos: TiposDeObjeto) -> APIRouter:
     rotas = APIRouter()
 
@@ -66,6 +83,6 @@ def criar_rotas_dos_tipos_de_objeto(tipos: TiposDeObjeto) -> APIRouter:
         _chamador: Annotated[Chamador, Depends(_exige("ler"))],
         q: Annotated[str, LinhaDaConsulta(100)] = "",
     ) -> list[TipoDeObjeto]:
-        return tipos.buscar(q, LIMITE_PADRAO)
+        return buscar_com_a_lista(tipos, q, LIMITE_PADRAO)
 
     return rotas

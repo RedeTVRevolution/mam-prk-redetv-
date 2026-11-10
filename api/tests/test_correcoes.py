@@ -31,6 +31,7 @@ from api.correcoes import (
     fila,
     historico,
     identidade_da_pessoa,
+    pessoas_corrigidas,
     reaplicar,
     reconciliar,
     versao_do_modelo,
@@ -837,6 +838,16 @@ def test_descartar_tira_da_fila_e_o_historico_marca_descartada() -> None:
         aplicar(novo, "nova", [original, descarte])["pessoas"][0]["nome"]
         == "Carla Dias"
     )
+
+
+def test_renomeacao_descartada_nao_conta_como_pessoa_corrigida() -> None:
+    novo = _modelo_com(_pessoa("p1", "Carla Dias", 1000, 5000))
+    original = _correcao_antiga()
+    descarte = descartar(novo, "nova", [original], original.id, "x", "j1", _AUTORIA)
+
+    assert pessoas_corrigidas([original]) == {"ana souza"}
+    assert pessoas_corrigidas([original, descarte]) == set()
+    assert pessoas_corrigidas([descarte]) == set()  # o registro de descarte também não
 
 
 def test_descartar_duas_vezes_levanta() -> None:

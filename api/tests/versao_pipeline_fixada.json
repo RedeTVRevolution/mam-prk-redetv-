@@ -1,7 +1,7 @@
 {
-  "versao_pipeline": "2026.11.9",
+  "versao_pipeline": "2026.11.11",
   "manifesto": {
-    "esquema": "1.4",
+    "esquema": "1.5",
     "modelos": {
       "analise": "gemini-3.5-flash-lite",
       "versao_do_modelo_da_analise": "gemini-3.5-flash-lite",
@@ -11,13 +11,15 @@
     "modos": {
       "analise": "flex",
       "inventario": "flex",
-      "modelo_forte": "standard"
+      "modelo_forte": "standard",
+      "juncao_de_pessoas": "flex"
     },
     "instrucoes": {
       "analise": "22d9b8be0f68944e51015321be71e04226f7abbc95b79298671c2bfd0de03e7d",
       "modelo_forte": "ad94677b657ef48f3b5b2a2aa85f2dba0922cf2de38bcb6275afab2fb027980c",
-      "conversao_do_inventario": "5c410045cce15863e3cfc1ba89d33dfc95f6397e113e32b12c148282016bc1a1",
-      "olhar_do_inventario": "7d4bae5eed07b9ef7c1a0801cc1074aaf298a9f6b1283d4c5e01900e1f072731"
+      "juncao_de_pessoas": "97aaf08306f652015196f7904999e73b4d6bf45d2a55097d368fab90b4ac4d0e",
+      "conversao_do_inventario": "80a8d2530c34323b138f8fd54075247a481becef5aacb05a53b1a2f26e91027c",
+      "olhar_do_inventario": "4c107336505236d57fb591977c563b30f7d2d46436cd3694ee97d2ac5a815bb2"
     },
     "motores": {
       "transcricao": {

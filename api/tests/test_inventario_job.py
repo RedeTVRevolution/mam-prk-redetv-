@@ -1,10 +1,12 @@
 """Job em CPU do inventário de objetos (#244): lê, converte e grava na Decupagem."""
 
+import io
 import json
 from typing import Any
 
 import pytest
 from google.api_core.exceptions import NotFound
+from PIL import Image
 
 from api import inventario_job
 from api.decupagem import Decupagem
@@ -178,6 +180,24 @@ def test_motor_gemini_manda_os_quadros_e_nao_le_o_bruto() -> None:
     assert gravada.planos[0].inventario[0].cor == "marrom"
     assert gravada.inventario_gerado_por is not None
     assert gravada.inventario_gerado_por.motor == "gemini"
+
+
+def test_o_job_grava_o_grupo_dos_planos_recorrentes_pelos_quadros_chave() -> None:
+    imagem = io.BytesIO()
+    Image.new("RGB", (32, 32), "gray").save(imagem, "PNG")
+    armazem = Armazem()
+    armazem.decupagens["j1"] = decupagem_com_planos(["q/a.jpg"], ["q/b.jpg"])
+    armazem.quadros = {"q/a.jpg": imagem.getvalue(), "q/b.jpg": imagem.getvalue()}
+
+    executar(
+        "j1",
+        armazem,
+        TransporteFalso(json.dumps({"planos": []})),
+        ConfigDoInventario(motor="gemini", modelo="gemini-x"),
+    )
+
+    gravada = Decupagem.model_validate_json(armazem.gravadas[0][1])
+    assert [p.plano_recorrente for p in gravada.planos] == ["rec01", "rec01"]
 
 
 def test_sem_a_decupagem_falha_com_mensagem_clara() -> None:
