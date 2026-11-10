@@ -6669,6 +6669,83 @@
         ],
         "title": "Opcao"
       },
+      "OrigemDaJuncao": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Id"
+          },
+          "chave": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Chave"
+          },
+          "nome": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Nome"
+          },
+          "janela": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Janela"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo"
+          },
+          "na_imagem": {
+            "items": {
+              "$ref": "#/components/schemas/Aparicao"
+            },
+            "type": "array",
+            "title": "Na Imagem",
+            "default": []
+          },
+          "pautas": {
+            "items": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "type": "array",
+            "title": "Pautas",
+            "default": []
+          },
+          "objetos": {
+            "items": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "type": "array",
+            "title": "Objetos",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "chave",
+          "nome"
+        ],
+        "title": "OrigemDaJuncao",
+        "description": "Uma das pessoas \"não identificado\" que a junção (#547) uniu numa só.\n\nGuarda o que a separação (`pessoa.separar`) precisa para devolvê-la: as\naparições, as pautas e os objetos que eram dela. O servidor grava; o modelo\nnão conhece."
+      },
       "ParDeQuadro": {
         "properties": {
           "job": {
@@ -6923,6 +7000,25 @@
               }
             ],
             "title": "Catalogo Id"
+          },
+          "janela": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Janela"
+          },
+          "origens": {
+            "items": {
+              "$ref": "#/components/schemas/OrigemDaJuncao"
+            },
+            "type": "array",
+            "title": "Origens",
+            "default": []
           },
           "na_imagem": {
             "items": {
