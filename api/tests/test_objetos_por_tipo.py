@@ -20,9 +20,9 @@ from api.inventario import (
 )
 from api.taxonomia_de_objetos import OPCOES_DE_TIPO
 from api.tests.test_decupagem import decupagem_valida
+from api.tests.test_gemini import TransporteFalso
 from api.tests.test_inventario import (
     COM_SOFA,
-    TransporteFalso,
     convertido,
     decupagem,
     resposta,

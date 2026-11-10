@@ -122,10 +122,11 @@ def amostra_de_cobertura(grupos: Grupos, quantos: int) -> list[dict[str, str]]:
                 for palavra in assinatura(nome).split():
                     por_palavra[palavra].add((programa, nome))
     pares: set[tuple[str, str, str]] = set()
-    for palavra, nomes in por_palavra.items():
-        for (p1, a), (p2, b) in combinations(sorted(nomes), 2):
+    for palavra, vizinhos in por_palavra.items():
+        for (_, a), (_, b) in combinations(sorted(vizinhos), 2):
             if a != b and assinatura(a) != assinatura(b):
-                pares.add((palavra, *sorted((a, b))))  # type: ignore[arg-type]
+                menor, maior = sorted((a, b))
+                pares.add((palavra, menor, maior))
     ordenados = sorted(pares, key=lambda p: _hash("|".join(p)))
     return [{"palavra": p, "a": a, "b": b} for p, a, b in ordenados[:quantos]]
 
@@ -165,7 +166,7 @@ def medir(pasta: Path, quantos: int = 100) -> dict[str, Any]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    analisador = argparse.ArgumentParser(description=__doc__.splitlines()[0])  # type: ignore[union-attr]
+    analisador = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     analisador.add_argument("pasta", type=Path)
     analisador.add_argument("--amostra", type=int, default=100)
     args = analisador.parse_args(argv)

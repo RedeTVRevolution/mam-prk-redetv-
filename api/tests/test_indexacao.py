@@ -584,7 +584,8 @@ def test_a_rota_devolve_os_tipos_gravados_pelo_reindexar() -> None:
             "/v1/objetos/tipos", params={"q": q}, headers=AUTORIZACAO
         )
 
-    assert buscar("sa").json() == [{"tipo": "sandália", "ocorrencias": 1}]
+    # Os já vistos vêm primeiro, com a contagem; os da lista fechada (#544) vêm depois, com 0.
+    assert buscar("sa").json()[0] == {"tipo": "sandália", "ocorrencias": 1}
     assert buscar("SCAR").json() == [{"tipo": "scarpin", "ocorrencias": 1}]
 
 
@@ -607,7 +608,8 @@ def test_os_tipos_acompanham_acrescentar_e_atributos() -> None:
 
     def buscar(q: str) -> list[tuple[str, int]]:
         r = mundo.cliente.get("/v1/objetos/tipos", params={"q": q}, headers=AUTORIZACAO)
-        return [(t["tipo"], t["ocorrencias"]) for t in r.json()]
+        # Só os já vistos: os da lista fechada (#544) vêm com 0 ocorrências.
+        return [(t["tipo"], t["ocorrencias"]) for t in r.json() if t["ocorrencias"]]
 
     mundo.reindexar()
     assert buscar("sa") == []
