@@ -460,14 +460,6 @@ passo_1() {
     || { warn "Fique na main, igual à origin/main, com o PR da troca já mesclado."; exit 1; }
   [[ -z "$(git status --porcelain)" ]] || { warn "A árvore do git tem mudanças; limpe antes."; exit 1; }
   printf '  %s✓%s main igual à origin/main\n' "$GREEN" "$RESET"
-  # O CD do merge lê GCP_REGION ao começar (a antiga). Se o plan dele rodasse depois do state rm do
-  # passo 2, criaria tudo de novo em $REGIAO_ANTIGA sem destruir nada, e o apply passaria.
-  local rodando
-  rodando=$(gh run list --workflow ci.yml --branch main --limit 20 --json status \
-    --jq '[.[] | select(.status != "completed")] | length') \
-    || { warn "Não consegui ler os runs do CI pelo gh (gh auth login)."; exit 1; }
-  (( rodando == 0 )) || { warn "$rodando run(s) do CI na main ainda correndo. Espere o publicar acabar (falhar no plan)."; exit 1; }
-  printf '  %s✓%s nenhum run do CI na main correndo\n' "$GREEN" "$RESET"
   # Execuções ainda correndo nos Workflows antigos.
   local ativos=0 w n
   for w in $(gcloud workflows list --location "$REGIAO_ANTIGA" --format='value(name.basename())'); do
@@ -506,6 +498,21 @@ passo_2() {
   confirm "Pausar?" || exit 1
   pausar_agendas "$REGIAO_ANTIGA"
   if [[ -n "$lista" ]]; then
+    # O CD (job publicar) lê GCP_REGION ao começar. Com a região antiga e o estado sem estes
+    # endereços, o plan dele criaria tudo de novo em $REGIAO_ANTIGA sem destruir nada, e o apply
+    # passaria. Por isso a variável troca antes do state rm: um run que a leia nova com o estado
+    # ainda inteiro quer recriar (aplicar-sem-destruir.sh recusa). E os que já leram a antiga
+    # têm de acabar antes. A conferência fica aqui para valer também na retomada.
+    set_var GCP_REGION "$REGIAO_NOVA"
+    [[ " ${SKIPPED[*]-} " != *"GitHub variable GCP_REGION"* ]] \
+      || { warn "Sem trocar GCP_REGION no GitHub o state rm não é seguro (gh auth login)."; exit 1; }
+    local rodando
+    rodando=$(gh run list --workflow ci.yml --branch main --limit 20 --json status \
+      --jq '[.[] | select(.status != "completed")] | length') \
+      || { warn "Não consegui ler os runs do CI pelo gh (gh auth login)."; exit 1; }
+    (( rodando == 0 )) \
+      || { warn "$rodando run(s) do CI na main ainda correndo (leram a região antiga). Espere acabar e rode de novo."; exit 1; }
+    printf '  %s✓%s nenhum run do CI na main correndo\n' "$GREEN" "$RESET"
     say "Estes endereços saem do estado (os recursos de $REGIAO_ANTIGA continuam na nuvem até o passo 10):"
     printf '%s\n' "$lista" | while IFS= read -r f; do step "$f"; done
     (umask 077 && tf state pull >"$DIR_ESTADO/estado-antes.tfstate")
@@ -515,9 +522,7 @@ passo_2() {
   else
     note "Nenhum endereço da lista está no estado (já saíram)."
   fi
-  # O CD da main lê esta variável: só agora, com os endereços fora do estado, o plan dele só cria
-  # (com a região velha ele mostraria SP de novo, e com a nova antes do state rm, destruiria SP).
-  set_var GCP_REGION "$REGIAO_NOVA"
+  set_var GCP_REGION "$REGIAO_NOVA" # repetir não muda nada (retomada sem endereços a tirar)
 
   local plano json apagam
   plano=$(mktemp); json=$(mktemp)
