@@ -2,7 +2,7 @@ import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import App from '../App.tsx'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
 
@@ -129,4 +129,32 @@ test('a pessoa entra pelo teclado, e quem não está no catálogo é criada com 
   expect(pessoasCriadas).toEqual([{ nome: 'Ana Hickmann', apelidos: ['Ana', 'Hickmann'] }])
   await u.click(screen.getByRole('button', { name: 'Tirar Sabrina Sato' }))
   expect(screen.queryByLabelText('Papel de Sabrina Sato')).toBeNull()
+})
+
+test('criar e apagar um programa refazem na hora a lista do envio', async () => {
+  eu = { ...EDITOR, permissoes: [...EDITOR.permissoes, 'video.enviar'] }
+  const pedidos = { programas: 0 }
+  servidor.use(
+    http.get('/v1/programas', () => {
+      pedidos.programas++
+      return HttpResponse.json(lista.map((p) => p.nome))
+    }),
+  )
+  const u = userEvent.setup()
+  await abrir()
+  await u.click(await screen.findByRole('button', { name: 'Enviar vídeo' }))
+  await vi.waitFor(() => expect(pedidos.programas).toBe(1))
+  await u.keyboard('{Escape}')
+  await u.click(await screen.findByRole('button', { name: 'Novo programa' }))
+  await u.type(screen.getByLabelText('Nome'), 'Hoje em Dia')
+  await u.click(screen.getByRole('button', { name: 'Gravar' }))
+  await screen.findByText('Hoje em Dia')
+  await u.click(screen.getByRole('button', { name: 'Enviar vídeo' }))
+  expect(await screen.findByRole('option', { name: 'Hoje em Dia' })).toBeTruthy()
+  await u.keyboard('{Escape}')
+  await u.click(screen.getByRole('button', { name: 'Apagar TV Fama' }))
+  await u.click(await screen.findByRole('button', { name: 'Apagar programa' }))
+  await u.click(await screen.findByRole('button', { name: 'Enviar vídeo' }))
+  await vi.waitFor(() => expect(screen.queryByRole('option', { name: 'TV Fama' })).toBeNull())
+  expect(screen.getByRole('option', { name: 'Hoje em Dia' })).toBeTruthy()
 })
