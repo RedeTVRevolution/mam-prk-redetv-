@@ -72,10 +72,13 @@ const servidor = setupServer(
     consultas.push(url.searchParams)
     const cursor = url.searchParams.get('cursor')
     const limite = Number(url.searchParams.get('limite') ?? 50)
-    const inicio = cursor ? lista.findIndex((r) => r.id === cursor) + 1 : 0
-    const pagina = lista.slice(inicio, inicio + limite)
+    const alvo = url.searchParams.get('alvo')
+    const pessoa = url.searchParams.get('pessoa')
+    const filtrada = lista.filter((r) => (!alvo || r.alvo_id === alvo) && (!pessoa || r.email === pessoa))
+    const inicio = cursor ? filtrada.findIndex((r) => r.id === cursor) + 1 : 0
+    const pagina = filtrada.slice(inicio, inicio + limite)
     const ultimo = pagina.at(-1)
-    const mais = inicio + limite < lista.length && ultimo
+    const mais = inicio + limite < filtrada.length && ultimo
     return HttpResponse.json(pagina, mais ? { headers: { 'X-Proximo-Cursor': ultimo.id } } : {})
   }),
   http.all('/v1/admin/auditoria/*', () => {
@@ -154,6 +157,34 @@ test('os filtros vão para a API e para a URL', async () => {
     expect(ultima.get('alvo')).toBe('j1')
     expect(ultima.get('acao')).toBe('chave.revogada')
   })
+})
+
+test('"Filtrar por este alvo" no detalhe aplica o filtro e deixa só as linhas do alvo', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(await linhaDe('TV Fama'))
+  await usuario.click(await screen.findByRole('button', { name: 'Filtrar por este alvo' }))
+  await waitFor(() => expect(location.search).toContain('alvo=j1'))
+  expect((screen.getByRole('textbox', { name: 'Alvo' }) as HTMLInputElement).value).toBe('j1')
+  await waitFor(() => expect(screen.queryByText('outro.mp4')).toBeNull())
+  expect(await linhaDe('TV Fama')).toBeTruthy()
+})
+
+test('"Filtrar por esta pessoa" no detalhe aplica o filtro e deixa só as linhas da pessoa', async () => {
+  const usuario = userEvent.setup()
+  lista = [{ ...registros()[1]!, id: 'r5', email: 'rui@redetv.com.br', alvo_nome: 'do-rui.mp4' }, ...registros()]
+  await abrir()
+  await usuario.click(await linhaDe('do-rui'))
+  await usuario.click(await screen.findByRole('button', { name: 'Filtrar por esta pessoa' }))
+  await waitFor(() => expect(location.search).toContain('pessoa=rui%40redetv.com.br'))
+  await waitFor(() => expect(screen.queryByText('outro.mp4')).toBeNull())
+  expect(await linhaDe('do-rui')).toBeTruthy()
+})
+
+test('o campo Alvo diz que aceita o código e que dá para preencher pelo detalhe', async () => {
+  await abrir()
+  await linhaDe('TV Fama')
+  expect(screen.getByRole('textbox', { name: 'Alvo' }).getAttribute('placeholder')).toMatch(/detalhe da linha/)
 })
 
 test('o filtro de ação agrupa os acessos e manda as três ações à API', async () => {
@@ -238,7 +269,7 @@ test('a aba é só de leitura: nenhum botão de editar ou apagar', async () => {
   await abrir()
   await usuario.click(await linhaDe('TV Fama'))
   const tabela = screen.getByRole('table', { name: 'Auditoria' })
-  expect(within(tabela).queryAllByRole('button')).toEqual([])
+  expect(within(tabela).queryAllByRole('button').map((b) => b.textContent)).toEqual(['Filtrar por este alvo', 'Filtrar por esta pessoa'])
   expect(screen.queryByRole('button', { name: /editar|apagar|excluir|remover/i })).toBeNull()
   expect(escrita).toBe(false)
 })

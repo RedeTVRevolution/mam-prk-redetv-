@@ -132,6 +132,27 @@ test('a coluna Tempo mostra um travessão no legado reprocessado sem início da 
   expect(within(linha).getAllByRole('cell')[3]!.textContent).toBe('—')
 })
 
+test('o selo mostra só as etapas em andamento, não a concluída nem a etapa_atual defasada', async () => {
+  jobs = [
+    job({
+      estado: 'analisando',
+      etapa_atual: 'transcricao',
+      etapas: [
+        { nome: 'transcricao', ...ETAPA_OK },
+        { nome: 'leitura_da_tela', inicio: '2026-10-29T15:04:00Z', fim: null, resultado: null },
+        { nome: 'analise', inicio: '2026-10-29T15:05:00Z', fim: null, resultado: null },
+      ],
+    }),
+  ]
+  await abrir()
+
+  const linha = await linhaDe('clipe.mp4')
+  const selos = within(linha).getByText('Leitura da tela').closest('div')!
+
+  expect(within(selos).queryByText('Transcrição')).toBeNull()
+  expect(within(selos).getByText('Análise')).toBeTruthy()
+})
+
 test('a tabela mostra vídeos de pessoas e de sistemas, e o filtro por sistema vai à API', async () => {
   jobs = [
     job({ id: 'a', nome: 'de-pessoa.mp4' }),
