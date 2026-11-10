@@ -107,3 +107,19 @@ def test_a_cobertura_sorteia_vizinhos_pela_assinatura() -> None:
 def test_a_margem_de_confianca_do_ticket() -> None:
     assert round(margem_de_confianca(100), 1) == 4.3
     assert 190 <= pares_para_margem(3) <= 210
+
+
+def test_a_cobertura_inclui_tipo_canonico_vizinho_de_outro_no_mesmo_programa() -> None:
+    grupos = grupos_por_programa(
+        {
+            "jornal": [_video([("camisa", None), ("camisa rara", None)])],
+            "novela": [_video([("camisa rara", None)])],
+        }
+    )
+
+    pares = amostra_de_cobertura(grupos, 10)
+
+    # "camisa" (tipo) e "camisa rara" (outro) do jornal; o par não cruza programas.
+    assert [(x["programa"], x["a"], x["b"]) for x in pares] == [
+        ("jornal", "camisa", "camisa rara")
+    ]

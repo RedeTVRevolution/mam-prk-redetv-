@@ -8,8 +8,8 @@ Lê uma pasta de Decupagens em JSON (uma subpasta por programa; sem subpasta, o 
 - a amostra para a pessoa marcar a precisão: grupos sorteados de forma estável (pelo hash da
   chave do grupo, como `reservado_pelo_sorteio`), estratificados por programa, e um par de
   nomes diferentes dentro de cada grupo, não pares soltos;
-- a amostra para a cobertura: pares de nomes que ficaram separados mas são vizinhos pela
-  assinatura (dividem uma palavra), não pares ao acaso.
+- a amostra para a cobertura: pares de nomes de grupos diferentes (de qualquer tipo) do mesmo
+  programa que são vizinhos pela assinatura (dividem uma palavra), não pares ao acaso.
 
 Só lê arquivos locais. Os nomes usados para montar o dicionário não valem como amostra de
 qualidade: a pessoa escolhe vídeos de outros programas.
@@ -111,24 +111,26 @@ def amostra_de_precisao(grupos: Grupos, quantos: int) -> list[dict[str, str]]:
 
 
 def amostra_de_cobertura(grupos: Grupos, quantos: int) -> list[dict[str, str]]:
-    """Pares de nomes de grupos `outro` diferentes que dividem uma palavra da assinatura:
-    vizinhos próximos, onde as duplicatas que ficaram separadas aparecem."""
-    por_palavra: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    """Pares de nomes de grupos diferentes (de qualquer tipo) do mesmo programa que dividem
+    uma palavra da assinatura: vizinhos próximos, onde as duplicatas que ficaram separadas
+    aparecem. O programa vai no par."""
+    pares: set[tuple[str, str, str, str]] = set()
     for programa, por_chave in grupos.items():
+        por_palavra: dict[str, set[tuple[str, str]]] = defaultdict(set)
         for chave, nomes in por_chave.items():
-            if not chave.startswith("nome:"):
-                continue
             for nome in nomes:
                 for palavra in assinatura(nome).split():
-                    por_palavra[palavra].add((programa, nome))
-    pares: set[tuple[str, str, str]] = set()
-    for palavra, vizinhos in por_palavra.items():
-        for (_, a), (_, b) in combinations(sorted(vizinhos), 2):
-            if a != b and assinatura(a) != assinatura(b):
-                menor, maior = sorted((a, b))
-                pares.add((palavra, menor, maior))
+                    por_palavra[palavra].add((chave, nome))
+        for palavra, vizinhos in por_palavra.items():
+            for (ca, a), (cb, b) in combinations(sorted(vizinhos), 2):
+                if ca != cb and a != b:
+                    menor, maior = sorted((a, b))
+                    pares.add((programa, palavra, menor, maior))
     ordenados = sorted(pares, key=lambda p: _hash("|".join(p)))
-    return [{"palavra": p, "a": a, "b": b} for p, a, b in ordenados[:quantos]]
+    return [
+        {"programa": g, "palavra": p, "a": a, "b": b}
+        for g, p, a, b in ordenados[:quantos]
+    ]
 
 
 def margem_de_confianca(pares: int, precisao: float = 0.95) -> float:
