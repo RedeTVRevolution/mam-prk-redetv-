@@ -10,8 +10,7 @@ import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
-from google.cloud import firestore
-
+from api.bancos import cliente_do_firestore
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.nuvem import RepositorioDeRevisaoFirestore
 from api.revisao import RepositorioDeRevisao, relatorio_em_csv
@@ -39,7 +38,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     except (FaltaNoAmbiente, ValueError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    listar(RepositorioDeRevisaoFirestore(firestore.Client(project=projeto)), desde)
+    listar(RepositorioDeRevisaoFirestore(cliente_do_firestore(projeto)), desde)
     return 0
 
 

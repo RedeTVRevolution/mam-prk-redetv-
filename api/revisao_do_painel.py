@@ -18,8 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from google.cloud import firestore
-
+from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, _parametro, transporte_http
 from api.jobs import RepositorioDeJobs
 from api.nuvem import RepositorioDeRevisaoFirestore
@@ -424,7 +423,7 @@ def revisao_do_ambiente(ambiente: Any) -> RevisaoBigQuery | None:
 def main() -> int:
     config = ConfigDaRevisao.do_ambiente(os.environ)
     total = preencher(
-        RepositorioDeRevisaoFirestore(firestore.Client(project=config.projeto)),
+        RepositorioDeRevisaoFirestore(cliente_do_firestore(config.projeto)),
         TabelaDaRevisaoBigQuery(config, transporte_http(config.projeto)),
     )
     print(f"{total} medidas gravadas")

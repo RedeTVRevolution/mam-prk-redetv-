@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
+from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import (
     DestinoDaCorrecao,
     EstadoNaoCorrigivel,
@@ -192,7 +193,6 @@ def main(
 
 
 def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
-    from google.cloud import firestore
     from google.cloud.storage import Client as ClienteStorage
 
     from api.bancos import cliente_da_colecao
@@ -210,7 +210,7 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    banco = firestore.Client(project=projeto)
+    banco = cliente_do_firestore(projeto, ambiente)
     return main(
         argumentos,
         RepositorioFirestore(banco),

@@ -1260,3 +1260,11 @@ def test_quem_grava_a_fila_avisa_a_espera_sem_nunca_falhar_por_isso() -> None:
     assert fila.count("call: sys.sleep") == 1 and "espera_para_reler" in fila
     roda = _subworkflow(_texto(), "roda_o_job_com_gpu")
     assert roda.count("call: sys.sleep") == 1 and "espera_a_gpu" in roda
+
+
+def test_o_banco_do_firestore_vem_da_configuracao_e_nao_e_default() -> None:
+    texto = _texto()
+
+    assert "(default)" not in texto
+    assert "databases/${banco_firestore}/documents/" in texto
+    assert "banco_firestore" in MAIN.read_text().split("validacao.workflow.yaml")[1]

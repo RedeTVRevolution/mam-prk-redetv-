@@ -22,9 +22,8 @@ import sys
 from collections.abc import Mapping
 from typing import Any
 
-from google.cloud import firestore
-
 from api import log_estruturado
+from api.bancos import cliente_do_firestore
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.eventos_de_uso import Eventos
 from api.eventos_do_job import (
@@ -77,7 +76,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         return 2
     from api.nuvem import RepositorioDeWebhooksFirestore, RepositorioFirestore
 
-    cliente = firestore.Client(project=projeto)
+    cliente = cliente_do_firestore(projeto, ambiente)
     avisar_o_fim(
         job_id,
         RepositorioFirestore(cliente),

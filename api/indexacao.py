@@ -20,12 +20,12 @@ from datetime import datetime
 from functools import partial
 from typing import Any, NamedTuple, Protocol, get_args
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.bancos import cliente_do_firestore
 from api.catalogo import PessoaDoCatalogo
 from api.catalogo_apagado import com_pessoas_fundidas
 from api.catalogo_dos_jobs import gravar_catalogo_do_job
@@ -418,7 +418,7 @@ def reindexar_jobs(
 
 def main(argv: list[str]) -> int:
     projeto = os.environ["GCP_PROJECT_ID"]
-    firestore_ = firestore.Client(project=projeto)
+    firestore_ = cliente_do_firestore(projeto)
     decupagens = DecupagensStorage(
         ClienteStorage(project=projeto),
         os.environ["BUCKET_ACEITOS"],

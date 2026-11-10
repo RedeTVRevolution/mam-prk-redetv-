@@ -12,10 +12,10 @@ from collections.abc import Callable
 from datetime import datetime
 from functools import partial
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.bancos import cliente_do_firestore
 from api.catalogo import PessoaDoCatalogo
 from api.ciclo_de_vida import fechar_a_rodada, tomar_a_rodada
 from api.copia_bigquery import (
@@ -201,7 +201,7 @@ def main(argv: list[str]) -> int:
         print("BIGQUERY_DATASET não definido", file=sys.stderr)
         return 2
     projeto = os.environ["GCP_PROJECT_ID"]
-    firestore_ = firestore.Client(project=projeto)
+    firestore_ = cliente_do_firestore(projeto)
     resultado = copiar_jobs(
         argv or None,
         RepositorioFirestore(firestore_),

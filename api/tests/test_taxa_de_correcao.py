@@ -5,7 +5,6 @@ import io
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -439,7 +438,7 @@ def test_comando_imprime_o_csv_do_periodo_e_do_programa(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     jobs, decupagens, correcoes, revisao = _mundo()
-    monkeypatch.setattr(taxa, "firestore", SimpleNamespace(Client=lambda project: None))
+    monkeypatch.setattr(taxa, "cliente_do_firestore", lambda projeto: None)
     monkeypatch.setattr(taxa, "ClienteStorage", lambda project: None)
     monkeypatch.setattr(taxa, "RepositorioFirestore", lambda banco: jobs)
     monkeypatch.setattr(taxa, "DecupagensStorage", lambda *_: decupagens)

@@ -144,7 +144,7 @@ processa:
                 try:
                   call: googleapis.firestore.v1.projects.databases.documents.get
                   args:
-                    name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                    name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
                   result: antes
                 except:
                   as: erro_da_leitura
@@ -165,7 +165,7 @@ processa:
             - marca_como_falhou:
                 call: googleapis.firestore.v1.projects.databases.documents.patch
                 args:
-                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
                   # Só vale se o Job não mudou desde a leitura (um cancelamento no meio).
                   currentDocument:
                     updateTime: $${antes.updateTime}
@@ -195,7 +195,7 @@ processa:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.get
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
           result: documento
         except:
           as: e
@@ -304,7 +304,7 @@ processa:
             - rele_o_job:
                 call: googleapis.firestore.v1.projects.databases.documents.get
                 args:
-                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
                 result: atual
             - so_se_ainda_analisando:
                 switch:
@@ -313,7 +313,7 @@ processa:
             - marca_analise_como_falha:
                 call: googleapis.firestore.v1.projects.databases.documents.patch
                 args:
-                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
                   currentDocument:
                     updateTime: $${atual.updateTime}
                   updateMask:
@@ -341,7 +341,7 @@ processa:
     - le_o_job_depois_da_analise:
         call: googleapis.firestore.v1.projects.databases.documents.get
         args:
-          name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
         result: depois_da_analise
     # Identificação, quadros-chave e indexação só valem com o
     # Job `concluido`; uma análise que derrubou o Job (sai sem erro) não as inicia.
@@ -590,7 +590,7 @@ marca_interrompido:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.get
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
           result: interrompido
         except:
           as: erro_da_leitura_do_interrompido
@@ -614,7 +614,7 @@ marca_interrompido:
     - derruba_o_job_interrompido:
         call: googleapis.firestore.v1.projects.databases.documents.patch
         args:
-          name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+          name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
           # Só vale se o Job não mudou desde a leitura (um cancelamento no meio).
           currentDocument:
             updateTime: $${interrompido.updateTime}
@@ -687,7 +687,7 @@ marca_inicio:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.patch
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
             currentDocument:
               exists: true
             updateMask:
@@ -736,7 +736,7 @@ marca_fim:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.get
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
           result: documento_da_etapa
         except:
           as: erro_da_leitura_da_etapa
@@ -803,7 +803,7 @@ marca_fim:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.patch
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
             currentDocument:
               exists: true
             updateMask:
@@ -867,7 +867,7 @@ etapa_com_gpu:
             - rele_antes_da_falha:
                 call: googleapis.firestore.v1.projects.databases.documents.get
                 args:
-                  name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                  name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
                 result: durante
             - so_se_ainda_analisando:
                 switch:
@@ -877,7 +877,7 @@ etapa_com_gpu:
                 try:
                   call: googleapis.firestore.v1.projects.databases.documents.patch
                   args:
-                    name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+                    name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
                     currentDocument:
                       updateTime: $${durante.updateTime}
                     updateMask:
@@ -1191,7 +1191,7 @@ atualiza_fila_gpu:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.get
           args:
-            name: projects/${projeto}/databases/(default)/documents/fila_gpu/vagas
+            name: projects/${projeto}/databases/${banco_firestore}/documents/fila_gpu/vagas
           result: documento_da_fila
         retry: $${http.default_retry}
         except:
@@ -1400,7 +1400,7 @@ atualiza_fila_gpu:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.patch
           args:
-            name: projects/${projeto}/databases/(default)/documents/fila_gpu/vagas
+            name: projects/${projeto}/databases/${banco_firestore}/documents/fila_gpu/vagas
             currentDocument: $${precondicao}
             updateMask:
               fieldPaths: [espera, ocupadas]
@@ -1554,7 +1554,7 @@ le_job_da_fila:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.get
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
           result: job_lido
         retry: $${http.default_retry}
         except:
@@ -1580,7 +1580,7 @@ marca_dispositivo:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.get
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
           result: documento_do_dispositivo
         except:
           as: erro_da_leitura_do_dispositivo
@@ -1612,7 +1612,7 @@ marca_dispositivo:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.patch
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
             currentDocument:
               exists: true
             updateMask:
@@ -1643,7 +1643,7 @@ limpa_a_etapa_atual:
         try:
           call: googleapis.firestore.v1.projects.databases.documents.patch
           args:
-            name: $${"projects/${projeto}/databases/(default)/documents/jobs/" + job_id}
+            name: $${"projects/${projeto}/databases/${banco_firestore}/documents/jobs/" + job_id}
             currentDocument:
               exists: true
             updateMask:

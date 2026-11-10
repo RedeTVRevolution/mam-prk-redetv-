@@ -13,10 +13,9 @@ import logging
 import os
 import sys
 
-from google.cloud import firestore
-
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.bancos import cliente_do_firestore
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import FiltroDeJobs, RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
@@ -73,7 +72,7 @@ def _conferir_a_lixeira(
 
 
 def main() -> int:
-    firestore_ = firestore.Client(project=os.environ["GCP_PROJECT_ID"])
+    firestore_ = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
     contagem = preencher(
         RepositorioFirestore(firestore_),
         AgentRetrieval(

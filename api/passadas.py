@@ -29,12 +29,12 @@ import google.auth
 from fastapi import APIRouter, Depends, HTTPException, Path
 from google.api_core.exceptions import NotFound
 from google.auth.transport.requests import AuthorizedSession
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.analise_por_janelas import analisar_video
 from api.auth import Chamador
+from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.comparar_objetos import (
     FaltaNoAmbiente,
@@ -338,7 +338,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
-    banco = firestore.Client(project=projeto)
+    banco = cliente_do_firestore(projeto)
     catalogo = CatalogoFirestore(banco)
     try:
         passada = rodar_passada(

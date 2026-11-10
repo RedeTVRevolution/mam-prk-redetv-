@@ -45,6 +45,14 @@ variable "regiao_do_bigquery" {
   default = "southamerica-east1"
 }
 
+# Nome do banco do Firestore (#536). `(default)` é o de hoje; o nome vem sempre daqui, nunca
+# escrito no código: a API o recebe por FIRESTORE_BANCO e o Workflows pelo templatefile.
+variable "banco_firestore" {
+  type        = string
+  default     = "(default)"
+  description = "Nome do banco principal do Firestore."
+}
+
 # Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Cloud Run não tem GPU
 # em southamerica-east1. Só processamento de passagem: nenhum bucket nasce nesta região.
 variable "regiao_gpu" {
@@ -518,7 +526,7 @@ resource "google_artifact_registry_repository" "mam_gpu" {
 }
 
 resource "google_firestore_database" "mam" {
-  name                    = "(default)"
+  name                    = var.banco_firestore
   location_id             = var.regiao
   type                    = "FIRESTORE_NATIVE"
   delete_protection_state = "DELETE_PROTECTION_ENABLED"
@@ -1025,6 +1033,10 @@ resource "google_cloud_run_v2_service" "web" {
         value = var.projeto
       }
       env {
+        name  = "FIRESTORE_BANCO"
+        value = var.banco_firestore
+      }
+      env {
         name  = "FIRESTORE_BANCO_DE_SEGURANCA"
         value = local.banco_de_seguranca
       }
@@ -1278,6 +1290,10 @@ resource "google_cloud_run_v2_job" "validacao" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
+        }
+        env {
           name  = "BUCKET_QUARENTENA"
           value = local.buckets["quarentena"]
         }
@@ -1381,6 +1397,10 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
+        }
+        env {
           name  = "BUCKET_ACEITOS"
           value = local.buckets["aceitos"]
         }
@@ -1469,6 +1489,10 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
+        }
+        env {
           name  = "BUCKET_ACEITOS"
           value = local.buckets["aceitos"]
         }
@@ -1544,6 +1568,10 @@ resource "google_cloud_run_v2_job" "objetos_gpu" {
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
+        }
+        env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
         }
         env {
           name  = "BUCKET_DECUPAGENS"
@@ -1660,6 +1688,10 @@ resource "google_cloud_run_v2_job" "inventario" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
+        }
+        env {
           name  = "BUCKET_DECUPAGENS"
           value = local.buckets["decupagens"]
         }
@@ -1767,6 +1799,10 @@ resource "google_cloud_run_v2_job" "analise" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
+        }
+        env {
           name  = "BUCKET_ACEITOS"
           value = local.buckets["aceitos"]
         }
@@ -1827,6 +1863,10 @@ resource "google_cloud_run_v2_job" "quadros" {
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
+        }
+        env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
         }
         env {
           name  = "BUCKET_ACEITOS"
@@ -1907,6 +1947,10 @@ resource "google_cloud_run_v2_job" "indexacao" {
         env {
           name  = "GCP_PROJECT_ID"
           value = var.projeto
+        }
+        env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
         }
         env {
           name  = "BUCKET_ACEITOS"
@@ -2021,6 +2065,10 @@ resource "google_cloud_run_v2_job" "identificacao" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
+        }
+        env {
           name  = "BUCKET_ACEITOS"
           value = local.buckets["aceitos"]
         }
@@ -2080,9 +2128,10 @@ resource "google_workflows_workflow" "validacao" {
   service_account = google_service_account.mam["orquestracao"].id
   source_contents = templatefile("${path.module}/validacao.workflow.yaml", {
     projeto                = var.projeto
+    banco_firestore        = var.banco_firestore
     regiao                 = var.regiao
     workflow               = local.workflow_validacao
-    job_de_validacao      = google_cloud_run_v2_job.validacao.name
+    job_de_validacao       = google_cloud_run_v2_job.validacao.name
     regiao_gpu             = var.regiao_gpu
     vagas_de_gpu           = var.vagas_de_gpu
     gpu_espera_total_s     = var.espera_gpu_minutos * 60
@@ -2997,6 +3046,10 @@ output "busca_distancia_maxima" {
 
 output "busca_palavras_minimas" {
   value = var.busca_palavras_minimas
+}
+
+output "banco_firestore" {
+  value = var.banco_firestore
 }
 
 output "banco_de_seguranca" {

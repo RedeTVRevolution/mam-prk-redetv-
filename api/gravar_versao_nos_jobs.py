@@ -15,9 +15,9 @@ import sys
 from itertools import batched
 from typing import Any
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api.bancos import cliente_do_firestore
 from api.jobs import Job
 from api.nuvem import COLECAO_DE_JOBS, DecupagensStorage
 from api.reprocessar_versao import ANTERIOR, LeitorDeDecupagem, versao_da_decupagem
@@ -55,7 +55,7 @@ def gravar(colecao: Any, cliente: Any, decupagens: LeitorDeDecupagem) -> dict[st
 
 def main() -> int:
     projeto = os.environ["GCP_PROJECT_ID"]
-    cliente = firestore.Client(project=projeto)
+    cliente = cliente_do_firestore(projeto)
     decupagens = DecupagensStorage(
         ClienteStorage(project=projeto),
         os.environ["BUCKET_ACEITOS"],

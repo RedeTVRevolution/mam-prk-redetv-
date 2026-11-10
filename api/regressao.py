@@ -22,10 +22,10 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from api.bancos import cliente_do_firestore
 from api.comparador import Item, Tipo
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import (
@@ -406,7 +406,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
         print(f"erro: {e}", file=sys.stderr)
         return 2
     pasta = Path(argumentos[0]) if argumentos and argumentos[0] else PASTA_DOS_CASOS
-    banco = firestore.Client(project=projeto)
+    banco = cliente_do_firestore(projeto)
     exportar(
         RepositorioFirestore(banco),
         DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),

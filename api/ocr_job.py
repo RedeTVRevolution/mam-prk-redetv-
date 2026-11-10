@@ -11,10 +11,10 @@ import os
 import time
 from pathlib import Path
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado, teste_dos_jobs
+from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import transitar
 from api.eventos_do_job import jobs_do_ambiente
 from api.jobs import RepositorioDeJobs
@@ -93,7 +93,7 @@ def main() -> None:
     projeto = os.environ["GCP_PROJECT_ID"]
     executar(
         os.environ["JOB_ID"],
-        jobs_do_ambiente(firestore.Client(project=projeto)),
+        jobs_do_ambiente(cliente_do_firestore(projeto)),
         LeiturasStorage(ClienteStorage(project=projeto), os.environ["BUCKET_ACEITOS"]),
         LeitorPaddle.da_pasta(os.environ["PASTA_DOS_MODELOS"]),
         Path(os.environ["TMPDIR"]),

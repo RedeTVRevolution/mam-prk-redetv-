@@ -31,11 +31,11 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.auth import ChamadorAutenticado, Usuario
+from api.bancos import cliente_do_firestore
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import (
     CORRIGIVEIS,
@@ -311,7 +311,7 @@ def main(
     except (FaltaNoAmbiente, ValueError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    banco = firestore.Client(project=projeto)
+    banco = cliente_do_firestore(projeto)
     linhas = calcular(
         RepositorioFirestore(banco),
         DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
