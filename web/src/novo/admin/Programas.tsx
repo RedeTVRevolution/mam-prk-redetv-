@@ -281,7 +281,12 @@ export default function Programas() {
   const [editando, setEditando] = useState<ProgramaCadastrado | 'novo' | null>(null)
   const [apagando, setApagando] = useState<ProgramaCadastrado | null>(null)
   const lista = carga.data ?? []
-  const recarregar = () => void consultas.invalidateQueries({ queryKey: CHAVE, exact: true })
+  const recarregar = () => {
+    void consultas.invalidateQueries({ queryKey: CHAVE, exact: true })
+    // A lista do envio, da busca, do acervo e dos relatórios, e as opções do filtro do painel, guardam os programas por 5 min.
+    void consultas.invalidateQueries({ queryKey: ['programas'], exact: true })
+    void consultas.invalidateQueries({ queryKey: ['painel', 'opcoes'], exact: true })
+  }
 
   return (
     <Aba>
