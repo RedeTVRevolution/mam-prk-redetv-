@@ -219,7 +219,9 @@ def test_a_pasta_local_mostra_o_numero_de_grupos_e_os_maiores(
     assert main([]) == 2
 
 
-def _p(programa: str, video: str, plano: str, grupo: str | None, bits: int):
+def _p(
+    programa: str, video: str, plano: str, grupo: str | None, bits: int
+) -> PlanoDaAmostra:
     return PlanoDaAmostra(programa, video, plano, grupo, Sinal((1 << bits) - 1, (1.0,)))
 
 

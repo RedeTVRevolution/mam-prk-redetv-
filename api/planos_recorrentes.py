@@ -294,9 +294,9 @@ def amostra_de_cobertura(
                 menor, maior = sorted((a.plano, b.plano))
                 pares.add((programa, video, menor, maior))
     por_programa: dict[str, list[dict[str, str]]] = defaultdict(list)
-    for programa, video, a, b in sorted(pares, key=lambda p: _hash("|".join(p))):
+    for programa, video, id_a, id_b in sorted(pares, key=lambda p: _hash("|".join(p))):
         por_programa[programa].append(
-            {"programa": programa, "video": video, "plano_a": a, "plano_b": b}
+            {"programa": programa, "video": video, "plano_a": id_a, "plano_b": id_b}
         )
     return _por_programa(por_programa, quantos)
 
