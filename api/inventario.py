@@ -21,12 +21,15 @@ from api.decupagem import (
     GeradorDoInventario,
     ObjetoDoInventario,
     Rotulo,
+    TipoCanonico,
     em_mm_ss,
 )
 from api.espera import sorteio_uniforme
 from api.florence import ObjetosDaDecupagem
 from api.gemini import Chamada, Transporte, gerar_validado
 from api.leitura_da_tela import Caixa
+from api.taxonomia_de_objetos import OUTRO
+from api.tipo_do_objeto import chave_de_agrupamento, tipo_canonico_de
 
 # Regra do destaque (1 a 3), por caixa; o objeto fica com o maior destaque das suas
 # caixas. Área em fração do quadro e distância do centro da caixa ao centro do quadro (0 a ~0,71).
@@ -73,6 +76,8 @@ class _Descrito(_Estrito):
         Rotulo, Field(min_length=1, description="Em português, curto e no singular.")
     ]
     categoria: CategoriaDeObjeto
+    # Ao lado do nome livre; sem ele (resposta antiga), o dicionário decide pelo nome.
+    tipo_canonico: TipoCanonico = OUTRO
     cor: CorBase | None = Field(
         description="Da lista, ou null se não houver uma cor dominante."
     )
@@ -133,6 +138,7 @@ REGRAS
 - Escreva tudo em português do Brasil: nome, categoria e cor. Nunca copie a legenda em inglês.
 - `nome`: curto e no singular ("sofá", "vaso de flores", "violão").
 - `categoria`: uma só da lista do esquema; `outro` só quando nenhuma servir.
+- `tipo_canonico`: o tipo da lista do esquema que melhor descreve o objeto ("camiseta" e "blusa" são `camisa`; "veículo" é `carro`); `outro` só quando nenhum servir. O `nome` continua livre e fiel ao que se vê.
 - `cor`: uma da lista do esquema, a dominante do objeto; null se não houver.
 - `marca`: só se a legenda ou um logo legível citar uma marca; senão null. Nunca adivinhe.
 - Não liste pessoas nem partes do corpo. Liste objetos de cena: móveis, decoração, instrumentos, utensílios, documentos, plantas, bebidas, eletrônicos, veículos e o que mais aparecer.
@@ -211,9 +217,13 @@ def _caixa_do_quadro(caminho: str, caixa: Caixa) -> CaixaDoQuadro:
 def _item(modelo: _Descrito, caixas: list[CaixaDoQuadro]) -> ObjetoDoInventario | None:
     if not caixas or not modelo.nome.strip():
         return None
+    nome = modelo.nome.strip()
     return ObjetoDoInventario(
-        nome=modelo.nome.strip(),
+        nome=nome,
         categoria=modelo.categoria,
+        tipo_canonico=tipo_canonico_de(
+            modelo.tipo_canonico, nome, [modelo.cor] if modelo.cor else []
+        ),
         cor=modelo.cor,
         marca=modelo.marca.strip() if modelo.marca and modelo.marca.strip() else None,
         caixas=caixas,
@@ -222,23 +232,42 @@ def _item(modelo: _Descrito, caixas: list[CaixaDoQuadro]) -> ObjetoDoInventario 
 
 
 def unir_repetidos(itens: list[ObjetoDoInventario]) -> list[ObjetoDoInventario]:
-    """Nome (sem acento nem caixa), categoria e cor iguais viram um item, com as caixas
-    de todos e o maior destaque; a marca é a primeira que aparecer."""
-    unidos: dict[tuple[str, str, str | None], ObjetoDoInventario] = {}
+    """O mesmo objeto visto em vários quadros do plano vira um item, com as caixas de todos e
+    o maior destaque. É o mesmo tipo canônico (ou, em `outro`, a mesma assinatura do nome e a
+    mesma categoria) e a mesma cor; a marca só separa quando as duas existem e diferem. O
+    texto bruto e a marca são os do primeiro que aparecer; a visão por tipo, no vídeo todo,
+    fica a cargo de quem lê (nunca funde o que está gravado)."""
+    unidos: list[ObjetoDoInventario] = []
+    por_chave: dict[tuple[str, str, str | None], list[int]] = {}
     for item in itens:
-        chave = (normalizar(item.nome), item.categoria, item.cor)
-        antes = unidos.get(chave)
-        if antes is None:
-            unidos[chave] = item
+        cores = [item.cor] if item.cor else []
+        tipo = tipo_canonico_de(item.tipo_canonico, item.nome, cores)
+        chave = chave_de_agrupamento(tipo, item.nome, cores)
+        grupo = (chave, item.categoria if tipo == OUTRO else "", item.cor)
+        marca = normalizar(item.marca) if item.marca else None
+        destino = next(
+            (
+                k
+                for k in por_chave.get(grupo, [])
+                if marca is None
+                or not unidos[k].marca
+                or normalizar(unidos[k].marca or "") == marca
+            ),
+            None,
+        )
+        if destino is None:
+            por_chave.setdefault(grupo, []).append(len(unidos))
+            unidos.append(item.model_copy(update={"tipo_canonico": tipo}))
             continue
-        unidos[chave] = antes.model_copy(
+        antes = unidos[destino]
+        unidos[destino] = antes.model_copy(
             update={
                 "caixas": [*antes.caixas, *item.caixas],
                 "destaque": max(antes.destaque, item.destaque),
                 "marca": antes.marca or item.marca,
             }
         )
-    return list(unidos.values())
+    return unidos
 
 
 def _chamada(
