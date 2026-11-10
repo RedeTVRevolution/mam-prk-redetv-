@@ -253,7 +253,7 @@ DUAS_SEM_NOME = [
 def test_a_juncao_roda_depois_do_modelo_forte_e_a_decupagem_sai_com_as_origens(
     tmp_path: Path,
 ) -> None:
-    # O modelo forte não nomeia ninguém; a junção une as duas, sem o juiz.
+    # O modelo forte não nomeia ninguém; a junção une as duas.
     nao_identificado = json.dumps(
         {
             "resultado": "nao_identificado",
