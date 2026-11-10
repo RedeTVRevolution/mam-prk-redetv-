@@ -114,3 +114,25 @@ def test_o_banco_de_seguranca_tem_as_mesmas_agendas_de_backup() -> None:
     )
     assert "daily_recurrence" in diaria and '"604800s"' in diaria
     assert "weekly_recurrence" in semanal and '"8467200s"' in semanal
+
+
+def test_o_banco_principal_vem_da_variavel_e_chega_a_todo_servico_e_job() -> None:
+    assert re.search(r'variable "banco_firestore" \{[^}]*default\s+= "\(default\)"', TF)
+    assert "name                    = var.banco_firestore" in _bloco(
+        'resource "google_firestore_database" "mam"'
+    )
+    todos = set()
+    for arquivo in sorted(MODULO.glob("*.tf")):
+        texto = arquivo.read_text()
+        for recurso in re.finditer(
+            r'^resource "google_cloud_run_v2_(?:job|service)" "(\w+)"',
+            texto,
+            re.MULTILINE,
+        ):
+            fim = texto.find("\nresource ", recurso.end())
+            corpo = texto[recurso.start() : fim if fim != -1 else len(texto)]
+            assert 'name  = "FIRESTORE_BANCO"' in corpo, recurso.group(1)
+            todos.add(recurso.group(1))
+    assert {"web", "purga", "validacao", "identificacao", "fim"} <= todos
+    for nome in ("main.tf", "ambientes/prod/main.tf"):
+        assert "banco_firestore" in (RAIZ / "infra" / nome).read_text(), nome

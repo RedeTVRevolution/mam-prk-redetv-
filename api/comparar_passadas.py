@@ -35,11 +35,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Path as CaminhoDaRota
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.auth import Chamador
+from api.bancos import cliente_do_firestore
 from api.comparador import (
     TIPOS_COM_IDENTIDADE,
     TOLERANCIA_MS,
@@ -842,7 +842,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
             jobs,
             passada_id=passada_id,
             modelo=modelo,
-            repositorio=RepositorioFirestore(firestore.Client(project=projeto)),
+            repositorio=RepositorioFirestore(cliente_do_firestore(projeto)),
             ler_decupagem=DecupagensStorage(cliente, aceitos, decupagens).ler_decupagem,
             passadas=PassadasStorage(cliente, aceitos, decupagens),
             custo_do_job_por_id=lambda j: custo_do_job(

@@ -11,8 +11,7 @@ import sys
 from itertools import batched
 from typing import Any
 
-from google.cloud import firestore
-
+from api.bancos import cliente_do_firestore
 from api.jobs import Job
 from api.nuvem import COLECAO_DE_JOBS
 
@@ -42,7 +41,7 @@ def gravar(colecao: Any, cliente: Any) -> dict[str, int]:
 
 
 def main() -> int:
-    cliente = firestore.Client(project=os.environ["GCP_PROJECT_ID"])
+    cliente = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
     contagem = gravar(cliente.collection(COLECAO_DE_JOBS), cliente)
     for nome, quantos in contagem.items():
         print(f"{nome}: {quantos}")

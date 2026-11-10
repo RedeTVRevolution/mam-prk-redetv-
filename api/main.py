@@ -36,7 +36,7 @@ from api.auth import (
     VerificadorIdentityPlatform,
     exigir_autenticacao,
 )
-from api.bancos import cliente_da_colecao
+from api.bancos import cliente_da_colecao, cliente_do_firestore
 from api.busca import (
     Busca,
     ListasDaBusca,
@@ -775,7 +775,7 @@ if _projeto:
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(
-            firestore.Client(project=_projeto),
+            cliente_do_firestore(_projeto),
             listagem_por_mes=listagem_por_mes_do_ambiente(os.environ),
         ),
         ArmazenamentoStorage(
@@ -788,8 +788,8 @@ if _projeto:
             cliente_da_colecao(_projeto, COLECAO_DE_PAPEIS)
         ),
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
-        correcoes=RepositorioDeCorrecoesFirestore(firestore.Client(project=_projeto)),
-        aprovacao=RepositorioDeAprovacaoFirestore(firestore.Client(project=_projeto)),
+        correcoes=RepositorioDeCorrecoesFirestore(cliente_do_firestore(_projeto)),
+        aprovacao=RepositorioDeAprovacaoFirestore(cliente_do_firestore(_projeto)),
         auditoria=RepositorioDeAuditoriaFirestore(
             cliente_da_colecao(_projeto, COLECAO_DA_AUDITORIA)
         ),
@@ -800,10 +800,8 @@ if _projeto:
         # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
         # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
         # sistema; listar e revogar funcionam.
-        idempotencia=RepositorioDeIdempotenciaFirestore(
-            firestore.Client(project=_projeto)
-        ),
-        listas_da_busca=ListasDaBuscaFirestore(firestore.Client(project=_projeto)),
+        idempotencia=RepositorioDeIdempotenciaFirestore(cliente_do_firestore(_projeto)),
+        listas_da_busca=ListasDaBuscaFirestore(cliente_do_firestore(_projeto)),
         repositorio_de_chaves=RepositorioDeChavesFirestore(
             cliente_da_colecao(_projeto, COLECAO_DE_CHAVES)
         ),
@@ -813,7 +811,7 @@ if _projeto:
             os.environ["BUCKET_DECUPAGENS"],
         ),
         mac=mac_do_ambiente(os.environ),
-        revisao=_revisao_espelhada(firestore.Client(project=_projeto)),
+        revisao=_revisao_espelhada(cliente_do_firestore(_projeto)),
         login_recente=timedelta(
             minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
             or LOGIN_RECENTE_PADRAO / timedelta(minutes=1)
@@ -830,9 +828,9 @@ if _projeto:
         janelas=JanelasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_ACEITOS"]
         ),
-        catalogo=CatalogoFirestore(firestore.Client(project=_projeto)),
-        marcas=CatalogoDeMarcasFirestore(firestore.Client(project=_projeto)),
-        programas=ProgramasFirestore(firestore.Client(project=_projeto)),
+        catalogo=CatalogoFirestore(cliente_do_firestore(_projeto)),
+        marcas=CatalogoDeMarcasFirestore(cliente_do_firestore(_projeto)),
+        programas=ProgramasFirestore(cliente_do_firestore(_projeto)),
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),
@@ -843,15 +841,15 @@ if _projeto:
                 _busca,
                 transporte_http(),
                 tentar_no_429=True,
-                orcamento=OrcamentoFirestore(firestore.Client(project=_projeto)),
+                orcamento=OrcamentoFirestore(cliente_do_firestore(_projeto)),
             )
             if _busca
             else None
         ),
         copia=copia_do_ambiente(os.environ),
-        tipos_de_objeto=TiposDeObjetoFirestore(firestore.Client(project=_projeto)),
+        tipos_de_objeto=TiposDeObjetoFirestore(cliente_do_firestore(_projeto)),
         apagar_dados_da_purga=dados_do_ambiente(
-            firestore.Client(project=_projeto), os.environ
+            cliente_do_firestore(_projeto), os.environ
         ).apagar,
         limites_da_imagem=LimitesDaImagem(
             max_bytes=int(

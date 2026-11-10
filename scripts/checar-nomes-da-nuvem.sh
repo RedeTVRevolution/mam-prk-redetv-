@@ -4,7 +4,9 @@
 # Procura o ID do projeto (o formato do wizard e, se definido, o GCP_PROJECT_ID) e
 # os nomes de bucket, pelos sufixos que o infra/modulos/mam/main.tf monta, mais o do estado do
 # Terraform e o das fontes do build, que ficam fora da lista. Procura também, entre
-# aspas, os nomes da busca (coleções e índices) e a região dela.
+# aspas, os nomes da busca (coleções e índices) e a região dela. O banco `(default)` do
+# Firestore também não pode voltar escrito (#536): vem de FIRESTORE_BANCO no código e do
+# templatefile no workflow; api/bancos.py guarda o valor padrão, o único lugar permitido.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -28,5 +30,11 @@ fi
 if grep -rnIE "$padrao" api web/src --exclude-dir=tests --exclude-dir=__pycache__ \
   --exclude='*.test.*' --exclude=setup-testes.ts; then
   echo "Nome de recurso da nuvem escrito no código (acima): leia da configuração." >&2
+  exit 1
+fi
+
+if grep -rnIE "[\"']\(default\)[\"']" api --include='*.py' --exclude-dir=tests --exclude-dir=__pycache__ \
+  --exclude=bancos.py || grep -nI '(default)' infra/modulos/mam/validacao.workflow.yaml; then
+  echo "Banco (default) do Firestore escrito (acima): use FIRESTORE_BANCO / banco_firestore." >&2
   exit 1
 fi

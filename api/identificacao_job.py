@@ -14,10 +14,10 @@ from typing import Any, Protocol, cast
 
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
+from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import rodar_etapa
 from api.decupagem import Decupagem
@@ -109,10 +109,10 @@ def main() -> None:
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
-    catalogo = CatalogoFirestore(firestore.Client(project=projeto))
+    catalogo = CatalogoFirestore(cliente_do_firestore(projeto))
     executar(
         os.environ["JOB_ID"],
-        RepositorioFirestore(firestore.Client(project=projeto)),
+        RepositorioFirestore(cliente_do_firestore(projeto)),
         DecupagensStorage(
             ClienteStorage(project=projeto), aceitos, os.environ["BUCKET_DECUPAGENS"]
         ),
@@ -121,7 +121,7 @@ def main() -> None:
         catalogo,
         Path(os.environ["TMPDIR"]),
         perfis=perfis_dos_programas(
-            ProgramasFirestore(firestore.Client(project=projeto)), catalogo
+            ProgramasFirestore(cliente_do_firestore(projeto)), catalogo
         ),
         limite_de_pessoas=int(
             os.environ.get("LIMITE_DE_PESSOAS_DO_MODELO_FORTE", LIMITE_DE_PESSOAS)

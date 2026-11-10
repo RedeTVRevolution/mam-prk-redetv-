@@ -26,8 +26,6 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-from google.cloud import firestore
-
 from api.agent_retrieval import (
     AgentRetrieval,
     ConfigDaBusca,
@@ -35,6 +33,7 @@ from api.agent_retrieval import (
     conferir_esquema,
     transporte_http,
 )
+from api.bancos import cliente_do_firestore
 from api.busca import (
     Ajustes,
     Busca,
@@ -233,7 +232,7 @@ def esquema_sem_campos(config: ConfigDaBusca, transporte: Transporte) -> str | N
 
 
 def main() -> int:
-    cliente = firestore.Client(project=os.environ["GCP_PROJECT_ID"])
+    cliente = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
     config = ConfigDaBusca.do_ambiente(os.environ)
     transporte = transporte_http()
     if erro := esquema_sem_campos(config, transporte):

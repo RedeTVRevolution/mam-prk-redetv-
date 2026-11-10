@@ -21,6 +21,7 @@ from google.cloud import firestore
 from google.cloud.exceptions import NotFound
 from google.cloud.storage import Client as ClienteStorage
 
+from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.nuvem import (
     CatalogoFirestore,
@@ -221,7 +222,7 @@ class DecupagensNoStorage:
 
 if __name__ == "__main__":
     projeto = os.environ.get("GCP_PROJECT_ID") or sys.exit("defina GCP_PROJECT_ID")
-    cliente = firestore.Client(project=projeto)
+    cliente = cliente_do_firestore(projeto)
     storage = ClienteStorage(project=projeto)
     tudo: dict[str, Any] = {
         "fotos": ReferenciasStorage(storage, os.environ["BUCKET_REFERENCIAS"]),

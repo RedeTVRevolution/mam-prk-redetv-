@@ -19,11 +19,11 @@ from typing import Any, Protocol, cast
 
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
 from api.analise_por_janelas import analisar_video
+from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import transitar
 from api.decupagem import Video
@@ -174,10 +174,10 @@ def main() -> None:
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
-    catalogo = CatalogoFirestore(firestore.Client(project=projeto))
+    catalogo = CatalogoFirestore(cliente_do_firestore(projeto))
     executar(
         os.environ["JOB_ID"],
-        jobs_do_ambiente(firestore.Client(project=projeto)),
+        jobs_do_ambiente(cliente_do_firestore(projeto)),
         DecupagensStorage(
             ClienteStorage(project=projeto), aceitos, os.environ["BUCKET_DECUPAGENS"]
         ),
@@ -188,7 +188,7 @@ def main() -> None:
         max_paralelas=int(os.environ["JANELAS_EM_PARALELO"]),
         catalogo=catalogo,
         perfis=perfis_dos_programas(
-            ProgramasFirestore(firestore.Client(project=projeto)), catalogo
+            ProgramasFirestore(cliente_do_firestore(projeto)), catalogo
         ),
         tolerancia_da_fala_ms=int(
             os.environ.get("TOLERANCIA_DA_FALA_MS", TOLERANCIA_DA_FALA_MS)

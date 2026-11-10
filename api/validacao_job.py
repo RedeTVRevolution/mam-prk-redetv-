@@ -9,11 +9,11 @@ import logging
 import os
 from pathlib import Path
 
-from google.cloud import firestore
 from google.cloud.storage import Bucket
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
+from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import transitar
 from api.cortes import LIMIAR_PADRAO
 from api.eventos_do_job import jobs_do_ambiente
@@ -95,7 +95,7 @@ def main() -> None:
     storage = ClienteStorage(project=projeto)
     executar(
         os.environ["JOB_ID"],
-        jobs_do_ambiente(firestore.Client(project=projeto)),
+        jobs_do_ambiente(cliente_do_firestore(projeto)),
         storage.bucket(os.environ["BUCKET_QUARENTENA"]),
         storage.bucket(os.environ["BUCKET_ACEITOS"]),
         Path(os.environ.get("QUARENTENA_MONTADA", "/quarentena")),

@@ -14,8 +14,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from google.cloud import firestore
-
+from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, _parametro, transporte_http
 from api.jobs import Job, RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
@@ -184,7 +183,7 @@ def preencher(
 def main() -> int:
     config = ConfigDaTabelaDeJobs.do_ambiente(os.environ)
     total = preencher(
-        RepositorioFirestore(firestore.Client(project=config.projeto)),
+        RepositorioFirestore(cliente_do_firestore(config.projeto)),
         TabelaBigQuery(config, transporte_http(config.projeto)),
     )
     print(f"{total} Jobs gravados")

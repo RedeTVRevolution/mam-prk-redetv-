@@ -70,6 +70,10 @@ resource "google_cloud_run_v2_job" "taxa_diaria" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
+        }
+        env {
           name  = "BUCKET_ACEITOS"
           value = local.buckets["aceitos"]
         }

@@ -12,9 +12,9 @@ import os
 import sys
 from collections.abc import Callable
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api.bancos import cliente_do_firestore
 from api.catalogo import PessoaDoCatalogo
 from api.catalogo_dos_jobs import (
     LeitorDeDecupagem,
@@ -71,7 +71,7 @@ def preencher(
 
 def main() -> int:
     projeto = os.environ["GCP_PROJECT_ID"]
-    firestore_ = firestore.Client(project=projeto)
+    firestore_ = cliente_do_firestore(projeto)
     contagem = preencher(
         RepositorioFirestore(firestore_),
         DecupagensStorage(
