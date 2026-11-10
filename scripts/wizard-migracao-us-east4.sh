@@ -232,7 +232,7 @@ banco_principal_antigo() {
 # comparar_contagens ANTIGAS NOVAS: cada arquivo tem "chave valor..." por linha. Imprime uma
 # linha por chave (ok, DIFERE ou FALTA) e sai com erro se qualquer uma não bater.
 comparar_contagens() {
-  awk -v so_crescem=" $CONTAGENS_QUE_SO_CRESCEM " '
+  awk -v so_crescem=" ${CONTAGENS_QUE_SO_CRESCEM:-} " '
        FILENAME == ARGV[1] { a[$1] = substr($0, length($1) + 2); next }
        { b[$1] = substr($0, length($1) + 2) }
        END {

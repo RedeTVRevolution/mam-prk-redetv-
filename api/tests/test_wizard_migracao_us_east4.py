@@ -207,6 +207,22 @@ def test_antigas_vazias_nao_viram_as_novas(tmp_path: Path) -> None:
     assert "FALTA   a: só no novo (1)" in r.stdout
 
 
+def test_contagem_que_so_cresce_passa_se_cresceu_e_para_se_caiu(tmp_path: Path) -> None:
+    a, n = tmp_path / "a.txt", tmp_path / "n.txt"
+    a.write_text("seguranca:auditoria 328\n")
+    comparar = (
+        f'CONTAGENS_QUE_SO_CRESCEM=seguranca:auditoria comparar_contagens "{a}" "{n}"'
+    )
+    n.write_text("seguranca:auditoria 330\n")
+    cresceu = _bash(tmp_path, comparar)
+    assert cresceu.returncode == 0, cresceu.stdout
+    assert "(só cresce)" in cresceu.stdout
+    n.write_text("seguranca:auditoria 320\n")
+    caiu = _bash(tmp_path, comparar)
+    assert caiu.returncode == 1
+    assert "DIFERE  seguranca:auditoria: antigo 328 | novo 320" in caiu.stdout
+
+
 def test_contagens_que_cairam(tmp_path: Path) -> None:
     antes, depois = tmp_path / "antes.txt", tmp_path / "depois.txt"
     antes.write_text("fat.t1 10\nfat.t2 5\nfat.t3 2\n")
