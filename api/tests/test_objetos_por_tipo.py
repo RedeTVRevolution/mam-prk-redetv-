@@ -43,7 +43,9 @@ def test_os_esquemas_do_modelo_trazem_o_tipo_em_enum_ao_lado_do_texto_livre() ->
     assert "tipo" in analise  # o texto livre continua
     for modelo in (RespostaConvertida, RespostaVista):
         esquema = _esquema(modelo)
-        descrito = esquema["$defs"]["ObjetoConvertido" if modelo is RespostaConvertida else "ObjetoVisto"]
+        descrito = esquema["$defs"][
+            "ObjetoConvertido" if modelo is RespostaConvertida else "ObjetoVisto"
+        ]
         assert descrito["properties"]["tipo_canonico"]["enum"] == OPCOES_DE_TIPO
         assert "tipo_canonico" in descrito["required"]
         assert "nome" in descrito["properties"]
@@ -61,7 +63,9 @@ def test_a_conversao_grava_o_tipo_escolhido_e_o_dicionario_cobre_o_outro() -> No
                 "plano": 0,
                 "objetos": [
                     convertido("blusa", ["p0q0o0"], tipo_canonico="camisa"),
-                    convertido("camiseta", ["p0q0r0"], tipo_canonico="outro", cor="azul"),
+                    convertido(
+                        "camiseta", ["p0q0r0"], tipo_canonico="outro", cor="azul"
+                    ),
                 ],
             }
         )
@@ -80,7 +84,9 @@ def test_nome_sem_tipo_seguro_fica_em_outro_com_o_nome_bruto() -> None:
         resposta(
             {
                 "plano": 0,
-                "objetos": [convertido("xablau raro", ["p0q0o0"], tipo_canonico="outro")],
+                "objetos": [
+                    convertido("xablau raro", ["p0q0o0"], tipo_canonico="outro")
+                ],
             }
         )
     )

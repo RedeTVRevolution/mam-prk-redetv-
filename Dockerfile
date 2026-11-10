@@ -84,6 +84,7 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/a
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
 COPY api/__init__.py \
+     api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
      api/bancos.py \
@@ -112,6 +113,7 @@ COPY api/__init__.py \
      api/lixeira.py \
      api/log_estruturado.py \
      api/marcas.py \
+     api/numero.py \
      api/nuvem.py \
      api/paddle.py \
      api/papeis.py \
@@ -120,8 +122,11 @@ COPY api/__init__.py \
      api/progresso_das_janelas.py \
      api/revisao.py \
      api/sinais.py \
+     api/taxonomia_de_objetos.json \
+     api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
      api/texto_como_dado.py \
+     api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/transcricao_job.py \
@@ -156,6 +161,7 @@ RUN uv sync --locked --no-dev --group ocr-gpu
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
 COPY api/__init__.py \
+     api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
      api/bancos.py \
@@ -185,6 +191,7 @@ COPY api/__init__.py \
      api/log_estruturado.py \
      api/marcas.py \
      api/mudanca_da_tela.py \
+     api/numero.py \
      api/nuvem.py \
      api/ocr_job.py \
      api/paddle.py \
@@ -195,8 +202,11 @@ COPY api/__init__.py \
      api/quadros.py \
      api/revisao.py \
      api/sinais.py \
+     api/taxonomia_de_objetos.json \
+     api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
      api/texto_como_dado.py \
+     api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/usuarios.py \
@@ -261,6 +271,7 @@ RUN uv sync --locked --no-dev --group objetos
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
 COPY api/__init__.py \
+     api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
      api/catalogo.py \
@@ -287,6 +298,7 @@ COPY api/__init__.py \
      api/lixeira.py \
      api/log_estruturado.py \
      api/marcas.py \
+     api/numero.py \
      api/nuvem.py \
      api/objetos_job.py \
      api/paddle.py \
@@ -296,8 +308,11 @@ COPY api/__init__.py \
      api/progresso_das_janelas.py \
      api/revisao.py \
      api/sinais.py \
+     api/taxonomia_de_objetos.json \
+     api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
      api/texto_como_dado.py \
+     api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
      api/transcricao.py \
      api/usuarios.py \

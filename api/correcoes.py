@@ -47,6 +47,8 @@ from api.identidade import (
 from api.identidade import identidade_do_nome, nao_identificado
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.pessoas import LISTAS
+from api.taxonomia_de_objetos import OUTRO
+from api.tipo_do_objeto import tipo_canonico_de
 from api.texto_como_dado import ID_SEGURO, Linha, Texto
 
 TipoNovo = Literal[
@@ -2223,7 +2225,35 @@ def decupagem_entregue(
     versão do JSON do modelo em que elas se apoiam."""
     entregue = aplicar(modelo, versao, correcoes)
     entregue["versao_decupagem"] = versao
+    _com_tipo_canonico(modelo, entregue)
     return entregue
+
+
+def _cores_do_objeto(o: dict[str, Any]) -> list[str]:
+    return [*(o.get("cor_base") or []), *([o["cor"]] if o.get("cor") else [])]
+
+
+def _com_tipo_canonico(modelo: dict[str, Any], entregue: dict[str, Any]) -> None:
+    """O tipo canônico (#544), derivado depois das Correções: o do modelo vale se o texto
+    bruto não mudou; o objeto corrigido ou acrescentado, o antigo sem tipo e o fora da lista
+    passam pelo dicionário de nome livre para tipo, e o que não está nele fica em `outro`."""
+    brutos = {
+        o.get("id"): (o.get("tipo"), o.get("tipo_canonico")) for o in _objetos(modelo)
+    }
+    for o in _objetos(entregue):
+        tipo, canonico = brutos.get(o.get("id"), (None, None))
+        gravado = canonico if tipo == o.get("tipo") else None
+        o["tipo_canonico"] = tipo_canonico_de(
+            gravado, str(o.get("tipo", "")), _cores_do_objeto(o)
+        )
+    for plano in _planos(entregue):
+        for item in plano.get("inventario") or []:
+            if isinstance(item, dict):
+                item["tipo_canonico"] = tipo_canonico_de(
+                    item.get("tipo_canonico"),
+                    str(item.get("nome", "")),
+                    [item["cor"]] if item.get("cor") else [],
+                )
 
 
 # --- Uma entrada por tipo de Correção ------------------------------------------

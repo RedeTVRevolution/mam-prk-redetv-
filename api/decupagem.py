@@ -213,6 +213,7 @@ TipoCanonico = Annotated[
     ),
 ]
 
+
 class Objeto(_Estrito):
     id: Id
     categoria: CategoriaDeObjeto = Field(
