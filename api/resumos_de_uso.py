@@ -110,6 +110,9 @@ class ResumosDeUso(Protocol):
     def usuarios(self) -> list[str]:
         """Os uids de quem já agiu, em ordem."""
 
+    def sistemas(self) -> list[str]:
+        """Os sistemas (chaves de API) que já têm algum evento, em ordem."""
+
 
 class ResumosEmMemoria:
     """Dublê: as linhas dadas, com os mesmos filtros da consulta."""
@@ -196,6 +199,12 @@ class ResumosEmMemoria:
 
     def usuarios(self) -> list[str]:
         return sorted({a.uid for a in self._acessos if a.ativo})
+
+    def sistemas(self) -> list[str]:
+        return sorted(
+            {u.quem_id for u in self._uso if u.quem_tipo == "sistema" and u.quem_id}
+            | {c.quem_id for c in self._chamadas if c.quem_tipo == "sistema"}
+        )
 
 
 @dataclass(frozen=True)
@@ -414,6 +423,16 @@ class ResumosBigQuery:
             " WHERE quem_tipo = 'usuario' AND ativo ORDER BY quem_id"
         )
         return [v[0] for v in linhas]
+
+    def sistemas(self) -> list[str]:
+        linhas = self._consultar(
+            "SELECT quem_id FROM ("
+            f"SELECT quem_id FROM {self._tabela(self._config.tabela_por_dia_e_usuario)}"
+            " WHERE quem_tipo = 'sistema' UNION DISTINCT"
+            f" SELECT quem_id FROM {self._tabela(self._config.tabela_de_chamadas_por_dia)}"
+            " WHERE quem_tipo = 'sistema') ORDER BY quem_id"
+        )
+        return [v[0] for v in linhas if v[0]]
 
 
 def resumos_do_ambiente(ambiente: Any) -> ResumosBigQuery | None:

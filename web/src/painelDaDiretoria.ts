@@ -97,6 +97,8 @@ export interface UsuarioDoFiltro {
 export interface OpcoesDoPainel {
   programas: string[]
   usuarios: UsuarioDoFiltro[]
+  /** Os sistemas (chaves de API) com eventos; só a aba API os oferece (#524). */
+  sistemas: string[]
 }
 
 export interface DiaDeAcessos {
