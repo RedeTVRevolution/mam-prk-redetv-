@@ -332,10 +332,17 @@ def _agrupar_dias[V](
     return juntos
 
 
-def escolhe_o_grupo(agrupar: Grupo | Literal["auto"], dias: Iterable[date]) -> Grupo:
+def escolhe_o_grupo(
+    agrupar: Grupo | Literal["auto"],
+    dias: Iterable[date],
+    desde: date | None = None,
+) -> Grupo:
     """O grupo dos gráficos por dia. `auto` escolhe pelo tamanho do período com dados; um
-    grupo pedido que dê mais de `MAXIMO_DE_PONTOS` pontos é 422."""
+    grupo pedido que dê mais de `MAXIMO_DE_PONTOS` pontos é 422. O `desde` do filtro conta: o
+    gráfico começa nele (veja `_dias_do_intervalo`)."""
     dias = list(dias)
+    if dias and desde is not None and desde < min(dias):
+        dias.append(desde)
     if agrupar == "auto":
         tamanho = (max(dias) - min(dias)).days + 1 if dias else 0
         return next((g for ate, g in FAIXAS_DO_AUTO if tamanho <= ate), "trimestre")
@@ -600,8 +607,10 @@ def _dias_do_intervalo(
     if not dias:
         return []
     primeiro = min(dias)
-    if desde is not None and desde < primeiro:
-        primeiro = desde
+    if (
+        desde is not None and desde < primeiro
+    ):  # no máximo `MAXIMO_DE_PONTOS` dias antes
+        primeiro = max(desde, primeiro - timedelta(days=MAXIMO_DE_PONTOS))
     return list(
         dict.fromkeys(
             inicio_do_grupo(primeiro + timedelta(days=i), grupo)
@@ -1179,12 +1188,13 @@ def criar_rotas_do_painel(
         agrupar: Grupo | Literal["auto"] | None,
         dias: Iterable[date],
         resposta: Response,
+        desde: date | None = None,
     ) -> Grupo:
         """Sem `agrupar`, por dia como sempre; com ele, o grupo usado vai no cabeçalho
         `X-Agrupamento` (o `auto` diz qual escolheu). O CSV não agrupa."""
         if agrupar is None:
             return "dia"
-        grupo = escolhe_o_grupo(agrupar, dias)
+        grupo = escolhe_o_grupo(agrupar, dias, desde)
         resposta.headers["X-Agrupamento"] = grupo
         return grupo
 
@@ -1265,7 +1275,7 @@ def criar_rotas_do_painel(
                 ),
                 "acessos.csv",
             )
-        grupo = _grupo(agrupar, (a.dia for a in linhas), resposta)
+        grupo = _grupo(agrupar, (a.dia for a in linhas), resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "acessos", filtro)
         return relatorio_de_acessos(linhas, emails, filtro, grupo)
 
@@ -1325,7 +1335,9 @@ def criar_rotas_do_painel(
             )
         if filtro.programa is not None:
             por_programa = base
-        grupo = _grupo(agrupar, (u.dia for u in base if _tem_video(u)), resposta)
+        grupo = _grupo(
+            agrupar, (u.dia for u in base if _tem_video(u)), resposta, filtro.desde
+        )
         acessos_ao_painel.abriu(pessoa, "videos", filtro)
         return relatorio_de_videos(base, por_programa, emails, filtro, grupo)
 
@@ -1358,7 +1370,9 @@ def criar_rotas_do_painel(
                 ),
                 "buscas.csv",
             )
-        grupo = _grupo(agrupar, (u.dia for u in base if u.buscas), resposta)
+        grupo = _grupo(
+            agrupar, (u.dia for u in base if u.buscas), resposta, filtro.desde
+        )
         acessos_ao_painel.abriu(pessoa, "buscas", filtro)
         return relatorio_de_buscas(base, emails, filtro, grupo)
 
@@ -1412,7 +1426,7 @@ def criar_rotas_do_painel(
                 ),
                 "revisao.csv",
             )
-        grupo = _grupo(agrupar, (c.dia for c in correcoes), resposta)
+        grupo = _grupo(agrupar, (c.dia for c in correcoes), resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "revisao", filtro)
         return RelatorioDeRevisao(
             desde=filtro.desde,
@@ -1500,7 +1514,7 @@ def criar_rotas_do_painel(
                 "api.csv",
             )
         dias = [c.dia for c in chamadas] + [u.dia for u in envios if u.videos_enviados]
-        grupo = _grupo(agrupar, dias, resposta)
+        grupo = _grupo(agrupar, dias, resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "api", filtro)
         return relatorio_de_api(chamadas, envios, filtro, grupo)
 

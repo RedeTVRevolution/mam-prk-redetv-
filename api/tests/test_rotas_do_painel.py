@@ -283,6 +283,19 @@ def test_o_grafico_comeca_no_dia_inicial_do_filtro_mesmo_sem_dados_nele() -> Non
     ]
 
 
+def test_desde_muito_antigo_vale_para_o_teto_de_pontos_e_para_o_auto() -> None:
+    mundo = Mundo(["diretoria"], resumos=ResumosEmMemoria([_acesso(3, "bia", 1)]))
+
+    por_dia = mundo.get("/acessos", desde="0001-01-01", agrupar="dia")
+    auto = mundo.get("/acessos", desde="0001-01-01", agrupar="auto")
+    sem_agrupar = mundo.get("/acessos", desde="0001-01-01").json()
+
+    assert por_dia.status_code == 422
+    assert auto.status_code == 200
+    assert auto.headers["X-Agrupamento"] == "trimestre"
+    assert len(sem_agrupar["por_dia"]) <= 401  # os dados (1 dia) + o teto antes deles
+
+
 def test_linha_sem_login_nem_acao_nao_vira_dia_nem_pessoa() -> None:
     # Só o fim do processamento do vídeo do caio caiu no dia 4.
     resumos = ResumosEmMemoria([_acesso(3, "bia", 1), _acesso(4, "caio", 0, False)])
