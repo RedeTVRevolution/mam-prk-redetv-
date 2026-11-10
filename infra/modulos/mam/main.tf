@@ -1219,11 +1219,13 @@ resource "google_compute_network" "validacao" {
   depends_on              = [google_project_service.apis]
 }
 
+# Faixa 10.30, não 10.10: a sub-rede de SP fica na mesma rede até a remoção (#537), e a
+# VPC recusa faixas sobrepostas mesmo entre regiões.
 resource "google_compute_subnetwork" "validacao" {
   name                     = "mam-validacao"
   region                   = var.regiao
   network                  = google_compute_network.validacao.id
-  ip_cidr_range            = "10.10.0.0/24"
+  ip_cidr_range            = "10.30.0.0/24"
   private_ip_google_access = true
 }
 

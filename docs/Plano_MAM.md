@@ -521,7 +521,7 @@ A E0 prova o caminho de ponta a ponta: vídeo enviado, quarentena, Gemini, decup
 | Tema | Decisão na E0 |
 | --- | --- |
 | Projeto GCP | Projeto `dev` novo, sem organização, com billing da RedeTV e alerta de orçamento; vira a produção, sem staging ([ADR 0016](adr/0016-sem-organizacao-dev-vira-producao.md)) |
-| Região | Tudo em `southamerica-east1`; o Gemini usa o endpoint global, coberto pela autorização escrita dos clipes. Ver [ADR 0001](adr/0001-gemini-endpoint-global.md) |
+| Região | Tudo em `us-east4` ([ADR 0019](adr/0019-tudo-em-us-east4.md)); o Gemini usa o endpoint global, coberto pela autorização escrita dos clipes. Ver [ADR 0001](adr/0001-gemini-endpoint-global.md) |
 | Hospedagem | Um único serviço Cloud Run: o FastAPI serve a API e o build do React. Sem balanceador nem Cloud Armor; o front ganha serviço próprio quando o balanceador entrar (E10) |
 | Orquestração | Esqueleto real com o mínimo de passos: Eventarc → Workflows → Job de validação → Job de análise → decupagem no Storage |
 | Login | Só contas locais no Identity Platform, com MFA TOTP obrigatório, criadas por script, inclusive os 2 administradores de emergência com alerta a cada login. Sem papéis: toda conta autenticada envia e vê todos os vídeos |

@@ -36,7 +36,8 @@ def test_sub_rede_da_gpu_na_rede_que_ja_existe_sem_nat_e_sem_sobrepor_a_faixa() 
     assert "google_compute_network.validacao.id" in sub
     assert "private_ip_google_access = true" in sub
     assert 'ip_cidr_range            = "10.20.0.0/24"' in sub
-    assert '"10.10.0.0/24"' in _bloco(
+    # A de SP (10.10.0.0/24) segue na mesma rede até a remoção (#537): faixa nova, sem sobrepor.
+    assert '"10.30.0.0/24"' in _bloco(
         'resource "google_compute_subnetwork" "validacao"'
     )
     assert "google_compute_router" not in MAIN and "external_ip" not in MAIN

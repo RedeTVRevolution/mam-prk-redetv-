@@ -28,7 +28,7 @@ run "plano" {
   # Tudo em us-east4 (ADR 0019): uma região só, e os nomes novos levam a região no nome
   # (os de São Paulo seguem existindo até o fim da cópia).
   assert {
-    condition = output.regiao == "us-east4" && output.bigquery_regiao == "us-east4" && output.workflow_regiao == "us-east4" && output.regiao_gpu == "us-east4" && output.busca_regiao == "us-east4"
+    condition     = output.regiao == "us-east4" && output.bigquery_regiao == "us-east4" && output.workflow_regiao == "us-east4" && output.regiao_gpu == "us-east4" && output.busca_regiao == "us-east4"
     error_message = "Toda região do dev deve ser us-east4."
   }
   assert {
