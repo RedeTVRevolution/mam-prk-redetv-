@@ -9,7 +9,7 @@
 # chamada HTTP, porque passa do teto de 1800 s da chamada do Workflows (#127).
 # Carregado por templatefile: ${projeto}, ${regiao}, ${regiao_gpu}, ${job_de_validacao},
 # ${job_de_transcricao_gpu}, ${job_de_ocr_gpu},
-# ${gpu_espera_total_s}, ${gpu_espera_s}, ${gpu_fator_da_espera}, ${gpu_espera_maxima_s},
+# ${workflow} (o nome deste Workflows, para ler as execuções), ${gpu_espera_total_s}, ${gpu_espera_s}, ${gpu_fator_da_espera}, ${gpu_espera_maxima_s},
 # ${job_de_objetos_gpu}, ${motor_objetos}, ${job_de_inventario} (o inventário de objetos, #244:
 # o Florence-2 num Job com GPU, sem plano B, e o Job em CPU que grava o inventário na Decupagem
 # entre os quadros-chave e a indexação; com o motor gemini só o Job em CPU),
@@ -152,7 +152,7 @@ processa:
                     # Um objeto sem Job correspondente não cria documento.
                     - sem_job_para_marcar:
                         switch:
-                          - condition: $${erro_da_leitura.code == 404}
+                          - condition: $${default(map.get(erro_da_leitura, "code"), 0) == 404}
                             next: encerra_com_falha
                     - repassa_o_erro_da_releitura:
                         raise: $${erro_da_leitura}
@@ -203,7 +203,7 @@ processa:
             # Um objeto sem Job correspondente não tem o que analisar.
             - sem_job:
                 switch:
-                  - condition: $${e.code == 404}
+                  - condition: $${default(map.get(e, "code"), 0) == 404}
                     next: fim
             - repassa_o_erro_da_leitura:
                 raise: $${e}
@@ -598,7 +598,7 @@ marca_interrompido:
             # Um objeto sem Job correspondente não cria documento.
             - sem_job_interrompido:
                 switch:
-                  - condition: $${erro_da_leitura_do_interrompido.code == 404}
+                  - condition: $${default(map.get(erro_da_leitura_do_interrompido, "code"), 0) == 404}
                     next: sai_sem_job_interrompido
             - repassa_o_erro_da_leitura_do_interrompido:
                 raise: $${erro_da_leitura_do_interrompido}
@@ -1148,6 +1148,7 @@ atualiza_fila_gpu:
           # O estado pode envelhecer alguns segundos nas releituras; o próximo pulso
           # de 60 s lê de novo e limpa, sem alongar a janela do compare-and-swap.
           - jobs_lidos: {}
+          - execucoes_lidas: {}
     - le_o_job_da_vaga:
         call: le_job_da_fila
         args:
@@ -1172,7 +1173,7 @@ atualiza_fila_gpu:
           steps:
             - so_aceita_fila_ausente:
                 switch:
-                  - condition: $${erro_da_fila.code != 404}
+                  - condition: $${default(map.get(erro_da_fila, "code"), 0) != 404}
                     raise: $${erro_da_fila}
     - precondicao_da_fila:
         switch:
@@ -1210,6 +1211,8 @@ atualiza_fila_gpu:
                           - item: $${entrada.mapValue.fields}
                           - meu: $${item.job_id.stringValue == job_id and item.dono.stringValue == dono and (etapa == null or item.etapa.stringValue == etapa)}
                           - job_do_item: $${default(map.get(jobs_lidos, item.job_id.stringValue), null)}
+                          - estado_da_execucao: $${default(map.get(execucoes_lidas, item.dono.stringValue), "ACTIVE")}
+                          - execucao_lida: {state: ACTIVE}
                     - le_se_ainda_nao_conhece_o_dono:
                         switch:
                           - condition: $${job_do_item == null}
@@ -1222,11 +1225,43 @@ atualiza_fila_gpu:
                               - guarda_o_dono_da_vaga:
                                   assign:
                                     - jobs_lidos[item.job_id.stringValue]: $${job_do_item}
+                    # Cancelar a execução no console do Workflows não roda a limpeza (#520): a
+                    # vaga cuja execução não está mais ativa sai sem esperar o prazo. Só se
+                    # lê a execução de outro dono, uma vez por pulso.
+                    - le_a_execucao_do_dono:
+                        switch:
+                          - condition: $${item.dono.stringValue != dono and map.get(execucoes_lidas, item.dono.stringValue) == null}
+                            steps:
+                              - consulta_a_execucao:
+                                  try:
+                                    call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.get
+                                    args:
+                                      name: $${"projects/${projeto}/locations/${regiao}/workflows/${workflow}/executions/" + item.dono.stringValue}
+                                    result: execucao_lida
+                                  except:
+                                    as: erro_da_execucao
+                                    steps:
+                                      # Só a execução que não existe mais conta como inativa; outro
+                                      # erro mantém a vaga até o prazo.
+                                      - execucao_apagada:
+                                          switch:
+                                            - condition: $${default(map.get(erro_da_execucao, "code"), 0) == 404}
+                                              assign:
+                                                - execucao_lida: {state: NOT_FOUND}
+                              - guarda_a_execucao_do_dono:
+                                  assign:
+                                    - estado_da_execucao: $${default(map.get(execucao_lida, "state"), "ACTIVE")}
+                                    - execucoes_lidas[item.dono.stringValue]: $${estado_da_execucao}
                     # Florence começa depois da análise: `concluido` é válido só nele.
-                    # Falha, cancelamento ou Job apagado invalidam qualquer etapa.
+                    # Falha, cancelamento ou Job apagado invalidam qualquer etapa. A única
+                    # exceção é a vaga já ocupada da transcrição ou da leitura da tela num Job
+                    # `falhou` (#520): a outra etapa pode seguir na GPU, e a vaga sai quando o
+                    # Job dela termina, pelo prazo ou pela execução que acabou.
                     - descarta_o_pedido_perdido:
                         switch:
-                          - condition: $${not (job_do_item.estado == "analisando" or (item.etapa.stringValue == "inventario_de_objetos" and job_do_item.estado == "concluido"))}
+                          - condition: $${not (estado_da_execucao in ["ACTIVE", "QUEUED"])}
+                            next: continue
+                          - condition: $${not (job_do_item.estado == "analisando" or (item.etapa.stringValue == "inventario_de_objetos" and job_do_item.estado == "concluido") or (grupo == "ocupadas" and job_do_item.estado == "falhou" and item.etapa.stringValue != "inventario_de_objetos"))}
                             next: continue
                           - condition: $${grupo == "ocupadas" and agora - item.desde.doubleValue > item.timeout_gpu.doubleValue}
                             next: continue
@@ -1401,7 +1436,7 @@ le_job_da_fila:
           steps:
             - job_ausente:
                 switch:
-                  - condition: $${erro_do_job_da_fila.code == 404}
+                  - condition: $${default(map.get(erro_do_job_da_fila, "code"), 0) == 404}
                     return: {estado: ausente}
             - repassa_o_erro_do_job_da_fila:
                 raise: $${erro_do_job_da_fila}
