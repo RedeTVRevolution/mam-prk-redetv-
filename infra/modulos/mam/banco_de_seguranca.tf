@@ -2,7 +2,7 @@
 # conteúdo hostil não têm acesso a ele (condição IAM por banco, mais abaixo). É o único
 # lugar que monta o nome; o código o recebe por FIRESTORE_BANCO_DE_SEGURANCA (api/bancos.py).
 locals {
-  banco_de_seguranca = "mam-seguranca"
+  banco_de_seguranca = "mam-seguranca-${local.marca_da_regiao}"
 }
 
 resource "google_firestore_database" "seguranca" {

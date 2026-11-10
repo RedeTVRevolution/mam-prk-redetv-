@@ -36,7 +36,7 @@ resource "google_cloud_run_v2_job" "purga" {
         }
         env {
           name  = "BIGQUERY_REGIAO"
-          value = var.regiao_do_bigquery
+          value = var.regiao
         }
         env {
           name  = "BIGQUERY_TABELA"

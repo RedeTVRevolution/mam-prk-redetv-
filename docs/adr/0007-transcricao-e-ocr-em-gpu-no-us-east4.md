@@ -1,5 +1,7 @@
 # Transcrição e leitura da tela em GPU L4 no us-east4, sem plano B em CPU
 
+> **Região substituída em 09/11/2026 pela [ADR 0019](0019-tudo-em-us-east4.md):** todo o MAM, dados incluídos, passa a ficar em `us-east4`. O que esta ADR diz sobre guardar dados no Brasil ou sobre a região dos buckets, do Firestore e do BigQuery deixou de valer.
+
 A transcrição (faster-whisper) e a leitura da tela (PaddleOCR) passam a rodar em Jobs do Cloud Run com GPU L4 em `us-east4`, no norte da Virgínia. A transcrição e a leitura da tela rodam em paralelo, e a análise espera as duas. Se falta GPU ou cota, o Workflows espera e tenta de novo, com intervalos crescentes (60, 120 e depois 240 s), até a espera total de `espera_gpu_minutos` (27 min, o que dá 9 tentativas); esgotada a espera, a etapa falha e o vídeo fica `falhou`, com reprocessamento manual. As imagens com GPU são alvos novos do `Dockerfile` (`transcricao-gpu` e `ocr-gpu`), e o dispositivo vem da variável `DISPOSITIVO` (`cpu`, o padrão, ou `gpu`): o modo CPU continua disponível para testes locais.
 
 **Decisão de 07/11/2026 — Bruno (#500):** nenhum plano B em CPU para transcrição ou leitura da tela. Esta decisão substitui a de 05/11/2026, que manteve o plano B, por causa do custo das CPUs. A espera por GPU acontece na fila FIFO (#498); `espera_gpu_minutos` só limita as tentativas por falta de GPU ou cota depois de obter a vaga. Esgotado esse prazo, a falha sobe e a vaga é liberada. O Florence mantém a exceção: sem inventário, a decupagem segue. A métrica e o gráfico “Falta de GPU ou de cota” permanecem.

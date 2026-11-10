@@ -37,7 +37,7 @@ resource "google_bigquery_table" "jobs_do_painel" {
 
 resource "google_bigquery_data_transfer_config" "jobs_do_painel" {
   display_name         = "mam-jobs-do-painel"
-  location             = var.regiao_do_bigquery
+  location             = var.regiao
   data_source_id       = "scheduled_query"
   schedule             = "every 10 minutes"
   service_account_name = google_service_account.resumos_de_uso.email

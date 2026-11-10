@@ -21,40 +21,29 @@ variable "projeto" {
   type = string
 }
 
+# us-east4 (ADR 0019): a região de todo recurso regional e de todo dado. Só o que já estava lá
+# antes da troca mantém variável própria: a busca (ADR 0006) e a GPU (ADR 0007).
 variable "regiao" {
   type = string
 }
 
-# O Agent Retrieval não existe em southamerica-east1: o índice da busca fica nos EUA (ADR 0006).
+# O Agent Retrieval não existe em todas as regiões: o índice da busca fica nos EUA (ADR 0006).
 variable "regiao_da_busca" {
   type    = string
   default = "us-east4"
 }
 
-# O Model Armor existe em southamerica-east1 (lista de locais de 2/11/2026), então a
-# consulta do editor não sai do Brasil para ser julgada; a Ranking API é global e fica
-# fora do Brasil (ADR 0006).
-variable "regiao_do_model_armor" {
-  type    = string
-  default = "southamerica-east1"
-}
-
-# A cópia das decupagens no BigQuery (#260) fica no Brasil: os dados não saem do país.
-variable "regiao_do_bigquery" {
-  type    = string
-  default = "southamerica-east1"
-}
-
-# Nome do banco do Firestore (#536). `(default)` é o de hoje; o nome vem sempre daqui, nunca
+# Nome do banco do Firestore (#536). Em us-east4 o banco é nomeado (o `(default)` de São Paulo é
+# apagado pelo wizard da troca, #538); o nome vem sempre daqui, nunca
 # escrito no código: a API o recebe por FIRESTORE_BANCO e o Workflows pelo templatefile.
 variable "banco_firestore" {
   type        = string
-  default     = "(default)"
+  default     = "mam"
   description = "Nome do banco principal do Firestore."
 }
 
-# Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Cloud Run não tem GPU
-# em southamerica-east1. Só processamento de passagem: nenhum bucket nasce nesta região.
+# Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Com a troca para us-east4
+# (ADR 0019) é a mesma região do resto, mas a variável fica: os recursos da GPU não mudam.
 variable "regiao_gpu" {
   type    = string
   default = "us-east4"
@@ -612,7 +601,11 @@ resource "google_firestore_index" "auditoria" {
 # web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).
 locals {
   sufixos_dos_buckets = ["quarentena", "aceitos", "decupagens", "clipes-ouro", "referencias"]
-  buckets             = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${s}" }
+  # Os de São Paulo seguem existindo até o fim da cópia (wizard #538), e o nome do bucket é
+  # global: os de us-east4 levam a região no nome, `<projeto>-useast4-<sufixo>` (ADR 0019).
+  # Os datasets do BigQuery e o banco de segurança usam a mesma marca.
+  marca_da_regiao = replace(var.regiao, "-", "")
+  buckets         = { for s in local.sufixos_dos_buckets : s => "${var.projeto}-${local.marca_da_regiao}-${s}" }
 }
 
 # A coleção de momentos da busca (#117) e o índice ANN dela
@@ -635,7 +628,7 @@ locals {
 # com confiança média ou maior. Sem o filtro de conteúdo nocivo: a consulta é só uma frase
 # de busca, e o Gemini já recusa o que é nocivo.
 resource "google_model_armor_template" "consulta_da_busca" {
-  location    = var.regiao_do_model_armor
+  location    = var.regiao
   template_id = local.modelo_do_model_armor
   filter_config {
     pi_and_jailbreak_filter_settings {
@@ -810,7 +803,7 @@ locals {
 
 # `datastore.user` vale para todos os bancos do projeto. Só a `web` (papéis, chaves, auditoria)
 # e a `purga` (auditoria) entram no banco de segurança (#464); as outras contas recebem o
-# papel com condição IAM limitada ao `(default)`. Quem grava papéis, chaves ou auditoria
+# papel com condição IAM limitada ao banco principal. Quem grava papéis, chaves ou auditoria
 # (grep de COLECAO_DE_PAPEIS/COLECAO_DE_CHAVES/COLECAO_DA_AUDITORIA em api/): main.py (web),
 # purga.py e os comandos do Makefile (rodados por pessoa, com a conta dela).
 locals {
@@ -828,7 +821,7 @@ resource "google_project_iam_member" "mam" {
   dynamic "condition" {
     for_each = each.value.papel == "roles/datastore.user" && !contains(local.contas_no_banco_de_seguranca, each.value.sa) ? [1] : []
     content {
-      title      = "so-o-banco-default"
+      title      = "so-o-banco-principal"
       expression = "resource.name == \"projects/${var.projeto}/databases/${google_firestore_database.mam.name}\""
     }
   }
@@ -861,7 +854,7 @@ resource "google_service_account_iam_member" "web_assina" {
 # envia ao repositório. Bucket fora do mapa acima porque aquele depende do serviço,
 # e o build vem antes dele. O scripts/checar-nomes-da-nuvem.sh conhece o sufixo.
 resource "google_storage_bucket" "fontes" {
-  name                        = "${var.projeto}-fontes"
+  name                        = "${var.projeto}-${local.marca_da_regiao}-fontes"
   location                    = var.regiao
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
@@ -919,7 +912,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 # nomes; o código os recebe por BIGQUERY_*. Quem grava (indexação, no fim da análise e
 # no `make copiar-para-bigquery`, e a web, a cada Correção) é dataEditor só no dataset.
 locals {
-  dataset_do_bigquery = "mam_decupagens"
+  dataset_do_bigquery = "mam_decupagens_${local.marca_da_regiao}"
   # Tabela dividida por dia (#260): fica até a cópia para a por ano (#356) e a remoção à mão.
   tabela_antiga_de_momentos = "momentos"
   # Tabela em uso (#356): dividida por ano, em `momentos_por_ano.tf`.
@@ -958,7 +951,7 @@ locals {
 
 resource "google_bigquery_dataset" "decupagens" {
   dataset_id                 = local.dataset_do_bigquery
-  location                   = var.regiao_do_bigquery
+  location                   = var.regiao
   delete_contents_on_destroy = false
   depends_on                 = [google_project_service.apis]
 }
@@ -1139,7 +1132,7 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "BIGQUERY_REGIAO"
-        value = var.regiao_do_bigquery
+        value = var.regiao
       }
       # As tabelas resumidas que o painel da diretoria lê (resumos_de_uso.tf, #282).
       env {
@@ -1349,7 +1342,7 @@ resource "google_cloud_run_v2_job" "validacao" {
 }
 
 # Job de transcrição com GPU L4 (E1, ADR 0007): lê o áudio do bucket de aceitos
-# (São Paulo), grava a transcrição lá e nada fica na região da GPU: os arquivos locais
+# (mesma região), grava a transcrição lá e nada fica na região da GPU: os arquivos locais
 # vivem no volume em memória.
 resource "google_cloud_run_v2_job" "transcricao_gpu" {
   name                = "mam-transcricao-gpu"
@@ -1439,7 +1432,7 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
 }
 
 # Job de OCR da tela com GPU L4 (E1, ADR 0007): lê o proxy do bucket de aceitos
-# (São Paulo) e grava a leitura lá.
+# (mesma região) e grava a leitura lá.
 resource "google_cloud_run_v2_job" "ocr_gpu" {
   name                = "mam-ocr-gpu"
   location            = var.regiao_gpu
@@ -1533,7 +1526,7 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
 }
 
 # Job de objetos com GPU L4 (#243): o Florence-2 lê os quadros-chave da Decupagem, no bucket
-# das decupagens (São Paulo), e grava o resultado bruto ao lado. Só processamento de
+# das decupagens (mesma região), e grava o resultado bruto ao lado. Só processamento de
 # passagem na região da GPU: nada fica lá. Não tem plano B em CPU nem escreve no Firestore.
 resource "google_cloud_run_v2_job" "objetos_gpu" {
   name                = "mam-objetos-gpu"
@@ -1998,7 +1991,7 @@ resource "google_cloud_run_v2_job" "indexacao" {
         }
         env {
           name  = "BIGQUERY_REGIAO"
-          value = var.regiao_do_bigquery
+          value = var.regiao
         }
         env {
           name  = "SINAL_VIDEOS"
@@ -3002,7 +2995,7 @@ output "bigquery_tabela" {
 }
 
 output "bigquery_regiao" {
-  value = var.regiao_do_bigquery
+  value = var.regiao
 }
 
 # Para o make criar-colecao-da-busca, o make medir-busca e o make sondar-busca.
@@ -3066,6 +3059,19 @@ output "bucket_decupagens" {
 
 output "bucket_referencias" {
   value = local.buckets["referencias"]
+}
+
+# Para o wizard da troca de região (#538): os nomes novos, que só este módulo monta.
+output "regiao" {
+  value = var.regiao
+}
+
+output "buckets" {
+  value = local.buckets
+}
+
+output "datasets_bigquery" {
+  value = { decupagens = local.dataset_do_bigquery, faturamento = local.dataset_do_faturamento }
 }
 
 output "workflow_regiao" {

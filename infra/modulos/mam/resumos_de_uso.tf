@@ -49,7 +49,7 @@ resource "google_bigquery_dataset_iam_member" "resumos_de_uso_grava" {
 
 resource "google_bigquery_data_transfer_config" "resumos_de_uso" {
   display_name         = "mam-resumos-de-uso"
-  location             = var.regiao_do_bigquery
+  location             = var.regiao
   data_source_id       = "scheduled_query"
   schedule             = "every 10 minutes"
   service_account_name = google_service_account.resumos_de_uso.email

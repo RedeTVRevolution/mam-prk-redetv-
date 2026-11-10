@@ -1,7 +1,7 @@
 # Exemplo para prod: copie para prod.tfvars (fora do git) e troque pelos valores do projeto.
 # Os nomes reais vêm do wizard; nada daqui é de um projeto de verdade.
 projeto                = "SEU-PROJETO-PROD"
-regiao                 = "southamerica-east1"
+regiao                 = "us-east4"
 admins_emergencia      = "admin1@exemplo.com,admin2@exemplo.com"
 imagem                 = "REGIAO-docker.pkg.dev/SEU-PROJETO-PROD/mam/imagem@sha256:DIGEST"
 imagem_validacao       = "REGIAO-docker.pkg.dev/SEU-PROJETO-PROD/mam/imagem_validacao@sha256:DIGEST"
