@@ -85,6 +85,12 @@ variable "dominio" {
   default     = ""
 }
 
+variable "banco_firestore" {
+  type        = string
+  default     = "mam"
+  description = "Nome do banco principal do Firestore (#536)."
+}
+
 variable "vagas_de_gpu" {
   description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
   type        = number
@@ -115,6 +121,7 @@ module "mam" {
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
   vagas_de_gpu                 = var.vagas_de_gpu
+  banco_firestore              = var.banco_firestore
 
   # O índice ANN da descrição (~R$ 290/mês; ADR 0006): o KNN sem índice aceita só 100 mil
   # registros, uns 44 h de vídeo.
@@ -276,6 +283,22 @@ output "busca_distancia_maxima" {
 
 output "busca_palavras_minimas" {
   value = module.mam.busca_palavras_minimas
+}
+
+output "regiao" {
+  value = module.mam.regiao
+}
+
+output "buckets" {
+  value = module.mam.buckets
+}
+
+output "datasets_bigquery" {
+  value = module.mam.datasets_bigquery
+}
+
+output "banco_firestore" {
+  value = module.mam.banco_firestore
 }
 
 output "banco_de_seguranca" {

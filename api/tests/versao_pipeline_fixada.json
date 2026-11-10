@@ -1,11 +1,11 @@
 {
-  "versao_pipeline": "2026.11.8",
+  "versao_pipeline": "2026.11.9",
   "manifesto": {
     "esquema": "1.4",
     "modelos": {
       "analise": "gemini-3.5-flash-lite",
       "versao_do_modelo_da_analise": "gemini-3.5-flash-lite",
-      "modelo_forte": "gemini-3.8-flash",
+      "modelo_forte": "gemini-3.5-flash-lite",
       "embedding": "gemini-embedding-001"
     },
     "modos": {

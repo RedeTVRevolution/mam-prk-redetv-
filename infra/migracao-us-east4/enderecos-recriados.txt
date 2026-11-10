@@ -1,0 +1,80 @@
+# Endereços do estado do Terraform que o wizard da troca (scripts/wizard-migracao-us-east4.sh,
+# #538) tira com `terraform state rm` ANTES do `make publicar`, para o plan só criar e nunca
+# destruir o que existe em São Paulo (a cópia dos dados vem depois; o wizard apaga SP no fim).
+# Um endereço por linha; `#` é comentário. O wizard pula o que não estiver em `terraform state
+# list` (o balanceador só existe com `dominio`). `state rm` em endereço sem chave de for_each
+# tira todas as instâncias.
+#
+# São os recursos que mudam de região ou de nome (força a troca) e os dependentes que o provedor
+# recria junto (IAM, tabelas, índices). Fica de fora o que já está em us-east4 (mam-gpu, sub-rede e
+# Jobs da GPU) e o que atualiza no lugar (assinaturas do Pub/Sub, backend service do balanceador).
+# O teste api/tests/test_infra_migracao_us_east4.py recalcula esta lista a partir dos .tf.
+# A chave MAC nova (google_kms_crypto_key.chaves_de_api) tem outro material. Nenhum sistema legado
+# usa a API hoje (decisão de 09/11, spec #535), então não há chave de API para reemitir.
+#
+module.mam.google_artifact_registry_repository.mam
+module.mam.google_artifact_registry_repository_iam_member.build_envia
+module.mam.google_bigquery_data_transfer_config.jobs_do_painel
+module.mam.google_bigquery_data_transfer_config.resumos_de_uso
+module.mam.google_bigquery_dataset.decupagens
+module.mam.google_bigquery_dataset.faturamento
+module.mam.google_bigquery_dataset_iam_member.faturamento_le
+module.mam.google_bigquery_dataset_iam_member.grava_momentos
+module.mam.google_bigquery_dataset_iam_member.resumos_de_uso_grava
+module.mam.google_bigquery_table.eventos_de_uso
+module.mam.google_bigquery_table.jobs_do_painel
+module.mam.google_bigquery_table.momentos
+module.mam.google_bigquery_table.momentos_por_ano
+module.mam.google_bigquery_table.revisao_do_painel
+module.mam.google_bigquery_table.taxa_de_correcao_por_dia
+module.mam.google_bigquery_table_iam_member.pubsub_grava_uso
+module.mam.google_cloud_run_v2_job.analise
+module.mam.google_cloud_run_v2_job.fim
+module.mam.google_cloud_run_v2_job.identificacao
+module.mam.google_cloud_run_v2_job.indexacao
+module.mam.google_cloud_run_v2_job.inventario
+module.mam.google_cloud_run_v2_job.purga
+module.mam.google_cloud_run_v2_job.quadros
+module.mam.google_cloud_run_v2_job.taxa_diaria
+module.mam.google_cloud_run_v2_job.validacao
+module.mam.google_cloud_run_v2_job_iam_member.agendador_roda_purga
+module.mam.google_cloud_run_v2_job_iam_member.agendador_roda_taxa_diaria
+module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda
+module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_analise
+module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_fim
+module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_identificacao
+module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_indexacao
+module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_inventario
+module.mam.google_cloud_run_v2_job_iam_member.orquestracao_roda_quadros
+module.mam.google_cloud_run_v2_job_iam_member.web_roda_indexacao
+module.mam.google_cloud_run_v2_service.web
+module.mam.google_cloud_run_v2_service_iam_member.publico
+module.mam.google_cloud_scheduler_job.purga
+module.mam.google_cloud_scheduler_job.taxa_diaria
+module.mam.google_compute_region_network_endpoint_group.web
+module.mam.google_compute_subnetwork.validacao
+module.mam.google_eventarc_trigger.quarentena
+module.mam.google_firestore_backup_schedule.diaria
+module.mam.google_firestore_backup_schedule.diaria_na_seguranca
+module.mam.google_firestore_backup_schedule.semanal
+module.mam.google_firestore_backup_schedule.semanal_na_seguranca
+module.mam.google_firestore_database.mam
+module.mam.google_firestore_database.seguranca
+module.mam.google_firestore_field.idempotencia_expira_em
+module.mam.google_firestore_field.jobs_cortes_ms
+module.mam.google_firestore_field.listas_da_busca_expira_em
+module.mam.google_firestore_index.acervo
+module.mam.google_firestore_index.acervo_por_mes
+module.mam.google_firestore_index.auditoria
+module.mam.google_firestore_index.auditoria_na_seguranca
+module.mam.google_firestore_index.teto_de_criacao
+module.mam.google_kms_crypto_key.chaves_de_api
+module.mam.google_kms_crypto_key_iam_member.web_usa_a_chave_mac
+module.mam.google_kms_key_ring.mam
+module.mam.google_model_armor_template.consulta_da_busca
+module.mam.google_project_iam_member.mam
+module.mam.google_storage_bucket.fontes
+module.mam.google_storage_bucket.mam
+module.mam.google_storage_bucket_iam_member.build_le_fontes
+module.mam.google_storage_bucket_iam_member.mam
+module.mam.google_workflows_workflow.validacao

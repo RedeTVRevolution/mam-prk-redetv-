@@ -16,8 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from google.cloud import firestore
-
+from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.nuvem import CatalogoFirestore, ProgramasFirestore
 from api.programas import (
@@ -65,7 +64,7 @@ if __name__ == "__main__":
     projeto = os.environ.get("GCP_PROJECT_ID") or sys.exit("defina GCP_PROJECT_ID")
     if len(sys.argv) != 2 or not sys.argv[1]:
         sys.exit("uso: make carregar-programas ARQUIVO=<arquivo.toml>")
-    cliente = firestore.Client(project=projeto)
+    cliente = cliente_do_firestore(projeto)
     entraram = carregar(
         ProgramasFirestore(cliente),
         CatalogoFirestore(cliente),

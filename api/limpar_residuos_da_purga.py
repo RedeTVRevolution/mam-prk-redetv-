@@ -5,6 +5,7 @@ from collections.abc import Mapping
 
 from google.cloud import firestore
 
+from api.bancos import cliente_do_firestore
 from api.copia_bigquery import ConfigDoBigQuery, Transporte, transporte_http
 from api.dados_da_purga import executar
 from api.nuvem import COLECAO_DE_JOBS, TiposDeObjetoFirestore
@@ -40,7 +41,7 @@ def limpar(
 
 def main() -> None:
     projeto = os.environ["GCP_PROJECT_ID"]
-    limpar(firestore.Client(project=projeto), os.environ, transporte_http(projeto))
+    limpar(cliente_do_firestore(projeto), os.environ, transporte_http(projeto))
 
 
 if __name__ == "__main__":

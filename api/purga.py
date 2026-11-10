@@ -15,7 +15,6 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict
 
@@ -23,7 +22,7 @@ from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
-from api.bancos import cliente_da_colecao
+from api.bancos import cliente_da_colecao, cliente_do_firestore
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import RepositorioDeCorrecoes
 from api.dados_da_purga import dados_do_ambiente
@@ -218,7 +217,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         print(f"erro: {e}", file=sys.stderr)
         return 2
     log_estruturado.configurar(logging.INFO)
-    cliente = firestore.Client(project=projeto)
+    cliente = cliente_do_firestore(projeto, ambiente)
     banco_de_seguranca = cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
     busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
     repositorio = RepositorioFirestore(cliente)

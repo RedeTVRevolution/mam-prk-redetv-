@@ -86,6 +86,7 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/a
 COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
+     api/bancos.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -157,6 +158,7 @@ RUN uv sync --locked --no-dev --group ocr-gpu
 COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
+     api/bancos.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \

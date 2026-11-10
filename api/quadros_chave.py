@@ -15,11 +15,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from PIL import Image, ImageStat
 
 from api import log_estruturado
+from api.bancos import cliente_do_firestore
 from api.decupagem import Decupagem, caminho_do_quadro
 from api.jobs import RepositorioDeJobs
 from api.nuvem import QuadrosStorage, RepositorioFirestore
@@ -177,7 +177,7 @@ def main() -> None:
     projeto = os.environ["GCP_PROJECT_ID"]
     executar(
         os.environ["JOB_ID"],
-        RepositorioFirestore(firestore.Client(project=projeto)),
+        RepositorioFirestore(cliente_do_firestore(projeto)),
         QuadrosStorage(
             ClienteStorage(project=projeto),
             os.environ["BUCKET_ACEITOS"],

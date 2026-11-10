@@ -74,10 +74,10 @@ def test_detalhe_calcula_a_posicao_por_criacao_e_ordem_da_espera_sem_gravar() ->
 @pytest.mark.parametrize(
     "estado,etapa,sem_pulso_s,conta",
     [
-        ("analisando", "transcricao", 180, True),
-        ("analisando", "transcricao", 181, False),
-        ("concluido", "inventario_de_objetos", 180, True),
-        ("concluido", "inventario_de_objetos", 181, False),
+        ("analisando", "transcricao", 780, True),
+        ("analisando", "transcricao", 781, False),
+        ("concluido", "inventario_de_objetos", 780, True),
+        ("concluido", "inventario_de_objetos", 781, False),
         ("concluido", "transcricao", 0, False),
         ("concluido", "leitura_da_tela", 0, False),
         ("falhou", "inventario_de_objetos", 0, False),

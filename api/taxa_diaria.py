@@ -30,10 +30,10 @@ from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from google.api_core.exceptions import NotFound
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
+from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, _parametro, transporte_http
 from api.correcoes import RepositorioDeCorrecoes
 from api.itens_da_decupagem import (
@@ -363,7 +363,7 @@ def main(argumentos: list[str]) -> int:
     )
     config = ConfigDaTaxa.do_ambiente(os.environ)
     cliente = ClienteStorage(project=config.projeto)
-    banco = firestore.Client(project=config.projeto)
+    banco = cliente_do_firestore(config.projeto)
     jobs = RepositorioFirestore(banco)
     itens = ItensNoStorage(cliente, os.environ["BUCKET_DECUPAGENS"])
     if preenchendo:

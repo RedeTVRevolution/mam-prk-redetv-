@@ -21,11 +21,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
 from api.auditoria import RepositorioDeAuditoria
-from api.bancos import cliente_da_colecao
+from api.bancos import cliente_da_colecao, cliente_do_firestore
 from api.ciclo_de_vida import NaoReprocessavel
 from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.jobs import (
@@ -219,7 +218,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     except (FaltaNoAmbiente, ValueError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    banco = firestore.Client(project=projeto)
+    banco = cliente_do_firestore(projeto, ambiente)
     cliente = ClienteStorage(project=projeto)
     reprocessar_versao(
         RepositorioFirestore(banco),

@@ -244,11 +244,13 @@ def test_metrica_criada_no_mesmo_apply_tem_o_alinhador_conferido_pela_tabela() -
 
 WORKFLOW = {
     "project": "p",
-    "region": "southamerica-east1",
+    "region": "us-east4",
     "source_contents": "main:\n  steps: []\n",
     "service_account": "projects/p/serviceAccounts/o@p.iam.gserviceaccount.com",
 }
-BASE_DO_WORKFLOW = "https://workflows.googleapis.com/v1/projects/p/locations/southamerica-east1/workflows"
+BASE_DO_WORKFLOW = (
+    "https://workflows.googleapis.com/v1/projects/p/locations/us-east4/workflows"
+)
 
 
 def test_workflow_e_publicado_com_nome_descartavel_e_apagado_mesmo_se_nao_compilar() -> (
@@ -256,7 +258,7 @@ def test_workflow_e_publicado_com_nome_descartavel_e_apagado_mesmo_se_nao_compil
 ):
     # A recusa vem na operação, com o workflow já criado (o run 41662346067).
     recusa = {
-        "name": "projects/p/locations/southamerica-east1/operations/o",
+        "name": "projects/p/locations/us-east4/operations/o",
         "done": True,
         "error": {
             "message": "symbol 'mensagem' is neither a variable nor a sub-workflow name"
@@ -350,7 +352,7 @@ def test_o_corpo_do_servico_leva_trafego_e_ingresso_e_vai_ao_patch() -> None:
     servico = {
         "name": "mam-web",
         "project": "p",
-        "location": "southamerica-east1",
+        "location": "us-east4",
         "ingress": "INGRESS_TRAFFIC_ALL",
         "traffic": [{"type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST", "percent": 100}],
         "scaling": [{"manual_instance_count": 0, "min_instance_count": 0}],
@@ -368,7 +370,7 @@ def test_o_corpo_do_servico_leva_trafego_e_ingresso_e_vai_ao_patch() -> None:
     metodo, url, corpo = api.chamadas[0]
     assert (metodo, url) == (
         "PATCH",
-        "https://run.googleapis.com/v2/projects/p/locations/southamerica-east1/services/mam-web?validateOnly=true",
+        "https://run.googleapis.com/v2/projects/p/locations/us-east4/services/mam-web?validateOnly=true",
     )
     assert corpo["ingress"] == "INGRESS_TRAFFIC_ALL"
     assert corpo["traffic"] == [

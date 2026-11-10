@@ -12,9 +12,9 @@ import sys
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api.bancos import cliente_do_firestore
 from api.correcoes import decupagem_entregue, versao_do_modelo
 from api.marcas import carregar_marcas
 from api.nuvem import (
@@ -48,7 +48,7 @@ def decupagens_dos_jobs(
 
 if __name__ == "__main__":
     projeto = os.environ.get("GCP_PROJECT_ID") or sys.exit("defina GCP_PROJECT_ID")
-    cliente = firestore.Client(project=projeto)
+    cliente = cliente_do_firestore(projeto)
     entraram = carregar_marcas(
         CatalogoDeMarcasFirestore(cliente),
         decupagens_dos_jobs(

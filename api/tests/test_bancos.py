@@ -13,9 +13,11 @@ from google.cloud import firestore
 from api import bancos, correcao_de_estado, purga, reprocessar_versao
 from api.bancos import (
     BANCO_PADRAO,
+    VARIAVEL_DO_BANCO,
     VARIAVEL_DO_BANCO_DE_SEGURANCA,
     banco_da_colecao,
     cliente_da_colecao,
+    cliente_do_firestore,
 )
 from api.nuvem import (
     COLECAO_DA_AUDITORIA,
@@ -75,6 +77,38 @@ def test_o_cliente_nasce_apontado_para_o_banco_da_colecao() -> None:
     assert chamadas == [
         {"project": "proj", "database": "seguranca-teste"},
         {"project": "proj", "database": BANCO_PADRAO},
+    ]
+
+
+def test_as_colecoes_comuns_vao_para_o_banco_da_configuracao() -> None:
+    ambiente = {VARIAVEL_DO_BANCO: "mam-teste", **COM_BANCO}
+
+    assert banco_da_colecao(COLECAO_DE_JOBS, ambiente) == "mam-teste"
+    # A de segurança segue no banco próprio.
+    assert banco_da_colecao(COLECAO_DE_PAPEIS, ambiente) == "seguranca-teste"
+    # Variável vazia é o mesmo que ausente.
+    assert banco_da_colecao(COLECAO_DE_JOBS, {VARIAVEL_DO_BANCO: ""}) == BANCO_PADRAO
+
+
+def test_o_cliente_do_firestore_abre_o_banco_da_configuracao(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chamadas: list[dict[str, Any]] = []
+
+    def fabrica(**kwargs: Any) -> object:
+        chamadas.append(kwargs)
+        return object()
+
+    cliente_do_firestore("proj", {VARIAVEL_DO_BANCO: "mam-teste"}, fabrica)
+    cliente_do_firestore("proj", {}, fabrica)
+    # Sem ambiente, lê o do processo, e a fábrica padrão é a `firestore.Client` de agora.
+    monkeypatch.setenv(VARIAVEL_DO_BANCO, "do-processo")
+    monkeypatch.setattr(firestore, "Client", fabrica)
+    cliente_do_firestore("proj")
+    assert chamadas == [
+        {"project": "proj", "database": "mam-teste"},
+        {"project": "proj", "database": BANCO_PADRAO},
+        {"project": "proj", "database": "do-processo"},
     ]
 
 

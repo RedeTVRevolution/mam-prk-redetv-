@@ -12,3 +12,5 @@ Alternativas recusadas:
 - **Wikidata:** só o Leão Lobo, dos quatro nomes do catálogo, tem foto lá.
 
 O nome confirmado pelas fotos entra nos relatórios, e a revisora pode corrigi-lo depois. O palpite sem prova fica marcado como não confirmado, fora dos relatórios de tempo de tela.
+
+**Nota de 09/11/2026 (#539).** O modelo forte passou do 3.8 Flash para o 3.5 Flash-Lite (`MODELO_FORTE` é o `MODELO` da análise). No dev, em 13 vídeos e 60 pessoas sem nome, 25 deram o mesmo resultado nos dois modelos; o Flash-Lite deu 6 nomes com prova (GC ou fala) a mais e nenhum a menos, e no TV Fama da Pocah acertou o Arthur Pelágio, que o 3.8 chamou de "Pocah". Ele deu também 10 palpites onde o 3.8 não deu nome, alguns repetindo o mesmo nome para várias pessoas; como palpite não é confirmado, o risco é só o ruído, e filtrar palpites em série ficou fora desta troca. O Flash-Lite é mais barato e o Bruno decidiu trocar. A conferência de provas acima não mudou.

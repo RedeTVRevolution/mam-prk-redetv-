@@ -14,7 +14,7 @@ Nenhum valor real de projeto vai no código: cada ambiente tem um `exemplo.tfvar
 | Assunto | Igual nos dois | Muda por ambiente | Depende de decisão |
 | --- | --- | --- | --- |
 | Recursos | todos os de `modulos/mam` | nada | — |
-| Projeto, região, nomes de bucket | a regra de nomes (`<projeto>-<sufixo>`) | projeto e região (variáveis) | — (sem organização, #296 e [ADR 0016](../docs/adr/0016-sem-organizacao-dev-vira-producao.md)) |
+| Projeto, região, nomes de bucket | a regra de nomes (`<projeto>-<região sem hífen>-<sufixo>`) | projeto e região (variáveis) | — (sem organização, #296 e [ADR 0016](../docs/adr/0016-sem-organizacao-dev-vira-producao.md)) |
 | Estado | bucket GCS, um por projeto | prefixo (`dev`, `prod`) | — |
 | Imagens | um digest por componente | o digest publicado em cada projeto | quando prod recebe imagem (promoção a partir do dev) |
 | Tamanhos e limites | os padrões do módulo | `janelas_em_paralelo`, `espera_gpu_minutos`, `limite_de_falhas_por_etapa`, `builds_de_imagem_guardados` (builds de cada imagem que o Artifact Registry guarda, padrão 2) (prod igual ao dev até o piloto medir) | os valores finais de prod, depois do piloto |
@@ -97,7 +97,7 @@ Custo mensal (estimativa pela tabela do Google, a confirmar: US$): política ~US
 
 ## Chave MAC do Cloud KMS (#272)
 
-O hash das chaves de API dos sistemas legados (E7) sai de uma chave MAC `HMAC_SHA256` do Cloud KMS, em `southamerica-east1`: key ring `mam`, chave `chaves-de-api` (`modulos/mam/chave_mac.tf`). O Terraform a entrega ao serviço em `KMS_CHAVE_MAC`; com ela, `api/main.py` usa o KMS (`api/mac_kms.py`), e sem ela, o `MacSimulado` de `MAC_SIMULADO_CHAVE` (máquina local, emulador e testes). A `mam-terraform` precisa de `roles/cloudkms.admin` (já no wizard); a `mam-web` recebe `cloudkms.signerVerifier` e `cloudkms.viewer` só nessa chave (assinar, verificar e listar as versões para achar a atual).
+O hash das chaves de API dos sistemas legados (E7) sai de uma chave MAC `HMAC_SHA256` do Cloud KMS, em `us-east4` (ADR 0019): key ring `mam`, chave `chaves-de-api` (`modulos/mam/chave_mac.tf`). O Terraform a entrega ao serviço em `KMS_CHAVE_MAC`; com ela, `api/main.py` usa o KMS (`api/mac_kms.py`), e sem ela, o `MacSimulado` de `MAC_SIMULADO_CHAVE` (máquina local, emulador e testes). A `mam-terraform` precisa de `roles/cloudkms.admin` (já no wizard); a `mam-web` recebe `cloudkms.signerVerifier` e `cloudkms.viewer` só nessa chave (assinar, verificar e listar as versões para achar a atual).
 
 - **Emitir chave de API**: `make emitir-chave` precisa de `KMS_CHAVE_MAC` no ambiente (`terraform -chdir=infra output -raw chave_mac_kms`; no prod, `-chdir=infra/ambientes/prod`) e de credencial de quem pode assinar na chave (o Owner já pode).
 - **Rotação manual**: crie uma versão nova com `gcloud kms keys versions create --key=chaves-de-api --keyring=mam --location=<região>`. A API passa a assinar com a versão ativa mais alta em até 5 minutos, e cada chave de API troca de versão sozinha no primeiro uso depois disso (o registro guarda a versão). Desligue a versão antiga (`gcloud kms keys versions disable`) só depois de as chaves em uso terem passado para a nova; chave que ainda aponte para versão desligada deixa de valer.
@@ -169,3 +169,9 @@ Passos humanos depois do `publicar`:
 Os programas saíram do `api/programas.toml` e viraram a coleção `programas` do Firestore, editada na aba Programas da administração. As contas que leem a coleção já têm `roles/datastore.user`; nenhum papel novo.
 
 Passo humano logo depois do `publicar`, antes de qualquer envio com programa: `make carregar-programas` (lê `docs/migracao/programas-2026-11.toml`). Até rodar, a lista do envio fica vazia, envio com `programa` recebe 422 e os Jobs analisam sem o perfil e sem as pessoas do programa. Rodar de novo não duplica.
+
+## Tudo em us-east4 (#537, ADR 0019)
+
+A região do dev e do prod é `us-east4` (`GCP_REGION`, `TF_VAR_regiao`); uma variável só (`regiao`) serve ao que não é a busca nem a GPU. Os nomes que mudaram (buckets, datasets, banco de segurança) levam `useast4` e saem pelos outputs `buckets`, `datasets_bigquery`, `banco_firestore`, `banco_de_seguranca` e `regiao`.
+
+Quem já tem o ambiente em São Paulo não aplica direto: o plan recriaria tudo e destruiria o que existe lá. Rode o wizard da troca (`scripts/wizard-migracao-us-east4.sh`, #538), que tira do estado os endereços de `infra/migracao-us-east4/enderecos-recriados.txt`, publica, copia os dados e só então apaga São Paulo. O `scripts/aplicar-sem-destruir.sh` continua recusando qualquer plan com `delete`, e o CD do GitHub fica vermelho (sem aplicar nada) até a variável `GCP_REGION` do repositório passar a `us-east4` e o wizard ter tirado os endereços do estado. Um recurso regional novo no módulo entra nessa lista; o teste `api/tests/test_infra_migracao_us_east4.py` cobra.

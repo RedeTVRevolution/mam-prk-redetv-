@@ -27,12 +27,16 @@ resource "google_cloud_run_v2_job" "purga" {
           value = var.projeto
         }
         env {
+          name  = "FIRESTORE_BANCO"
+          value = var.banco_firestore
+        }
+        env {
           name  = "BIGQUERY_DATASET"
           value = local.dataset_do_bigquery
         }
         env {
           name  = "BIGQUERY_REGIAO"
-          value = var.regiao_do_bigquery
+          value = var.regiao
         }
         env {
           name  = "BIGQUERY_TABELA"

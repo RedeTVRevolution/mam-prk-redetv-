@@ -7,6 +7,8 @@ from typing import Any
 import pytest
 import yaml
 
+from api.jobs import CONFERENCIA_DA_FILA_GPU_S, FOLGA_DA_FILA_GPU_S
+
 INFRA = Path(__file__).parents[2] / "infra"
 MODULO = INFRA / "modulos" / "mam"
 MAIN = MODULO / "main.tf"
@@ -48,7 +50,9 @@ def test_roda_o_job_de_analise_so_se_o_job_esta_em_analisando() -> None:
     assert "jobs/${job_de_analise}" in passo
     assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
     # A análise não é mais uma chamada HTTP: o teto de 1800 s do Workflows não vale.
-    assert "http.post" not in texto and "url_da_analise" not in texto
+    # O único `http.post` é o aviso da fila de GPU (#534), num subworkflow à parte.
+    assert texto.count("call: http.post") == 1 and "url_da_analise" not in texto
+    assert "call: http.post" in _subworkflow(texto, "avisa_a_espera")
     # O conector espera mais que o timeout de 21600 s do Job, não o padrão de 1800 s.
     assert "timeout: 21900" in passo
     # Fora de `analisando` o fluxo pula a análise.
@@ -1217,9 +1221,50 @@ def test_a_vaga_cerca_a_gpu_e_e_liberada_tambem_na_interrupcao() -> None:
     assert "GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID" in fila
 
 
-def test_a_fila_espera_com_pulso_e_registra_a_posicao_inicial() -> None:
+def test_a_fila_espera_por_callback_e_registra_a_posicao_inicial() -> None:
     espera = _subworkflow(_texto(), "espera_vaga_gpu")
-    assert "seconds: 60" in espera and "next: pede_a_vaga" in espera
+    # Sem pulso (#534): o endpoint é criado uma vez, antes do primeiro pedido, e a
+    # conferência de segurança é o prazo do `await_callback`.
+    assert "sys.sleep" not in espera
+    assert espera.index("events.create_callback_endpoint") < espera.index(
+        "- pede_a_vaga:"
+    )
+    assert "events.await_callback" in espera
+    assert f"timeout: {CONFERENCIA_DA_FILA_GPU_S}" in espera
+    assert "next: pede_a_vaga" in espera
     assert "evento: vaga_de_gpu" in espera
     assert "posicao: $${posicao_inicial}" in espera
     assert "espera_s: $${sys.now() - inicio_da_espera}" in espera
+
+
+def test_quem_grava_a_fila_avisa_a_espera_sem_nunca_falhar_por_isso() -> None:
+    fila = _subworkflow(_texto(), "atualiza_fila_gpu")
+    # Depois da gravação e antes do erro de vaga interrompida: a execução que se limpa
+    # da fila também pode ter liberado uma vaga.
+    assert (
+        fila.index("- grava_a_fila:")
+        < fila.index("call: avisa_a_espera")
+        < fila.index("- nao_roda_sem_vaga_ou_cancelado:")
+    )
+    assert "callback: {stringValue: '$${url_do_aviso}'}" in fila
+    # A espera de um item só sai da fila depois da conferência mais a folga.
+    limite = CONFERENCIA_DA_FILA_GPU_S + FOLGA_DA_FILA_GPU_S
+    assert f"agora - item.visto_em.doubleValue > {limite}" in fila
+    avisa = _subworkflow(_texto(), "avisa_a_espera")
+    assert "call: http.post" in avisa and "type: OAuth2" in avisa
+    assert "sys.sleep" not in avisa and "raise" not in avisa
+    # O token só vai ao callback da execução dona do pedido, neste workflow e região.
+    assert "locations/${regiao}/workflows/${workflow}/executions/" in avisa
+    assert "aviso_de_gpu_recusado" in avisa and "condition: $${destino_valido}" in avisa
+    # Sem `sys.sleep` periódico: só a releitura do compare-and-swap dorme na fila.
+    assert fila.count("call: sys.sleep") == 1 and "espera_para_reler" in fila
+    roda = _subworkflow(_texto(), "roda_o_job_com_gpu")
+    assert roda.count("call: sys.sleep") == 1 and "espera_a_gpu" in roda
+
+
+def test_o_banco_do_firestore_vem_da_configuracao_e_nao_e_default() -> None:
+    texto = _texto()
+
+    assert "(default)" not in texto
+    assert "databases/${banco_firestore}/documents/" in texto
+    assert "banco_firestore" in MAIN.read_text().split("validacao.workflow.yaml")[1]
