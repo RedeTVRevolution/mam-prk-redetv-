@@ -293,6 +293,7 @@ const servidor = setupServer(
     HttpResponse.json({
       programas: ["TV Fama"],
       usuarios: [{ uid: "u1", email: "ana@redetv.com.br" }],
+      sistemas: ["ingestao"],
     }),
   ),
   http.get("/v1/painel/fila", () => HttpResponse.json(FILA)),
@@ -427,6 +428,34 @@ test("o seletor de usuário mostra o e-mail e manda o uid ao endereço", async (
 
   await waitFor(() => expect(pedidos.at(-1)?.get("usuario")).toBe("u1"));
   expect(location.search).toContain("usuario=u1");
+});
+
+test("na aba API o filtro de usuário lista os sistemas e filtra por eles", async () => {
+  await abrir("/painel/videos");
+  const naVideos = (await screen.findByRole("combobox", {
+    name: "Usuário",
+  })) as HTMLSelectElement;
+  await waitFor(() =>
+    expect(
+      within(naVideos).getByRole("option", { name: "ana@redetv.com.br" }),
+    ).toBeTruthy(),
+  );
+  expect(within(naVideos).queryByText("Sistema: ingestao")).toBeNull();
+  cleanup();
+
+  await abrir("/painel/api");
+  const usuario = (await screen.findByRole("combobox", {
+    name: "Usuário",
+  })) as HTMLSelectElement;
+  const opcao = await within(usuario).findByRole("option", {
+    name: "Sistema: ingestao",
+  });
+
+  fireEvent.change(usuario, {
+    target: { value: (opcao as HTMLOptionElement).value },
+  });
+
+  await waitFor(() => expect(pedidos.at(-1)?.get("usuario")).toBe("ingestao"));
 });
 
 test("período invertido mostra o aviso e não chama a API", async () => {
@@ -568,7 +597,9 @@ test("a aba Vídeos mostra os totais e as tabelas por dia, programa e usuário",
   expect(
     screen.getByText(/um vídeo que falhou e depois concluiu aparece nas duas/),
   ).toBeTruthy();
-  expect(screen.getAllByText("Tempo médio até concluir").length).toBeGreaterThan(0);
+  expect(
+    screen.getAllByText("Tempo médio até concluir").length,
+  ).toBeGreaterThan(0);
   expect(
     screen.getByText(/com a espera na fila e as novas tentativas/),
   ).toBeTruthy();
@@ -608,7 +639,11 @@ test("a fila continua visível quando a API não traz esperando_gpu", async () =
   await abrir("/painel/videos");
 
   const fila = await screen.findByRole("list", { name: "Fila agora" });
-  expect(within(fila).getAllByRole("listitem").map((i) => i.textContent)).toEqual([
+  expect(
+    within(fila)
+      .getAllByRole("listitem")
+      .map((i) => i.textContent),
+  ).toEqual([
     "Aguardando envio0Nenhum agora",
     "Em quarentena1O mais antigo há 30s",
     "Decupando2O mais antigo há 2min00s",
@@ -766,7 +801,12 @@ test("Revisão mostra o rótulo dos tipos conhecidos e mantém a chave dos desco
         },
         taxa_de_correcao: {
           ...REVISAO.taxa_de_correcao,
-          por_tipo: tipos.map(([tipo]) => ({ tipo, correcoes: 1, itens: 8, taxa: 0.125 })),
+          por_tipo: tipos.map(([tipo]) => ({
+            tipo,
+            correcoes: 1,
+            itens: 8,
+            taxa: 0.125,
+          })),
         },
       }),
     ),
@@ -775,7 +815,9 @@ test("Revisão mostra o rótulo dos tipos conhecidos e mantém a chave dos desco
 
   await waitFor(() => {
     const correcoes = screen.getByRole("img", { name: /^Correções por tipo/ });
-    const taxa = screen.getByRole("img", { name: /^Taxa de correção por tipo/ });
+    const taxa = screen.getByRole("img", {
+      name: /^Taxa de correção por tipo/,
+    });
     for (const [, rotulo] of tipos) {
       expect(correcoes.getAttribute("aria-label")).toContain(`${rotulo}, 1`);
       expect(taxa.getAttribute("aria-label")).toContain(`${rotulo}, 12,5%`);
@@ -929,7 +971,9 @@ test("a aba Custo mostra o total, o mês, o usuário, a etapa e o custo sem dono
     screen.getByText("Custo por hora de vídeo").nextSibling?.textContent,
   ).toBe(REAL("25,00"));
   expect(
-    screen.getByText(/^Custo até 04\/11 — o faturamento do Google chega com 1 a 2 dias de atraso/),
+    screen.getByText(
+      /^Custo até 04\/11 — o faturamento do Google chega com 1 a 2 dias de atraso/,
+    ),
   ).toBeTruthy();
   expect(pedidos[0].get("programa")).toBe("TV Fama");
   // O custo vem sempre por mês: o agrupamento não vale nesta aba.
@@ -946,23 +990,40 @@ test("a aba Custo escreve R$ 0,00, sem sinal, para um líquido de fração de ce
     relatorio("custo", () =>
       HttpResponse.json({
         ...CUSTO,
-        total: { ...CUSTO.total, custo: TINHA, custo_dos_jobs: TINHA, custo_sem_dono: TINHA, custo_por_hora: TINHA },
+        total: {
+          ...CUSTO.total,
+          custo: TINHA,
+          custo_dos_jobs: TINHA,
+          custo_sem_dono: TINHA,
+          custo_por_hora: TINHA,
+        },
         por_mes: [
-          { ...CUSTO.por_mes[0], custo: TINHA, custo_dos_jobs: TINHA, custo_sem_dono: TINHA, custo_por_hora: TINHA },
+          {
+            ...CUSTO.por_mes[0],
+            custo: TINHA,
+            custo_dos_jobs: TINHA,
+            custo_sem_dono: TINHA,
+            custo_por_hora: TINHA,
+          },
         ],
       }),
     ),
   );
   await abrir("/painel/custo");
 
-  expect(linhasDe(await tabela("Custo por mês"))[0].filter((c) => c.startsWith("R$"))).toEqual([
-    REAL("0,00"),
-    REAL("0,00"),
-    REAL("0,00"),
-    REAL("0,00"),
-  ]);
-  for (const rotulo of ["Custo dos vídeos", "Custo sem dono", "Custo por hora de vídeo"]) {
-    const indicador = screen.getAllByText(rotulo).find((e) => e.tagName === "P");
+  expect(
+    linhasDe(await tabela("Custo por mês"))[0].filter((c) =>
+      c.startsWith("R$"),
+    ),
+  ).toEqual([REAL("0,00"), REAL("0,00"), REAL("0,00"), REAL("0,00")]);
+  for (const rotulo of [
+    "Custo dos vídeos",
+    "Custo sem dono",
+    "Custo por hora de vídeo",
+  ]) {
+    const indicador = screen
+      .getAllByText(rotulo)
+      .find((e) => e.tagName === "P");
     expect(indicador?.nextSibling?.textContent).toBe(REAL("0,00"));
   }
   expect(document.body.textContent).not.toMatch(/-\s*R\$|-0/);
@@ -1083,8 +1144,12 @@ test("ao abrir sem filtro, o período é os últimos 7 dias, na tela e no pedido
   try {
     await abrir("/painel/acessos");
 
-    expect(((await screen.findByLabelText("De")) as HTMLInputElement).value).toBe("2026-11-01");
-    expect((screen.getByLabelText("Até") as HTMLInputElement).value).toBe("2026-11-07");
+    expect(
+      ((await screen.findByLabelText("De")) as HTMLInputElement).value,
+    ).toBe("2026-11-01");
+    expect((screen.getByLabelText("Até") as HTMLInputElement).value).toBe(
+      "2026-11-07",
+    );
     await waitFor(() => expect(pedidos.length).toBeGreaterThan(0));
     expect(pedidos[0].get("desde")).toBe("2026-11-01");
     expect(pedidos[0].get("ate")).toBe("2026-11-07");
@@ -1093,7 +1158,9 @@ test("ao abrir sem filtro, o período é os últimos 7 dias, na tela e no pedido
     pedidos.length = 0;
     await abrir("/painel/acessos?de=&ate=");
 
-    expect(((await screen.findByLabelText("De")) as HTMLInputElement).value).toBe("");
+    expect(
+      ((await screen.findByLabelText("De")) as HTMLInputElement).value,
+    ).toBe("");
     await waitFor(() => expect(pedidos.length).toBeGreaterThan(0));
     expect(pedidos[0].get("desde")).toBe("");
     expect(pedidos[0].get("ate")).toBe("");

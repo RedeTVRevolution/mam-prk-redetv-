@@ -202,6 +202,7 @@ class UsuarioDoFiltro(BaseModel):
 class OpcoesDosFiltros(BaseModel):
     programas: list[str]
     usuarios: list[UsuarioDoFiltro]
+    sistemas: list[str]  # só a aba API os oferece (#524)
 
 
 # Os Jobs ainda em andamento; os terminados ficam de fora (a falha já tem alerta próprio).
@@ -1191,16 +1192,18 @@ def criar_rotas_do_painel(
     def filtros(_pessoa: PodeVerOPainel) -> OpcoesDosFiltros:
         """O que a tela oferece nos filtros de programa e de usuário."""
         fonte = confere_o_pedido(resumos, None, None)
-        programas, uids, emails = ou_503(
+        programas, uids, emails, sistemas = ou_503(
             lambda: em_paralelo(
                 lambda: lido(("filtros", "programas"), fonte.programas),
                 lambda: lido(("filtros", "usuarios"), fonte.usuarios),
                 emails_das_contas,
+                lambda: lido(("filtros", "sistemas"), fonte.sistemas),
             )
         )
         return OpcoesDosFiltros(
             programas=programas,
             usuarios=[UsuarioDoFiltro(uid=u, email=emails.get(u)) for u in uids],
+            sistemas=sistemas,
         )
 
     @rotas.get("/acessos", response_model=RelatorioDeAcessos)

@@ -312,6 +312,12 @@ def test_filtros_oferecem_programas_e_usuarios_ativos() -> None:
     ]
 
 
+def test_filtros_oferecem_os_sistemas_que_tem_eventos() -> None:
+    r = _diretoria().get("/filtros").json()
+
+    assert r["sistemas"] == ["cms"]
+
+
 def test_csv_tem_uma_linha_por_dia_e_pessoa() -> None:
     resposta = _diretoria().get("/acessos", formato="csv", usuario="bia")
 
