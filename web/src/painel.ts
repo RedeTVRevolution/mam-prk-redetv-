@@ -215,7 +215,7 @@ export function gruposDePlanos(planos: Plano[]): GrupoDePlanos[] {
     .map(([id, doGrupo]) => {
       const [primeiro] = doGrupo
       const enquadramento = primeiro.enquadramento_canonico
-      const nome = [primeiro.ambiente_canonico ?? primeiro.ambiente, enquadramento && enquadramento !== 'indefinido' ? enquadramento : null]
+      const nome = [primeiro.ambiente_canonico && primeiro.ambiente_canonico !== 'outro' ? primeiro.ambiente_canonico : primeiro.ambiente, enquadramento && enquadramento !== 'indefinido' ? enquadramento : null]
         .filter(Boolean)
         .join(', ')
       const tempo = duracaoDoGrupo(doGrupo.reduce((t, p) => t + (p.fim_ms - p.inicio_ms), 0))

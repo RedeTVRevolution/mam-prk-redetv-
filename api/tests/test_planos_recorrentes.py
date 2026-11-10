@@ -1,12 +1,21 @@
 """O agrupamento dos planos recorrentes (#546), em quadros gerados na hora."""
 
 import io
+from pathlib import Path
 from typing import Any
 
+import pytest
 from PIL import Image
 
 from api.decupagem import Decupagem
-from api.planos_recorrentes import Sinal, agrupar, com_os_planos_recorrentes, contagem
+from api.planos_recorrentes import (
+    Sinal,
+    agrupar,
+    com_os_planos_recorrentes,
+    contagem,
+    main,
+    resumo,
+)
 
 
 def _quadro(variante: int, brilho: int = 0) -> bytes:
@@ -161,10 +170,10 @@ def test_cor_diferente_com_o_mesmo_hash_nao_junta() -> None:
 
 
 def test_a_ligacao_e_completa_um_intermediario_nao_une_os_extremos() -> None:
-    # a~b e b~c estão dentro do limiar, a~c não: b junta com um deles, nunca os três.
+    # a~b e a~c estão dentro do limiar, b~c não: a junta com um deles, nunca os três.
     a = Sinal(0, (1.0,) + (0.0,) * 63)
     b = Sinal(0b1111111, (1.0,) + (0.0,) * 63)  # 7 bits de a
-    c = Sinal(0b1111111 << 7, (1.0,) + (0.0,) * 63)  # 7 bits de b, 14 de a
+    c = Sinal(0b1111111 << 7, (1.0,) + (0.0,) * 63)  # 7 bits de a, 14 de b
 
     grupos = agrupar([a, b, c], ["x"] * 3, [False] * 3)
 
@@ -179,3 +188,28 @@ def test_repetir_da_o_mesmo_resultado_e_a_contagem_mostra_planos_e_grupos() -> N
 
     assert duas == uma
     assert contagem(uma) == {"planos": 2, "grupos": 1}
+
+
+def test_a_pasta_local_mostra_o_numero_de_grupos_e_os_maiores(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pasta = tmp_path / "v1"
+    (pasta / "quadros").mkdir(parents=True)
+    nomes = ["a1", "b1", "a2", "b2", "a1", "c1"]
+    planos = [_plano(f"p{n}", n, f"quadros/{q}.png") for n, q in enumerate(nomes)]
+    (pasta / "decupagem.json").write_text(_decupagem(planos).model_dump_json())
+    for nome in set(nomes):
+        (pasta / f"quadros/{nome}.png").write_bytes(_QUADROS[nome])
+
+    assert main([str(pasta)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "v1: 6 planos, 5 em 2 grupos",
+        "  rec01: 3 planos, 0.1 min",
+        "  rec02: 2 planos, 0.0 min",
+    ]
+    pronta = com_os_planos_recorrentes(
+        _decupagem(planos), lambda c: _QUADROS[Path(c).stem]
+    )
+    assert resumo(pronta, quantos=1) == [("rec01", 3, 3000)]
+    assert main([]) == 2

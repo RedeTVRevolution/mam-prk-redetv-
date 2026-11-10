@@ -14,10 +14,13 @@ números de `python -m api.preencher_planos_recorrentes`.
 """
 
 import logging
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from io import BytesIO
 from itertools import pairwise
+from pathlib import Path
 
 from PIL import Image
 
@@ -131,31 +134,35 @@ def com_os_planos_recorrentes(
     """
     planos = sorted(decupagem.planos, key=lambda p: p.inicio_ms)
 
-    def abrir(caminho: str | None) -> Image.Image | None:
+    lidos: dict[str, Sinal | None] = {}
+
+    def sinal(caminho: str | None) -> Sinal | None:
+        """Cada quadro é lido uma vez: o do meio de um plano é, no plano de um quadro só, o
+        das duas bordas."""
         if caminho is None:
             return None
-        try:
-            return Image.open(BytesIO(ler_quadro(caminho)))
-        except Exception:  # noqa: BLE001 - quadro que falta ou não abre só tira o plano do grupo
-            log.warning("quadro %s não abriu; o plano fica sem grupo", caminho)
-            return None
+        if caminho not in lidos:
+            try:
+                lidos[caminho] = sinal_do_quadro(
+                    Image.open(BytesIO(ler_quadro(caminho)))
+                )
+            except Exception:  # noqa: BLE001 - quadro que falta ou não abre só tira o plano do grupo
+                log.warning("quadro %s não abriu; o plano fica sem grupo", caminho)
+                lidos[caminho] = None
+        return lidos[caminho]
 
-    sinais: list[Sinal | None] = []
-    for p in planos:
-        quadros = _quadros(p)
-        imagem = abrir(p.quadro or (quadros[len(quadros) // 2] if quadros else None))
-        sinais.append(None if imagem is None else sinal_do_quadro(imagem))
-
+    sinais = [
+        sinal(p.quadro or (q[len(q) // 2] if (q := _quadros(p)) else None))
+        for p in planos
+    ]
     reais: list[bool] = []
     for a, b in pairwise(planos):
-        ultimo, primeiro = _quadros(a)[-1:], _quadros(b)[:1]
-        antes = abrir(ultimo[0] if ultimo else None)
-        depois = abrir(primeiro[0] if primeiro else None)
+        antes = sinal(_quadros(a)[-1] if _quadros(a) else None)
+        depois = sinal(_quadros(b)[0] if _quadros(b) else None)
         reais.append(
             antes is None
             or depois is None
-            or (hash_do_quadro(antes) ^ hash_do_quadro(depois)).bit_count()
-            > LIMITE_DE_BITS
+            or (antes.impressao ^ depois.impressao).bit_count() > LIMITE_DE_BITS
         )
     reais.append(False)
 
@@ -180,3 +187,44 @@ def contagem(decupagem: Decupagem) -> dict[str, int]:
     """Os `planos` agrupados e os `grupos` da Decupagem, para a prévia do preenchimento."""
     ids = [p.plano_recorrente for p in decupagem.planos if p.plano_recorrente]
     return {"planos": len(ids), "grupos": len(set(ids))}
+
+
+def resumo(decupagem: Decupagem, quantos: int = 5) -> list[tuple[str, int, int]]:
+    """Os maiores grupos: (id, planos, tempo total em ms), o maior primeiro."""
+    por_grupo: dict[str, list[Plano]] = {}
+    for p in decupagem.planos:
+        if p.plano_recorrente:
+            por_grupo.setdefault(p.plano_recorrente, []).append(p)
+    achados = [
+        (g, len(ps), sum(p.fim_ms - p.inicio_ms for p in ps))
+        for g, ps in por_grupo.items()
+    ]
+    return sorted(achados, key=lambda t: (-t[1], t[0]))[:quantos]
+
+
+def _ler(pasta: Path, caminho: str) -> bytes:
+    return (pasta / caminho).read_bytes()
+
+
+def main(argumentos: list[str]) -> int:
+    """Diagnóstico sobre pastas locais por vídeo (`decupagem.json` e `quadros/`, como em
+    `api.planos_curtos`): o número de grupos e os 5 maiores, sem tocar a nuvem."""
+    if not argumentos:
+        print("uso: python -m api.planos_recorrentes PASTA [PASTA...]", file=sys.stderr)
+        return 2
+    for argumento in argumentos:
+        pasta = Path(argumento)
+        antes = Decupagem.model_validate_json((pasta / "decupagem.json").read_bytes())
+        depois = com_os_planos_recorrentes(antes, partial(_ler, pasta))
+        total = contagem(depois)
+        print(
+            f"{pasta.name}: {len(depois.planos)} planos, {total['planos']} em "
+            f"{total['grupos']} grupos"
+        )
+        for grupo, planos, ms in resumo(depois):
+            print(f"  {grupo}: {planos} planos, {ms / 60_000:.1f} min")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
