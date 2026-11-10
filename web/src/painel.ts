@@ -1,4 +1,5 @@
 /** O painel do Visualizador sem React e sem DOM: itens por tipo, abas, o que é "agora" e a rolagem. */
+import { assinatura } from './assinaturaDoNome.ts'
 import {
   type Intervalo,
   NAO_IDENTIFICADO,
@@ -178,14 +179,36 @@ export const maiorCaixa = (o: ObjetoDoInventario): CaixaDoQuadro =>
 
 type PlanoDoObjeto = Intervalo & { id: string; ambiente: string }
 
+/** Quantos planos do vídeo têm o valor (uma cor ou uma marca) dentro de um tipo de objeto. */
+export interface ContagemDoValor {
+  valor: string
+  planos: number
+}
+
+/** Uma ocorrência do objeto num plano, com o nome, a cor e a marca como foram gravados. */
+export interface OcorrenciaDoObjeto {
+  nome: string
+  cor?: CorBase | null
+  marca?: string | null
+  destaque: 1 | 2 | 3
+  caixa: CaixaDoQuadro
+  plano: PlanoDoObjeto
+}
+
 /**
- * Um objeto de cena do vídeo: o mesmo nome (sem acento nem caixa), categoria e cor de vários planos viram um
- * item, com os planos em que aparece, como o `unir_repetidos` da API faz dentro do plano (a marca é a primeira).
+ * Um objeto de cena do vídeo, visto por tipo (#544): o mesmo tipo canônico (ou, em `outro`, o mesmo nome pela
+ * assinatura e a mesma categoria) de vários planos vira um item, com os planos em que aparece. A cor e a marca são
+ * atributos, contados em `cores` e `marcas`; cada ocorrência segue em `ocorrencias` com o que foi gravado. É uma
+ * visão: nada do que está gravado é fundido.
  */
 export interface ObjetoDoVideo {
   chave: string
+  /** O tipo canônico, ou `null` em `outro`. */
+  tipo: string | null
+  /** O tipo canônico ou, em `outro`, o nome da primeira ocorrência. */
   nome: string
   categoria: CategoriaDeObjeto
+  /** A cor, quando todas as ocorrências têm a mesma. */
   cor?: CorBase | null
   marca?: string | null
   destaque: 1 | 2 | 3
@@ -194,33 +217,69 @@ export interface ObjetoDoVideo {
   /** O plano da maior caixa: clicar leva a ele, para o player cair na cena que o quadro mostrou. */
   planoDaCaixa: PlanoDoObjeto
   planos: PlanoDoObjeto[]
+  cores: ContagemDoValor[]
+  marcas: ContagemDoValor[]
+  ocorrencias: OcorrenciaDoObjeto[]
 }
 
+/** "azul 5, branco 4": as contagens por planos, da maior para a menor. */
+export const resumoDasContagens = (contagens: ContagemDoValor[], limite = 3): string => {
+  const mostradas = contagens.slice(0, limite).map((c) => `${c.valor} ${c.planos}`)
+  return contagens.length > limite ? `${mostradas.join(', ')}…` : mostradas.join(', ')
+}
+
+const contar = (por: Map<string, Set<string>>): ContagemDoValor[] =>
+  [...por]
+    .map(([valor, planos]) => ({ valor, planos: planos.size }))
+    .sort((a, b) => b.planos - a.planos || a.valor.localeCompare(b.valor, 'pt-BR'))
+
 /**
- * O inventário de todos os planos por categoria (ordem alfabética do nome mostrado), cada objeto uma vez, com o
+ * O inventário de todos os planos por categoria (ordem alfabética do nome mostrado), cada tipo uma vez, com o
  * destaque maior primeiro, como na aba Planos. O objeto sem caixa fica de fora: não há quadro para mostrar.
  */
 export function inventarioDoVideo(
   planos: Plano[],
 ): { categoria: CategoriaDeObjeto; nome: string; objetos: ObjetoDoVideo[] }[] {
   const porChave = new Map<string, ObjetoDoVideo>()
+  const cores = new Map<string, Map<string, Set<string>>>()
+  const marcas = new Map<string, Map<string, Set<string>>>()
+  const somar = (por: Map<string, Map<string, Set<string>>>, chave: string, valor: string, plano: string) => {
+    const dentro = por.get(chave) ?? new Map<string, Set<string>>()
+    dentro.set(valor, (dentro.get(valor) ?? new Set<string>()).add(plano))
+    por.set(chave, dentro)
+  }
   for (const p of planos) {
     const plano = { id: p.id, ambiente: p.ambiente_canonico ?? p.ambiente, inicio_ms: p.inicio_ms, fim_ms: p.fim_ms }
     for (const o of p.inventario ?? []) {
       if (o.caixas.length === 0) continue
-      const chave = [nomeNormalizado(o.nome), o.categoria, o.cor ?? ''].join('|')
+      const tipo = o.tipo_canonico && o.tipo_canonico !== 'outro' ? o.tipo_canonico : null
+      const chave = tipo
+        ? `tipo:${tipo}`
+        : `nome:${o.categoria}:${assinatura(o.nome, o.cor ? [o.cor] : []) || nomeNormalizado(o.nome)}`
       const caixa = maiorCaixa(o)
+      const ocorrencia = { nome: o.nome, cor: o.cor, marca: o.marca, destaque: o.destaque, caixa, plano }
+      if (o.cor) somar(cores, chave, o.cor, p.id)
+      if (o.marca) somar(marcas, chave, o.marca, p.id)
       const achado = porChave.get(chave)
       if (!achado) {
-        const { nome, categoria, cor, marca, destaque } = o
-        porChave.set(chave, { chave, nome, categoria, cor, marca, destaque, caixa, planoDaCaixa: plano, planos: [plano] })
+        const { categoria, cor, marca, destaque } = o
+        porChave.set(chave, {
+          chave, tipo, nome: tipo ?? o.nome, categoria, cor, marca, destaque, caixa, planoDaCaixa: plano,
+          planos: [plano], cores: [], marcas: [], ocorrencias: [ocorrencia],
+        })
         continue
       }
+      achado.ocorrencias.push(ocorrencia)
       if (achado.planos.at(-1)?.id !== p.id) achado.planos.push(plano)
       achado.marca ||= o.marca
+      if ((achado.cor ?? null) !== (o.cor ?? null)) achado.cor = null
       if (o.destaque > achado.destaque) achado.destaque = o.destaque
       if (area(caixa) > area(achado.caixa)) Object.assign(achado, { caixa, planoDaCaixa: plano })
     }
+  }
+  for (const [chave, o] of porChave) {
+    o.cores = contar(cores.get(chave) ?? new Map())
+    o.marcas = contar(marcas.get(chave) ?? new Map())
   }
   const grupos = new Map<CategoriaDeObjeto, ObjetoDoVideo[]>()
   for (const o of porChave.values()) {

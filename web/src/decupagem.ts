@@ -48,6 +48,8 @@ export interface CaixaDoQuadro {
 export interface ObjetoDoInventario {
   nome: string
   categoria: CategoriaDeObjeto
+  /** O tipo da lista fechada (#544), ao lado do nome livre; `outro` ou ausente (acervo antigo) agrupa pelo nome. */
+  tipo_canonico?: string
   cor?: CorBase | null
   marca?: string | null
   caixas: CaixaDoQuadro[]
@@ -128,6 +130,8 @@ export interface Objeto {
   id: string
   categoria: CategoriaDeObjeto
   tipo: string
+  /** O tipo da lista fechada (#544), ao lado do texto livre `tipo`. */
+  tipo_canonico?: string
   cor_base: CorBase[]
   /** O tom em palavras ("vermelho vivo"). */
   cor?: string | null

@@ -26,6 +26,7 @@ import {
   type DadosDoObjeto,
   type ItemDoPainel,
   inventarioDoVideo,
+  resumoDasContagens,
   itensPorTipo,
   NAO_IDENTIFICADO,
   nomeNormalizado,
@@ -140,7 +141,9 @@ function linhasDaSecao(
       if (aberta) linhas.push(...o.ocorrencias.map((x) => item(x, true)))
     }
     for (const g of inventario) {
-      const objetos = g.objetos.filter((o) => casa(`${o.nome} ${o.cor ?? ''} ${o.marca ?? ''} ${g.nome}`, filtro))
+      const objetos = g.objetos.filter((o) =>
+        casa(`${o.nome} ${o.ocorrencias.map((x) => x.nome).join(' ')} ${o.cores.map((c) => c.valor).join(' ')} ${o.marcas.map((m) => m.valor).join(' ')} ${g.nome}`, filtro),
+      )
       if (objetos.length > 0) linhas.push({ tipo: 'categoria', chave: `categoria:${g.categoria}`, nome: g.nome })
       for (const o of objetos) {
         const chave = `inventario:${o.chave}`
@@ -741,7 +744,9 @@ function LinhaDoInventario({
   aoAlternar: () => void
 }) {
   const { objeto } = linha
-  const detalhes = [objeto.cor, objeto.marca].filter(Boolean).join(' · ')
+  // Um tipo reúne cores e marcas: com várias, "azul 5, branco 4" são os planos de cada uma (a visão não funde as ocorrências).
+  const valores = (c: typeof objeto.cores, limite = 3) => (c.length > 1 ? resumoDasContagens(c, limite) : (c[0]?.valor ?? ''))
+  const detalhes = [valores(objeto.cores), valores(objeto.marcas, 2)].filter(Boolean).join(' · ')
   const nome = detalhes ? `${objeto.nome} (${detalhes})` : objeto.nome
   const quantos = `${objeto.planos.length} ${objeto.planos.length === 1 ? 'plano' : 'planos'}`
   return (
