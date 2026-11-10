@@ -279,6 +279,8 @@ def criar_rotas_dos_usuarios(
             raise HTTPException(
                 409, "Você não pode tirar de si mesmo o papel de Administrador"
             )
+        if _em_ordem(antes) == _em_ordem(depois):
+            return da_lista(conta)
         papeis.salvar(uid, pedido.papeis)
         try:
             registrar(

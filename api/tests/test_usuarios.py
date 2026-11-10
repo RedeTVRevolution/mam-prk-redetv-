@@ -202,6 +202,19 @@ def test_da_o_papel_diretoria() -> None:
     assert mundo.papeis.obter("u2") == ["diretoria"]
 
 
+def test_salvar_os_mesmos_papeis_em_outra_ordem_nao_grava_nem_audita() -> None:
+    mundo = Mundo()
+    mundo.papeis.salvar("u2", ["editor", "operador"])
+
+    resposta = mundo.cliente.put(
+        f"{ROTA}/u2/papeis", json={"papeis": ["operador", "editor"]}, headers=ADMIN
+    )
+
+    assert resposta.status_code == 200
+    assert mundo.papeis.obter("u2") == ["editor", "operador"]
+    assert mundo.registros() == []
+
+
 def test_ninguem_tira_de_si_o_papel_de_administrador() -> None:
     mundo = Mundo()
 
@@ -245,11 +258,7 @@ def test_admin_de_emergencia_segue_administrador_apos_trocar_papeis() -> None:
 
     lista = {u["uid"]: u["papeis"] for u in cliente.get(ROTA, headers=ADMIN).json()}
     assert lista["uid-3"] == ["consulta", "administrador"]
-    (registro,) = mundo.registros()
-    assert registro.detalhes == {
-        "antes": ["consulta", "administrador"],
-        "depois": ["consulta", "administrador"],
-    }
+    assert mundo.registros() == []
 
 
 def test_admin_de_emergencia_pode_trocar_os_proprios_papeis_sem_o_administrador() -> (

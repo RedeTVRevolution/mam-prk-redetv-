@@ -98,6 +98,15 @@ async function abrirMenu(usuario: ReturnType<typeof userEvent.setup>, nome: stri
   await usuario.click(within(linha).getByRole('button', { name: `Ações de ${nome}` }))
 }
 
+test('uma conta sem nome usa o e-mail no botão de ações e a inicial dele no avatar', async () => {
+  lista = [...contas(), { uid: 'u4', email: 'zeca@redetv.com.br', nome: '', papeis: ['consulta'], criada_em: null, ultimo_acesso: null, situacao: 'ativa' }]
+  await abrir('/admin/usuarios')
+  const linha = await linhaDe('zeca@redetv.com.br')
+  expect(within(linha).getByRole('button', { name: 'Ações de zeca@redetv.com.br' })).toBeTruthy()
+  expect(linha.textContent).toContain('Z')
+  expect(linha.textContent).not.toContain('?')
+})
+
 test('o link Administração só aparece para quem abre alguma aba da área', async () => {
   eu = COMUM
   await abrir('/acervo')
