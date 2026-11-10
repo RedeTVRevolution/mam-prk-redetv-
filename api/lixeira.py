@@ -8,7 +8,7 @@ import logging
 import math
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -95,6 +95,9 @@ class ItemDaLixeira(BaseModel):
     enviado_em: datetime
     motivo: str
     dias_ate_a_purga: int
+    # Só o vídeo tem; pessoa e marca vão com `None`.
+    programa: str | None = None
+    data_exibicao: date | None = None
 
 
 class Envio(BaseModel):
@@ -150,6 +153,8 @@ def item_da_lixeira(
     nome: str,
     envio: EnvioParaLixeira,
     agora: datetime,
+    programa: str | None = None,
+    data_exibicao: date | None = None,
 ) -> ItemDaLixeira:
     faltam = envio.em + PRAZO_DA_PURGA - agora
     return ItemDaLixeira(
@@ -160,11 +165,15 @@ def item_da_lixeira(
         enviado_em=envio.em,
         motivo=envio.motivo,
         dias_ate_a_purga=max(0, math.ceil(faltam / timedelta(days=1))),
+        programa=programa,
+        data_exibicao=data_exibicao,
     )
 
 
 def _item(job: Job, envio: EnvioParaLixeira, agora: datetime) -> ItemDaLixeira:
-    return item_da_lixeira("video", job.id, job.nome, envio, agora)
+    return item_da_lixeira(
+        "video", job.id, job.nome, envio, agora, job.programa, job.data_exibicao
+    )
 
 
 def login_recente_ou_403(pessoa: Usuario, agora: datetime, janela: timedelta) -> None:
