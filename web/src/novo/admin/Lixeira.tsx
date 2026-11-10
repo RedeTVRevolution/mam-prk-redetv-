@@ -4,6 +4,7 @@ import { cn } from 'cn'
 import { useId, useRef, useState } from 'react'
 import { LoginRecenteExigido, SessaoExpirada, codigoDoErro, type ItemDaLixeira, type TipoDeItem } from '../../api.ts'
 import { falhaDaAcao, type Falha } from '../../falhaDaAcao.ts'
+import { dataDeExibicao } from '../../jobs.ts'
 import { frasesDoImpacto, purgaEm, rotuloDoTipo } from '../../lixeira.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
@@ -15,7 +16,7 @@ import { gravarNaLista, useColunasVisiveis, useLinhasVirtuais } from './listas.t
 const CHAVE = ['admin', 'lixeira']
 const TUDO = ''
 // Em que ponto cada coluna aparece; `null`, sempre.
-const COLUNAS = [null, 'sm', 'md', 'lg', null, 'md', null] as const
+const COLUNAS = [null, 'sm', 'md', 'lg', 'md', 'lg', null, 'md', null] as const
 // A purga que pediu um login novo: ao voltar, a tela reabre o diálogo dela. A mesma chave da tela antiga.
 const PURGA_PENDENTE = 'mam:purga-pendente'
 const ICONE_DO_TIPO: Record<string, Icon> = {
@@ -217,6 +218,8 @@ export default function Lixeira({ aoEntrarDeNovo }: { aoEntrarDeNovo: () => void
             <tr>
               <th className={CABECALHO}>Item</th>
               <th className={cn(CABECALHO, 'hidden w-24 sm:table-cell')}>Tipo</th>
+              <th className={cn(CABECALHO, 'hidden w-[14%] md:table-cell')}>Programa</th>
+              <th className={cn(CABECALHO, 'hidden w-28 lg:table-cell')}>Exibição</th>
               <th className={cn(CABECALHO, 'hidden w-[18%] md:table-cell')}>Apagado por</th>
               <th className={cn(CABECALHO, 'hidden w-28 lg:table-cell')}>Em</th>
               <th className={cn(CABECALHO, 'w-24')}>Purga em</th>
@@ -241,6 +244,8 @@ export default function Lixeira({ aoEntrarDeNovo }: { aoEntrarDeNovo: () => void
                     </span>
                   </td>
                   <td className={cn(CELULA, 'hidden sm:table-cell')}>{rotuloDoTipo(item.tipo)}</td>
+                  <td className={cn(CELULA, 'hidden truncate md:table-cell')}>{item.programa || '—'}</td>
+                  <td className={cn(CELULA, 'hidden tabular-nums whitespace-nowrap lg:table-cell')}>{dataDeExibicao(item.data_exibicao)}</td>
                   <td className={cn(CELULA, 'hidden truncate md:table-cell')}>{item.enviado_por}</td>
                   <td className={cn(CELULA, 'hidden tabular-nums whitespace-nowrap lg:table-cell')}>{quando(item.enviado_em)}</td>
                   <td className={CELULA}>

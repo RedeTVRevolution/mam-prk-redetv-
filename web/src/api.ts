@@ -261,6 +261,9 @@ export interface ItemDaLixeira {
   enviado_em: string
   motivo: string
   dias_ate_a_purga: number
+  /** Só o vídeo tem. */
+  programa?: string | null
+  data_exibicao?: string | null
 }
 
 /** O que vai junto com o vídeo, antes de confirmar. */

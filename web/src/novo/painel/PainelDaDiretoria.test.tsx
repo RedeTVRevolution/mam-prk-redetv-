@@ -545,6 +545,27 @@ test("o gráfico pede o agrupamento automático e segue o que o servidor escolhe
   await waitFor(() => expect(pedidos.at(-1)?.get("agrupar")).toBe("mes"));
 });
 
+test("o agrupamento escolhido vai para o endereço e o endereço o devolve ao abrir", async () => {
+  await abrir("/painel/acessos");
+  await screen.findByRole("img", { name: /Logins por/ });
+
+  fireEvent.change(screen.getByRole("combobox", { name: "Agrupar" }), {
+    target: { value: "semana" },
+  });
+
+  await waitFor(() => expect(location.search).toContain("agrupar=semana"));
+});
+
+test("abrir o link com agrupar usa o agrupamento do link", async () => {
+  await abrir("/painel/acessos?agrupar=trimestre");
+
+  await waitFor(() => expect(pedidos[0].get("agrupar")).toBe("trimestre"));
+  expect(
+    (screen.getByRole("combobox", { name: "Agrupar" }) as HTMLSelectElement)
+      .value,
+  ).toBe("trimestre");
+});
+
 test("o agrupamento recusado pela API aparece com o motivo e deixa tentar de novo", async () => {
   let vezes = 0;
   resposta = () => {

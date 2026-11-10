@@ -332,14 +332,20 @@ def _agrupar_dias[V](
     return juntos
 
 
-def escolhe_o_grupo(agrupar: Grupo | Literal["auto"], dias: Iterable[date]) -> Grupo:
+def escolhe_o_grupo(
+    agrupar: Grupo | Literal["auto"],
+    dias: Iterable[date],
+    desde: date | None = None,
+) -> Grupo:
     """O grupo dos gráficos por dia. `auto` escolhe pelo tamanho do período com dados; um
-    grupo pedido que dê mais de `MAXIMO_DE_PONTOS` pontos é 422."""
+    grupo pedido que dê mais de `MAXIMO_DE_PONTOS` pontos é 422. O `desde` do filtro conta: o
+    gráfico começa nele (veja `_dias_do_intervalo`)."""
     dias = list(dias)
     if agrupar == "auto":
-        tamanho = (max(dias) - min(dias)).days + 1 if dias else 0
+        primeiro = min([*dias, *([desde] if desde else [])], default=None)
+        tamanho = (max(dias) - primeiro).days + 1 if dias and primeiro else 0
         return next((g for ate, g in FAIXAS_DO_AUTO if tamanho <= ate), "trimestre")
-    pontos = len(_dias_do_intervalo(dias, agrupar))
+    pontos = len(_dias_do_intervalo(dias, agrupar, desde))
     if pontos > MAXIMO_DE_PONTOS:
         raise HTTPException(
             422,
@@ -349,8 +355,10 @@ def escolhe_o_grupo(agrupar: Grupo | Literal["auto"], dias: Iterable[date]) -> G
     return agrupar
 
 
-def _com_os_dias_vazios(por_dia: dict[date, int], grupo: Grupo) -> dict[date, int]:
-    return {d: por_dia.get(d, 0) for d in _dias_do_intervalo(por_dia, grupo)}
+def _com_os_dias_vazios(
+    por_dia: dict[date, int], grupo: Grupo, desde: date | None
+) -> dict[date, int]:
+    return {d: por_dia.get(d, 0) for d in _dias_do_intervalo(por_dia, grupo, desde)}
 
 
 def relatorio_de_acessos(
@@ -393,7 +401,9 @@ def relatorio_de_acessos(
                 acessos=n,
                 usuarios_ativos=len(ativos_do_grupo.get(d, ())),
             )
-            for d, n in sorted(_com_os_dias_vazios(acessos_do_grupo, grupo).items())
+            for d, n in sorted(
+                _com_os_dias_vazios(acessos_do_grupo, grupo, filtro.desde).items()
+            )
         ],
         por_semana=_ativos_por(
             ativos_do_dia, lambda d: d - timedelta(days=d.weekday())
@@ -622,13 +632,19 @@ def _tem_video(u: UsoDoDia) -> bool:
     return bool(u.videos_enviados or u.videos_concluidos or u.videos_falhos)
 
 
-def _dias_do_intervalo(dias: Iterable[date], grupo: Grupo = "dia") -> list[date]:
+def _dias_do_intervalo(
+    dias: Iterable[date], grupo: Grupo = "dia", desde: date | None = None
+) -> list[date]:
     """Do primeiro ao último dia, sem buracos: o gráfico não cola dias distantes. Com um
     grupo, o primeiro dia de cada grupo do intervalo."""
     dias = list(dias)
     if not dias:
         return []
     primeiro = min(dias)
+    if (
+        desde is not None and desde < primeiro
+    ):  # no máximo `MAXIMO_DE_PONTOS` dias antes
+        primeiro = max(desde, primeiro - timedelta(days=MAXIMO_DE_PONTOS))
     return list(
         dict.fromkeys(
             inicio_do_grupo(primeiro + timedelta(days=i), grupo)
@@ -681,7 +697,7 @@ def relatorio_de_videos(
         total=NumerosDeVideos(**total.videos()),
         por_dia=[
             DiaDeVideos(dia=d, **por_dia.get(d, _SomaDeUso()).videos())
-            for d in _dias_do_intervalo(por_dia, grupo)
+            for d in _dias_do_intervalo(por_dia, grupo, filtro.desde)
         ],
         por_programa=[
             ProgramaDeVideos(programa=p, **soma.videos())
@@ -732,7 +748,7 @@ def relatorio_de_buscas(
                 if por_programa
                 else len(pessoas_do_dia.get(d, ())),
             )
-            for d in _dias_do_intervalo(por_dia, grupo)
+            for d in _dias_do_intervalo(por_dia, grupo, filtro.desde)
         ],
         por_usuario=[
             QuemDeBuscas(**quem, **soma.de_buscas())
@@ -897,7 +913,10 @@ class RelatorioDeRevisao(BaseModel):
 
 
 def relatorio_de_correcoes(
-    linhas: list[CorrecaoDoDia], emails: dict[str, str], grupo: Grupo = "dia"
+    linhas: list[CorrecaoDoDia],
+    emails: dict[str, str],
+    grupo: Grupo = "dia",
+    desde: date | None = None,
 ) -> CorrecoesNoPeriodo:
     por_dia: dict[date, int] = defaultdict(int)
     por_tipo: dict[str | None, int] = defaultdict(int)
@@ -910,7 +929,7 @@ def relatorio_de_correcoes(
         total=sum(por_dia.values()),
         por_dia=[
             DiaDeCorrecoes(dia=d, correcoes=por_dia.get(d, 0))
-            for d in _dias_do_intervalo(por_dia, grupo)
+            for d in _dias_do_intervalo(por_dia, grupo, desde)
         ],
         por_tipo=[
             TipoDeCorrecoes(tipo=t, correcoes=n)
@@ -1137,7 +1156,9 @@ def relatorio_de_api(
                 videos_enviados=enviados_do_dia.get(d, 0),
                 **_numeros_de_chamadas(do_dia.get(d, [])),
             )
-            for d in _dias_do_intervalo(set(do_dia) | set(enviados_do_dia), grupo)
+            for d in _dias_do_intervalo(
+                set(do_dia) | set(enviados_do_dia), grupo, filtro.desde
+            )
         ],
         por_sistema=[
             SistemaDeApi.model_validate(
@@ -1201,12 +1222,13 @@ def criar_rotas_do_painel(
         agrupar: Grupo | Literal["auto"] | None,
         dias: Iterable[date],
         resposta: Response,
+        desde: date | None = None,
     ) -> Grupo:
         """Sem `agrupar`, por dia como sempre; com ele, o grupo usado vai no cabeçalho
         `X-Agrupamento` (o `auto` diz qual escolheu). O CSV não agrupa."""
         if agrupar is None:
             return "dia"
-        grupo = escolhe_o_grupo(agrupar, dias)
+        grupo = escolhe_o_grupo(agrupar, dias, desde)
         resposta.headers["X-Agrupamento"] = grupo
         return grupo
 
@@ -1287,7 +1309,7 @@ def criar_rotas_do_painel(
                 ),
                 "acessos.csv",
             )
-        grupo = _grupo(agrupar, (a.dia for a in linhas), resposta)
+        grupo = _grupo(agrupar, (a.dia for a in linhas), resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "acessos", filtro)
         return relatorio_de_acessos(linhas, emails, filtro, grupo)
 
@@ -1350,7 +1372,9 @@ def criar_rotas_do_painel(
             )
         if filtro.programa is not None:
             por_programa = base
-        grupo = _grupo(agrupar, (u.dia for u in base if _tem_video(u)), resposta)
+        grupo = _grupo(
+            agrupar, (u.dia for u in base if _tem_video(u)), resposta, filtro.desde
+        )
         acessos_ao_painel.abriu(pessoa, "videos", filtro)
         return relatorio_de_videos(base, por_programa, emails, filtro, grupo)
 
@@ -1383,7 +1407,9 @@ def criar_rotas_do_painel(
                 ),
                 "buscas.csv",
             )
-        grupo = _grupo(agrupar, (u.dia for u in base if u.buscas), resposta)
+        grupo = _grupo(
+            agrupar, (u.dia for u in base if u.buscas), resposta, filtro.desde
+        )
         acessos_ao_painel.abriu(pessoa, "buscas", filtro)
         return relatorio_de_buscas(base, emails, filtro, grupo)
 
@@ -1437,14 +1463,14 @@ def criar_rotas_do_painel(
                 ),
                 "revisao.csv",
             )
-        grupo = _grupo(agrupar, (c.dia for c in correcoes), resposta)
+        grupo = _grupo(agrupar, (c.dia for c in correcoes), resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "revisao", filtro)
         return RelatorioDeRevisao(
             desde=filtro.desde,
             ate=filtro.ate,
             programa=filtro.programa,
             usuario=filtro.usuario,
-            correcoes=relatorio_de_correcoes(correcoes, emails, grupo),
+            correcoes=relatorio_de_correcoes(correcoes, emails, grupo, filtro.desde),
             taxa_de_correcao=taxa_no_painel(taxa),
             tempo_de_revisao=tempo_no_painel(tempo),
         )
@@ -1525,7 +1551,7 @@ def criar_rotas_do_painel(
                 "api.csv",
             )
         dias = [c.dia for c in chamadas] + [u.dia for u in envios if u.videos_enviados]
-        grupo = _grupo(agrupar, dias, resposta)
+        grupo = _grupo(agrupar, dias, resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "api", filtro)
         return relatorio_de_api(chamadas, envios, filtro, grupo)
 

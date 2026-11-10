@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
@@ -264,6 +265,58 @@ def test_dias_sem_login_no_meio_do_periodo_vem_com_zero() -> None:
         {"dia": "2026-11-03", "acessos": 0, "usuarios_ativos": 0},
         {"dia": "2026-11-04", "acessos": 1, "usuarios_ativos": 1},
     ]
+
+
+def test_o_grafico_comeca_no_dia_inicial_do_filtro_mesmo_sem_dados_nele() -> None:
+    resumos = ResumosEmMemoria([_acesso(3, "bia", 1), _acesso(4, "bia", 2)])
+
+    r = (
+        Mundo(["diretoria"], resumos=resumos)
+        .get("/acessos", desde="2026-11-01", ate="2026-11-04")
+        .json()
+    )
+
+    assert [d["dia"] for d in r["por_dia"]] == [
+        "2026-11-01",
+        "2026-11-02",
+        "2026-11-03",
+        "2026-11-04",
+    ]
+
+
+def test_desde_muito_antigo_vale_para_o_teto_de_pontos_e_para_o_auto() -> None:
+    mundo = Mundo(["diretoria"], resumos=ResumosEmMemoria([_acesso(3, "bia", 1)]))
+
+    por_dia = mundo.get("/acessos", desde="0001-01-01", agrupar="dia")
+    auto = mundo.get("/acessos", desde="0001-01-01", agrupar="auto")
+    sem_agrupar = mundo.get("/acessos", desde="0001-01-01").json()
+
+    assert por_dia.status_code == 422
+    assert auto.status_code == 200
+    assert auto.headers["X-Agrupamento"] == "trimestre"
+    assert len(sem_agrupar["por_dia"]) <= 401  # os dados (1 dia) + o teto antes deles
+
+
+def test_o_teto_de_pontos_corta_o_desde_antigo_sem_andar_dia_a_dia(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api import painel
+
+    tamanhos: list[int] = []
+    original = painel._dias_do_intervalo
+
+    def espiao(*args: Any, **kwargs: Any) -> list[date]:
+        r = original(*args, **kwargs)
+        tamanhos.append(len(r))
+        return r
+
+    monkeypatch.setattr(painel, "_dias_do_intervalo", espiao)
+
+    with pytest.raises(HTTPException) as erro:
+        escolhe_o_grupo("dia", [date(2026, 1, 1)], date(1, 1, 1))
+
+    assert erro.value.status_code == 422
+    assert max(tamanhos) <= 401
 
 
 def test_linha_sem_login_nem_acao_nao_vira_dia_nem_pessoa() -> None:
