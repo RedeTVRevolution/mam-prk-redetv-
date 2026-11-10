@@ -24,12 +24,14 @@ _ENQUADRAMENTOS: list[tuple[tuple[str, ...], Enquadramento]] = [
     (("detalhe",), "detalhe"),
     (("conjunto", "corpo inteiro"), "plano de conjunto"),
     (("americano",), "plano americano"),
-    (("geral", "aberto", "amplo", "panoramic", "wide"), "plano geral"),
+    (("geral", "aberto", "panoramic", "wide"), "plano geral"),
     (("medio", "medium", "media"), "plano médio"),
     (
         ("primeiro plano", "close", "fechado", "proximo", "aproximado"),
         "primeiro plano",
     ),
+    # Por último: "amplo desfoque" não pode vencer um enquadramento explícito.
+    (("amplo",), "plano geral"),
 ]
 
 _AMBIENTES: list[tuple[tuple[str, ...], Ambiente]] = [

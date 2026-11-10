@@ -30,6 +30,8 @@ from api.canonicos import ambiente_canonico, enquadramento_canonico
         ("APROXIMADO", "primeiro plano"),
         ("Amplo", "plano geral"),
         ("plano AMPLO", "plano geral"),
+        ("Close com amplo desfoque de fundo", "primeiro plano"),
+        ("Plano médio com amplo desfoque", "plano médio"),
         ("Corpo inteiro", "plano de conjunto"),
         ("CORPO INTEIRO", "plano de conjunto"),
         ("", "indefinido"),
