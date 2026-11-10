@@ -1,5 +1,7 @@
 """Invariantes da regra de tempos para qualquer plano e qualquer corte (#545)."""
 
+from itertools import pairwise
+
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
@@ -22,7 +24,7 @@ def test_os_planos_saem_em_ordem_sem_sobreposicao_e_dentro_do_video(
 
     pares = [(p.inicio_ms, p.fim_ms) for p in saida]
     assert all(0 <= i < f <= DURACAO_MS for i, f in pares)
-    assert all(a[1] <= b[0] for a, b in zip(pares, pares[1:], strict=False))
+    assert all(a[1] <= b[0] for a, b in pairwise(pares))
 
 
 @given(_planos, _cortes)

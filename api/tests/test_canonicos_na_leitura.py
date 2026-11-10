@@ -19,7 +19,8 @@ def _corrigir_ambiente(modelo: dict[str, Any], ambiente: str) -> dict[str, Any]:
         valor=_descricao(ambiente=ambiente),
         versao=versao_do_modelo(json.dumps(modelo).encode()),
     )
-    return mundo.decupagem()["planos"][0]
+    plano: dict[str, Any] = mundo.decupagem()["planos"][0]
+    return plano
 
 
 def test_decupagem_antiga_ganha_o_canonico_pelo_dicionario_e_o_texto_fica() -> None:

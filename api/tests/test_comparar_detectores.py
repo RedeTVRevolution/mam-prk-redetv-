@@ -7,11 +7,18 @@ from api.comparar_detectores import Medida, NaoInstalado, comparar, medir
 
 def test_precisao_e_cobertura_com_tolerancia() -> None:
     marcados = [1_000, 5_000, 9_000]
-    detectados = [1_100, 2_000, 5_000, 5_050]  # 2 000 sobra; 5 050 repete o de 5 000; 9 000 falta
+    detectados = [
+        1_100,
+        2_000,
+        5_000,
+        5_050,
+    ]  # 2 000 sobra; 5 050 repete o de 5 000; 9 000 falta
 
     m = medir(detectados, marcados, tolerancia_ms=200)
 
-    assert m == Medida(acertos=2, detectados=4, marcados=3, precisao=0.5, cobertura=2 / 3)
+    assert m == Medida(
+        acertos=2, detectados=4, marcados=3, precisao=0.5, cobertura=2 / 3
+    )
 
 
 def test_sem_detectar_nada_a_precisao_e_vazia_e_a_cobertura_zero() -> None:

@@ -95,7 +95,9 @@ def comparar(
     tolerancia_ms: int = TOLERANCIA_PADRAO_MS,
     detectores: dict[str, Callable[[Path], list[int]]] | None = None,
 ) -> str:
-    linhas = [f"{'detector':28} {'achados':>8} {'precisão':>9} {'cobertura':>10} {'tempo_s':>8}"]
+    linhas = [
+        f"{'detector':28} {'achados':>8} {'precisão':>9} {'cobertura':>10} {'tempo_s':>8}"
+    ]
     for nome, detectar in (detectores or DETECTORES).items():
         inicio = time.monotonic()
         try:
@@ -113,7 +115,9 @@ def comparar(
             f"{nome:28} {m.detectados:>8} {pct(m.precisao):>9} {pct(m.cobertura):>10} "
             f"{segundos:>8.1f}"
         )
-    linhas.append(f"({len(marcados)} cortes marcados; tolerância de {tolerancia_ms} ms)")
+    linhas.append(
+        f"({len(marcados)} cortes marcados; tolerância de {tolerancia_ms} ms)"
+    )
     return "\n".join(linhas)
 
 

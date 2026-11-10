@@ -14,7 +14,10 @@ from api.decupagem import Ambiente, Enquadramento
 
 # Começos de palavra do texto normalizado (sem acento nem maiúscula) -> valor.
 _ENQUADRAMENTOS: list[tuple[tuple[str, ...], Enquadramento]] = [
-    (("primeirissimo", "super close", "big close", "extreme close"), "primeiríssimo plano"),
+    (
+        ("primeirissimo", "super close", "big close", "extreme close"),
+        "primeiríssimo plano",
+    ),
     (("detalhe",), "detalhe"),
     (("conjunto",), "plano de conjunto"),
     (("americano",), "plano americano"),
@@ -30,16 +33,42 @@ _AMBIENTES: list[tuple[tuple[str, ...], Ambiente]] = [
     (("hospital", "clinica", "consultorio"), "hospital"),
     (("bastidor", "camarim", "redacao", "corredor"), "bastidor"),
     (("palco", "auditorio", "teatro", "plateia"), "palco"),
-    (("carro", "veiculo", "onibus", "caminhao", "viatura", "helicoptero", "aviao"), "veículo"),
-    (("escritorio", "empresa", "sala de reuniao", "delegacia", "tribunal"), "escritório"),
+    (
+        ("carro", "veiculo", "onibus", "caminhao", "viatura", "helicoptero", "aviao"),
+        "veículo",
+    ),
+    (
+        ("escritorio", "empresa", "sala de reuniao", "delegacia", "tribunal"),
+        "escritório",
+    ),
     (("loja", "mercado", "shopping", "restaurante", "comercio", "feira"), "comércio"),
-    (("casa", "residencia", "sala de estar", "cozinha", "quarto", "apartamento"), "residência"),
-    (("praia", "floresta", "mata", "campo", "rio", "natureza", "montanha", "parque"), "natureza"),
-    (("rua", "externa", "exterior", "avenida", "praca", "ao ar livre", "calcada", "estrada"), "externa"),
+    (
+        ("casa", "residencia", "sala de estar", "cozinha", "quarto", "apartamento"),
+        "residência",
+    ),
+    (
+        ("praia", "floresta", "mata", "campo", "rio", "natureza", "montanha", "parque"),
+        "natureza",
+    ),
+    (
+        (
+            "rua",
+            "externa",
+            "exterior",
+            "avenida",
+            "praca",
+            "ao ar livre",
+            "calcada",
+            "estrada",
+        ),
+        "externa",
+    ),
 ]
 
 
-def _classificar[T](texto: str, regras: list[tuple[tuple[str, ...], T]], padrao: T) -> T:
+def _classificar[T](
+    texto: str, regras: list[tuple[tuple[str, ...], T]], padrao: T
+) -> T:
     normal = normalizar(texto)
     for trechos, valor in regras:
         # No começo de uma palavra: "rio" não casa com "criado".

@@ -76,9 +76,15 @@ def diagnosticar(
         antes = _quadros(planos[n - 1])[-1:] if n > 0 else []
         depois = _quadros(planos[n + 1])[:1] if n + 1 < len(planos) else []
         meus = _quadros(plano)
-        entrada = _distancia(antes[0] if antes else None, meus[0] if meus else None, ler_quadro)
-        saida = _distancia(meus[-1] if meus else None, depois[0] if depois else None, ler_quadro)
-        vizinhos = _distancia(antes[0] if antes else None, depois[0] if depois else None, ler_quadro)
+        entrada = _distancia(
+            antes[0] if antes else None, meus[0] if meus else None, ler_quadro
+        )
+        saida = _distancia(
+            meus[-1] if meus else None, depois[0] if depois else None, ler_quadro
+        )
+        vizinhos = _distancia(
+            antes[0] if antes else None, depois[0] if depois else None, ler_quadro
+        )
         medidas = [d for d in (entrada, saida, vizinhos) if d is not None]
         if not medidas:
             veredito: Veredito = "sem quadros"
@@ -105,7 +111,9 @@ def diagnosticar(
 def diagnosticar_pasta(pasta: Path) -> list[LinhaDoDiagnostico]:
     decupagem = Decupagem.model_validate_json((pasta / "decupagem.json").read_bytes())
     arquivo_de_cortes = pasta / "cortes_ms.json"
-    cortes = json.loads(arquivo_de_cortes.read_text()) if arquivo_de_cortes.exists() else []
+    cortes = (
+        json.loads(arquivo_de_cortes.read_text()) if arquivo_de_cortes.exists() else []
+    )
     return diagnosticar(
         decupagem, cortes, lambda c: (pasta / c).read_bytes(), video=pasta.name
     )
@@ -117,7 +125,7 @@ def tabela(linhas: Sequence[LinhaDoDiagnostico]) -> str:
 
     saida = [
         f"{'vídeo':14} {'plano':8} {'início_ms':>10} {'dur_ms':>7} {'origem':7} "
-        f"{'entra':>5} {'sai':>5} {'viz.':>5}  veredito"
+        + f"{'entra':>5} {'sai':>5} {'viz.':>5}  veredito"
     ]
     for ln in linhas:
         saida.append(
@@ -128,8 +136,12 @@ def tabela(linhas: Sequence[LinhaDoDiagnostico]) -> str:
     por_origem = Counter(ln.origem for ln in linhas)
     por_veredito = Counter(ln.veredito for ln in linhas)
     saida.append("")
-    saida.append("origem — " + ", ".join(f"{k}: {v}" for k, v in sorted(por_origem.items())))
-    saida.append("veredito — " + ", ".join(f"{k}: {v}" for k, v in sorted(por_veredito.items())))
+    saida.append(
+        "origem — " + ", ".join(f"{k}: {v}" for k, v in sorted(por_origem.items()))
+    )
+    saida.append(
+        "veredito — " + ", ".join(f"{k}: {v}" for k, v in sorted(por_veredito.items()))
+    )
     saida.append(f"(distâncias em bits de 64; parecido = até {BITS_PARECIDOS})")
     return "\n".join(saida)
 

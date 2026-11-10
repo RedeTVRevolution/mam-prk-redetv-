@@ -14,10 +14,12 @@ from api.planos_curtos import diagnosticar, diagnosticar_pasta, tabela
 def _jpeg(variante: int) -> bytes:
     """Um de três quadros bem diferentes: degradê crescente, decrescente ou listras."""
     imagem = Image.new("L", (64, 64))
-    valor = [lambda x: x * 4, lambda x: 255 - x * 4, lambda x: 255 * (x // 4 % 2)][
-        variante
-    ]
-    imagem.putdata([valor(x) for _ in range(64) for x in range(64)])
+    por_coluna = [
+        [x * 4 for x in range(64)],
+        [255 - x * 4 for x in range(64)],
+        [255 * (x // 4 % 2) for x in range(64)],
+    ][variante]
+    imagem.putdata(por_coluna * 64)
     saida = io.BytesIO()
     imagem.save(saida, "PNG")
     return saida.getvalue()
@@ -49,7 +51,9 @@ def _decupagem(planos: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _video(tmp_path: Path, planos: list[dict[str, Any]], cortes: list[int] | None) -> Path:
+def _video(
+    tmp_path: Path, planos: list[dict[str, Any]], cortes: list[int] | None
+) -> Path:
     pasta = tmp_path / "v1"
     (pasta / "quadros").mkdir(parents=True)
     (pasta / "decupagem.json").write_text(json.dumps(_decupagem(planos)))
