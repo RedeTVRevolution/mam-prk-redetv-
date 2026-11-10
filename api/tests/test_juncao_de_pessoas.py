@@ -203,6 +203,26 @@ def test_pares_proibidos_por_uma_pessoa_na_tela_sao_respeitados() -> None:
     assert ids(r) == ["pes01", "pes02"]
 
 
+def test_pessoa_ja_juntada_com_correcao_ancorada_na_identidade_agregada_fica_fora() -> (
+    None
+):
+    juntada = juntar_sem_nome(
+        decupagem(
+            [
+                pessoa("pes01", 0, [(0, 10_000)]),
+                pessoa("pes02", 1, [(20_000, 30_000)]),
+            ]
+        )
+    )
+    [j] = juntada.pessoas
+    outra = Pessoa.model_validate(pessoa("pes03", 0, [(12_000, 18_000)]))
+    d = juntada.model_copy(update={"pessoas": [j, outra]})
+
+    r = juntar_sem_nome(d, corrigidas={chave_da_pessoa(j)})
+
+    assert ids(r) == ["pes01", "pes03"]
+
+
 def test_pautas_e_donos_de_objetos_vao_para_a_pessoa_juntada_e_a_origem_lembra() -> (
     None
 ):

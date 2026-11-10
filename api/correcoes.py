@@ -1806,8 +1806,8 @@ def pessoas_corrigidas(correcoes: Sequence[Correcao]) -> set[str]:
         c.ancora.identidade
         for c in correcoes
         if c.ancora.tipo_do_item == "pessoa"
-        and c.tipo != "desfazer"
-        and estado.em_vigor(c.id)
+        and c.tipo not in ("desfazer", "descartar", "aprovar", "recusar")
+        and estado.casavel(c.id)
     }
 
 

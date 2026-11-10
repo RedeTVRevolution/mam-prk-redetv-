@@ -157,7 +157,7 @@ def _proibida(a: Pessoa, b: Pessoa, proibidos: Collection[frozenset[str]]) -> bo
 
 def _candidata(p: Pessoa, corrigidas: Collection[str] = ()) -> bool:
     return (
-        not (_chaves(p) & set(corrigidas))
+        not ((_chaves(p) | {chave_da_pessoa(p)}) & set(corrigidas))
         and nao_identificado(p.nome)
         and p.estado_do_nome is None
         and p.catalogo_id is None
