@@ -4,8 +4,9 @@
  * `api/tests/assinatura_do_nome.json` é lida pelo teste daqui e pelo do Python, para as duas não divergirem.
  */
 
+// Como `normalizar` de api/comparador.py: NFKD + casefold (toLowerCase, mais o único caso que difere: ß).
 const normalizar = (t: string): string =>
-  t.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().split(/\s+/).filter(Boolean).join(' ')
+  t.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/ß/g, 'ss').split(/\s+/).filter(Boolean).join(' ')
 
 const PALAVRAS_VAZIAS = new Set(['de', 'da', 'do', 'das', 'dos', 'com', 'um', 'uma'])
 

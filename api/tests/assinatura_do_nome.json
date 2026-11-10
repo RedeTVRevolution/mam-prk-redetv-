@@ -1,5 +1,5 @@
 {
-  "_comentario": "Entrada, cores do item e a assinatura esperada. Lida por api/tests/test_assinatura_do_nome.py e por web/src/assinaturaDoNome.test.ts: as duas implementações têm de dar a mesma chave.",
+  "_comentario": "Entrada, cores do item e a assinatura esperada. Lida por api/tests/test_assinatura_do_nome.py e por web/src/assinaturaDoNome.test.ts: as duas implementações têm de dar a mesma chave. O Python usa NFKD + casefold; no TS, NFKD + toLowerCase + ß→ss. Sem equivalente simples no TS (casefold de sigma final, p. ex.): não coberto, fora do vocabulário do português.",
   "casos": [
     {"entrada": "Microfone", "cores": [], "chave": "microfone"},
     {"entrada": "microfones", "cores": [], "chave": "microfone"},
@@ -20,6 +20,9 @@
     {"entrada": "mãos", "cores": [], "chave": "mao"},
     {"entrada": "vermelho", "cores": ["vermelho"], "chave": "vermelho"},
     {"entrada": "de da", "cores": [], "chave": ""},
+    {"entrada": "vaso ﬂoral", "cores": [], "chave": "floral vaso"},
+    {"entrada": "ＣＡＮＥＣＡ", "cores": [], "chave": "caneca"},
+    {"entrada": "Straße", "cores": [], "chave": "strasse"},
     {"entrada": "", "cores": [], "chave": ""}
   ]
 }
