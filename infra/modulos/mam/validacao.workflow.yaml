@@ -1094,7 +1094,13 @@ roda_o_job_com_gpu:
             - repassa_o_erro_com_vaga:
                 raise: $${erro_com_vaga}
 
-# Um pulso por minuto mantém vivo o pedido; a posição do log é a da primeira gravação.
+# Sem vaga, a execução espera um aviso (callback do Workflows, #534), sem pulso: quem grava
+# a fila com vaga livre avisa as primeiras da espera (`avisa_a_espera`). O prazo de 600 s do
+# `await_callback` é a conferência de segurança, para o aviso perdido e para a execução
+# cancelada no console: ao vencer, o pedido é refeito, e a gravação da fila renova o `visto_em`
+# (o descarte do `atualiza_fila_gpu` é 600 s mais a folga de 180 s; o mesmo número está em
+# `CONFERENCIA_DA_FILA_GPU_S` e `FOLGA_DA_FILA_GPU_S`, em api/jobs.py). O endpoint é criado
+# uma vez e reaproveitado a cada espera. A posição do log é a da primeira gravação.
 espera_vaga_gpu:
   params: [job_id, etapa, timeout_gpu]
   steps:
@@ -1102,12 +1108,18 @@ espera_vaga_gpu:
         assign:
           - inicio_da_espera: $${sys.now()}
           - posicao_inicial: null
+    - cria_o_endpoint_do_aviso:
+        call: events.create_callback_endpoint
+        args:
+          http_callback_method: POST
+        result: endpoint_do_aviso
     - pede_a_vaga:
         call: atualiza_fila_gpu
         args:
           job_id: $${job_id}
           etapa: $${etapa}
           timeout_gpu: $${timeout_gpu}
+          url_do_aviso: $${endpoint_do_aviso.url}
         result: pedido_de_vaga
     - guarda_a_posicao:
         switch:
@@ -1118,10 +1130,22 @@ espera_vaga_gpu:
         switch:
           - condition: $${pedido_de_vaga.vaga}
             next: registra_a_vaga
-    - espera_na_fila:
-        call: sys.sleep
-        args:
-          seconds: 60
+    # Só o prazo vencido volta a pedir a vaga; outro erro sobe. O aviso que chegou antes
+    # deste passo fica guardado no endpoint (documentação do Workflows).
+    - espera_o_aviso:
+        try:
+          call: events.await_callback
+          args:
+            callback: $${endpoint_do_aviso}
+            timeout: 600
+        except:
+          as: erro_da_espera
+          steps:
+            - so_o_prazo_vencido:
+                switch:
+                  - condition: $${not ("TimeoutError" in default(map.get(erro_da_espera, "tags"), []))}
+                    raise: $${erro_da_espera}
+    - volta_a_pedir:
         next: pede_a_vaga
     - registra_a_vaga:
         call: sys.log
@@ -1138,15 +1162,17 @@ espera_vaga_gpu:
 
 # Um único documento, com compare-and-swap também na criação. Toda releitura refaz a
 # limpeza e a decisão: repetir um PATCH com listas antigas perderia pedidos concorrentes.
+# `url_do_aviso` é o endpoint de callback da execução que pede; quem grava a fila com vaga
+# livre avisa a espera. O pedido sem URL (execução da versão anterior) só acorda no prazo.
 atualiza_fila_gpu:
-  params: [job_id, etapa: null, timeout_gpu: 0, acao: pedir]
+  params: [job_id, etapa: null, timeout_gpu: 0, acao: pedir, url_do_aviso: ""]
   steps:
     - identifica_a_execucao:
         assign:
           - dono: $${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
           - releituras_da_fila: 0
-          # O estado pode envelhecer alguns segundos nas releituras; o próximo pulso
-          # de 60 s lê de novo e limpa, sem alongar a janela do compare-and-swap.
+          # O estado pode envelhecer alguns segundos nas releituras; a próxima conferência
+          # lê de novo e limpa, sem alongar a janela do compare-and-swap.
           - jobs_lidos: {}
           - execucoes_lidas: {}
     - le_o_job_da_vaga:
@@ -1265,7 +1291,7 @@ atualiza_fila_gpu:
                             next: continue
                           - condition: $${grupo == "ocupadas" and agora - item.desde.doubleValue > item.timeout_gpu.doubleValue}
                             next: continue
-                          - condition: $${grupo == "espera" and agora - item.visto_em.doubleValue > 3 * 60}
+                          - condition: $${grupo == "espera" and agora - item.visto_em.doubleValue > 780}
                             next: continue
                           - condition: $${meu and acao == "liberar"}
                             next: continue
@@ -1306,6 +1332,7 @@ atualiza_fila_gpu:
                       chegada: {doubleValue: '$${time.parse(job_da_vaga.criado_em)}'}
                       visto_em: {doubleValue: '$${agora}'}
                       timeout_gpu: {doubleValue: '$${timeout_gpu}'}
+                      callback: {stringValue: '$${url_do_aviso}'}
               - fila.espera: $${list.concat(fila.espera, novo)}
     - procura_meu_pedido:
         for:
@@ -1411,6 +1438,18 @@ atualiza_fila_gpu:
                     next: rele_a_fila
             - repassa_a_falha_da_fila:
                 raise: $${erro_da_gravacao_da_fila}
+    # Gravada a fila, avisa a espera se sobrou vaga livre (liberar, renovar, limpar pedido
+    # vencido ou de Job que falhou). Antes do erro de vaga interrompida: a execução que se
+    # limpa da fila também pode ter deixado uma vaga.
+    - avisa_a_espera_da_fila:
+        switch:
+          - condition: $${len(fila.espera) > 0 and ${vagas_de_gpu} > len(fila.ocupadas)}
+            steps:
+              - chama_o_aviso:
+                  call: avisa_a_espera
+                  args:
+                    espera: $${fila.espera}
+                    livres: $${${vagas_de_gpu} - len(fila.ocupadas)}
     - nao_roda_sem_vaga_ou_cancelado:
         switch:
           - condition: $${acao != "liberar" and (not ativo or (acao == "renovar" and not tem_vaga))}
@@ -1420,6 +1459,76 @@ atualiza_fila_gpu:
           vaga: $${tem_vaga}
           posicao: $${posicao}
           posicao_inicial: $${posicao_inicial}
+
+# Avisa por callback as primeiras execuções da espera (por chegada, e pela ordem da lista
+# no empate, como a posição), até o número de vagas livres. O aviso é só um empurrão: o
+# outro lado volta a pedir a vaga e o compare-and-swap decide. Quem avisa nunca falha por
+# isso (404: a execução já acabou; 429: já há um aviso à espera; qualquer outro): o erro vai
+# ao log, e a conferência de 10 min do `espera_vaga_gpu` cobre o aviso perdido. O item sem
+# URL (de antes do #534) fica contado e sem aviso. A conta `orquestracao` envia o callback
+# pelo `roles/workflows.invoker`, que inclui `workflows.callbacks.send`.
+avisa_a_espera:
+  params: [espera, livres]
+  steps:
+    - prepara_os_avisos:
+        assign:
+          - avisados: []
+    - escolhe_a_proxima:
+        switch:
+          - condition: $${len(avisados) >= livres}
+            next: fim_dos_avisos
+    - procura_a_mais_antiga:
+        assign:
+          - primeira: -1
+          - chegada_da_primeira: 0
+    - percorre_a_espera:
+        for:
+          value: candidata
+          index: indice
+          in: $${espera}
+          steps:
+            - se_chegou_antes:
+                switch:
+                  - condition: $${not (indice in avisados) and (primeira == -1 or candidata.mapValue.fields.chegada.doubleValue < chegada_da_primeira)}
+                    assign:
+                      - primeira: $${indice}
+                      - chegada_da_primeira: $${candidata.mapValue.fields.chegada.doubleValue}
+    - sem_mais_ninguem:
+        switch:
+          - condition: $${primeira == -1}
+            next: fim_dos_avisos
+    - marca_a_avisada:
+        assign:
+          - avisados: $${list.concat(avisados, primeira)}
+          - destino: $${default(map.get(espera[primeira], ["mapValue", "fields", "callback", "stringValue"]), "")}
+    - envia_se_tem_endpoint:
+        switch:
+          - condition: $${destino != ""}
+            steps:
+              - envia_o_aviso:
+                  try:
+                    call: http.post
+                    args:
+                      url: $${destino}
+                      auth:
+                        type: OAuth2
+                      timeout: 30
+                      body:
+                        evento: vaga_livre
+                  except:
+                    as: erro_do_aviso
+                    steps:
+                      - registra_o_aviso_perdido:
+                          call: sys.log
+                          args:
+                            severity: WARNING
+                            json:
+                              evento: aviso_de_gpu_perdido
+                              codigo: $${default(map.get(erro_do_aviso, "code"), 0)}
+    - proxima_da_espera:
+        next: escolhe_a_proxima
+    - fim_dos_avisos:
+        return: null
 
 le_job_da_fila:
   params: [job_id]

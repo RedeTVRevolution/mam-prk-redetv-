@@ -864,6 +864,13 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
 
+# Quem espera uma vaga de GPU acorda por aviso e confere a fila a cada 10 min, no máximo
+# (o `await_callback` do `espera_vaga_gpu`, #534); o pedido que passou desse prazo mais
+# a folga some da espera. O mesmo número está no `validacao.workflow.yaml`.
+CONFERENCIA_DA_FILA_GPU_S = 10 * 60
+FOLGA_DA_FILA_GPU_S = 3 * 60
+
+
 def espera_da_gpu(
     repositorio: RepositorioDeJobs, agora: datetime
 ) -> list[dict[str, Any]]:
@@ -883,7 +890,8 @@ def espera_da_gpu(
                     and jobs[p["job_id"]].estado == "concluido"
                 )
             )
-            and agora_s - p["visto_em"] <= 3 * 60
+            and agora_s - p["visto_em"]
+            <= CONFERENCIA_DA_FILA_GPU_S + FOLGA_DA_FILA_GPU_S
         ),
         # sorted é estável: no empate vale a ordem da espera, como no Workflows
         key=lambda p: p["chegada"],

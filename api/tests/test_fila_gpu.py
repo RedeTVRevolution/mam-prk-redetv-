@@ -92,6 +92,17 @@ class FilaLocal:
         self.logs: list[Any] = []
         # Estado das execuções do Workflows por id; a que não está aqui está ativa.
         self.execucoes: dict[str, str] = {}
+        # Endpoints de callback: URL -> execução que o criou; os avisos recebidos e ainda
+        # não consumidos; todos os avisos enviados; os prazos pedidos ao `await_callback`.
+        self.callbacks: dict[str, str] = {}
+        self.pendentes: set[str] = set()
+        self.avisos: list[str] = []
+        self.prazos: list[float] = []
+        self.dono_atual = "execucao"
+        # Roda uma vez, no primeiro `await_callback` sem aviso: o que os outros fazem
+        # enquanto a execução espera.
+        self.ao_esperar: Callable[[], None] | None = None
+        self.erro_no_aviso: int | None = None
 
     def job(
         self,
@@ -240,6 +251,7 @@ class FilaLocal:
         if "call" in corpo:
             args = self.valor(corpo.get("args", {}), escopo)
             nome = corpo["call"]
+            self.dono_atual = dono
             resultado = (
                 self.executar(nome, dono, **args)
                 if nome in self.definicao
@@ -264,6 +276,34 @@ class FilaLocal:
         if nome == "sys.log":
             self.logs.append(args)
             return None
+        if nome == "events.create_callback_endpoint":
+            url = f"https://callback/{self.dono_atual}/{len(self.callbacks)}"
+            self.callbacks[url] = self.dono_atual
+            return {"url": url}
+        if nome == "events.await_callback":
+            url = args["callback"]["url"]
+            self.prazos.append(args["timeout"])
+            if url not in self.pendentes and self.ao_esperar:
+                chamada, self.ao_esperar = self.ao_esperar, None
+                chamada()
+            if url in self.pendentes:
+                self.pendentes.discard(url)
+                return {"http_request": {"method": "POST"}}
+            self.agora += args["timeout"]
+            raise ErroDaChamada(None, ["TimeoutError"])
+        if nome == "http.post":
+            assert args["auth"] == {"type": "OAuth2"}
+            url = args["url"]
+            self.avisos.append(url)
+            if self.erro_no_aviso:
+                raise ErroDaChamada(self.erro_no_aviso)
+            dono = self.callbacks.get(url)
+            if dono is not None and self.execucoes.get(dono, "ACTIVE") != "ACTIVE":
+                raise ErroDaChamada(404)  # a execução acabou
+            if url in self.pendentes:
+                raise ErroDaChamada(429)  # o espaço do callback está ocupado
+            self.pendentes.add(url)
+            return {"code": 200}
         if nome.endswith("executions.get"):
             return {
                 "state": self.execucoes.get(args["name"].rsplit("/", 1)[1], "ACTIVE")
@@ -323,14 +363,17 @@ class FilaLocal:
         etapa: str = "transcricao",
         dono: str = "execucao",
         acao: str = "pedir",
+        url_do_aviso: str = "",
+        timeout_gpu: int = 300,
     ) -> Any:
         return self.executar(
             "atualiza_fila_gpu",
             dono,
             job_id=job,
             etapa=etapa,
-            timeout_gpu=300,
+            timeout_gpu=timeout_gpu,
             acao=acao,
+            url_do_aviso=url_do_aviso,
         )
 
     def itens(self, grupo: str) -> list[Any]:
@@ -610,25 +653,163 @@ def test_limpa_vagas_perdidas_preservando_florence_concluido(
 
 
 @pytest.mark.parametrize("etapa", ["transcricao", "inventario_de_objetos"])
-def test_vaga_expira_pelo_timeout_e_pedido_abandonado_por_tres_esperas(
+def test_vaga_expira_pelo_timeout_e_pedido_abandonado_so_apos_a_conferencia_e_a_folga(
     etapa: str,
 ) -> None:
     fila = FilaLocal()
     for job in ("ocupante", "abandonado", "vivo"):
         fila.job(job)
-    fila.pedir("ocupante", etapa)
+    fila.pedir("ocupante", etapa, timeout_gpu=1000)
     if etapa == "inventario_de_objetos":
         fila.job("ocupante", estado="concluido")
     fila.pedir("abandonado")
+    # Quem espera o aviso só passa pela fila a cada conferência (10 min): não sai antes
+    # dela nem da folga de 3 min.
+    fila.agora += 600
+    fila.pedir("vivo")
+    assert len(fila.itens("espera")) == 2
     fila.agora += 180
     fila.pedir("vivo")
     assert len(fila.itens("espera")) == 2
     fila.agora += 1
     fila.pedir("vivo")
-    assert [p["job_id"]["stringValue"] for p in fila.itens("espera")] == ["vivo"]
-    fila.agora += 120
+    assert _jobs_da_espera(fila) == ["vivo"]
+    fila.agora += 300
     assert fila.pedir("vivo")["vaga"] is True
     assert fila.itens("espera") == []
+
+
+def _jobs_da_espera(fila: FilaLocal) -> list[str]:
+    return [p["job_id"]["stringValue"] for p in fila.itens("espera")]
+
+
+def test_liberar_a_vaga_avisa_quem_espera() -> None:
+    fila = FilaLocal()
+    fila.job("a")
+    fila.job("b")
+    fila.pedir("a")
+    assert fila.pedir("b", dono="b", url_do_aviso="cb-b")["vaga"] is False
+    assert fila.avisos == []
+    fila.pedir("a", acao="liberar")
+    assert fila.avisos == ["cb-b"]
+    assert fila.pedir("b", dono="b")["vaga"] is True
+
+
+def test_o_aviso_vai_so_as_vagas_livres_na_ordem_de_chegada() -> None:
+    fila = FilaLocal(vagas=2)
+    for job in ("a", "b"):
+        fila.job(job)
+    fila.job("c", "1970-01-01T00:00:03Z")
+    fila.job("d", "1970-01-01T00:00:04Z")
+    fila.job("e", "1970-01-01T00:00:05Z")
+    fila.pedir("a")
+    fila.pedir("b")
+    for job in ("e", "c", "d"):  # a ordem de gravação não é a de chegada
+        fila.pedir(job, dono=job, url_do_aviso=f"cb-{job}")
+    assert fila.avisos == []
+    fila.pedir("a", acao="liberar")
+    assert fila.avisos == ["cb-c"]
+    fila.avisos.clear()
+    fila.pendentes.clear()
+    fila.pedir("b", acao="liberar")
+    assert fila.avisos == ["cb-c", "cb-d"]
+
+
+def test_quem_ocupa_a_ultima_vaga_nao_avisa_ninguem() -> None:
+    fila = FilaLocal()
+    for job in ("a", "b"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("b", dono="b", url_do_aviso="cb-b")
+    fila.pedir("a", acao="renovar")
+    assert fila.avisos == []
+
+
+def test_execucao_encerrada_sai_da_fila_e_o_aviso_vai_ao_seguinte() -> None:
+    fila = FilaLocal()
+    for job in ("a", "b", "c"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("b", dono="b", url_do_aviso="cb-b")
+    fila.pedir("c", dono="c", url_do_aviso="cb-c")
+    fila.execucoes["b"] = "CANCELLED"
+    fila.pedir("a", acao="liberar")
+    assert fila.avisos == ["cb-c"]
+    assert _jobs_da_espera(fila) == ["c"]
+
+
+@pytest.mark.parametrize("codigo", [404, 429, 500])
+def test_aviso_que_falha_nao_derruba_quem_avisa(codigo: int) -> None:
+    fila = FilaLocal()
+    for job in ("a", "b"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("b", dono="b", url_do_aviso="cb-b")
+    fila.erro_no_aviso = codigo
+    assert fila.pedir("a", acao="liberar")["vaga"] is False
+    assert fila.avisos == ["cb-b"]
+    assert fila.itens("ocupadas") == []
+    assert _jobs_da_espera(fila) == ["b"]
+    assert not any(log.get("severity") == "ERROR" for log in fila.logs)
+
+
+def test_item_sem_endpoint_da_versao_antiga_nao_recebe_aviso() -> None:
+    fila = FilaLocal()
+    for job in ("a", "b"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("b", dono="b")  # sem callback: só a conferência o acorda
+    fila.pedir("a", acao="liberar")
+    assert fila.avisos == []
+
+
+def test_a_espera_acorda_com_o_aviso_sem_dormir() -> None:
+    fila = FilaLocal()
+    for job in ("a", "b"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.ao_esperar = lambda: fila.pedir("a", acao="liberar")
+    fila.executar(
+        "espera_vaga_gpu", "b", job_id="b", etapa="transcricao", timeout_gpu=300
+    )
+    assert fila.prazos == [600]
+    assert fila.agora == 1000.0  # nenhum sys.sleep
+    assert [p["job_id"]["stringValue"] for p in fila.itens("ocupadas")] == ["b"]
+    assert fila.logs[-1]["json"]["evento"] == "vaga_de_gpu"
+
+
+def test_conferencia_ao_vencer_o_prazo_pede_a_vaga_de_novo() -> None:
+    # Aviso perdido: ninguém avisa `b`, e a vaga de `a` vence pelo timeout dela.
+    fila = FilaLocal()
+    for job in ("a", "b"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.executar(
+        "espera_vaga_gpu", "b", job_id="b", etapa="transcricao", timeout_gpu=300
+    )
+    assert fila.prazos == [600]
+    assert [p["job_id"]["stringValue"] for p in fila.itens("ocupadas")] == ["b"]
+    assert fila.logs[-1]["json"]["espera_s"] == 600
+
+
+def test_erro_do_await_que_nao_e_o_prazo_sobe() -> None:
+    fila = FilaLocal()
+    for job in ("a", "b"):
+        fila.job(job)
+    fila.pedir("a")
+    chamar = fila.chamar
+
+    def await_com_erro(nome: str, args: dict[str, Any]) -> Any:
+        if nome == "events.await_callback":
+            raise ErroDaChamada(500)
+        return chamar(nome, args)
+
+    fila.chamar = await_com_erro  # type: ignore[method-assign]
+    with pytest.raises(ErroDaChamada) as erro:
+        fila.executar(
+            "espera_vaga_gpu", "b", job_id="b", etapa="transcricao", timeout_gpu=300
+        )
+    assert erro.value.dados["code"] == 500
 
 
 def test_cancelamento_na_espera_limpa_o_pedido_antes_de_subir_o_erro() -> None:
