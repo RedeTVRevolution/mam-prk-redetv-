@@ -27,6 +27,7 @@ import {
   porSistema,
   SEM_FILTROS_DAS_ENTRADAS,
   sistemaDoFiltro,
+  etapasEmAndamento,
   tempoDaEntradaMs,
   type FiltrosDasEntradas,
 } from '../../entradas.ts'
@@ -174,15 +175,19 @@ function FalhaDaLinha({ job, etapaFalha }: { job: Job; etapaFalha: string | null
 function EstadoDaLinha({ job }: { job: Job }) {
   const estado = ESTADOS_DO_JOB[job.estado as EstadoDoJob]
   const icone = ICONE_DO_ESTADO[job.estado as EstadoDoJob]
-  const etapa = job.etapa_atual ? <Selo tom="andamento" Icone={IconProgress}>{nomeDaEtapa(job.etapa_atual)}</Selo> : null
-  // A etapa no lugar do estado enquanto roda; o vídeo concluído continua concluído enquanto uma etapa de depois roda.
-  if (etapa && job.estado !== 'concluido') return etapa
+  const etapas = etapasEmAndamento(job).map((nome) => (
+    <Selo key={nome} tom="andamento" Icone={IconProgress}>
+      {nomeDaEtapa(nome)}
+    </Selo>
+  ))
+  // As etapas no lugar do estado enquanto rodam; o vídeo concluído continua concluído enquanto uma etapa de depois roda.
+  if (etapas.length && job.estado !== 'concluido') return <>{etapas}</>
   return (
     <>
       <Selo tom={icone?.tom ?? 'neutro'} Icone={icone?.Icone}>
         {estado?.rotulo ?? job.estado}
       </Selo>
-      {etapa}
+      {etapas}
     </>
   )
 }
