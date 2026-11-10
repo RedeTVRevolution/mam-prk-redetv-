@@ -12,6 +12,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from api.assinatura_do_nome import assinatura
 from api.comparador import normalizar
 from api.decupagem import (
     CaixaDoQuadro,
@@ -29,7 +30,7 @@ from api.florence import ObjetosDaDecupagem
 from api.gemini import Chamada, Transporte, gerar_validado
 from api.leitura_da_tela import Caixa
 from api.taxonomia_de_objetos import OUTRO
-from api.tipo_do_objeto import chave_de_agrupamento, tipo_canonico_de
+from api.tipo_do_objeto import tipo_canonico_de
 
 # Regra do destaque (1 a 3), por caixa; o objeto fica com o maior destaque das suas
 # caixas. Área em fração do quadro e distância do centro da caixa ao centro do quadro (0 a ~0,71).
@@ -233,17 +234,20 @@ def _item(modelo: _Descrito, caixas: list[CaixaDoQuadro]) -> ObjetoDoInventario 
 
 def unir_repetidos(itens: list[ObjetoDoInventario]) -> list[ObjetoDoInventario]:
     """O mesmo objeto visto em vários quadros do plano vira um item, com as caixas de todos e
-    o maior destaque. É o mesmo tipo canônico (ou, em `outro`, a mesma assinatura do nome e a
-    mesma categoria) e a mesma cor; a marca só separa quando as duas existem e diferem. O
-    texto bruto e a marca são os do primeiro que aparecer; a visão por tipo, no vídeo todo,
-    fica a cargo de quem lê (nunca funde o que está gravado)."""
+    o maior destaque. É a mesma assinatura do nome (nunca o tipo canônico: "camisa listrada" e "camisa
+    estampada" seguem dois itens), a mesma categoria e a mesma cor; a marca só separa quando
+    as duas existem e diferem. O texto bruto e a marca são os do primeiro que aparecer; o
+    agrupamento por tipo é uma visão de quem lê, nunca uma fusão do que está gravado."""
     unidos: list[ObjetoDoInventario] = []
     por_chave: dict[tuple[str, str, str | None], list[int]] = {}
     for item in itens:
         cores = [item.cor] if item.cor else []
         tipo = tipo_canonico_de(item.tipo_canonico, item.nome, cores)
-        chave = chave_de_agrupamento(tipo, item.nome, cores)
-        grupo = (chave, item.categoria if tipo == OUTRO else "", item.cor)
+        grupo = (
+            assinatura(item.nome, cores) or normalizar(item.nome),
+            item.categoria,
+            item.cor,
+        )
         marca = normalizar(item.marca) if item.marca else None
         destino = next(
             (

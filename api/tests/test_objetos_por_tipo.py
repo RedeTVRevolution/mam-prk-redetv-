@@ -104,26 +104,34 @@ def test_nome_sem_tipo_seguro_fica_em_outro_com_o_nome_bruto() -> None:
     assert (item.nome, item.tipo_canonico) == ("xablau raro", "outro")
 
 
-def test_unir_repetidos_agrupa_pelo_tipo_e_nao_pelo_nome() -> None:
+def test_unir_repetidos_junta_pela_assinatura_do_nome_e_nao_pelo_tipo() -> None:
     juntos = unir_repetidos(
         [
             objeto("camiseta", tipo_canonico="camisa"),
-            objeto("blusa", tipo_canonico="camisa", caixas=[caixa(0.5)], destaque=3),
-            objeto("camisa"),  # sem o tipo gravado: o dicionário resolve
+            objeto(
+                "camisetas", tipo_canonico="camisa", caixas=[caixa(0.5)], destaque=3
+            ),
+            objeto("blusa", tipo_canonico="camisa"),  # outro nome bruto: fica
+            objeto("camisa listrada", tipo_canonico="camisa"),
+            objeto("camisa estampada", tipo_canonico="camisa"),
         ]
     )
-    assert len(juntos) == 1
-    assert len(juntos[0].caixas) == 3
+    assert [i.nome for i in juntos] == [
+        "camiseta",
+        "blusa",
+        "camisa listrada",
+        "camisa estampada",
+    ]
+    assert len(juntos[0].caixas) == 2
     assert juntos[0].destaque == 3
-    assert juntos[0].nome == "camiseta"  # o texto bruto do primeiro fica
 
 
-def test_mesmo_tipo_com_cor_ou_marca_diferente_mantem_cada_combinacao() -> None:
+def test_mesmo_nome_com_cor_ou_marca_diferente_mantem_cada_combinacao() -> None:
     juntos = unir_repetidos(
         [
             objeto("camisa", tipo_canonico="camisa", cor="azul", marca="Nike"),
-            objeto("camiseta", tipo_canonico="camisa", cor="branco", marca="Nike"),
-            objeto("blusa", tipo_canonico="camisa", cor="azul", marca="Adidas"),
+            objeto("camisa", tipo_canonico="camisa", cor="branco", marca="Nike"),
+            objeto("camisa", tipo_canonico="camisa", cor="azul", marca="Adidas"),
             objeto("camisa", tipo_canonico="camisa", cor="azul", marca=None),
         ]
     )
@@ -132,6 +140,13 @@ def test_mesmo_tipo_com_cor_ou_marca_diferente_mantem_cada_combinacao() -> None:
         ("branco", "Nike", 1),
         ("azul", "Adidas", 1),
     ]
+
+
+def test_mesmo_nome_em_categorias_diferentes_continua_separado() -> None:
+    juntos = unir_repetidos(
+        [objeto("vaso", categoria="decoracao"), objeto("vaso", categoria="movel")]
+    )
+    assert len(juntos) == 2
 
 
 def test_dois_nomes_desconhecidos_diferentes_continuam_separados() -> None:
