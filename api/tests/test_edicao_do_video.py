@@ -210,3 +210,15 @@ def test_disparo_que_falha_da_503_e_devolve_a_indexacao() -> None:
     assert resposta.status_code == 503
     assert mundo.job().indexacao == antes
     assert mundo.job().programa == "Hoje em Dia"
+
+
+def test_repetir_o_mesmo_pedido_depois_do_503_dispara_a_indexacao() -> None:
+    mundo = Mundo(disparo=DisparoContado(falha=True))
+    assert mundo.editar({"programa": "Hoje em Dia"}).status_code == 503
+    mundo.disparo.falha = False
+
+    resposta = mundo.editar({"programa": "Hoje em Dia"})
+
+    assert resposta.status_code == 200
+    assert mundo.disparo.ids == ["j1"]
+    assert len(mundo.auditoria.consultar(FiltroDeAuditoria()).registros) == 1

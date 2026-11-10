@@ -345,7 +345,7 @@ def escolhe_o_grupo(
         primeiro = min([*dias, *([desde] if desde else [])], default=None)
         tamanho = (max(dias) - primeiro).days + 1 if dias and primeiro else 0
         return next((g for ate, g in FAIXAS_DO_AUTO if tamanho <= ate), "trimestre")
-    pontos = len(_dias_do_intervalo(dias, agrupar, desde))
+    pontos = _pontos_do_intervalo(dias, agrupar, desde)
     if pontos > MAXIMO_DE_PONTOS:
         raise HTTPException(
             422,
@@ -426,6 +426,7 @@ def relatorio_de_acessos(
 
 
 COLUNAS_DO_CSV_DE_VIDEOS = (
+    "quebra",  # "usuario" ou "programa": some uma quebra só, as duas dão o dobro (#522)
     "dia",
     "quem_tipo",
     "quem_id",
@@ -465,7 +466,17 @@ def _linhas_por_programa_do_csv(
         if resto.enviados or resto.concluidos or resto.falhos:
             quebra.append(("Sem programa", resto))
         linhas += [
-            [dia.isoformat(), "", "", "", p, s.enviados, s.concluidos, s.falhos]
+            [
+                "programa",
+                dia.isoformat(),
+                "",
+                "",
+                "",
+                p,
+                s.enviados,
+                s.concluidos,
+                s.falhos,
+            ]
             + [round(s.horas, 2), s.segundos]
             for p, s in quebra
         ]
@@ -632,25 +643,58 @@ def _tem_video(u: UsoDoDia) -> bool:
     return bool(u.videos_enviados or u.videos_concluidos or u.videos_falhos)
 
 
+def _indice_do_grupo(dia: date, grupo: Grupo) -> int:
+    """O número do grupo que tem o dia, para contar e andar grupos sem andar dia a dia."""
+    if grupo == "semana":
+        return (dia.toordinal() - 1) // 7  # o dia 1 do calendário é segunda
+    meses = dia.year * 12 + dia.month - 1
+    if grupo == "mes":
+        return meses
+    if grupo == "trimestre":
+        return meses // 3
+    return dia.toordinal()
+
+
+def _grupo_do_indice(indice: int, grupo: Grupo) -> date:
+    if grupo == "semana":
+        return date.fromordinal(indice * 7 + 1)
+    if grupo in ("mes", "trimestre"):
+        meses = indice * (3 if grupo == "trimestre" else 1)
+        return date(meses // 12, meses % 12 + 1, 1)
+    return date.fromordinal(indice)
+
+
+def _faixa_de_grupos(
+    dias: list[date], grupo: Grupo, desde: date | None
+) -> tuple[int, int]:
+    """Do primeiro ao último grupo da série, começando no `desde` se ele for anterior aos dados."""
+    primeiro = min(dias) if desde is None else min(desde, *dias)
+    return _indice_do_grupo(primeiro, grupo), _indice_do_grupo(max(dias), grupo)
+
+
+def _pontos_do_intervalo(
+    dias: Iterable[date], grupo: Grupo = "dia", desde: date | None = None
+) -> int:
+    dias = list(dias)
+    if not dias:
+        return 0
+    inicio, fim = _faixa_de_grupos(dias, grupo, desde)
+    return fim - inicio + 1
+
+
 def _dias_do_intervalo(
     dias: Iterable[date], grupo: Grupo = "dia", desde: date | None = None
 ) -> list[date]:
     """Do primeiro ao último dia, sem buracos: o gráfico não cola dias distantes. Com um
-    grupo, o primeiro dia de cada grupo do intervalo."""
+    grupo, o primeiro dia de cada grupo do intervalo. O gráfico começa no `desde`; se a
+    série não couber em `MAXIMO_DE_PONTOS` pontos, perde grupos vazios do começo (nunca dados)."""
     dias = list(dias)
     if not dias:
         return []
-    primeiro = min(dias)
-    if (
-        desde is not None and desde < primeiro
-    ):  # no máximo `MAXIMO_DE_PONTOS` dias antes
-        primeiro = max(desde, primeiro - timedelta(days=MAXIMO_DE_PONTOS))
-    return list(
-        dict.fromkeys(
-            inicio_do_grupo(primeiro + timedelta(days=i), grupo)
-            for i in range((max(dias) - primeiro).days + 1)
-        )
-    )
+    inicio, fim = _faixa_de_grupos(dias, grupo, desde)
+    primeiro_dado = _indice_do_grupo(min(dias), grupo)
+    inicio = max(inicio, min(fim - MAXIMO_DE_PONTOS + 1, primeiro_dado))
+    return [_grupo_do_indice(i, grupo) for i in range(inicio, fim + 1)]
 
 
 def relatorio_de_videos(
@@ -1341,12 +1385,14 @@ def criar_rotas_do_painel(
             emails_das_contas,
         )
         if formato == "csv":
+            quebra_da_base = "programa" if filtro.programa is not None else "usuario"
             acessos_ao_painel.exportou(pessoa, "videos", filtro)
             return resposta_em_csv(
                 csv_em_texto(
                     COLUNAS_DO_CSV_DE_VIDEOS,
                     [
-                        _linha_do_csv(
+                        [quebra_da_base]
+                        + _linha_do_csv(
                             u,
                             emails,
                             [

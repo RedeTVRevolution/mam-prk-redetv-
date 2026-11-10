@@ -92,6 +92,12 @@ def criar_rotas_da_edicao(
         if pedido.programa not in (None, job.programa):
             antes["programa"], depois["programa"] = job.programa, pedido.programa
         if not depois:
+            # Um disparo que falhou (503) deixa a `versao_pedida` gravada: repetir o pedido
+            # o refaz, sem nova auditoria, se a indexação não está em andamento.
+            if job.versao_pedida > job.versao_indexada and (
+                job.indexacao is None or job.indexacao.estado != "pendente"
+            ):
+                disparo.iniciar(job.id)
             return JobPublico.de(job)
         # O registro vem antes de gravar: nunca há edição sem rastro.
         auditoria.acrescentar(

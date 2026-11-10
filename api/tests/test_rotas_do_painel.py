@@ -10,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from api import painel
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.chaves import (
@@ -297,26 +298,33 @@ def test_desde_muito_antigo_vale_para_o_teto_de_pontos_e_para_o_auto() -> None:
     assert len(sem_agrupar["por_dia"]) <= 401  # os dados (1 dia) + o teto antes deles
 
 
-def test_o_teto_de_pontos_corta_o_desde_antigo_sem_andar_dia_a_dia(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from api import painel
-
-    tamanhos: list[int] = []
-    original = painel._dias_do_intervalo
-
-    def espiao(*args: Any, **kwargs: Any) -> list[date]:
-        r = original(*args, **kwargs)
-        tamanhos.append(len(r))
-        return r
-
-    monkeypatch.setattr(painel, "_dias_do_intervalo", espiao)
-
+def test_o_teto_de_pontos_com_desde_antigo_nao_anda_dia_a_dia() -> None:
     with pytest.raises(HTTPException) as erro:
         escolhe_o_grupo("dia", [date(2026, 1, 1)], date(1, 1, 1))
 
     assert erro.value.status_code == 422
-    assert max(tamanhos) <= 401
+    assert (
+        len(painel._dias_do_intervalo([date(2026, 1, 1)], "dia", date(1, 1, 1))) == 400
+    )
+
+
+def test_o_teto_conta_grupos_e_o_grafico_mensal_comeca_no_desde() -> None:
+    resumos = ResumosEmMemoria([AcessoDoDia(date(2026, 11, 3), "bia", 1, True, None)])
+    mundo = Mundo(["diretoria"], resumos=resumos)
+
+    r = mundo.get("/acessos", desde="2025-01-01", agrupar="mes").json()
+
+    assert r["por_dia"][0]["dia"] == "2025-01-01"
+    assert len(r["por_dia"]) == 23
+
+
+def test_sem_caber_no_teto_fica_so_com_os_ultimos_grupos() -> None:
+    from api.painel import MAXIMO_DE_PONTOS, _dias_do_intervalo
+
+    dias = _dias_do_intervalo([date(2026, 11, 3)], "mes", date(1, 1, 1))
+
+    assert len(dias) == MAXIMO_DE_PONTOS
+    assert dias[-1] == date(2026, 11, 1)
 
 
 def test_linha_sem_login_nem_acao_nao_vira_dia_nem_pessoa() -> None:
@@ -551,17 +559,17 @@ def test_csv_de_videos_traz_a_quebra_por_programa_com_a_linha_sem_programa() -> 
 
     linhas = list(csv.reader(io.StringIO(mundo.get("/videos", formato="csv").text)))
 
-    por_programa = [l for l in linhas[1:] if l[4]]
-    assert [(l[0], l[1], l[2], l[4], l[5]) for l in por_programa] == [
+    por_programa = [l for l in linhas[1:] if l[0] == "programa"]
+    assert [(l[1], l[2], l[3], l[5], l[6]) for l in por_programa] == [
         ("2026-11-01", "", "", "Fala", "1"),
         ("2026-11-01", "", "", "Hoje", "2"),
         ("2026-11-01", "", "", "Sem programa", "4"),
         ("2026-11-03", "", "", "Hoje", "0"),
     ]
-    assert por_programa[2][6:] == ["2", "0", "1.5", "100"]
+    assert por_programa[2][7:] == ["2", "0", "1.5", "100"]
     # A soma da quebra bate com os enviados do relatório.
     enviados = mundo.get("/videos").json()["total"]["enviados"]
-    assert sum(int(l[5]) for l in por_programa) == enviados
+    assert sum(int(l[6]) for l in por_programa) == enviados
     # Com filtro de usuário não há quebra por programa.
     de_usuario = mundo.get("/videos", formato="csv", usuario="bia").text
     assert "Sem programa" not in de_usuario
@@ -665,7 +673,8 @@ def test_csv_de_videos_e_de_buscas_e_a_base_do_filtro() -> None:
     videos = mundo.get("/videos", formato="csv")
     linhas = list(csv.reader(io.StringIO(videos.text)))
     assert "videos.csv" in videos.headers["content-disposition"]
-    assert linhas[0][:6] == [
+    assert linhas[0][:7] == [
+        "quebra",
         "dia",
         "quem_tipo",
         "quem_id",
@@ -674,6 +683,7 @@ def test_csv_de_videos_e_de_buscas_e_a_base_do_filtro() -> None:
         "enviados",
     ]
     assert linhas[1] == [
+        "usuario",
         "2026-11-01",
         "usuario",
         "bia",
@@ -685,7 +695,7 @@ def test_csv_de_videos_e_de_buscas_e_a_base_do_filtro() -> None:
         "2",
         "600",
     ]
-    assert linhas[2][1:3] == ["sistema", "cms"]
+    assert linhas[2][2:4] == ["sistema", "cms"]
     # Os dois do dia 1 e o do dia 3 (a linha só com login fica fora), mais a quebra por
     # programa: Hoje e Fala no dia 1 e Hoje no dia 3.
     assert len(linhas) == 7
@@ -695,7 +705,7 @@ def test_csv_de_videos_e_de_buscas_e_a_base_do_filtro() -> None:
             io.StringIO(mundo.get("/videos", formato="csv", programa="Fala").text)
         )
     )
-    assert por_programa[1][:5] == ["2026-11-01", "", "", "", "Fala"]
+    assert por_programa[1][:6] == ["programa", "2026-11-01", "", "", "", "Fala"]
 
     buscas = list(csv.reader(io.StringIO(mundo.get("/buscas", formato="csv").text)))
     assert buscas[0] == [
@@ -855,6 +865,17 @@ def test_auto_escolhe_o_grupo_pelo_tamanho_do_periodo(dias: int, grupo: str) -> 
     periodo = [inicio, inicio + timedelta(days=dias - 1)] if dias else []
 
     assert escolhe_o_grupo("auto", periodo) == grupo
+
+
+def test_csv_de_videos_cada_quebra_soma_o_total_do_json() -> None:
+    mundo = _diretoria()
+
+    total = mundo.get("/videos").json()["total"]["enviados"]
+    linhas = list(csv.DictReader(io.StringIO(mundo.get("/videos", formato="csv").text)))
+
+    for quebra in ("usuario", "programa"):
+        assert sum(int(l["enviados"]) for l in linhas if l["quebra"] == quebra) == total
+    assert {l["quebra"] for l in linhas} == {"usuario", "programa"}
 
 
 def test_inicio_do_grupo() -> None:
