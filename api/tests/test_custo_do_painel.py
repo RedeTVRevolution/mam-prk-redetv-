@@ -444,6 +444,10 @@ def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None
     assert "credits" in sql and "America/Sao_Paulo" in sql
     assert [p["name"] for p in corpo["queryParameters"]] == ["desde"]
     assert corpo["queryParameters"][0]["parameterValue"] == {"value": "2026-11-01"}
+    # O "até quando há faturamento" é o MAX do dia, dentro dos limites do período.
+    assert "CAST(MAX(l.dia) AS STRING)" in sql and "MIN(l.dia)" not in sql
+    parte_ate = sql[sql.index("SELECT 'ate'") :]
+    assert "WHERE TRUE AND l.dia >= @desde\n" in parte_ate
 
 
 def test_os_filtros_vao_como_parametros_e_o_sem_dono_so_vem_sem_programa_nem_usuario() -> (
@@ -459,6 +463,9 @@ def test_os_filtros_vao_como_parametros_e_o_sem_dono_so_vem_sem_programa_nem_usu
     sem_filtro, com_filtro = transporte.corpos
     assert [p["name"] for p in sem_filtro["queryParameters"]] == ["desde", "ate"]
     assert "'sem_dono'" in sem_filtro["query"]
+    # O MAX do dia só olha o período pedido, nos dois limites.
+    parte_ate = sem_filtro["query"][sem_filtro["query"].index("SELECT 'ate'") :]
+    assert "WHERE TRUE AND l.dia >= @desde AND l.dia <= @ate\n" in parte_ate
     assert [p["name"] for p in com_filtro["queryParameters"]] == [
         "desde",
         "ate",

@@ -427,6 +427,41 @@ COLUNAS_DO_CSV_DE_VIDEOS = (
     "horas_concluidas",
     "segundos_de_processamento",
 )
+
+
+def _linhas_por_programa_do_csv(
+    base: list[UsoDoDia], por_programa: list[UsoDoDia]
+) -> list[list[object]]:
+    """A quebra por dia e programa de um pedido sem filtro de programa ou usuário, com a linha "Sem programa": o que o dia tem
+    a mais que os programas, como no JSON. A soma delas é a dos enviados."""
+    base = [u for u in base if _tem_video(u)]
+    totais = _somas_por(base, lambda u: u.dia)
+    programas = _somas_por(
+        [u for u in por_programa if _tem_video(u) and u.programa is not None],
+        lambda u: (u.dia, u.programa or ""),
+    )
+    linhas: list[list[object]] = []
+    for dia in sorted(totais):
+        do_dia = {p: s for (d, p), s in programas.items() if d == dia}
+        resto = _SomaDeUso()
+        for campo in ("enviados", "concluidos", "falhos", "horas", "segundos"):
+            setattr(
+                resto,
+                campo,
+                getattr(totais[dia], campo)
+                - sum(getattr(s, campo) for s in do_dia.values()),
+            )
+        quebra = sorted(do_dia.items())
+        if resto.enviados or resto.concluidos or resto.falhos:
+            quebra.append(("Sem programa", resto))
+        linhas += [
+            [dia.isoformat(), "", "", "", p, s.enviados, s.concluidos, s.falhos]
+            + [round(s.horas, 2), s.segundos]
+            for p, s in quebra
+        ]
+    return linhas
+
+
 COLUNAS_DO_CSV_DE_BUSCAS = (
     "dia",
     "quem_tipo",
@@ -1267,10 +1302,8 @@ def criar_rotas_do_painel(
         """Vídeos enviados, concluídos e com falha, horas e tempo de processamento, por dia,
         programa e usuário (ou sistema). Programa e usuário não se combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        # O CSV não tem a tabela por programa; com `programa` ela é a própria base.
-        com_tabela_por_programa = (
-            formato == "json" and filtro.programa is None and filtro.usuario is None
-        )
+        # Com `programa` a tabela por programa é a própria base.
+        com_tabela_por_programa = filtro.programa is None and filtro.usuario is None
         base, por_programa, emails = em_paralelo(
             lambda: _base_de_uso(fonte, filtro, lido),
             lambda: (
@@ -1306,7 +1339,12 @@ def criar_rotas_do_painel(
                             filter(_tem_video, base),
                             key=lambda u: (u.dia, u.programa or "", u.quem_id or ""),
                         )
-                    ],
+                    ]
+                    + (
+                        _linhas_por_programa_do_csv(base, por_programa)
+                        if com_tabela_por_programa
+                        else []
+                    ),
                 ),
                 "videos.csv",
             )
