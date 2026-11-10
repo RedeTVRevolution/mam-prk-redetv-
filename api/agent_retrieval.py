@@ -32,6 +32,7 @@ from api.busca import _intercalar
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.orcamento_de_escrita import Orcamento
+from api.tipo_do_objeto import termos_do_tipo
 
 log = logging.getLogger(__name__)
 
@@ -585,9 +586,10 @@ def _dados(r: Registro) -> dict[str, Any]:
         "sistema": r.sistema,
     }
     # O que a tela mostra fica em `texto` e `descricao`; esta é só para o `textSearch`.
+    termos = termos_do_tipo(r.tipo_canonico)  # o tipo e os sinônimos (#544)
     if r.texto or r.descricao:
         opcionais[CAMPO_DO_TEXTO_DA_BUSCA] = normalizar(
-            " ".join(p for p in (r.texto, r.descricao) if p)
+            " ".join(p for p in (r.texto, r.descricao, termos) if p)
         )
     return dados | {k: v for k, v in opcionais.items() if v is not None}
 

@@ -951,6 +951,7 @@ locals {
     { name = "versao_pipeline", type = "STRING", mode = "NULLABLE" },
     { name = "gravado_em", type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "duracao_do_video_ms", type = "INTEGER", mode = "NULLABLE", description = "Duração do vídeo todo, igual em todas as linhas dele; vazia nas copiadas antes do sinal por programa (#287)" },
+    { name = "tipo_canonico", type = "STRING", mode = "NULLABLE", description = "Só no objeto: o tipo da lista fechada (#544); o texto bruto do objeto fica em texto" },
   ])
 }
 

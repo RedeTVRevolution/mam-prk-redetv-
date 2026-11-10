@@ -48,3 +48,11 @@ def chave_de_agrupamento(tipo: str, nome: str, cores: Iterable[str] = ()) -> str
     if tipo != OUTRO:
         return f"tipo:{tipo}"
     return f"nome:{assinatura(nome, cores) or normalizar(nome)}"
+
+
+def termos_do_tipo(tipo: str | None) -> str | None:
+    """O tipo e os sinônimos, só para a busca por texto achar "sapato" em "tênis" (não
+    aparecem na tela); `outro` não tem termos."""
+    if not tipo or tipo == OUTRO:
+        return None
+    return " ".join([tipo, *SINONIMOS_DO_TIPO.get(tipo, [])])

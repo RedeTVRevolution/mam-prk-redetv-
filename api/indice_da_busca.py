@@ -18,6 +18,7 @@ from api.decupagem import (
     _Intervalo,
     id_posicional,
 )
+from api.tipo_do_objeto import termos_do_tipo, tipo_canonico_de
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
 
@@ -35,6 +36,10 @@ class Registro:
     # Só no registro de objeto.
     categoria: str | None = None
     tipo_do_objeto: str | None = None
+    # O tipo da lista fechada (#544), ao lado do texto bruto de `tipo_do_objeto`. Não é um
+    # campo do índice: as palavras dele e dos sinônimos entram no texto da busca
+    # (`termos_do_tipo`), e a cópia do BigQuery ganha a coluna.
+    tipo_canonico: str | None = None
     cor_base: list[str] = field(default_factory=list)
     cor: str | None = None
     marca: str | None = None
@@ -240,6 +245,9 @@ def registros_da_decupagem(
             )
         )
         for k, item in enumerate(plano.inventario):
+            tipo_do_item = tipo_canonico_de(
+                item.tipo_canonico, item.nome, [item.cor] if item.cor else []
+            )
             registros.append(
                 Registro(
                     id=f"{job_id}:inventario:{plano.id}:{k}",
@@ -248,6 +256,7 @@ def registros_da_decupagem(
                     fim_ms=plano.fim_ms,
                     categoria=item.categoria,
                     tipo_do_objeto=item.nome,
+                    tipo_canonico=tipo_do_item,
                     cor_base=[item.cor] if item.cor else [],
                     cor=item.cor,
                     marca=item.marca,
@@ -303,6 +312,11 @@ def registros_da_decupagem(
                     fim_ms=ocorrencia.fim_ms,
                     categoria=objeto.categoria,
                     tipo_do_objeto=objeto.tipo,
+                    tipo_canonico=tipo_canonico_de(
+                        objeto.tipo_canonico,
+                        objeto.tipo,
+                        [*objeto.cor_base, *([objeto.cor] if objeto.cor else [])],
+                    ),
                     cor_base=list(objeto.cor_base),
                     cor=objeto.cor,
                     marca=objeto.marca,
@@ -405,7 +419,12 @@ class IndiceEmMemoria:
             for r in registros:
                 if not _casa(r, consulta.filtros):
                     continue
-                palavras_do_registro = set(palavras(_frase(r.texto, r.descricao) or ""))
+                palavras_do_registro = set(
+                    palavras(
+                        _frase(r.texto, r.descricao, termos_do_tipo(r.tipo_canonico))
+                        or ""
+                    )
+                )
                 if all(grupo & palavras_do_registro for grupo in da_consulta):
                     achados.append(r)
         return achados[: consulta.limite]
