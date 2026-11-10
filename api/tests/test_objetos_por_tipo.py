@@ -2,13 +2,22 @@
 
 from typing import Any
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from api.decupagem import (
     CaixaDoQuadro,
     Decupagem,
     ObjetoDoInventario,
     esquema_do_modelo,
 )
-from api.inventario import _esquema, RespostaConvertida, RespostaVista, unir_repetidos
+from api.inventario import (
+    RespostaConvertida,
+    RespostaVista,
+    _esquema,
+    converter_do_florence,
+    unir_repetidos,
+)
 from api.taxonomia_de_objetos import OPCOES_DE_TIPO
 from api.tests.test_decupagem import decupagem_valida
 from api.tests.test_inventario import (
@@ -18,7 +27,6 @@ from api.tests.test_inventario import (
     decupagem,
     resposta,
 )
-from api.inventario import converter_do_florence
 
 
 def caixa(x: float = 0.1) -> CaixaDoQuadro:
@@ -136,3 +144,54 @@ def test_dois_nomes_desconhecidos_diferentes_continuam_separados() -> None:
     )
     assert [i.nome for i in juntos] == ["xablau raro", "coisa estranha"]
     assert len(juntos[0].caixas) == 2
+
+
+NOMES = [
+    ("camisa", "camisa"),
+    ("blusa", "camisa"),
+    ("camiseta", None),
+    ("xablau raro", "outro"),
+    ("Xablau Raros", None),
+    ("coisa estranha", "outro"),
+]
+
+
+@st.composite
+def _itens(draw: st.DrawFn) -> list[ObjetoDoInventario]:
+    itens = []
+    for _ in range(draw(st.integers(0, 8))):
+        nome, tipo = draw(st.sampled_from(NOMES))
+        extra: dict[str, Any] = {
+            "cor": draw(st.sampled_from([None, "azul", "branco"])),
+            "marca": draw(st.sampled_from([None, "Nike", "Adidas"])),
+            "destaque": draw(st.integers(1, 3)),
+            "caixas": [
+                caixa(draw(st.floats(0, 0.5))) for _ in range(draw(st.integers(1, 3)))
+            ],
+        }
+        if tipo:
+            extra["tipo_canonico"] = tipo
+        itens.append(objeto(nome, **extra))
+    return itens
+
+
+@given(_itens())
+def test_juntar_conserva_as_caixas_e_o_maior_destaque(
+    itens: list[ObjetoDoInventario],
+) -> None:
+    juntos = unir_repetidos(itens)
+
+    assert sum(len(i.caixas) for i in juntos) == sum(len(i.caixas) for i in itens)
+    assert max((i.destaque for i in juntos), default=0) == max(
+        (i.destaque for i in itens), default=0
+    )
+    assert len(juntos) <= len(itens)
+
+
+@given(_itens())
+def test_juntar_o_que_ja_foi_juntado_nao_muda_nada(
+    itens: list[ObjetoDoInventario],
+) -> None:
+    uma_vez = unir_repetidos(itens)
+
+    assert unir_repetidos(uma_vez) == uma_vez

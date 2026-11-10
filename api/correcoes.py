@@ -48,9 +48,8 @@ from api.identidade import (
 from api.identidade import identidade_do_nome, nao_identificado
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.pessoas import LISTAS
-from api.taxonomia_de_objetos import OUTRO
-from api.tipo_do_objeto import tipo_canonico_de
 from api.texto_como_dado import ID_SEGURO, Linha, Texto
+from api.tipo_do_objeto import tipo_canonico_de
 
 TipoNovo = Literal[
     "pessoa.renomear",
