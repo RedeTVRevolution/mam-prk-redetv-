@@ -85,7 +85,7 @@ function TipoDoEvento({ acao }: { acao: string }) {
   )
 }
 
-function Detalhes({ registro }: { registro: RegistroDeAuditoria }) {
+function Detalhes({ registro, filtros, aoFiltrar }: { registro: RegistroDeAuditoria; filtros: FiltrosDaAuditoria; aoFiltrar: (parte: Partial<FiltrosDaAuditoria>) => void }) {
   const frases = detalhesEmFrases(registro)
   return (
     <div className="grid gap-0.5 py-1 pl-6">
@@ -93,6 +93,16 @@ function Detalhes({ registro }: { registro: RegistroDeAuditoria }) {
       <p className="text-muted-foreground md:hidden">{`Quem: ${autorDoRegistro(registro)}`}</p>
       {registro.motivo && <p className="text-muted-foreground lg:hidden">{`Motivo: ${registro.motivo}`}</p>}
       {frases.length === 0 ? <p className="text-muted-foreground">Sem detalhes para este registro.</p> : frases.map((f) => <p key={f}>{f}</p>)}
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Button type="button" variant="secondary" size="sm" disabled={filtros.alvo === registro.alvo_id} onClick={() => aoFiltrar({ alvo: registro.alvo_id })}>
+          Filtrar por este alvo
+        </Button>
+        {registro.email && (
+          <Button type="button" variant="secondary" size="sm" disabled={filtros.pessoa === registro.email} onClick={() => aoFiltrar({ pessoa: registro.email ?? '' })}>
+            Filtrar por esta pessoa
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -121,8 +131,8 @@ export default function Auditoria({ filtros }: { filtros: FiltrosDaAuditoria }) 
   return (
     <Aba ref={rolagem}>
       <TopoDaAba titulo="Auditoria">
-        <input aria-label="Pessoa" placeholder="E-mail da pessoa" className={cn(CAMPO, 'w-full sm:w-52')} value={filtros.pessoa} onChange={(e) => mudar({ pessoa: e.currentTarget.value })} />
-        <input aria-label="Alvo" placeholder="Código do alvo (ex.: um vídeo)" className={cn(CAMPO, 'w-full sm:w-56')} value={filtros.alvo} onChange={(e) => mudar({ alvo: e.currentTarget.value })} />
+        <input aria-label="Pessoa" placeholder="E-mail da pessoa (ou use o detalhe da linha)" className={cn(CAMPO, 'w-full sm:w-64')} value={filtros.pessoa} onChange={(e) => mudar({ pessoa: e.currentTarget.value })} />
+        <input aria-label="Alvo" placeholder="Código do alvo (use o detalhe da linha)" className={cn(CAMPO, 'w-full sm:w-64')} value={filtros.alvo} onChange={(e) => mudar({ alvo: e.currentTarget.value })} />
         <select aria-label="Ação" className={cn(CAMPO, 'w-full sm:w-52')} value={filtros.acao} onChange={(e) => mudar({ acao: e.currentTarget.value })}>
           <option value="">Todas as ações</option>
           {ACOES_DA_AUDITORIA.filter((a) => !ACOES_DE_ACESSO.includes(a)).map((a) => (
@@ -192,7 +202,7 @@ export default function Auditoria({ filtros }: { filtros: FiltrosDaAuditoria }) 
                 {aberta && (
                   <tr className="bg-card">
                     <td colSpan={colunas} className="border-b px-2 py-1">
-                      <Detalhes registro={r} />
+                      <Detalhes registro={r} filtros={filtros} aoFiltrar={mudar} />
                     </td>
                   </tr>
                 )}
