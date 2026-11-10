@@ -2081,7 +2081,8 @@ resource "google_workflows_workflow" "validacao" {
   source_contents = templatefile("${path.module}/validacao.workflow.yaml", {
     projeto                = var.projeto
     regiao                 = var.regiao
-    job_de_validacao       = google_cloud_run_v2_job.validacao.name
+    workflow               = local.workflow_validacao
+    job_de_validacao      = google_cloud_run_v2_job.validacao.name
     regiao_gpu             = var.regiao_gpu
     vagas_de_gpu           = var.vagas_de_gpu
     gpu_espera_total_s     = var.espera_gpu_minutos * 60

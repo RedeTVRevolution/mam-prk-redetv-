@@ -7,6 +7,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
 from itertools import permutations
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -46,8 +47,12 @@ class Retorno(Exception):
 
 
 class ErroDaChamada(Exception):
-    def __init__(self, codigo: int, tags: list[str] | None = None):
-        self.dados = mapa({"code": codigo, "tags": tags or ["HttpError"]})
+    def __init__(self, codigo: int | None, tags: list[str] | None = None):
+        # Erro de conexão chega sem `code`: o mapa não tem a chave.
+        dados: dict[str, Any] = {"tags": tags or ["HttpError"]}
+        if codigo is not None:
+            dados["code"] = codigo
+        self.dados = mapa(dados)
 
 
 def numero(valor: Any) -> Any:
@@ -85,6 +90,8 @@ class FilaLocal:
         self.erro_antes: int | None = None
         self.erro_depois: int | None = None
         self.logs: list[Any] = []
+        # Estado das execuções do Workflows por id; a que não está aqui está ativa.
+        self.execucoes: dict[str, str] = {}
 
     def job(
         self,
@@ -109,6 +116,7 @@ class FilaLocal:
             map=SimpleNamespace(get=campo),
             int=lambda v: int(numero(v)),
             list=SimpleNamespace(concat=lambda a, b: a + [b]),
+            math=SimpleNamespace(min=min),
             default=lambda v, padrao: padrao if v is None else v,
             len=len,
             string=str,
@@ -198,7 +206,7 @@ class FilaLocal:
                             corpo.get("retry") != "${http.default_retry}"
                             or tentativa == 5
                             or not (
-                                erro.dados.code in [429, 502, 503, 504]
+                                erro.dados.get("code") in [429, 502, 503, 504]
                                 or set(erro.dados.tags)
                                 & {
                                     "ConnectionError",
@@ -242,7 +250,7 @@ class FilaLocal:
         if "raise" in corpo:
             falha = self.valor(corpo["raise"], escopo)
             if isinstance(falha, dict):
-                raise ErroDaChamada(falha["code"], falha["tags"])
+                raise ErroDaChamada(falha.get("code"), falha["tags"])
             raise ErroDaChamada(0, [str(falha)])
         if "return" in corpo:
             raise Retorno(self.valor(corpo["return"], escopo))
@@ -256,6 +264,10 @@ class FilaLocal:
         if nome == "sys.log":
             self.logs.append(args)
             return None
+        if nome.endswith("executions.get"):
+            return {
+                "state": self.execucoes.get(args["name"].rsplit("/", 1)[1], "ACTIVE")
+            }
         if nome.endswith("documents.get"):
             if args["name"].endswith("fila_gpu/vagas"):
                 if self.documento is None:
@@ -726,7 +738,10 @@ def test_interrupcao_marca_o_job_antes_de_liberar_mesmo_com_fila_indisponivel(
 
     monkeypatch.setattr(fila, "chamar", chamar)
     fila.job("b")
-    assert fila.pedir("b")["vaga"] is True
+    # A vaga de um Job `falhou` fica até o prazo ou até a execução acabar (#520): a
+    # execução que marcou o Job terminou, e a vaga que a fila não liberou sai na limpeza.
+    fila.execucoes["execucao"] = "FAILED"
+    assert fila.pedir("b", dono="outra")["vaga"] is True
 
 
 @pytest.mark.parametrize("chamada", ["le_fila", "le_job", "grava_fila"])
@@ -878,3 +893,99 @@ def test_fila_indisponivel_na_liberacao_preserva_resultado_ou_erro_da_etapa(
         assert fila.executar("roda_o_job_com_gpu", **args) == resultado
     assert execucoes == ["gpu"]
     assert any(log.get("data", {}).get("code") == 503 for log in fila.logs)
+
+
+def test_falha_de_uma_etapa_nao_libera_a_vaga_da_outra_que_ainda_roda() -> None:
+    # A transcrição falhou e devolveu a vaga dela; o Job foi a `falhou`, mas a leitura da
+    # tela segue na GPU: a vaga dela não pode sair da fila.
+    fila = FilaLocal(vagas=2)
+    for job in ("a", "b", "c"):
+        fila.job(job)
+    fila.pedir("a")
+    fila.pedir("a", "leitura_da_tela")
+    fila.pedir("a", acao="liberar", etapa="transcricao", dono="execucao")
+    fila.job("a", estado="falhou")
+    assert fila.pedir("b", dono="outra")["vaga"] is True
+    assert fila.pedir("c", dono="outra")["vaga"] is False
+    assert [p["etapa"]["stringValue"] for p in fila.itens("ocupadas")] == [
+        "leitura_da_tela",
+        "transcricao",
+    ]
+
+
+def test_vaga_de_execucao_do_workflows_que_nao_esta_mais_ativa_e_liberada() -> None:
+    # Cancelar a execução no console não roda a limpeza: a fila confere a execução.
+    fila = FilaLocal()
+    fila.job("a")
+    fila.job("b")
+    fila.pedir("a", dono="cancelada")
+    assert fila.pedir("b", dono="viva")["vaga"] is False
+    fila.execucoes["cancelada"] = "CANCELLED"
+    assert fila.pedir("b", dono="viva")["vaga"] is True
+    assert [p["job_id"]["stringValue"] for p in fila.itens("ocupadas")] == ["b"]
+
+
+def test_erro_do_firestore_sem_codigo_sobe_como_o_original() -> None:
+    fila = FilaLocal()
+    fila.job("a")
+    fila.erro_antes = None
+    chamar = fila.chamar
+
+    def sem_codigo(nome: str, args: dict[str, Any]) -> Any:
+        if nome.endswith("documents.get"):
+            raise ErroDaChamada(None, ["ConnectionError"])
+        return chamar(nome, args)
+
+    fila.chamar = sem_codigo  # type: ignore[method-assign]
+    with pytest.raises(ErroDaChamada) as erro:
+        fila.pedir("a")
+    assert erro.value.dados["tags"] == ["ConnectionError"]
+    assert "code" not in erro.value.dados
+
+
+def test_workflow_nao_le_code_direto_de_um_erro() -> None:
+    texto = (
+        Path(__file__).parents[2] / "infra/modulos/mam/validacao.workflow.yaml"
+    ).read_text()
+    assert re.findall(r"\b\w+\.code\b", texto) == []
+
+
+def test_espera_apos_429_de_cota_mantem_a_vaga_e_tenta_de_novo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fila = FilaLocal()
+    fila.definicao = _definicao(
+        {
+            "gpu_espera_total_s": "600",
+            "gpu_espera_s": "10",
+            "gpu_fator_da_espera": "2",
+            "gpu_espera_maxima_s": "60",
+        }
+    )
+    fila.job("a")
+    chamar = fila.chamar
+    execucoes: list[float] = []
+    vagas_nas_tentativas: list[int] = []
+
+    def com_cota_na_primeira(nome: str, args: dict[str, Any]) -> Any:
+        if nome.endswith("jobs.run"):
+            execucoes.append(fila.agora)
+            vagas_nas_tentativas.append(len(fila.itens("ocupadas")))
+            if len(execucoes) == 1:
+                raise ErroDaChamada(429)
+            return None
+        return chamar(nome, args)
+
+    monkeypatch.setattr(fila, "chamar", com_cota_na_primeira)
+    resultado = fila.executar(
+        "roda_o_job_com_gpu",
+        job_id="a",
+        etapa="transcricao",
+        job_gpu="gpu",
+        timeout_gpu=300,
+    )
+    assert resultado == "gpu"
+    assert execucoes[1] - execucoes[0] == 10
+    assert vagas_nas_tentativas == [1, 1]
+    assert fila.itens("ocupadas") == []
+    assert any(log.get("json", {}).get("evento") == "falta_de_gpu" for log in fila.logs)
