@@ -13,8 +13,8 @@ from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-VersaoEsquema = Literal["1.2", "1.3", "1.4"]
-VERSAO_ESQUEMA: VersaoEsquema = "1.4"  # o mypy cobra se o tipo mudar sozinho
+VersaoEsquema = Literal["1.2", "1.3", "1.4", "1.5"]
+VERSAO_ESQUEMA: VersaoEsquema = "1.5"  # o mypy cobra se o tipo mudar sozinho
 
 Texto = Annotated[str, Field(max_length=2000)]
 Rotulo = Annotated[str, Field(max_length=200)]

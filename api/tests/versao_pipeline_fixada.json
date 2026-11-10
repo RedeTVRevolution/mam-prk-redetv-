@@ -1,7 +1,7 @@
 {
-  "versao_pipeline": "2026.11.9",
+  "versao_pipeline": "2026.11.11",
   "manifesto": {
-    "esquema": "1.4",
+    "esquema": "1.5",
     "modelos": {
       "analise": "gemini-3.5-flash-lite",
       "versao_do_modelo_da_analise": "gemini-3.5-flash-lite",

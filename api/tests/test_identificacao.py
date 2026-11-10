@@ -376,7 +376,7 @@ def test_leaozinho_dito_com_o_homem_de_barba_na_imagem_confirma_leao_lobo() -> N
     )
     [leao] = catalogo.achar("Leão Lobo")
     assert p.catalogo_id == leao.id
-    assert d.versao_esquema == "1.4"
+    assert d.versao_esquema == "1.5"
 
 
 def test_nelson_rubens_com_fala_e_contexto_sem_o_nome_no_whisper_vira_palpite() -> None:

@@ -201,7 +201,7 @@ _NOVO_JOB = {
 }
 
 _DECUPAGEM = {
-    "versao_esquema": "1.4",
+    "versao_esquema": "1.5",
     "versao_decupagem": "9c1f4e0a7b3d2c68a5f0e9d1b4c7a8e2f3d6b0c9a1e4f7d2b5c8a0e3f6d9b2c1",
     "video": {"sha256": "a" * 64, "duracao_ms": 598400},
     "programa": {
@@ -555,7 +555,7 @@ OPERACOES: tuple[Operacao, ...] = (
         "GET",
         "/v1/jobs/{job_id}/decupagem",
         "Buscar a decupagem",
-        "A Decupagem do vídeo em JSON (esquema 1.4): pautas, pessoas, planos, "
+        "A Decupagem do vídeo em JSON (esquema 1.5): pautas, pessoas, planos, "
         "comerciais, transcrição e textos na tela, todos com tempos em milissegundos. "
         "Já traz as correções dos revisores; `versao_decupagem` identifica essa "
         "versão. Com `?versao=modelo` vem o que o modelo gerou, sem correções. A "
