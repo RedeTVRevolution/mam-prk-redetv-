@@ -25,3 +25,11 @@ Rótulos padrão: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-hu
 ### Domain docs
 
 Contexto único: `GLOSSARY.md` e `docs/adr/` na raiz. Veja `docs/agents/domain.md`.
+
+### Implementação com subagentes (`/implement-spec`, `/implement`)
+
+- O spec é um issue-pai com os tickets como sub-issues; a ordem vem das dependências nativas do GitHub (`docs/agents/issue-tracker.md`).
+- Os subagentes implementadores rodam no modelo Sonnet, no máximo 3 ao mesmo tempo, cada um na sua worktree.
+- Cada ticket fecha com `VITEST_MAX_WORKERS=2 PYTEST_XDIST_AUTO_NUM_WORKERS=3 make verificar` verde. Com vários agentes em paralelo, os testes falham por carga se cada um usar todos os núcleos.
+- O branch de integração vira um PR único. Ele só é mesclado com todas as checagens do CI verdes, e quem mescla é a pessoa.
+- Item do aceite que só uma pessoa faz (teste no dev, script rodado à mão, deploy) fica aberto no ticket com um comentário dizendo o que falta; o agente não fecha esse ticket.

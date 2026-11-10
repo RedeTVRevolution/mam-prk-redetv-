@@ -161,7 +161,7 @@ export function Acessos({ relatorio }: { relatorio: Agrupado<RelatorioDeAcessos>
   )
 }
 
-const COLUNAS_DE_VIDEOS = ['Enviados', 'Concluídos', 'Com falha', 'Horas de vídeo', 'Tempo médio de processamento']
+const COLUNAS_DE_VIDEOS = ['Enviados', 'Concluídos', 'Falhas', 'Horas de vídeo', 'Tempo médio até concluir']
 const celulasDeVideos = (n: NumerosDeVideos) => [numero(n.enviados), numero(n.concluidos), numero(n.falhos), horasDeVideo(n.horas_concluidas), tempoMedio(n)]
 
 /** O que está no pipeline agora, fora dos filtros: lido na hora pela API (`GET /v1/painel/fila`). */
@@ -207,9 +207,13 @@ export function Videos({ relatorio }: { relatorio: Agrupado<RelatorioDeVideos> }
       <Indicadores>
         <Indicador rotulo="Enviados" valor={t.enviados} />
         <Indicador rotulo="Concluídos" valor={t.concluidos} />
-        <Indicador rotulo="Com falha" valor={t.falhos} />
+        <Indicador
+          rotulo="Falhas"
+          valor={t.falhos}
+          nota="Conta cada tentativa que falhou; um vídeo que falhou e depois concluiu aparece nas duas colunas."
+        />
         <Indicador rotulo="Horas de vídeo concluídas" valor={horasDeVideo(t.horas_concluidas)} />
-        <Indicador rotulo="Tempo médio de processamento" valor={tempoMedio(t)} />
+        <Indicador rotulo="Tempo médio até concluir" valor={tempoMedio(t)} nota="Do envio ao fim, com a espera na fila e as novas tentativas." />
       </Indicadores>
       <Grade>
         <NoTempo
@@ -226,11 +230,11 @@ export function Videos({ relatorio }: { relatorio: Agrupado<RelatorioDeVideos> }
           <Quebra
             titulo="Vídeos por programa"
             itens={relatorio.por_programa}
-            nome={(p) => p.programa}
+            nome={(p) => nomeDoPrograma(p.programa)}
             valor={(p) => p.enviados}
-            chave={(p) => p.programa}
+            chave={(p) => p.programa ?? ''}
             colunas={['Programa', ...COLUNAS_DE_VIDEOS]}
-            celulas={(p) => [p.programa, ...celulasDeVideos(p)]}
+            celulas={(p) => [nomeDoPrograma(p.programa), ...celulasDeVideos(p)]}
           />
         )}
         {relatorio.por_usuario.length > 0 && (
@@ -457,8 +461,14 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
   if (relatorio.por_mes.length === 0 && relatorio.sem_dono_por_servico.length === 0) return <Vazio texto="Nenhum custo neste filtro." />
   // O custo vem sempre por mês: o mês vira o primeiro dia dele, como os grupos das outras abas.
   const meses = relatorio.por_mes.map((m) => ({ ...m, dia: `${m.mes}-01` }))
+  const [, mes, dia] = relatorio.faturamento_ate?.split('-') ?? []
   return (
     <>
+      {dia && (
+        <p>
+          Custo até {dia}/{mes} — o faturamento do Google chega com 1 a 2 dias de atraso; vídeos mais novos ainda não entram aqui.
+        </p>
+      )}
       <Indicadores>
         <Indicador rotulo="Custo" valor={valor(t.custo)} />
         <Indicador rotulo="Custo dos vídeos" valor={valor(t.custo_dos_jobs)} />

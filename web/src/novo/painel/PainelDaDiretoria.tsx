@@ -11,7 +11,6 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
 import {
   useId,
-  useState,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -140,10 +139,12 @@ const AGRUPAMENTOS: { valor: PedidoDeAgrupamento; rotulo: string }[] = [
 function Filtros({
   filtros,
   comPrograma,
+  comSistemas,
   aoMudar,
 }: {
   filtros: FiltrosDoPainel;
   comPrograma: boolean;
+  comSistemas: boolean;
   aoMudar: (parte: Partial<FiltrosDoPainel>) => void;
 }) {
   const api = useApi();
@@ -154,6 +155,7 @@ function Filtros({
   });
   const programas = opcoes.data?.programas ?? [];
   const usuarios = opcoes.data?.usuarios ?? [];
+  const sistemas = comSistemas ? (opcoes.data?.sistemas ?? []) : [];
   const programa = comPrograma ? filtros.programa : "";
   return (
     <>
@@ -191,12 +193,18 @@ function Filtros({
           >
             <option value="">Todos os usuários</option>
             {filtros.usuario &&
-              !usuarios.some((u) => u.uid === filtros.usuario) && (
+              !usuarios.some((u) => u.uid === filtros.usuario) &&
+              !sistemas.includes(filtros.usuario) && (
                 <option value={filtros.usuario}>{filtros.usuario}</option>
               )}
             {usuarios.map((u) => (
               <option key={u.uid} value={u.uid}>
                 {u.email ?? u.uid}
+              </option>
+            ))}
+            {sistemas.map((s) => (
+              <option key={`sistema:${s}`} value={s}>
+                Sistema: {s}
               </option>
             ))}
           </select>
@@ -270,7 +278,7 @@ export default function PainelDaDiretoria({
   filtros: FiltrosDoPainel;
 }) {
   const api = useApi();
-  const [agrupar, setAgrupar] = useState<PedidoDeAgrupamento>("auto");
+  const agrupar: PedidoDeAgrupamento = filtros.agrupar ?? "auto";
   const definicao = ABAS[aba];
   const idDaAba = useId();
 
@@ -360,6 +368,7 @@ export default function PainelDaDiretoria({
           <Filtros
             filtros={filtros}
             comPrograma={!definicao.semPrograma}
+            comSistemas={aba === "api"}
             aoMudar={mudar}
           />
           <Campo rotulo="Agrupar">
@@ -374,7 +383,7 @@ export default function PainelDaDiretoria({
                 disabled={aba === "custo"}
                 value={aba === "custo" ? "mes" : agrupar}
                 onChange={(e) =>
-                  setAgrupar(e.target.value as PedidoDeAgrupamento)
+                  mudar({ agrupar: e.target.value as PedidoDeAgrupamento })
                 }
               >
                 {AGRUPAMENTOS.map((g) => (

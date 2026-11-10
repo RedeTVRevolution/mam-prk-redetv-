@@ -130,6 +130,8 @@ export interface ClienteDoJob {
   reprocessar(etapa: string, motivo: string): Promise<Job>
   /** `POST /v1/jobs/{id}/reprocessar` sem etapa: recomeça da que falhou (exige `video.reprocessar`). */
   reprocessarOQueFalhou(motivo: string): Promise<Job>
+  /** `PATCH /v1/jobs/{id}`: muda a data de exibição e/ou o programa de um vídeo concluído (exige `decupagem.editar`). */
+  editar(corpo: { data_exibicao?: string; programa?: string }): Promise<Job>
 }
 
 /** Um nome do catálogo de pessoas ou de marcas (ou um tipo de objeto já visto), como o autocompletar o mostra. */
@@ -259,6 +261,9 @@ export interface ItemDaLixeira {
   enviado_em: string
   motivo: string
   dias_ate_a_purga: number
+  /** Só o vídeo tem. */
+  programa?: string | null
+  data_exibicao?: string | null
 }
 
 /** O que vai junto com o vídeo, antes de confirmar. */
@@ -418,7 +423,7 @@ export function criarClienteDaApi(
 ): ClienteDaApi {
   async function pedir(
     caminho: string,
-    opcoes: { post?: true; put?: true; apagar?: true; corpo?: object; formulario?: FormData } = {},
+    opcoes: { post?: true; put?: true; patch?: true; apagar?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<Response> {
     const token = await autenticador.token()
     if (!token) {
@@ -430,7 +435,7 @@ export function criarClienteDaApi(
     }
     if (opcoes.corpo !== undefined) headers['Content-Type'] = 'application/json'
     const resposta = await fetch(caminho, {
-      method: opcoes.post ? 'POST' : opcoes.put ? 'PUT' : opcoes.apagar ? 'DELETE' : undefined,
+      method: opcoes.post ? 'POST' : opcoes.put ? 'PUT' : opcoes.patch ? 'PATCH' : opcoes.apagar ? 'DELETE' : undefined,
       headers,
       // Com `FormData` o navegador monta o Content-Type do multipart, com o limite.
       body: opcoes.formulario ?? (opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo)),
@@ -451,7 +456,7 @@ export function criarClienteDaApi(
 
   async function chamar<T>(
     caminho: string,
-    opcoes: { post?: true; put?: true; apagar?: true; corpo?: object; formulario?: FormData } = {},
+    opcoes: { post?: true; put?: true; patch?: true; apagar?: true; corpo?: object; formulario?: FormData } = {},
   ): Promise<T> {
     return (await (await pedir(caminho, opcoes)).json()) as T
   }
@@ -513,6 +518,7 @@ export function criarClienteDaApi(
         chamar(`${base}/reprocessar`, { post: true, corpo: { etapa, motivo } }),
       reprocessarOQueFalhou: (motivo) =>
         chamar(`${base}/reprocessar`, { post: true, corpo: motivo ? { motivo } : undefined }),
+      editar: (corpo) => chamar(base, { patch: true, corpo }),
     }
   }
 

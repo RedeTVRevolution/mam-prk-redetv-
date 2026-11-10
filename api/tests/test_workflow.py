@@ -81,7 +81,7 @@ def test_objeto_sem_job_nao_derruba_a_leitura() -> None:
     texto = _texto()
 
     leitura = texto[texto.index("le_o_job:") : texto.index("so_se_analisando:")]
-    assert "e.code == 404" in leitura and "next: fim" in leitura
+    assert 'map.get(e, "code"), 0) == 404' in leitura and "next: fim" in leitura
 
 
 def test_falha_da_execucao_nao_sobrescreve_job_cancelado() -> None:
@@ -95,7 +95,7 @@ def test_falha_da_execucao_nao_sobrescreve_job_cancelado() -> None:
     # O patch só vale se o documento não mudou desde a releitura.
     assert "updateTime: $${antes.updateTime}" in excecao
     # Um objeto sem Job correspondente não cria documento: a releitura dá 404.
-    assert "erro_da_leitura.code == 404" in excecao
+    assert 'map.get(erro_da_leitura, "code"), 0) == 404' in excecao
 
 
 def _subworkflow(texto: str, nome: str) -> str:

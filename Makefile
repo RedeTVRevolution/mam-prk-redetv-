@@ -1,4 +1,4 @@
-.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -221,6 +221,13 @@ migrar-banco-de-seguranca:
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
 	uv run --locked python -m api.migrar_banco_de_seguranca
+
+# Limpeza única (#530): as cópias antigas de papéis, chaves e auditoria no banco (default), que
+# hoje vivem no banco de segurança. Só conta por padrão; para apagar: make limpar-banco-padrao ARGS=--apagar
+limpar-banco-padrao:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	uv run --locked python -m api.limpar_banco_padrao $(ARGS)
 
 # Grava em cada Job concluído quem aparece nele (#359): make preencher-catalogo-dos-jobs.
 # Roda no dev depois do deploy: Job sem os campos não entra no impacto da lixeira. Repetir não muda nada.

@@ -245,7 +245,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                 <tr key={c.uid} className="hover:bg-card">
                   <td className={CELULA}>
                     <div className="flex min-w-0 items-center gap-2">
-                      <Iniciais nome={c.nome} />
+                      <Iniciais nome={c.nome || c.email} />
                       <div className="grid min-w-0">
                         <span className="truncate">{c.nome}</span>
                         <span className="truncate text-xs text-muted-foreground">{c.email}</span>
@@ -262,7 +262,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                   <td className={cn(CELULA, 'text-right')}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon-sm" aria-label={`Ações de ${c.nome}`}>
+                        <Button variant="ghost" size="icon-sm" aria-label={`Ações de ${c.nome || c.email}`}>
                           <IconDots stroke={1.75} aria-hidden />
                         </Button>
                       </DropdownMenuTrigger>

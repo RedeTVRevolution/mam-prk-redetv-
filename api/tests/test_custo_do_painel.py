@@ -129,7 +129,16 @@ def test_o_resultado_e_o_mesmo_do_calculo_antigo_que_lia_todos_os_jobs() -> None
         relatorio = relatorio_de_custo(
             base, {"bia": "bia@redetv.com.br"}, desde, ate, programa, usuario
         )
-        assert relatorio.model_dump(mode="json") == caso["relatorio"], caso["filtro"]
+        atual = relatorio.model_dump(mode="json")
+        atual.pop("faturamento_ate")  # o JSON é de antes deste campo (#523)
+        assert atual == caso["relatorio"], caso["filtro"]
+
+
+def test_devolve_o_dia_da_ultima_linha_do_faturamento_no_periodo() -> None:
+    assert _mundo().get("/custo").json()["faturamento_ate"] == "2026-12-01"
+    r = _mundo().get("/custo", ate="2026-11-30").json()
+    assert r["faturamento_ate"] == "2026-11-03"
+    assert _mundo(linhas=[]).get("/custo").json()["faturamento_ate"] is None
 
 
 def test_o_total_junta_os_jobs_e_o_custo_sem_dono() -> None:
@@ -400,6 +409,7 @@ def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None
             ],
             ["sem_dono", "2026-11", None, None, None, None, "1", "0", "0", "BRL"],
             ["moeda", None, None, None, None, None, "0", "0", "0", "BRL"],
+            ["ate", None, None, None, None, "2026-11-04", "0", "0", "0", "BRL"],
         ]
     )
 
@@ -418,6 +428,7 @@ def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None
         CustoSemDono("2026-11", None, 1.0),
     ]
     assert base.moedas == {"BRL"}
+    assert base.faturamento_ate == date(2026, 11, 4)
     # Uma consulta só, na região do painel, sobre as duas tabelas: a soma não passa pela API.
     assert len(transporte.corpos) == 1
     corpo = transporte.corpos[0]
@@ -433,6 +444,10 @@ def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None
     assert "credits" in sql and "America/Sao_Paulo" in sql
     assert [p["name"] for p in corpo["queryParameters"]] == ["desde"]
     assert corpo["queryParameters"][0]["parameterValue"] == {"value": "2026-11-01"}
+    # O "até quando há faturamento" é o MAX do dia, dentro dos limites do período.
+    assert "CAST(MAX(l.dia) AS STRING)" in sql and "MIN(l.dia)" not in sql
+    parte_ate = sql[sql.index("SELECT 'ate'") :]
+    assert "WHERE TRUE AND l.dia >= @desde\n" in parte_ate
 
 
 def test_os_filtros_vao_como_parametros_e_o_sem_dono_so_vem_sem_programa_nem_usuario() -> (
@@ -448,6 +463,9 @@ def test_os_filtros_vao_como_parametros_e_o_sem_dono_so_vem_sem_programa_nem_usu
     sem_filtro, com_filtro = transporte.corpos
     assert [p["name"] for p in sem_filtro["queryParameters"]] == ["desde", "ate"]
     assert "'sem_dono'" in sem_filtro["query"]
+    # O MAX do dia só olha o período pedido, nos dois limites.
+    parte_ate = sem_filtro["query"][sem_filtro["query"].index("SELECT 'ate'") :]
+    assert "WHERE TRUE AND l.dia >= @desde AND l.dia <= @ate\n" in parte_ate
     assert [p["name"] for p in com_filtro["queryParameters"]] == [
         "desde",
         "ate",
@@ -467,3 +485,16 @@ def test_sem_periodo_a_consulta_nao_filtra_o_dia() -> None:
 
     assert base == BaseDeCusto([], [], [], frozenset())
     assert transporte.corpos[0]["queryParameters"] == []
+
+
+def test_o_csv_traz_o_numero_de_videos_concluidos_e_vazio_no_custo_sem_dono() -> None:
+    linhas = list(
+        csv.DictReader(io.StringIO(_mundo().get("/custo", formato="csv").text))
+    )
+
+    assert [
+        (r["quem_id"], r["programa"], r["videos"])
+        for r in linhas
+        if r["quem_tipo"] != "sem_dono"
+    ] == [("bia", "Fala", "0"), ("Playout", "Hoje", "1"), ("bia", "Hoje", "2")]
+    assert {r["videos"] for r in linhas if r["quem_tipo"] == "sem_dono"} == {""}

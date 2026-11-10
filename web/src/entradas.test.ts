@@ -30,3 +30,17 @@ test.each([undefined, null])('legado sem reprocesso usa a criação quando o in�
 test.each([undefined, null])('legado reprocessado fica sem tempo quando o início é %s', (inicio_da_passada) => {
   expect(tempoDaEntradaMs({ ...JOB, inicio_da_passada, reprocessamentos: 1 }, AGORA)).toBeNull()
 })
+
+test('a coluna Tempo é o total da passada, mesmo com uma etapa em andamento', () => {
+  const job: Job = {
+    ...JOB,
+    estado: 'analisando',
+    etapa_atual: 'analise',
+    inicio_da_passada: '2026-11-04T14:00:00Z',
+    etapas: [
+      { nome: 'transcricao', inicio: '2026-11-04T14:01:00Z', fim: null, resultado: null },
+      { nome: 'analise', inicio: '2026-11-04T14:30:00Z', fim: null, resultado: null },
+    ],
+  }
+  expect(tempoDaEntradaMs(job, AGORA)).toBe(3_600_000)
+})

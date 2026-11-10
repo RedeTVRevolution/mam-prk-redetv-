@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { abaDoPainel, parametrosDoPainel, programaEUsuarioJuntos, rotuloDoGrupo } from './painelDaDiretoria.ts'
+import { abaDoPainel, filtrosDoPainel, filtrosParaEnderecoDoPainel, parametrosDoPainel, programaEUsuarioJuntos, rotuloDoGrupo } from './painelDaDiretoria.ts'
 
 test('abaDoPainel: vazio é Acessos, aba conhecida passa e desconhecida é null', () => {
   expect(abaDoPainel(undefined)).toBe('acessos')
@@ -21,6 +21,14 @@ test('o agrupamento só vai à API quando pedido', () => {
   const f = { programa: '', usuario: 'u1', de: '2026-01-01', ate: '' }
   expect(parametrosDoPainel(f)).toBe('usuario=u1&desde=2026-01-01&ate=')
   expect(parametrosDoPainel(f, { agrupar: 'auto' })).toBe('usuario=u1&desde=2026-01-01&ate=&agrupar=auto')
+})
+
+test('o agrupamento vai para o endereço e volta dele; o automático fica de fora e valor inválido sai', () => {
+  const base = { programa: '', usuario: '', de: '2026-01-01', ate: '2026-01-31' }
+  expect(filtrosParaEnderecoDoPainel({ ...base, agrupar: 'semana' })).toBe('?de=2026-01-01&ate=2026-01-31&agrupar=semana')
+  expect(filtrosParaEnderecoDoPainel({ ...base, agrupar: 'auto' })).toBe('?de=2026-01-01&ate=2026-01-31')
+  expect(filtrosDoPainel('?de=2026-01-01&ate=2026-01-31&agrupar=mes').agrupar).toBe('mes')
+  expect(filtrosDoPainel('?de=2026-01-01&ate=2026-01-31&agrupar=ano').agrupar).toBeUndefined()
 })
 
 test('rotuloDoGrupo nomeia o grupo pelo primeiro dia, na tabela e no eixo', () => {
