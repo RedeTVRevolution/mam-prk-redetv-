@@ -11,9 +11,23 @@ export type Aparicao = Intervalo & {
   quadro?: string | null
 }
 
+/** #547: uma pessoa sem nome que a junção automática uniu a outra; o servidor grava. */
+export interface OrigemDaJuncao {
+  id: string
+  /** A identidade da origem (descrição@início-fim em ms): o valor da correção `pessoa.separar`. */
+  chave: string
+  nome: string
+  janela?: number | null
+  /** Por que se uniu à base; vazio na própria base. */
+  motivo?: string | null
+  na_imagem: Aparicao[]
+}
+
 export interface Pessoa {
   id: string
   nome: string
+  /** Só na pessoa que a junção formou (duas ou mais). */
+  origens?: OrigemDaJuncao[]
   origem?: 'modelo' | 'revisao'
   /** 1.2: de onde veio o nome; falta em 1.1 e em pessoa acrescentada pela revisão. */
   fontes_do_nome?: string[]

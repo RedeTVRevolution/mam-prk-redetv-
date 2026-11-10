@@ -63,6 +63,9 @@ export interface AcoesDeCorrecao {
   corrigir: (i: ItemDoPainel) => void
   remover: (i: ItemDoPainel) => void
   acrescentar: (pessoa: string) => void
+  /** "Separar pessoa": só a que a junção automática formou (#547). */
+  pessoaJuntada: (pessoa: string) => boolean
+  separar: (pessoa: string) => void
   /** Juntar e dividir pautas (só no modo de revisão): marcar para juntar (M) e dividir no ponto do player (D). */
   pautas?: { marcada: (i: ItemDoPainel) => boolean; alternar: (i: ItemDoPainel) => void; dividir: (i: ItemDoPainel) => void }
   /** "Renomear em todos os vídeos" (Curador) e "Fundir com…": só para a pessoa do catálogo, e só se a permissão deixa. */
@@ -998,7 +1001,7 @@ function Detalhe({
   const rotuloDoTipo = SECOES.find((s) => s.tipo === tipo)?.rotulo ?? ''
   const marca = acoes?.marcas?.[item.chave]
   const edicao =
-    acoes?.edicao && (acoes.edicao.chave === item.chave || (item.pessoa && ['acrescentar', 'fundir', 'renomear'].some((m) => acoes.edicao?.chave === `${m}:${item.pessoa}`)))
+    acoes?.edicao && (acoes.edicao.chave === item.chave || (item.pessoa && ['acrescentar', 'separar', 'fundir', 'renomear'].some((m) => acoes.edicao?.chave === `${m}:${item.pessoa}`)))
       ? acoes.edicao
       : null
   const { dono } = item.objeto ?? {}
@@ -1083,6 +1086,11 @@ function Detalhe({
           {acoes && item.tipo === 'aparicao' && item.pessoa && (
             <Button type="button" variant="secondary" onClick={() => acoes.acrescentar(item.pessoa as string)}>
               <IconPlus size={16} stroke={1.75} aria-hidden /> {`Acrescentar aparição de ${item.titulo}`}
+            </Button>
+          )}
+          {item.tipo === 'aparicao' && item.pessoa && acoes?.pessoaJuntada(item.pessoa) && (
+            <Button type="button" variant="secondary" onClick={() => acoes.separar(item.pessoa as string)}>
+              Separar pessoa
             </Button>
           )}
           {item.tipo === 'aparicao' && item.pessoa && acoes?.renomear && acoes.pessoaDoCatalogo(item.pessoa) && edicao?.chave !== `renomear:${item.pessoa}` && (
