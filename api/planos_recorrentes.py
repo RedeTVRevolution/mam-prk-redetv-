@@ -1,12 +1,12 @@
-"""Planos recorrentes (#546): os planos do vídeo que são a mesma câmera no mesmo enquadramento.
+"""Planos recorrentes (#546): os planos do vídeo que são a mesma câmera.
 
 Em programa de estúdio, a mesma câmera volta dezenas de vezes. O sinal é o mais barato, sem
 modelo e sem vetor de imagem (ADR 0015): o hash perceptual (`hash_do_quadro`) mais o
 histograma de cor do quadro-chave de cada plano, que fica no bucket da Decupagem (ADR 0017).
-O agrupamento é aglomerativo, com duas restrições:
-
-- planos de enquadramento canônico diferente (#545) não se juntam;
-- dois planos seguidos não se juntam se o corte entre eles é real.
+O agrupamento é aglomerativo, com uma restrição: dois planos seguidos não se juntam se o
+corte entre eles é real. O enquadramento canônico (#545) não separa mais: o modelo rotula a
+mesma câmera ora como plano geral, ora como plano médio, e na marcação 34 de 64 retornos
+perdidos eram isso.
 
 Só o plano que tem par ganha `plano_recorrente` (`rec01`, `rec02`… por ordem de aparição);
 o plano único fica sem grupo. Os limiares são o chute inicial: a pessoa os calibra com os
@@ -27,15 +27,16 @@ from pathlib import Path
 
 from PIL import Image
 
-from api.canonicos import enquadramento_canonico
 from api.decupagem import Decupagem, Plano
 from api.medir_agrupamento_de_objetos import margem_de_confianca, pares_para_margem
 from api.objetos_job import hash_do_quadro
 
 log = logging.getLogger(__name__)
 
-# Bits de 64 em que dois quadros podem diferir e ainda ser o mesmo enquadramento.
-LIMITE_DE_BITS = 10
+# Bits de 64 em que dois quadros podem diferir e ainda ser a mesma câmera (14 após a marcação).
+LIMITE_DE_BITS = 14
+# Bits a partir dos quais o limite entre dois planos seguidos é corte real (não depende do agrupamento).
+LIMITE_DO_CORTE_REAL = 10
 # Distância de cor (0 a 1: metade da soma das diferenças dos histogramas) do mesmo teor.
 LIMITE_DE_COR = 0.25
 _BINS = 4  # por canal: 64 faixas de cor no histograma
@@ -72,15 +73,14 @@ def _distancia(a: Sinal, b: Sinal) -> float | None:
 
 def agrupar(
     sinais: Sequence[Sinal | None],
-    enquadramentos: Sequence[str],
     corte_real_depois: Sequence[bool],
 ) -> list[int | None]:
     """O grupo de cada plano (o índice do primeiro do grupo), `None` para o plano sem par.
 
     Os planos vêm em ordem de tempo. `corte_real_depois[i]` diz que o corte entre o plano `i`
     e o `i + 1` é real. Aglomerativo de ligação completa: os pares mais parecidos juntam
-    primeiro, e dois grupos só se juntam se todo par entre eles passa dos limiares, tem o
-    mesmo enquadramento e não é um par de vizinhos com corte real. Sem sinal (quadro que
+    primeiro, e dois grupos só se juntam se todo par entre eles passa dos limiares e não é um
+    par de vizinhos com corte real. Sem sinal (quadro que
     faltou), o plano fica de fora.
     """
     n = len(sinais)
@@ -92,7 +92,7 @@ def agrupar(
             continue
         for j in range(i + 1, n):
             outro = sinais[j]
-            if outro is None or enquadramentos[i] != enquadramentos[j]:
+            if outro is None:
                 continue
             if (d := _distancia(a, outro)) is not None:
                 proximos[(i, j)] = d
@@ -122,13 +122,6 @@ def _quadros(plano: Plano) -> list[str]:
     return plano.quadros or ([plano.quadro] if plano.quadro else [])
 
 
-def _enquadramento(plano: Plano) -> str:
-    """O canônico do modelo; na decupagem antiga, o do dicionário sobre o texto livre."""
-    if plano.enquadramento_canonico != "indefinido":
-        return plano.enquadramento_canonico
-    return enquadramento_canonico(plano.enquadramento or "")
-
-
 def com_os_planos_recorrentes(
     decupagem: Decupagem,
     ler_quadro: Callable[[str], bytes],
@@ -136,7 +129,7 @@ def com_os_planos_recorrentes(
     """A Decupagem com `plano_recorrente` em cada plano que tem par, no lugar do anterior.
 
     O limite entre dois planos seguidos é corte real quando os quadros dos dois lados
-    diferem mais que `LIMITE_DE_BITS`; parecidos, é corte falso (flash, transição), como no
+    diferem mais que `LIMITE_DO_CORTE_REAL`; parecidos, é corte falso (flash, transição), como no
     diagnóstico de `api/planos_curtos.py`. Quadro que não abre deixa o plano sem grupo e o
     corte, por prudência, como real.
     """
@@ -167,11 +160,11 @@ def com_os_planos_recorrentes(
         reais.append(
             antes is None
             or depois is None
-            or (antes.impressao ^ depois.impressao).bit_count() > LIMITE_DE_BITS
+            or (antes.impressao ^ depois.impressao).bit_count() > LIMITE_DO_CORTE_REAL
         )
     reais.append(False)
 
-    grupos = agrupar(sinais, [_enquadramento(p) for p in planos], reais)
+    grupos = agrupar(sinais, reais)
     nomes: dict[int, str] = {}
     novos: dict[str, str | None] = {}
     for p, g in zip(planos, grupos, strict=True):

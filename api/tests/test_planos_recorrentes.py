@@ -8,8 +8,11 @@ from typing import Any
 import pytest
 from PIL import Image
 
+from api import planos_recorrentes
 from api.decupagem import Decupagem
 from api.planos_recorrentes import (
+    LIMITE_DE_BITS,
+    LIMITE_DO_CORTE_REAL,
     PlanoDaAmostra,
     Sinal,
     agrupar,
@@ -94,21 +97,11 @@ def test_quadros_quase_iguais_se_juntam_e_os_diferentes_nao() -> None:
     assert _grupos(planos, _QUADROS) == ["rec01", "rec02", "rec01", "rec02", None]
 
 
-def test_enquadramento_canonico_diferente_nao_junta() -> None:
+def test_enquadramento_canonico_diferente_junta_a_mesma_camera() -> None:
     planos = [
         _plano("p0", 0, "a1", enquadramento_canonico="plano médio"),
         _plano("p1", 1, "b1"),
         _plano("p2", 2, "a2", enquadramento_canonico="plano geral"),
-    ]
-
-    assert _grupos(planos, _QUADROS) == [None, None, None]
-
-
-def test_decupagem_antiga_usa_o_dicionario_sobre_o_texto_livre() -> None:
-    planos = [
-        _plano("p0", 0, "a1", enquadramento="Close-up"),
-        _plano("p1", 1, "b1"),
-        _plano("p2", 2, "a2", enquadramento="close"),
     ]
 
     assert _grupos(planos, _QUADROS) == ["rec01", None, "rec01"]
@@ -158,7 +151,7 @@ def test_agrupar_nao_junta_sinais_diferentes_nem_planos_sem_sinal() -> None:
     igual = Sinal(0, (1.0,) + (0.0,) * 63)
     outro = Sinal((1 << 40) - 1, (1.0,) + (0.0,) * 63)
 
-    assert agrupar([igual, outro, igual, None], ["x"] * 4, [False] * 4) == [
+    assert agrupar([igual, outro, igual, None], [False] * 4) == [
         0,
         None,
         0,
@@ -170,16 +163,55 @@ def test_cor_diferente_com_o_mesmo_hash_nao_junta() -> None:
     a = Sinal(0, (1.0,) + (0.0,) * 63)
     b = Sinal(0, (0.0,) + (1.0,) + (0.0,) * 62)
 
-    assert agrupar([a, b], ["x", "x"], [False, False]) == [None, None]
+    assert agrupar([a, b], [False, False]) == [None, None]
+
+
+def test_de_12_a_14_bits_juntam_e_15_nao() -> None:
+    cor = (1.0,) + (0.0,) * 63
+    base = Sinal(0, cor)
+
+    for bits in (12, 13, 14):
+        assert agrupar([base, Sinal((1 << bits) - 1, cor)], [False] * 2) == [0, 0]
+    assert agrupar([base, Sinal((1 << 15) - 1, cor)], [False] * 2) == [None, None]
+
+
+def test_o_corte_real_continua_nos_10_bits_mesmo_com_o_limite_do_grupo_em_14(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert (LIMITE_DO_CORTE_REAL, LIMITE_DE_BITS) == (10, 14)
+    cor = (1.0,) + (0.0,) * 63
+    # O vermelho do pixel único diz quantos bits o quadro tem ligados (0 a 255).
+    monkeypatch.setattr(
+        planos_recorrentes,
+        "sinal_do_quadro",
+        lambda im: Sinal((1 << im.convert("RGB").getpixel((0, 0))[0]) - 1, cor),
+    )
+
+    def quadro(bits: int) -> bytes:
+        saida = io.BytesIO()
+        Image.new("RGB", (1, 1), (bits, 0, 0)).save(saida, "PNG")
+        return saida.getvalue()
+
+    quadros = {"k": quadro(0), "dez": quadro(10), "onze": quadro(11)}
+
+    def vizinhos(borda: str) -> list[str | None]:
+        planos = [
+            {**_plano("p0", 0, "k"), "quadros": ["k", "k"]},
+            {**_plano("p1", 1, "k"), "quadros": [borda, "k"]},
+        ]
+        return _grupos(planos, quadros)
+
+    assert vizinhos("dez") == ["rec01", "rec01"]  # 10 bits: corte falso
+    assert vizinhos("onze") == [None, None]  # 11 bits: corte real, apesar de <= 14
 
 
 def test_a_ligacao_e_completa_um_intermediario_nao_une_os_extremos() -> None:
     # a~b e a~c estão dentro do limiar, b~c não: a junta com um deles, nunca os três.
     a = Sinal(0, (1.0,) + (0.0,) * 63)
-    b = Sinal(0b1111111, (1.0,) + (0.0,) * 63)  # 7 bits de a
-    c = Sinal(0b1111111 << 7, (1.0,) + (0.0,) * 63)  # 7 bits de a, 14 de b
+    b = Sinal(0xFF, (1.0,) + (0.0,) * 63)  # 8 bits de a
+    c = Sinal(0xFF << 8, (1.0,) + (0.0,) * 63)  # 8 bits de a, 16 de b
 
-    grupos = agrupar([a, b, c], ["x"] * 3, [False] * 3)
+    grupos = agrupar([a, b, c], [False] * 3)
 
     assert len({g for g in grupos if g is not None}) == 1
     assert grupos.count(None) == 1

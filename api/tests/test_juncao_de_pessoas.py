@@ -15,16 +15,12 @@ from api import identificacao_job
 from api.analise_por_janelas import analisar_video
 from api.catalogo import CatalogoEmMemoria
 from api.decupagem import Decupagem, Pessoa
-from api.gemini import ErroHttp
 from api.jobs import Job, RepositorioEmMemoria
 from api.juncao_de_pessoas import (
-    ETAPA,
     Veredito,
     chave_da_pessoa,
-    juiz_do_modelo,
     juntar_sem_nome,
 )
-from api.quadros import FalhaNosQuadros
 from api.tests.test_analise_por_janelas import (
     URI,
     VIDEO,
@@ -314,71 +310,6 @@ def test_o_juiz_nao_e_chamado_para_o_que_ja_se_decide() -> None:
         raise AssertionError("não devia perguntar")
 
     assert len(juntar_sem_nome(d, julgar=julgar).pessoas) == 1
-
-
-# ---- o modelo na dúvida -------------------------------------------------------
-
-
-def _par_ambiguo() -> Decupagem:
-    return decupagem(
-        [
-            pessoa("pes01", 0, [(100_000, 110_000)]),
-            pessoa(
-                "pes02", 1, [(400_000, 410_000)], nome=NAO + "blusa vermelha, calvo"
-            ),
-        ]
-    )
-
-
-def _juiz(transporte: TransporteFalso, quadros: Any = None) -> Any:
-    return juiz_do_modelo(
-        transporte,
-        quadros_em=quadros or (lambda ms: [f"jpeg-{m}".encode() for m in ms]),
-        job_id="job-1",
-        dormir=lambda _: None,
-    )
-
-
-def test_o_lote_vai_numa_chamada_com_um_quadro_de_cada_pessoa() -> None:
-    transporte = TransporteFalso('{"respostas": [{"par": 1, "resposta": "sim"}]}')
-
-    r = juntar_sem_nome(_par_ambiguo(), julgar=_juiz(transporte))
-
-    [chamada] = transporte.chamadas
-    assert len(r.pessoas) == 1
-    assert chamada.imagens == (b"jpeg-105000", b"jpeg-405000")  # o meio da aparição
-    assert chamada.rotulos == {"job_id": "job-1", "etapa": ETAPA}
-    assert chamada.video_uri == ""
-    assert (
-        chamada.modo == "flex"
-    )  # só a busca e a identificação pedem Standard (ADR 0004)
-    assert "<descricao>" in chamada.texto
-
-
-def test_resposta_do_modelo_fora_do_esquema_ou_falha_deixa_tudo_separado() -> None:
-    d = _par_ambiguo()
-    ruim = TransporteFalso("{}", "{}", "{}", "{}", "{}")
-    fora = TransporteFalso(ErroHttp(400))
-
-    assert len(juntar_sem_nome(d, julgar=_juiz(ruim)).pessoas) == 2
-    assert len(juntar_sem_nome(d, julgar=_juiz(fora)).pessoas) == 2
-
-    def sem_quadro(ms: Any) -> Any:
-        raise FalhaNosQuadros("sem quadro")
-
-    mudo = TransporteFalso()
-    assert len(juntar_sem_nome(d, julgar=_juiz(mudo, sem_quadro)).pessoas) == 2
-
-
-def test_par_nao_respondido_ou_numero_de_par_que_nao_existe_nao_junta() -> None:
-    d = _par_ambiguo()
-    sem_resposta = TransporteFalso('{"respostas": []}')
-    inexistente = TransporteFalso(
-        *['{"respostas": [{"par": 9, "resposta": "sim"}]}'] * 5
-    )
-
-    assert len(juntar_sem_nome(d, julgar=_juiz(sem_resposta)).pessoas) == 2
-    assert len(juntar_sem_nome(d, julgar=_juiz(inexistente)).pessoas) == 2
 
 
 # ---- fluxo completo: da análise por janelas à Decupagem gravada -----------------

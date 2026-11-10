@@ -25,7 +25,7 @@ from api.correcoes import Correcao, pares_proibidos, pessoas_corrigidas
 from api.decupagem import Decupagem
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs
-from api.juncao_de_pessoas import juiz_do_modelo, juntar_sem_nome
+from api.juncao_de_pessoas import juntar_sem_nome
 from api.modelo_forte import LIMITE_DE_PESSOAS, olhar_pessoas_sem_nome
 from api.nuvem import (
     CatalogoFirestore,
@@ -109,13 +109,13 @@ def executar(
         # A junção das pessoas sem nome é o último passo, depois do modelo forte: assim
         # uma pessoa nomeada por ele nunca absorve outra e o nome nunca se espalha. As
         # separações que uma pessoa fez na tela ainda valem num reprocessamento (#547).
+        # Sem juiz do modelo: ele acertou 3 de 6 no dev (#547); a faixa ambígua não junta.
         nova = juntar_sem_nome(
             nova,
             proibidos=pares_proibidos(correcoes.listar(job_id)) if correcoes else (),
             corrigidas=pessoas_corrigidas(correcoes.listar(job_id))
             if correcoes
             else (),
-            julgar=juiz_do_modelo(transporte, quadros_em=quadros_em, job_id=job_id),
         )
         decupagens.gravar_decupagem(job_id, nova.model_dump_json())
         return "incompleto" if falhas else "identificado"
