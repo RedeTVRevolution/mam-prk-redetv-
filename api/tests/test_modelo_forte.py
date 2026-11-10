@@ -156,7 +156,7 @@ def test_a_chamada_leva_os_quadros_o_modelo_forte_e_o_rotulo_de_custo() -> None:
     olhar(d, transporte, programa=None)
 
     [chamada] = transporte.chamadas
-    assert chamada.modelo == MODELO_FORTE
+    assert chamada.modelo == MODELO_FORTE == "gemini-3.5-flash-lite"  # #539
     assert chamada.rotulos == {"job_id": "job-1", "etapa": ETAPA}
     assert chamada.imagens == (b"jpeg-15000", b"jpeg-55000")
     assert chamada.video_uri == ""

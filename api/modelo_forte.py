@@ -1,4 +1,4 @@
-"""Pessoas sem nome olhadas pelo modelo forte, o 3.8 Flash (#110, ADR 0005).
+"""Pessoas sem nome olhadas pelo modelo forte, o 3.5 Flash-Lite (#110, #539, ADR 0005).
 
 Roda depois da análise, num passo com a cópia limpa do vídeo e sem internet. As pessoas
 "não identificado" são agrupadas pela descrição (cada pessoa é tratada uma vez, mesmo
@@ -25,6 +25,7 @@ from api.decupagem import FORMATO_DO_TEMPO, Decupagem, Pessoa, Rotulo, em_mm_ss
 from api.entendimento_da_consulta import sanear
 from api.espera import sorteio_uniforme
 from api.gemini import (
+    MODELO,
     MODO_STANDARD,
     AnaliseFalhou,
     Chamada,
@@ -43,7 +44,7 @@ from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import instantes_das_aparicoes
 from api.transcricao import Transcricao
 
-MODELO_FORTE = "gemini-3.8-flash"
+MODELO_FORTE = MODELO  # o Flash-Lite, como a análise (#539)
 ETAPA = "identificacao_modelo_forte"  # o rótulo de custo de cada chamada
 # Pessoas (grupos) enviadas ao modelo forte por vídeo; as de mais tempo na imagem primeiro.
 LIMITE_DE_PESSOAS = 8
