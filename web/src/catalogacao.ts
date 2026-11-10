@@ -125,6 +125,7 @@ const MOTIVOS: Record<string, string> = {
   'fala.texto': 'fala corrigida pelo editor',
   'texto_na_tela.texto': 'texto na tela corrigido pelo editor',
   'pessoa.nao_e': 'pessoa removida desta aparição pelo editor',
+  'pessoa.separar': 'pessoa separada pelo editor',
   'pessoa.acrescentar_aparicao': 'aparição acrescentada pelo editor',
   'pauta.juntar': 'pautas juntadas pelo editor',
   'pauta.dividir': 'pauta dividida pelo editor',

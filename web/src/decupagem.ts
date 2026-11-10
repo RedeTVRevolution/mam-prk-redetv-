@@ -172,6 +172,7 @@ export interface ItemDoHistorico {
     | 'comercial.tipo'
     | 'comercial.acrescentar'
     | 'pessoa.nao_e'
+    | 'pessoa.separar'
     | 'pessoa.aparicao_para_mencao'
     | 'pessoa.mencao_para_aparicao'
     | 'pessoa.acrescentar_aparicao'

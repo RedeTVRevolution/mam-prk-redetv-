@@ -58,6 +58,7 @@ TipoNovo = Literal[
     "comercial.tipo",
     "comercial.acrescentar",
     "pessoa.nao_e",
+    "pessoa.separar",
     "pessoa.aparicao_para_mencao",
     "pessoa.mencao_para_aparicao",
     "pessoa.acrescentar_aparicao",
@@ -87,6 +88,7 @@ MENCOES = ("citada_na_fala", "citada_no_texto")
 # Prefixo do id da pessoa ou do comercial que a revisão cria.
 PREFIXO_ACRESCENTADO = "acr-"
 PREFIXO_NAO_IDENTIFICADO = "nid-"
+PREFIXO_SEPARADA = "sep-"  # a pessoa que a separação devolve (#547)
 NOME_NAO_IDENTIFICADO = "Não identificado"
 # Os tipos do esquema 1.2, a mesma lista que o Gemini recebe.
 TIPOS_DE_COMERCIAL = get_args(Comercial.model_fields["tipo"].annotation)
@@ -1718,6 +1720,75 @@ def _nao_e(resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao) -> No
     )
 
 
+def _chaves_das_origens(pessoa: dict[str, Any]) -> str:
+    """As origens da junção (`antes` da separação): o resto fica em `pares_proibidos`."""
+    return json.dumps(
+        [o["chave"] for o in pessoa.get("origens", [])], ensure_ascii=False
+    )
+
+
+def _separar(resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao) -> None:
+    """Devolve a origem `c.depois` da pessoa juntada: as aparições, a citação nas
+    pautas e o dono dos objetos que eram dela (guardados na junção). As menções
+    ficam com a base (a junção não as guardou por origem)."""
+    origens = pessoa.get("origens", [])
+    origem = next((o for o in origens if o["chave"] == c.depois), None)
+    if origem is None or len(origens) < 2:
+        return
+    novo_id = f"{PREFIXO_SEPARADA}{c.id}"
+    for aparicao in origem["na_imagem"]:
+        if aparicao in pessoa["na_imagem"]:
+            pessoa["na_imagem"].remove(aparicao)
+    restantes = [o for o in origens if o is not origem]
+    pessoa["origens"] = restantes if len(restantes) > 1 else []
+    resultado.setdefault("pessoas", []).append(
+        {
+            "id": novo_id,
+            "nome": origem["nome"],
+            "origem": "revisao",
+            "janela": origem.get("janela"),
+            "origens": [],
+            **{lista: [] for lista in LISTAS},
+            "na_imagem": list(origem["na_imagem"]),
+        }
+    )
+    ainda = {i for o in restantes for i in o["pautas"]}
+    for pauta in _pautas(resultado):
+        if pauta.get("id") in origem["pautas"]:
+            ids = [i for i in pauta.get("pessoas", []) if i != pessoa["id"] or pauta["id"] in ainda]
+            pauta["pessoas"] = list(dict.fromkeys([*ids, novo_id]))
+    for objeto in _objetos(resultado):
+        if objeto.get("id") in origem["objetos"] and objeto.get("pessoa") == pessoa["id"]:
+            objeto["pessoa"] = novo_id
+    resultado.setdefault("_separadas", []).append((pessoa["id"], novo_id))
+
+
+def _origem_ja_separada(c: Correcao, item: dict[str, Any]) -> bool:
+    return not any(o["chave"] == c.depois for o in item.get("origens", []))
+
+
+def _confere_a_origem(decupagem: dict[str, Any], valor: str) -> None:
+    if not any(
+        o["chave"] == valor for p in _pessoas(decupagem) for o in p.get("origens", [])
+    ):
+        raise ItemInexistente(valor)
+
+
+def pares_proibidos(correcoes: Sequence[Correcao]) -> set[frozenset[str]]:
+    """Os pares de pessoas de origem que uma pessoa separou na tela e seguem em vigor:
+    a junção automática do reprocessamento não os une de novo (#547)."""
+    estado = estado_das(list(correcoes))
+    pares: set[frozenset[str]] = set()
+    for c in correcoes:
+        if c.tipo == "pessoa.separar" and estado.em_vigor(c.id):
+            pares |= {
+                frozenset({c.depois, outra})
+                for outra in json.loads(c.antes)
+                if outra != c.depois
+            }
+    return pares
+
+
 def _leva_os_objetos(
     resultado: dict[str, Any],
     pessoa: dict[str, Any],
@@ -1854,6 +1925,29 @@ def _do_mesmo_nome(
     ]
 
 
+def _sem_separadas(
+    membros: list[dict[str, Any]],
+    separadas: set[frozenset[Any]],
+    renomeadas: dict[int, int],
+) -> list[list[dict[str, Any]]]:
+    """Parte os do mesmo nome em grupos sem nenhum par que uma pessoa separou (#547).
+    Renomear os dois à mão para o mesmo nome é juntá-los de propósito (#352)."""
+
+    def separado(a: dict[str, Any], b: dict[str, Any]) -> bool:
+        return frozenset({a.get("id"), b.get("id")}) in separadas and not (
+            id(a) in renomeadas and id(b) in renomeadas
+        )
+
+    grupos: list[list[dict[str, Any]]] = []
+    for m in membros:
+        alvo = next((g for g in grupos if not any(separado(m, x) for x in g)), None)
+        if alvo is None:
+            grupos.append([m])
+        else:
+            alvo.append(m)
+    return grupos
+
+
 def _juntar_as_do_mesmo_nome(
     resultado: dict[str, Any], renomeadas: dict[int, int]
 ) -> None:
@@ -1867,7 +1961,8 @@ def _juntar_as_do_mesmo_nome(
             grupos.setdefault(chave, []).append(p)
     para: dict[Any, Any] = {}
     absorvidas: list[dict[str, Any]] = []
-    for membros in grupos.values():
+    separadas = {frozenset(par) for par in resultado.get("_separadas", [])}
+    for membros in (s for g in grupos.values() for s in _sem_separadas(g, separadas, renomeadas)):
         if len(membros) < 2:
             continue
         base, *outras = membros
@@ -2016,6 +2111,7 @@ def aplicar(
             if entrada.pode_esvaziar:
                 esvaziadas.append(pessoa)
     _juntar_as_do_mesmo_nome(resultado, renomeadas)
+    resultado.pop("_separadas", None)
     # A pessoa que ficou sem nenhuma ocorrência some da decupagem, e das pautas.
     sumidas = [e for e in esvaziadas if not any(e[lista] for lista in LISTAS)]
     if sumidas:
@@ -2420,6 +2516,10 @@ def _canonizar_nao_e(n: NovaCorrecao) -> str:
     if not nao_identificado(n.valor):
         raise ValueError("o valor de pessoa.nao_e é Não identificado")
     return NOME_NAO_IDENTIFICADO
+
+
+def _canonizar_separar(n: NovaCorrecao) -> str:
+    return _sem_controle(n.valor)
 
 
 def _canonizar_aparicao_para_mencao(n: NovaCorrecao) -> str:
@@ -3186,6 +3286,16 @@ TIPOS: dict[str, Tipo] = {
         valor_da_ocorrencia=_na_lista,
         aplicar_na_pessoa=_nao_e,
         pode_esvaziar=True,
+    ),
+    "pessoa.separar": Tipo(
+        canonizar=_canonizar_separar,
+        rotulo="Separar pessoa",
+        legivel=textos.separacao,
+        tipo_do_item="pessoa",
+        valor_do_item=_chaves_das_origens,
+        aplicar_na_pessoa=_separar,
+        ja_traz=_origem_ja_separada,
+        confere=_confere_a_origem,
     ),
     "pessoa.aparicao_para_mencao": Tipo(
         canonizar=_canonizar_aparicao_para_mencao,
