@@ -11,7 +11,6 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "cn";
 import {
   useId,
-  useState,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -279,7 +278,7 @@ export default function PainelDaDiretoria({
   filtros: FiltrosDoPainel;
 }) {
   const api = useApi();
-  const [agrupar, setAgrupar] = useState<PedidoDeAgrupamento>("auto");
+  const agrupar: PedidoDeAgrupamento = filtros.agrupar ?? "auto";
   const definicao = ABAS[aba];
   const idDaAba = useId();
 
@@ -384,7 +383,7 @@ export default function PainelDaDiretoria({
                 disabled={aba === "custo"}
                 value={aba === "custo" ? "mes" : agrupar}
                 onChange={(e) =>
-                  setAgrupar(e.target.value as PedidoDeAgrupamento)
+                  mudar({ agrupar: e.target.value as PedidoDeAgrupamento })
                 }
               >
                 {AGRUPAMENTOS.map((g) => (

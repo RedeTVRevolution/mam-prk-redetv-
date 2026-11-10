@@ -27,13 +27,21 @@ export interface FiltrosDoPainel {
   /** Período, em `AAAA-MM-DD` (dia de São Paulo), inclusive. */
   de: string
   ate: string
+  /** O grupo dos gráficos no endereço; ausente é o automático. */
+  agrupar?: PedidoDeAgrupamento
 }
 
 
 /** Os filtros da query do endereço; data malformada de um link editado à mão sai. */
 export function filtrosDoPainel(busca: string): FiltrosDoPainel {
   const p = new URLSearchParams(busca)
-  return { programa: p.get('programa') ?? '', usuario: p.get('usuario') ?? '', ...periodoDoEndereco(p) }
+  const agrupar = p.get('agrupar') as PedidoDeAgrupamento
+  return {
+    programa: p.get('programa') ?? '',
+    usuario: p.get('usuario') ?? '',
+    ...periodoDoEndereco(p),
+    ...(GRUPOS_PEDIDOS.includes(agrupar) ? { agrupar } : {}),
+  }
 }
 
 /** A query do endereço da tela (o período vai sempre, vazio inclusive, para não cair no padrão). */
@@ -42,6 +50,7 @@ export function filtrosParaEnderecoDoPainel(f: FiltrosDoPainel): string {
   if (f.programa) p.set('programa', f.programa)
   if (f.usuario) p.set('usuario', f.usuario)
   poePeriodoNoEndereco(p, f)
+  if (f.agrupar && f.agrupar !== 'auto') p.set('agrupar', f.agrupar)
   return `?${p}`
 }
 
@@ -73,6 +82,7 @@ export function parametrosDoPainel(
  */
 export type Agrupamento = 'dia' | 'semana' | 'mes' | 'trimestre'
 export type PedidoDeAgrupamento = Agrupamento | 'auto'
+const GRUPOS_PEDIDOS: readonly (string | null)[] = ['auto', 'dia', 'semana', 'mes', 'trimestre']
 export type Agrupado<T> = T & { agrupamento: Agrupamento }
 
 /** Os Jobs em andamento num estado, lidos na hora (`GET /v1/painel/fila`, #420). */

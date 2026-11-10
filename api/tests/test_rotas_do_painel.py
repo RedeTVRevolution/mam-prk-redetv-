@@ -266,6 +266,23 @@ def test_dias_sem_login_no_meio_do_periodo_vem_com_zero() -> None:
     ]
 
 
+def test_o_grafico_comeca_no_dia_inicial_do_filtro_mesmo_sem_dados_nele() -> None:
+    resumos = ResumosEmMemoria([_acesso(3, "bia", 1), _acesso(4, "bia", 2)])
+
+    r = (
+        Mundo(["diretoria"], resumos=resumos)
+        .get("/acessos", desde="2026-11-01", ate="2026-11-04")
+        .json()
+    )
+
+    assert [d["dia"] for d in r["por_dia"]] == [
+        "2026-11-01",
+        "2026-11-02",
+        "2026-11-03",
+        "2026-11-04",
+    ]
+
+
 def test_linha_sem_login_nem_acao_nao_vira_dia_nem_pessoa() -> None:
     # Só o fim do processamento do vídeo do caio caiu no dia 4.
     resumos = ResumosEmMemoria([_acesso(3, "bia", 1), _acesso(4, "caio", 0, False)])

@@ -437,6 +437,7 @@ COLUNAS_DO_CSV_DE_CUSTO = (
     "email",
     "programa",
     "detalhe",
+    "videos",
     "horas_de_video",
     "custo",
 )
@@ -561,6 +562,7 @@ def linhas_do_csv_de_custo(
                 emails.get(c.quem_id, "") if c.quem_tipo == "usuario" else "",
                 c.programa or "",
                 "",
+                c.videos,
                 round(c.horas, 4),
                 centavos(c.custo),
             ]
@@ -569,5 +571,5 @@ def linhas_do_csv_de_custo(
     for s in base.sem_dono:
         por_mes_e_servico[(s.mes, s.servico or "")] += s.custo
     for (mes, servico), custo in sorted(por_mes_e_servico.items()):
-        linhas.append([mes, "sem_dono", "", "", "", servico, "", centavos(custo)])
+        linhas.append([mes, "sem_dono", "", "", "", servico, "", "", centavos(custo)])
     return linhas

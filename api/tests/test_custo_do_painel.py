@@ -478,3 +478,16 @@ def test_sem_periodo_a_consulta_nao_filtra_o_dia() -> None:
 
     assert base == BaseDeCusto([], [], [], frozenset())
     assert transporte.corpos[0]["queryParameters"] == []
+
+
+def test_o_csv_traz_o_numero_de_videos_concluidos_e_vazio_no_custo_sem_dono() -> None:
+    linhas = list(
+        csv.DictReader(io.StringIO(_mundo().get("/custo", formato="csv").text))
+    )
+
+    assert [
+        (r["quem_id"], r["programa"], r["videos"])
+        for r in linhas
+        if r["quem_tipo"] != "sem_dono"
+    ] == [("bia", "Fala", "0"), ("Playout", "Hoje", "1"), ("bia", "Hoje", "2")]
+    assert {r["videos"] for r in linhas if r["quem_tipo"] == "sem_dono"} == {""}
