@@ -29,6 +29,7 @@ from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.entendimento_da_consulta import (
     ConsultaEntendida,
+    IndiceDeNomesCitados,
     entender,
     termo_da_foto,
 )
@@ -383,6 +384,7 @@ class Busca:
     ) -> None:
         self._listas = listas or ListasDaBuscaEmMemoria()
         # A mesma cópia do autocompletar, se a aplicação a passa: uma só recarga para todos.
+        self._nomes_citados = IndiceDeNomesCitados()
         self._copia_do_catalogo = copia_do_catalogo or CopiaCurta(
             catalogo.todas, relogio
         )
@@ -444,6 +446,7 @@ class Busca:
                 texto,
                 catalogo=self._catalogo,
                 todas=self._copia_do_catalogo.itens,
+                indice=self._nomes_citados,
             ),
             ajustes or Ajustes(),
         )
