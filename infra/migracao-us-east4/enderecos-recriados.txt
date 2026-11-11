@@ -23,7 +23,6 @@ module.mam.google_bigquery_dataset_iam_member.grava_momentos
 module.mam.google_bigquery_dataset_iam_member.resumos_de_uso_grava
 module.mam.google_bigquery_table.eventos_de_uso
 module.mam.google_bigquery_table.jobs_do_painel
-module.mam.google_bigquery_table.momentos
 module.mam.google_bigquery_table.momentos_por_ano
 module.mam.google_bigquery_table.revisao_do_painel
 module.mam.google_bigquery_table.taxa_de_correcao_por_dia

@@ -919,8 +919,6 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 # no `make copiar-para-bigquery`, e a web, a cada Correção) é dataEditor só no dataset.
 locals {
   dataset_do_bigquery = "mam_decupagens_${local.marca_da_regiao}"
-  # Tabela dividida por dia (#260), apagada no apply 1 da #567; só o nome fica, até o apply 2.
-  tabela_antiga_de_momentos = "momentos"
   # Tabela em uso (#356): dividida por ano, em `momentos_por_ano.tf`.
   tabela_de_momentos = "momentos_por_ano"
   # Tabela dos Jobs do painel (#454), em `jobs_do_painel.tf`.
@@ -1115,11 +1113,6 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BIGQUERY_TABELA"
         value = local.tabela_de_momentos
-      }
-      # Remover esta variável junto com a tabela antiga, depois da migração.
-      env {
-        name  = "BIGQUERY_TABELA_ANTIGA"
-        value = local.tabela_antiga_de_momentos
       }
       env {
         name  = "BIGQUERY_TABELA_DE_EVENTOS"

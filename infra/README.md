@@ -156,13 +156,13 @@ Para clonar o banco inteiro naquele ponto, `gcloud firestore databases clone --s
 
 ## Momentos por ano no BigQuery (#356)
 
-A tabela de momentos em uso é `momentos_por_ano` (`modulos/mam/momentos_por_ano.tf`), dividida por `YEAR` em `data_de_exibicao`: a por dia chegaria ao teto de 10.000 partições com 25 anos de acervo. Serviços, Jobs e o output `bigquery_tabela` apontam para ela. A antiga `momentos` continua no código, sem uso, até a remoção. Nenhum papel novo (o IAM é por dataset).
+A tabela de momentos em uso é `momentos_por_ano` (`modulos/mam/momentos_por_ano.tf`), dividida por `YEAR` em `data_de_exibicao`: a por dia chegaria ao teto de 10.000 partições com 25 anos de acervo. Serviços, Jobs e o output `bigquery_tabela` apontam para ela. A antiga `momentos` foi apagada em dois applies (#567). Nenhum papel novo (o IAM é por dataset).
 
 Passos humanos depois do `publicar`:
 
 1. `make copiar-para-bigquery` preenche a nova a partir das decupagens. Até rodar, os relatórios do dev saem vazios.
 2. `bq show <dataset>.momentos_por_ano` deve mostrar `YEAR`; o relatório de tempo de tela dá os mesmos números de antes.
-3. Apagar a antiga: pôr `deletion_protection = false` nela, aplicar, tirar do código o recurso `momentos`, o local `tabela_antiga_de_momentos` e o `moved` dele em `infra/main.tf`, e aplicar com `PERMITIR_DESTRUICAO=sim`.
+3. Apagar a antiga (#567, feito): apply 1 com `PERMITIR_DESTRUICAO=sim` tira só a tabela; confira na nuvem que sumiu; apply 2, antes das 06:00Z seguintes, tira a variável do `mam-web` e da purga, o `moved` e o endereço do wizard. Entre os dois, a purga falha e tenta de novo no dia seguinte.
 
 ## Programas no Firestore (#338)
 

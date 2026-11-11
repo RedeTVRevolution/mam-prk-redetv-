@@ -56,15 +56,15 @@ run "plano" {
     error_message = "O output da limpeza dá a idade de cada repositório."
   }
 
-  # Etapa 2 da tabela antiga de momentos, apply 1 (#567): a tabela sumiu do código, mas a
-  # variável dela continua no mam-web e na purga até o apply 2.
+  # Etapa 2 da tabela antiga de momentos, apply 2 (#567): a variável dela saiu do mam-web
+  # e da purga (a tabela, o `moved` e o endereço, o teste em Python confere).
   assert {
     condition = alltrue([
       for env in [
         google_cloud_run_v2_service.web.template[0].containers[0].env,
         google_cloud_run_v2_job.purga.template[0].template[0].containers[0].env,
-      ] : one([for e in env : e.value if e.name == "BIGQUERY_TABELA_ANTIGA"]) == "momentos"
+      ] : length([for e in env : e if e.name == "BIGQUERY_TABELA_ANTIGA"]) == 0
     ])
-    error_message = "No apply 1 a variável da tabela antiga continua no mam-web e na purga."
+    error_message = "A variável da tabela antiga não pode mais existir no mam-web nem na purga."
   }
 }

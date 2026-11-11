@@ -438,11 +438,6 @@ moved {
 }
 
 moved {
-  from = google_bigquery_table.momentos
-  to   = module.mam.google_bigquery_table.momentos
-}
-
-moved {
   from = google_bigquery_dataset_iam_member.grava_momentos
   to   = module.mam.google_bigquery_dataset_iam_member.grava_momentos
 }

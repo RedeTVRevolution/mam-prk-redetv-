@@ -256,21 +256,14 @@ def test_limpeza_unica_resumida_e_idempotente_sem_tocar_nos_jobs_vivos(
     tipos.registrar("j1", {"sapato": 3})
     banco.dados["decisoes_legadas"] = {str(n): {"decisao": "a"} for n in range(6)}
     bq = BigQueryFalso()
-    bq.banco.executemany(
-        "INSERT INTO `projeto-teste.dados.momentos_antigos` VALUES (?)",
-        [(VIDEO_PURGADO,)] * 47,
-    )
-    bq.banco.commit()
     ambiente = AMBIENTE | {"FIRESTORE_COLECAO_DECISOES_DE_SUGESTAO": "decisoes_legadas"}
     limpar(banco, ambiente, bq)  # type: ignore[arg-type]
     assert (
-        capsys.readouterr().out
-        == "momentos antigos: 47; contribuição de tipos: 1; decisões de sugestão: 6\n"
+        capsys.readouterr().out == "contribuição de tipos: 1; decisões de sugestão: 6\n"
     )
     limpar(banco, ambiente, bq)  # type: ignore[arg-type]
     assert (
-        capsys.readouterr().out
-        == "momentos antigos: 0; contribuição de tipos: 0; decisões de sugestão: 0\n"
+        capsys.readouterr().out == "contribuição de tipos: 0; decisões de sugestão: 0\n"
     )
     assert banco.dados[COLECAO_DOS_TIPOS_DE_OBJETO]["sapato"]["total"] == 3
     assert set(banco.dados[COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB]) == {"j1"}
