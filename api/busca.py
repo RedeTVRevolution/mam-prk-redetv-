@@ -364,6 +364,9 @@ class _Trecho:
     tipo: TipoDeRegistro
 
 
+_agora = time.perf_counter  # troca-se nos testes por um relógio controlado
+
+
 class Busca:
     def __init__(
         self,
@@ -415,7 +418,7 @@ class Busca:
         saneamento, índice e ranking; só os filtros de `ajustes` valem. Sem o modelo,
         se ele falhar ou não achar objeto, levanta `BuscaPorImagemIndisponivel`: sem texto
         digitado não há plano B."""
-        inicio = time.perf_counter()
+        inicio = _agora()
         impostos = filtros_do_servidor or Filtros()
         if sistema is not None:
             # O filtro do índice só tira inelegíveis do teto; `_visivel_de` decide.
@@ -490,6 +493,7 @@ class Busca:
 
         carregar_nomes(entendida.pessoas)
         clausulas = self._clausulas(entendida, nome)
+        t_entender = _agora() - inicio
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
         # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
@@ -499,18 +503,21 @@ class Busca:
         # Se uma falha, o erro sobe sem esperar as que ainda nem saíram.
         por_clausula = [_com_facetas(c.consulta, facetado) for c in clausulas]
         planas = [q for qs in por_clausula for q in qs]
-        with ThreadPoolExecutor(
+        # Sem `with`: a saída do bloco esperaria as consultas presas; o limite de cada uma
+        # é o prazo da leitura do índice (15 s, `transporte_http`).
+        pool = ThreadPoolExecutor(
             max_workers=max(1, min(TETO_DE_CONSULTAS_AO_INDICE, len(planas)))
-        ) as pool:
-            try:
-                entregues = iter(list(pool.map(do_indice, planas)))
-            except BaseException:
-                pool.shutdown(wait=False, cancel_futures=True)
-                raise
+        )
+        try:
+            entregues = iter(list(pool.map(do_indice, planas)))
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        t_indice = _agora() - inicio
         brutos = [[next(entregues) for _ in qs] for qs in por_clausula]
         carregar_jobs(
             r.job_id for da_clausula in brutos for lista in da_clausula for r in lista
         )
+        t_jobs = _agora() - inicio
         resultados = [
             [
                 r
@@ -558,12 +565,14 @@ class Busca:
                 )
             except Exception:
                 log.exception("ranking indisponível; fica a ordem do índice")
+        t_ranking = _agora() - inicio
         _conferir(cancelado)
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
         termos = _termos(entendida, nome)
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
         todos = self._videos(trechos, job, termos, ordem, cancelado)
         videos = todos[:limite]
+        t_videos = _agora() - inicio
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
         vazios = [
@@ -576,10 +585,16 @@ class Busca:
             and not (achados_da_clausula if sem_facetas else consultar(c.consulta))
         ]
         log.info(
-            "busca em %d ms: %d vídeos, %d clausulas",
-            (time.perf_counter() - inicio) * 1000,
+            "busca em %d ms: %d vídeos, %d clausulas; desde o início: entender %d ms, "
+            "índice %d ms, jobs %d ms, ranking %d ms, vídeos %d ms",
+            (_agora() - inicio) * 1000,
             len(videos),
             len(clausulas),
+            t_entender * 1000,
+            t_indice * 1000,
+            t_jobs * 1000,
+            t_ranking * 1000,
+            t_videos * 1000,
         )
         agora = self._relogio()
         resultado = ResultadoDaBusca(

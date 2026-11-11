@@ -1140,6 +1140,34 @@ def test_transporte_http_levanta_cota_esgotada_no_429(
         transporte_http()("POST", "x:batchCreate", {})
 
 
+def test_transporte_http_leitura_do_indice_tem_15_s_e_o_resto_60_s(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prazos: dict[str, object] = {}
+
+    class Resposta:
+        status_code = 200
+        ok = True
+        content = b"{}"
+
+        def json(self) -> dict[str, object]:
+            return {}
+
+    class Sessao:
+        def __init__(self, _: object) -> None: ...
+
+        def request(self, _m: str, url: str, **kw: object) -> Resposta:
+            prazos[url.rsplit("/", 1)[-1]] = kw["timeout"]
+            return Resposta()
+
+    monkeypatch.setattr("google.auth.default", lambda scopes: (None, None))
+    monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", Sessao)
+    chamar = transporte_http()
+    chamar("POST", "c/x/dataObjects:batchSearch", {})
+    chamar("POST", "c/x/dataObjects:batchCreate", {})
+    assert prazos == {"dataObjects:batchSearch": 15, "dataObjects:batchCreate": 60}
+
+
 class _OrcamentoFalso:
     """O orçamento do Firestore, em memória: a transação vira um `Lock`."""
 
