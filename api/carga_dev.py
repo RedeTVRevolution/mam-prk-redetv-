@@ -115,8 +115,12 @@ class Medidas:
 
 
 def consultas_da_sonda() -> list[str]:
+    """Os termos da sonda e os pares deles: a busca guarda candidatos e ranking por 60 s
+    em cada instância, e só os ~20 termos cairiam quase sempre no cache, medindo menos
+    que a carga real."""
     with CONSULTAS.open("rb") as f:
-        return [c["texto"] for c in tomllib.load(f)["consulta"]]
+        termos = [c["texto"] for c in tomllib.load(f)["consulta"]]
+    return termos + [f"{a} {b}" for a in termos for b in termos if a != b]
 
 
 class Usuario:
@@ -219,8 +223,14 @@ def rodar(
             parar.wait(min(pausa(), max(0.0, duracao_s - (time.monotonic() - inicio))))
 
     with ThreadPoolExecutor(usuarios) as pool:
-        for f in [pool.submit(um, i) for i in range(usuarios)]:
-            f.result()
+        futuros = [pool.submit(um, i) for i in range(usuarios)]
+        try:
+            for f in futuros:
+                f.result()
+        except BaseException:
+            # Antes de sair do `with`, que espera as threads: senão o Ctrl+C só para no fim.
+            parar.set()
+            raise
 
 
 def main() -> int:

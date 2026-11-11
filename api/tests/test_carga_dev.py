@@ -1,6 +1,9 @@
 import random
 import threading
+import time
 from typing import Any
+
+import pytest
 
 from api.carga_dev import (
     Medidas,
@@ -77,3 +80,27 @@ def test_rodar_encerra_pela_duracao() -> None:
 
 def test_termos_da_sonda() -> None:
     assert "terno" in consultas_da_sonda()
+    # Pares dos termos, para a busca não cair quase sempre no cache de 60 s.
+    assert len(set(consultas_da_sonda())) > 400
+
+
+def test_interrupcao_para_todos_os_usuarios_logo() -> None:
+    def interrompe(
+        metodo: str, caminho: str, params: dict[str, Any] | None, corpo: Any
+    ) -> tuple[int, Any]:
+        raise KeyboardInterrupt
+
+    parar = threading.Event()
+    inicio = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        rodar(
+            [interrompe, transporte_falso([])],
+            4,
+            60,
+            0,
+            lambda: 0.01,
+            ["x"],
+            Medidas(),
+            parar,
+        )
+    assert parar.is_set() and time.monotonic() - inicio < 5
