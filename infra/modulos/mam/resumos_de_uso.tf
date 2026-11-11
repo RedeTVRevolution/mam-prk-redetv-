@@ -51,7 +51,7 @@ resource "google_bigquery_data_transfer_config" "resumos_de_uso" {
   display_name         = "mam-resumos-de-uso"
   location             = var.regiao
   data_source_id       = "scheduled_query"
-  schedule             = "every 10 minutes"
+  schedule             = "every 1 hours"
   service_account_name = google_service_account.resumos_de_uso.email
   params = {
     query = templatefile("${path.module}/resumos_de_uso.sql", {
