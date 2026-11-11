@@ -33,11 +33,11 @@ from api.busca import (
     VideoGuardado,
     filtros_do_servidor,
 )
+from api.cache_curto import CacheCurto
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import (
     TEMPO_DA_CONSULTA_S,
 )
-from api.cache_curto import CacheCurto
 from api.eventos_de_uso import Eventos, EventosEmMemoria
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
@@ -727,7 +727,9 @@ def test_com_faceta_as_mencoes_saem_juntas_com_a_consulta_sem_facetas() -> None:
     assert resultado.sem_aparicoes == []
 
 
-def test_com_faceta_sem_aparicao_so_se_a_consulta_sem_facetas_tambem_vem_vazia() -> None:
+def test_com_faceta_sem_aparicao_so_se_a_consulta_sem_facetas_tambem_vem_vazia() -> (
+    None
+):
     m = _mundo_sem_aparicao()
     resultado = buscar(
         m,

@@ -961,7 +961,9 @@ class Busca:
         )
 
 
-def _consultas_das_mencoes(quem: str, e: ConsultaEntendida) -> tuple[Consulta, Consulta]:
+def _consultas_das_mencoes(
+    quem: str, e: ConsultaEntendida
+) -> tuple[Consulta, Consulta]:
     """O nome na fala e no texto na tela, no programa e período da busca, sem a frase."""
     base = _base(e)
     texto = normalizar(quem)
