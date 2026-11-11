@@ -350,12 +350,12 @@ def test_com_uma_consulta_lenta_a_busca_nao_espera_o_executor_terminar() -> None
             solta.wait(timeout=30)
             return super().buscar(consulta)
 
-    erros: list[BaseException] = []
+    erros: list[RuntimeError] = []
 
     def rodar() -> None:
         try:
             buscar(_mundo_de_varias_clausulas(IndiceTravado()), "Sabrina Sato")
-        except BaseException as e:
+        except RuntimeError as e:
             erros.append(e)
 
     fio = threading.Thread(target=rodar)
