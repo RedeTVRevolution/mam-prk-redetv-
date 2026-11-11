@@ -73,7 +73,7 @@ test('Fundir com…: escolhe o destino, vê o efeito e Enter funde com o motivo;
 
   await usuario.type(screen.getByRole('combobox', { name: 'Fundir com' }), 'leão')
   await usuario.click(await screen.findByRole('option', { name: 'Leão Lobo (jurado)' }))
-  expect(await screen.findByText(/Leo Lobo passa a ser Leão Lobo em 3 vídeos\. As fotos de referência de Leo Lobo serão apagadas\./)).toBeTruthy()
+  expect(await screen.findByText(/Leo Lobo passa a ser Leão Lobo em 3 vídeos\. As fotos de referência de Leo Lobo serão apagadas\. A fusão não pode ser desfeita\. Enter confirma · Esc cancela\./)).toBeTruthy()
 
   await usuario.keyboard('{Enter}')
 

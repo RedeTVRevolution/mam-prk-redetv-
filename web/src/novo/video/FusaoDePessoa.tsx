@@ -11,7 +11,7 @@ const videos = (n: number) => `${n} ${n === 1 ? 'vídeo' : 'vídeos'}`
 /** O efeito da fusão, na frase que a pessoa lê antes de confirmar. */
 function efeitoDaFusao(i: ImpactoDaFusao): string {
   const fotos = i.fotos_apagadas > 0 ? ` As fotos de referência de ${i.origem_nome} serão apagadas.` : ''
-  return `${i.origem_nome} passa a ser ${i.destino_nome} em ${videos(i.videos)}.${fotos} Enter confirma · Esc cancela.`
+  return `${i.origem_nome} passa a ser ${i.destino_nome} em ${videos(i.videos)}.${fotos} A fusão não pode ser desfeita. Enter confirma · Esc cancela.`
 }
 
 /**
