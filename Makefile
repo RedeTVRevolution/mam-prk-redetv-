@@ -1,4 +1,4 @@
-.PHONY: preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: gravar-jobs-falsos medir-jobs-falsos apagar-jobs-falsos preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -210,6 +210,24 @@ reindexar:
 # Idempotente e retomável (só escreve o que falta), dentro da cota de escrita (#460).
 preencher-filtros-da-busca:
 	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.preencher_filtros_da_busca
+
+# Teste do Firestore em escala (#542), só no dev: grava Jobs falsos (id `teste_NNNNNNN`), mede as listas
+# do acervo com filtros combinados e apaga tudo. Veja o docstring de api/firestore_em_escala.py.
+#   make gravar-jobs-falsos N=100000 ; make medir-jobs-falsos ; make apagar-jobs-falsos
+ESCALA = set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	FIRESTORE_BANCO="$${FIRESTORE_BANCO:-$$(terraform -chdir=infra output -raw banco_firestore)}" \
+	LISTAGEM_POR_MES="$${LISTAGEM_POR_MES:-true}" \
+	uv run --locked python -m api.firestore_em_escala
+
+gravar-jobs-falsos:
+	$(ESCALA) gravar $${N:?use N=<quantos>}
+
+medir-jobs-falsos:
+	$(ESCALA) medir
+
+apagar-jobs-falsos:
+	$(ESCALA) apagar
 
 # Agrupa os planos recorrentes (mesma câmera, mesmo enquadramento) do acervo antigo (#546):
 # make preencher-planos-recorrentes [GRAVAR=1]. Usa só os quadros-chave e a Decupagem do bucket, sem
