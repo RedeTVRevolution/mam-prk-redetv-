@@ -105,3 +105,40 @@ def test_decupagem_ilegivel_grava_a_decupagem_e_deixa_a_contagem_de_fora() -> No
     DecupagensStorage(cliente, "aceitos", "decupagens").gravar_decupagem("j1", "[]")
 
     assert list(cliente.gravados) == ["decupagens/j1.json"]
+
+
+def _sem(itens: ItensDaDecupagem, *tipos: str) -> ItensDaDecupagem:
+    return ItensDaDecupagem(
+        versao_do_modelo=itens.versao_do_modelo,
+        versao_pipeline=itens.versao_pipeline,
+        itens={t: n for t, n in itens.itens.items() if t not in tipos},
+    )
+
+
+def test_tipo_gravado_devolve_a_propria_contagem() -> None:
+    itens = contar_itens(_conteudo(3, 2))
+
+    assert itens.itens_do_tipo("pessoa.renomear") == 3
+    assert itens.itens_do_tipo("pauta.titulo") == 2
+
+
+def test_tipo_novo_usa_a_contagem_de_um_irmao_do_mesmo_tipo_de_item() -> None:
+    itens = _sem(contar_itens(_conteudo(3, 2)), "pessoa.renomear")
+
+    assert itens.itens_do_tipo("pessoa.renomear") == 3
+
+
+def test_tipo_novo_sem_irmao_continua_um_erro() -> None:
+    itens = _sem(contar_itens(_conteudo(3, 2)), "pauta.titulo", "pauta.resumo")
+    itens = _sem(
+        itens, "pauta.tom", "pauta.acrescentar", "pauta.juntar", "pauta.dividir"
+    )
+
+    with pytest.raises(KeyError):
+        itens.itens_do_tipo("pauta.titulo")
+
+
+def test_irmao_so_vale_para_o_mesmo_tipo_de_item() -> None:
+    itens = _sem(contar_itens(_conteudo(3, 2)), "pauta.titulo")
+
+    assert itens.itens_do_tipo("pauta.titulo") == 2

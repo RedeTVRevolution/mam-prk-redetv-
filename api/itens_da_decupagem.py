@@ -33,6 +33,18 @@ class ItensDaDecupagem:
     versao_pipeline: str | None
     itens: dict[str, int]
 
+    def itens_do_tipo(self, tipo: str) -> int:
+        """A contagem do tipo. Se o tipo falta na contagem gravada (um tipo novo, #554), vale a
+        de um tipo irmão, com o mesmo tipo de item. Sem irmão, `KeyError`: um 0 tiraria o tipo
+        do denominador sem aviso."""
+        if tipo in self.itens:
+            return self.itens[tipo]
+        do_item = TIPOS[tipo].tipo_do_item
+        for irmao, n in self.itens.items():
+            if irmao in TIPOS and TIPOS[irmao].tipo_do_item == do_item:
+                return n
+        raise KeyError(tipo)
+
     def em_json(self) -> str:
         return json.dumps(
             {

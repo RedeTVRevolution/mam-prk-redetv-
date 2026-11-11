@@ -11,11 +11,17 @@ locals {
 }
 
 resource "google_pubsub_topic" "eventos_do_job" {
+  message_storage_policy {
+    allowed_persistence_regions = [var.regiao]
+  }
   name       = "mam-eventos-do-job"
   depends_on = [google_project_service.apis]
 }
 
 resource "google_pubsub_topic" "eventos_mortos" {
+  message_storage_policy {
+    allowed_persistence_regions = [var.regiao]
+  }
   name       = "mam-eventos-do-job-mortos"
   depends_on = [google_project_service.apis]
 }
