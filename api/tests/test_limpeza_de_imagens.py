@@ -12,7 +12,7 @@ AGORA = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 REPO = "us-east4-docker.pkg.dev/p/mam-gpu"
 REGRAS = Regras(
     manter_ultimas=3,
-    idade_minima_s=14 * 86400,
+    idade_minima_s={"mam": 14 * 86400, "mam-gpu": 7 * 86400},
     pacotes_do_cache=("cache",),
     tags_protegidas=("em-uso", "volta"),
     tag_da_volta="volta",
@@ -22,7 +22,7 @@ SAIDA_DO_TERRAFORM = {
     "limpeza_de_imagens": {
         "value": {
             "manter_ultimas": 3,
-            "idade_minima_s": 14 * 86400,
+            "idade_minima_s": {"mam": 14 * 86400, "mam-gpu": 7 * 86400},
             "pacotes_do_cache": ["cache"],
             "tags_protegidas": ["em-uso", "volta"],
             "tag_da_volta": "volta",
@@ -68,7 +68,7 @@ def test_sem_a_tag_a_mesma_volta_seria_apagada_e_a_conferencia_acusa() -> None:
 
 
 def test_a_tag_da_volta_que_nenhuma_regra_guarda_e_acusada() -> None:
-    regras = Regras(3, 14 * 86400, ("cache",), ("em-uso",), "volta")
+    regras = Regras(3, {"mam-gpu": 14 * 86400}, ("cache",), ("em-uso",), "volta")
     s = simular(_versoes(), regras, AGORA)
     assert [v.versao.digest for v in s.em_risco] == ["sha256:volta"]
 
@@ -202,6 +202,20 @@ def test_main_sem_imagem_em_uso_no_cloud_run_sai_com_2(
 
 
 def test_o_motivo_diz_a_idade_das_regras() -> None:
-    regras = Regras(3, 7 * 86400, ("cache",), ("em-uso", "volta"), "volta")
+    regras = Regras(3, {"mam-gpu": 7 * 86400}, ("cache",), ("em-uso", "volta"), "volta")
     s = simular(_versoes(), regras, AGORA)
     assert _veredito(s, "sha256:velha").motivo.endswith("mais de 7 dias")
+
+
+def test_cada_repositorio_tem_a_sua_idade() -> None:
+    """A 4ª versão, fora das 3 mais recentes: com 9 dias sai na GPU (7) e fica no comum (14)."""
+    comum = "us-east4-docker.pkg.dev/p/mam"
+    idades = (1, 2, 3, 9, 20)
+    gpu = [_versao(f"sha256:g{d}", d) for d in idades]
+    web = [Versao(comum, "web", f"sha256:w{d}", AGORA - timedelta(days=d)) for d in idades]
+    s = simular([*gpu, *web], REGRAS, AGORA)
+    assert _veredito(s, "sha256:g9").apagar
+    assert _veredito(s, "sha256:g9").motivo.endswith("mais de 7 dias")
+    assert not _veredito(s, "sha256:w9").apagar
+    assert _veredito(s, "sha256:w20").apagar
+    assert _veredito(s, "sha256:w20").motivo.endswith("mais de 14 dias")
