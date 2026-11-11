@@ -594,6 +594,11 @@ export function editorDeSeparacao(pessoa: Pessoa): Editor {
   )
 }
 
+/** O início e o fim digitados, em ms; `null` no que não está no formato. */
+function lerIntervalo(v: Record<string, Valor>): { inicio: number | null; fim: number | null } {
+  return { inicio: lerTempo(texto(v.inicio)), fim: lerTempo(texto(v.fim)) }
+}
+
 /** O editor de uma aparição nova da pessoa: começa no momento atual e dura 5 s. */
 export function editorDeNovaAparicao(
   pessoa: { id: string; nome: string },
@@ -609,8 +614,7 @@ export function editorDeNovaAparicao(
     ['pessoa.acrescentar_aparicao'],
     (v) => {
       if (editor.motivoDaRecusa?.(v)) return null
-      const inicio = lerTempo(texto(v.inicio)) as number
-      const fim = lerTempo(texto(v.fim)) as number
+      const { inicio, fim } = lerIntervalo(v)
       return [
         {
           tipo: 'pessoa.acrescentar_aparicao',
@@ -621,8 +625,7 @@ export function editorDeNovaAparicao(
     },
   )
   editor.motivoDaRecusa = (v) => {
-    const inicio = lerTempo(texto(v.inicio))
-    const fim = lerTempo(texto(v.fim))
+    const { inicio, fim } = lerIntervalo(v)
     if (!texto(v.evidencia)) return 'Falta a evidência: descreva o que mostra a pessoa na imagem.'
     if (inicio === null || fim === null) return 'Tempo fora do formato MM:SS ou H:MM:SS.'
     if (inicio >= fim) return 'O início tem de ser antes do fim.'
