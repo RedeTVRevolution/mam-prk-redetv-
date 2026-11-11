@@ -1152,8 +1152,11 @@ def transporte_http() -> Transporte:
     ) -> dict[str, Any]:
         # `caminho` é relativo à URL base, salvo o embedding da consulta (outro serviço).
         url = caminho if caminho.startswith("https://") else f"{URL_BASE}/{caminho}"
+        # A leitura do índice tem prazo próprio: a rota da busca já devolve 504 em 15 s, e
+        # sem isso a chamada presa segura o worker por até 60 s. Escrita e purga ficam em 60 s.
+        prazo = 15 if caminho.endswith(":batchSearch") else 60
         resposta = sessao.request(  # type: ignore[no-untyped-call]
-            metodo, url, json=corpo, timeout=60
+            metodo, url, json=corpo, timeout=prazo
         )
         if resposta.status_code == 409:
             raise JaExiste(caminho)
