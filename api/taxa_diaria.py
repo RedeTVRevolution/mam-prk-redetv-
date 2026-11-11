@@ -50,7 +50,7 @@ from api.nuvem import (
 )
 from api.reprocessar_versao import LeitorDeDecupagem
 from api.revisao import RepositorioDeRevisao
-from api.taxa_de_correcao import _modelo_da_decupagem, calcular_com_itens
+from api.taxa_de_correcao import calcular_com_itens, modelo_da_decupagem
 
 log = logging.getLogger(__name__)
 
@@ -388,7 +388,7 @@ def main(argumentos: list[str]) -> int:
         RepositorioDeCorrecoesFirestore(banco),
         RepositorioDeRevisaoFirestore(banco),
         TabelaDaTaxaBigQuery(config, transporte_http(config.projeto)),
-        lambda job_id: _modelo_da_decupagem(decupagens, job_id),
+        lambda job_id: modelo_da_decupagem(decupagens, job_id),
     )
     print(f"{gravadas} linhas gravadas em {quantos} dias")
     return 0

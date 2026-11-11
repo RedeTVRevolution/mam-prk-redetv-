@@ -104,7 +104,7 @@ def _itens_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> ItensDaDe
     return contar_itens(b"".join(decupagens.abrir_decupagem(job_id)))
 
 
-def _modelo_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> dict[str, Any]:
+def modelo_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> dict[str, Any]:
     return json.loads(b"".join(decupagens.abrir_decupagem(job_id)))  # type: ignore[no-any-return]
 
 
@@ -126,7 +126,7 @@ def calcular(
         desde,
         ate,
         programa,
-        lambda job_id: _modelo_da_decupagem(decupagens, job_id),
+        lambda job_id: modelo_da_decupagem(decupagens, job_id),
     )
     somas: dict[tuple[str | None, str | None, str], tuple[int, int]] = {}
     for _, linha in por_job:
@@ -184,20 +184,23 @@ def calcular_com_itens(
             continue
         try:
             contagem = itens_do_job(job.id)
+        except (ServicoIndisponivel, ValueError, KeyError, TypeError):
+            log.warning("decupagem de %s não lida: fora da taxa", job.id)
+            continue
+        try:
+            # `ServicoIndisponivel` da leitura do JSON escapa: a tabela não troca o dado
+            # certo por um incompleto, e a próxima execução tenta de novo.
+            reconciliadas = _reconciliadas(
+                job.id, feitas, contagem.versao_do_modelo, desde, ate, modelo_do_job
+            )
             vigor = _em_vigor_no_periodo(
-                feitas,
-                contagem.versao_do_modelo,
-                desde,
-                ate,
-                _reconciliadas(
-                    job.id, feitas, contagem.versao_do_modelo, modelo_do_job
-                ),
+                feitas, contagem.versao_do_modelo, desde, ate, reconciliadas
             )
             do_job = {
                 tipo: (sum(c.tipo == tipo for c in vigor), contagem.itens_do_tipo(tipo))
                 for tipo in CORRIGIVEIS
             }
-        except (ServicoIndisponivel, ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError):
             log.warning("decupagem de %s não lida: fora da taxa", job.id)
             continue
         for tipo, (n, itens) in do_job.items():
@@ -221,20 +224,20 @@ def _reconciliadas(
     job_id: str,
     todas: list[Correcao],
     versao: str,
+    desde: datetime | None,
+    ate: datetime | None,
     modelo_do_job: Callable[[str], dict[str, Any]] | None,
 ) -> set[str]:
     """Os ids das feitas sobre outro JSON que a `reconciliar` (a regra que as aplica no
-    vídeo) casa com o atual. Só lê a decupagem se há alguma de outra versão."""
+    vídeo) casa com o atual. Só lê a decupagem se alguma de outra versão pode contar:
+    casável (em vigor e na fila, como a `reconciliar` a vê) e que passou a valer no período."""
+    estado = estado_das(todas)
+    a_valer = _em_vigor_no_periodo(todas, versao, desde, ate, {c.id for c in todas})
     if modelo_do_job is None or not any(
-        c.tipo in CORRIGIVEIS and c.ancora.versao != versao for c in todas
+        c.ancora.versao != versao and estado.casavel(c.id) for c in a_valer
     ):
         return set()
-    try:
-        return {c.id for c in reconciliar(modelo_do_job(job_id), versao, todas).casadas}
-    except (ServicoIndisponivel, ValueError, KeyError, TypeError):
-        # A contagem leu; a decupagem inteira não: só as de outra versão ficam fora.
-        log.warning("decupagem de %s não reconciliada: sem as de outra versão", job_id)
-        return set()
+    return {c.id for c in reconciliar(modelo_do_job(job_id), versao, todas).casadas}
 
 
 def _em_vigor_no_periodo(
