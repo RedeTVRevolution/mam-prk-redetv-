@@ -258,7 +258,11 @@ def test_sem_os_indices_ann_buscar_calcula_o_vetor_da_consulta_na_regiao_da_busc
     }
     # Dois pedidos (#568): o do texto e o do significado, com o vetor da consulta.
     assert all(c.endswith("/dataObjects:batchSearch") for _, c, _ in buscas)
-    corpos = [b["searches"][0] for _, _, b in buscas if b is not None]
+    # Os pedidos vão em threads: a ordem de chegada não é fixa.
+    corpos = sorted(
+        (b["searches"][0] for _, _, b in buscas if b is not None),
+        key=lambda c: next(iter(c)),
+    )
     assert [next(iter(c)) for c in corpos] == ["textSearch", "vectorSearch"]
     assert corpos[1]["vectorSearch"]["vector"] == {"values": [0.5] * 256}
 
@@ -809,7 +813,10 @@ def test_so_do_significado_volta_o_que_esta_perto_e_tem_palavras_bastantes() -> 
     )
     # O achado pelo texto escapa do corte (a distância dele é a de outra busca).
     assert [r.id for r in adaptador.buscar(consulta)] == ["pelo-texto", "perto"]
-    [do_texto, do_significado] = corpos
+    # Os pedidos vão em threads: a ordem de chegada não é fixa.
+    [do_texto, do_significado] = sorted(
+        corpos, key=lambda c: "textSearch" not in c["searches"][0]
+    )
     # Só o pedido do significado pede os sinais; nenhum leva `combine`.
     assert "metadataOptions" not in do_texto
     assert do_significado["metadataOptions"] == {"searchSignalsEnabled": True}
