@@ -246,11 +246,11 @@ def test_a_consulta_vai_em_standard_sem_os_cabecalhos_do_flex() -> None:
     assert sessao.pedidos[0]["headers"] == {}
 
 
-def test_ranking_usa_o_prazo_de_1_s_e_o_modelo_fixado() -> None:
+def test_ranking_usa_o_prazo_de_2_s_e_o_modelo_fixado() -> None:
     ranking, sessao = _ranking(_ordem("a"))
     ranking.reordenar("q", [_r("a", texto="oi")])
-    assert TEMPO_DA_RANKING_S == 1.0
-    assert sessao.pedidos[0]["timeout"] == 1.0
+    assert TEMPO_DA_RANKING_S == 2.0
+    assert sessao.pedidos[0]["timeout"] == 2.0
     assert sessao.pedidos[0]["json"]["model"] == "semantic-ranker-default-005"
     assert MODELO_DA_RANKING == "semantic-ranker-default-005"
 
@@ -290,3 +290,13 @@ def test_o_aquecimento_da_ranking_so_existe_com_a_configuracao() -> None:
     assert [u for u, _ in sessao.urls] == ["https://discoveryengine.googleapis.com/"]
     sem = adaptadores_da_busca({"GCP_PROJECT_ID": "proj"}, lambda: SessaoFalsa())
     assert sem.aquecer is None
+
+
+def test_com_pool_guarda_as_conexoes_pedidas_por_host() -> None:
+    import requests
+
+    from api.busca_na_nuvem import com_pool
+
+    sessao = com_pool(requests.Session(), 24)
+    adaptador = sessao.get_adapter("https://discoveryengine.googleapis.com/")
+    assert adaptador._pool_maxsize == 24

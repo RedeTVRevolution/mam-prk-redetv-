@@ -9,6 +9,7 @@ from typing import Any, cast
 import google.auth
 import google.auth.transport.requests
 import requests
+from requests.adapters import HTTPAdapter
 
 from api.busca import Ranking
 from api.gemini import ErroHttp, SessaoHttp, Transporte, TransporteVertex
@@ -17,16 +18,25 @@ from api.indice_da_busca import Registro
 log = logging.getLogger(__name__)
 
 # Passado o prazo, a busca segue na ordem do índice. Vira o `timeout` do `requests` (conexão e
-# leitura, 1 s cada): a resposta da Ranking é um JSON pequeno que chega de uma vez, então a
+# leitura, 2 s cada): a resposta da Ranking é um JSON pequeno que chega de uma vez, então a
 # leitura é, na prática, o tempo até a resposta; uma conexão quente (aquecida na partida)
-# não paga o TLS.
-TEMPO_DA_RANKING_S = 1.0
+# não paga o TLS. Medido em 11/11/2026: p50 de ~400 ms e p90 de ~1,1 s, com cauda acima de
+# 1 s em ~12% das chamadas; 1 s jogava fora o ranking dessas buscas, e 2 s salva a maioria.
+TEMPO_DA_RANKING_S = 2.0
 # O limite de registros por pedido da Ranking API (RankRequest.records: no máximo 200);
 # a busca funde várias cláusulas de até 100 registros, então passar disso é comum.
 REGISTROS_POR_PEDIDO = 200
 MODELO_DA_RANKING = (
     "semantic-ranker-default-005"  # o que o @latest apontava em 11/11/2026
 )
+
+
+def com_pool(sessao: Any, conexoes: int) -> Any:
+    """Deixa a sessão guardar até `conexoes` conexões por host. O pool padrão do `requests`
+    guarda 10: com mais pedidos simultâneos, cada conexão a mais é aberta e descartada, e
+    uma conexão nova custa ~800 ms (TLS), medido em 11/11/2026."""
+    sessao.mount("https://", HTTPAdapter(pool_maxsize=conexoes))
+    return sessao
 
 
 def _postar(
