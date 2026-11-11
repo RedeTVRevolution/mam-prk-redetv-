@@ -727,6 +727,43 @@ def test_com_faceta_as_mencoes_saem_juntas_com_a_consulta_sem_facetas() -> None:
     assert resultado.sem_aparicoes == []
 
 
+class _IndiceSemMencoes(IndiceEspia):
+    def buscar(self, consulta: Consulta) -> list[Registro]:
+        if consulta.filtros.tipo in ("fala", "texto_na_tela") and consulta.texto:
+            raise RuntimeError("índice fora do ar para menções")
+        return super().buscar(consulta)
+
+
+def test_falha_nas_mencoes_que_nao_fazem_falta_nao_derruba_a_busca() -> None:
+    # Com faceta, as menções saem antes de saber se a pessoa aparece; se aparece, o erro
+    # delas não conta, como antes do #568, quando nem eram consultadas.
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]))
+    m.indice = _IndiceSemMencoes()
+    m.com(
+        job("j1"),
+        Registro(
+            id="p1",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            pessoas=[m.sabrina],
+        ),
+    )
+    resultado = buscar(
+        m, "Sabrina Sato", ajustes=Ajustes(evidencias=("imagem",), tipo="fala")
+    )
+    assert resultado.sem_aparicoes == []
+
+
+def test_falha_nas_mencoes_que_fazem_falta_continua_derrubando_a_busca() -> None:
+    m = _mundo_sem_aparicao(_IndiceSemMencoes())
+    with pytest.raises(RuntimeError, match="menções"):
+        buscar(
+            m, "Sabrina Sato", ajustes=Ajustes(evidencias=("imagem",), tipo="objeto")
+        )
+
+
 def test_com_faceta_sem_aparicao_so_se_a_consulta_sem_facetas_tambem_vem_vazia() -> (
     None
 ):

@@ -628,8 +628,27 @@ class Busca:
             pool = ThreadPoolExecutor(
                 max_workers=max(1, min(TETO_DE_CONSULTAS_AO_INDICE, len(pedidas)))
             )
+
+            def adiantada(q: Consulta) -> list[Registro] | None:
+                # Pode nem fazer falta: o erro só conta se `consultar` precisar dela e
+                # repetir a ida ao índice, como antes do #568.
+                try:
+                    return do_indice(q)
+                except BuscaCancelada:
+                    raise
+                except Exception:
+                    log.warning(
+                        "consulta adiantada falhou; refeita se fizer falta",
+                        exc_info=True,
+                    )
+                    return None
+
             try:
-                prontas.extend(zip(pedidas, pool.map(do_indice, pedidas), strict=True))
+                prontas.extend(
+                    (q, a)
+                    for q, a in zip(pedidas, pool.map(adiantada, pedidas), strict=True)
+                    if a is not None
+                )
             finally:
                 pool.shutdown(wait=False, cancel_futures=True)
         vazios = [
