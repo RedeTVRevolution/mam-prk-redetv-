@@ -101,11 +101,12 @@ def test_o_mesmo_instante_pedido_por_plano_aparicao_e_objeto_chama_o_ffmpeg_uma_
     }
 
 
-def test_escuro_e_ausente_tambem_sao_lembrados_e_a_saida_e_a_mesma(
+def test_escuro_e_lembrado_a_falha_nao_e_e_a_saida_e_a_mesma(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # Meio em 3 s: escuro; +1 s (4 s) ausente; -1 s (2 s) claro. Sem cache, cada um dos
-    # três momentos pediria 3 s, 4 s e 2 s: nove chamadas.
+    # Meio em 3 s: escuro; +1 s (4 s) ausente; -1 s (2 s) claro. O escuro e o claro entram no
+    # cache; a falha não (pode ser timeout passageiro, #548): o 4 s é pedido de novo por
+    # cada um dos dois momentos seguintes, em vez das seis chamadas a mais sem cache.
     pedidos = _com_ffmpeg_falso(monkeypatch, escuros={3_000}, ausentes={4_000})
     gravados: dict[str, bytes] = {}
 
@@ -113,7 +114,7 @@ def test_escuro_e_ausente_tambem_sao_lembrados_e_a_saida_e_a_mesma(
         tmp_path / "v.mp4", _decupagem_com_meio_em(3_000, 2_000), gravados.__setitem__
     )
 
-    assert pedidos == [3_000, 4_000, 2_000]
+    assert pedidos == [3_000, 4_000, 2_000, 4_000, 4_000]
     assert pronta.planos[0].quadro == "quadros/plano-0.jpg"
     assert pronta.pessoas[0].na_imagem[0].quadro == "quadros/aparicao-0-0.jpg"
     assert pronta.objetos[0].quadro == "quadros/objeto-0.jpg"
