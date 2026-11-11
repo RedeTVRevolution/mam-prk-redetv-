@@ -39,7 +39,7 @@ resource "google_bigquery_data_transfer_config" "jobs_do_painel" {
   display_name         = "mam-jobs-do-painel"
   location             = var.regiao
   data_source_id       = "scheduled_query"
-  schedule             = "every 10 minutes"
+  schedule             = "every 1 hours"
   service_account_name = google_service_account.resumos_de_uso.email
   params = {
     query = templatefile("${path.module}/jobs_do_painel.sql", {
