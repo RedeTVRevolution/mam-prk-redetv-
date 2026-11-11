@@ -2251,3 +2251,28 @@ def test_nome_inteiro_do_catalogo_na_frase_gera_imagem_fala_e_gc() -> None:
         if c.filtros.tipo != "plano"
     )
     assert m.transporte.chamadas == []
+
+
+def test_leitura_do_indice_que_estoura_o_prazo_do_transporte_responde_504(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O prazo de 15 s do `batchSearch` levanta `ReadTimeout` do requests: vira 504, não 500 (#560).
+    import requests
+
+    from api.agent_retrieval import AgentRetrieval, transporte_http
+    from api.tests.test_agent_retrieval import SEM_INDICES
+
+    class Sessao:
+        def __init__(self, _: object) -> None: ...
+
+        def request(self, *_: object, **__: object) -> None:
+            raise requests.exceptions.ReadTimeout("batchSearch")
+
+    monkeypatch.setattr("google.auth.default", lambda scopes: (None, None))
+    monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", Sessao)
+    indice: Any = AgentRetrieval(SEM_INDICES, transporte_http())
+    c, _ = cliente(["consulta"], pedido(texto_livre="vestido"), indice=indice)
+
+    r = c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
+
+    assert r.status_code == 504
