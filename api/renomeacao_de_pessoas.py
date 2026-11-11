@@ -160,6 +160,7 @@ def criar_rotas_da_renomeacao(
         apelidos = list(pessoa.apelidos)
         if normalizar(pessoa.nome) not in {normalizar(a) for a in apelidos}:
             apelidos.append(pessoa.nome)
+        apelidos = [a for a in apelidos if normalizar(a) != normalizar(novo)]
         pessoas.corrigir(pessoa.id, nome=novo, apelidos=apelidos)
         pessoas.definir_renomeacao(
             pessoa.id,

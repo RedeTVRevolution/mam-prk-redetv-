@@ -95,6 +95,8 @@ export interface Editor {
   pedidos(valores: Record<string, Valor>, exatos?: Intervalo | null): Pedido[] | null
   /** O intervalo do item, quando os tempos dele se corrigem (as alças da linha do tempo). */
   intervalo?: Intervalo
+  /** Por que `pedidos` devolveu `null`, em frase para a tela; sem ela, vale a mensagem padrão. */
+  motivoDaRecusa?(valores: Record<string, Valor>): string | null
   /** O motivo do gesto, quando o editor não escreve um. */
   motivo(pedidos: Pedido[]): string
   /** Todos os tipos de correção que este editor sabe gerar. */
@@ -598,17 +600,17 @@ export function editorDeNovaAparicao(
   atualMs: number,
   c: CatalogoDeCorrecoes,
 ): Editor {
-  return montar(
+  const editor = montar(
     [
       ...camposDeTempo(),
-      { chave: 'evidencia', rotulo: 'Evidência na imagem', tipo: 'texto', limite: c.limites.nome },
+      { chave: 'evidencia', rotulo: 'Evidência na imagem (obrigatória)', tipo: 'texto', limite: c.limites.nome },
     ],
     { inicio: relogio(atualMs), fim: relogio(atualMs + 5000), evidencia: '' },
     ['pessoa.acrescentar_aparicao'],
     (v) => {
-      const inicio = lerTempo(texto(v.inicio))
-      const fim = lerTempo(texto(v.fim))
-      if (inicio === null || fim === null || inicio >= fim || !texto(v.evidencia)) return null
+      if (editor.motivoDaRecusa?.(v)) return null
+      const inicio = lerTempo(texto(v.inicio)) as number
+      const fim = lerTempo(texto(v.fim)) as number
       return [
         {
           tipo: 'pessoa.acrescentar_aparicao',
@@ -618,6 +620,15 @@ export function editorDeNovaAparicao(
       ]
     },
   )
+  editor.motivoDaRecusa = (v) => {
+    const inicio = lerTempo(texto(v.inicio))
+    const fim = lerTempo(texto(v.fim))
+    if (!texto(v.evidencia)) return 'Falta a evidência: descreva o que mostra a pessoa na imagem.'
+    if (inicio === null || fim === null) return 'Tempo fora do formato MM:SS ou H:MM:SS.'
+    if (inicio >= fim) return 'O início tem de ser antes do fim.'
+    return null
+  }
+  return editor
 }
 
 /** Quem o item corrige na API: o tipo e o id do item da Correção (a pessoa vale para todas as aparições). */

@@ -75,7 +75,10 @@ export function FormularioDeCorrecao({
   async function salvar() {
     if (salvando) return
     if (!pedidos) {
-      setErro('Confira os campos: há um valor em branco ou um tempo fora do formato MM:SS ou H:MM:SS.')
+      setErro(
+        editor.motivoDaRecusa?.(valores) ??
+          'Confira os campos: há um valor em branco ou um tempo fora do formato MM:SS ou H:MM:SS.',
+      )
       return
     }
     if (pedidos.length === 0) {

@@ -196,6 +196,20 @@ def test_o_nome_antigo_fica_como_apelido_para_a_busca() -> None:
     assert achada.nome == "Sabrina Sato Silva"
 
 
+def test_renomear_para_um_apelido_tira_o_apelido_da_lista() -> None:
+    mundo = Mundo()
+    mundo.catalogo.corrigir(mundo.sabrina.id, apelidos=["Sabrina Silva", "Sabi"])
+
+    resposta = mundo.renomear("  sábrina SILVA ")
+
+    assert resposta.status_code == 200, resposta.text
+    pessoa = mundo.catalogo.obter(mundo.sabrina.id)
+    assert pessoa is not None
+    assert pessoa.apelidos == ["Sabi", "Sabrina Sato"]
+    [registro] = mundo.auditoria.consultar(FiltroDeAuditoria()).registros
+    assert registro.acao == "pessoa.renomeada"
+
+
 def test_reindexar_depois_da_renomeacao_nao_poe_o_nome_no_indice() -> None:
     mundo = Mundo()
     mundo.renomear()
