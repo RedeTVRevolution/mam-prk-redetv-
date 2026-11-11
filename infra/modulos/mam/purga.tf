@@ -42,11 +42,6 @@ resource "google_cloud_run_v2_job" "purga" {
           name  = "BIGQUERY_TABELA"
           value = local.tabela_de_momentos
         }
-        # Remover junto com a tabela antiga, depois da migração.
-        env {
-          name  = "BIGQUERY_TABELA_ANTIGA"
-          value = local.tabela_antiga_de_momentos
-        }
         env {
           name  = "BIGQUERY_TABELA_DE_JOBS"
           value = local.tabela_de_jobs_do_painel
