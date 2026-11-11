@@ -956,20 +956,22 @@ def agora_utc() -> datetime:
 
 
 def aceita_gzip(accept_encoding: str) -> bool:
-    """`gzip` (ou `*`) no `Accept-Encoding`, sem `q=0`."""
+    """`gzip` (ou `*`) no `Accept-Encoding`, sem `q=0`. O `gzip` explícito vale mais que o `*`."""
+    qs: dict[str, float] = {}
     for opcao in accept_encoding.split(","):
-        nome, *parametros = (parte.strip() for parte in opcao.split(";"))
-        if nome.lower() not in ("gzip", "*"):
+        nome, *parametros = (parte.strip().lower() for parte in opcao.split(";"))
+        if nome not in ("gzip", "*"):
             continue
+        q = 1.0
         for parametro in parametros:
             chave, _, valor = parametro.partition("=")
-            if chave.strip().lower() == "q":
+            if chave.strip() == "q":
                 try:
-                    return float(valor) > 0
+                    q = float(valor)
                 except ValueError:
-                    return False
-        return True
-    return False
+                    q = 0.0
+        qs.setdefault(nome, q)
+    return qs.get("gzip", qs.get("*", 0.0)) > 0
 
 
 def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
