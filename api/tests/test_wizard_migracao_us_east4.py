@@ -300,3 +300,17 @@ def test_condicoes_do_banco_pega_o_titulo_antigo_e_ignora_o_banco_novo(
         f"sa:a|roles/datastore.user|so-o-banco-default|{exp}",
         f"sa:b|roles/datastore.user|so-o-banco-default|{exp}",
     ]
+
+
+def test_o_aviso_de_passo_que_falhou_sai_em_stderr(tmp_path: Path) -> None:
+    linha = next(
+        x.strip()
+        for x in WIZARD.read_text().splitlines()
+        if x.strip().startswith("trap ")
+    )
+    r = _bash(
+        tmp_path, f"set -E\n{linha}\nfalso() {{ return 1; }}\nfalso || true\nfalso\n"
+    )
+    assert r.returncode == 1
+    assert "O passo falhou" not in r.stdout
+    assert "O passo falhou" in r.stderr
