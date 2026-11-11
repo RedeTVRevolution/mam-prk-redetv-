@@ -562,6 +562,7 @@ class Busca:
             for r in da_clausula
             for p in (*r.pessoas, r.dono)
         )
+        t_nomes = _agora() - inicio
         sem_facetas = all(
             x is None for x in (facetado.pessoa, facetado.marca, facetado.tipo)
         )
@@ -570,6 +571,7 @@ class Busca:
         # Sem a API de Ranking, a posição é a da pontuação do RRF: registros de mesma
         # pontuação empatam, e o desempate dos vídeos é o número de momentos.
         posicao = _posicoes_por_pontos(fundidos)
+        t_fusao = _agora() - inicio
         if _texto_da_busca(entendida) and achados:
             try:
                 achados = [
@@ -660,13 +662,15 @@ class Busca:
         ]
         log.info(
             "busca em %d ms: %d vídeos, %d clausulas; desde o início: entender %d ms, "
-            "índice %d ms, jobs %d ms, ranking %d ms, vídeos %d ms",
+            "índice %d ms, jobs %d ms, nomes %d ms, fusão %d ms, ranking %d ms, vídeos %d ms",
             (_agora() - inicio) * 1000,
             len(videos),
             len(clausulas),
             t_entender * 1000,
             t_indice * 1000,
             t_jobs * 1000,
+            t_nomes * 1000,
+            t_fusao * 1000,
             t_ranking * 1000,
             t_videos * 1000,
         )

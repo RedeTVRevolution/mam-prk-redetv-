@@ -980,7 +980,8 @@ def test_o_log_traz_o_tempo_de_cada_etapa_desde_o_inicio_da_busca(
         buscar(m, "vestido")
     (linha,) = [r.message for r in caplog.records if r.message.startswith("busca em")]
     assert (
-        "entender 10 ms, índice 20 ms, jobs 30 ms, ranking 40 ms, vídeos 50 ms" in linha
+        "entender 10 ms, índice 20 ms, jobs 30 ms, nomes 40 ms, fusão 50 ms, "
+        "ranking 60 ms, vídeos 70 ms" in linha
     )
 
 
