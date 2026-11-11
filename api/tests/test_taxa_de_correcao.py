@@ -19,6 +19,7 @@ from api.correcoes import (
     RepositorioDeCorrecoesEmMemoria,
     versao_do_modelo,
 )
+from api.itens_da_decupagem import ItensDaDecupagem
 from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
@@ -469,7 +470,7 @@ def _taxa_com_contagem_sem(*tipos: str) -> list[Any]:
     jobs, decupagens, correcoes, revisao = _mundo()
     _pulsar(revisao, "j1")
     pronta = taxa._itens_da_decupagem(decupagens, "j1")
-    gravada = taxa.ItensDaDecupagem(
+    gravada = ItensDaDecupagem(
         versao_do_modelo=pronta.versao_do_modelo,
         versao_pipeline=pronta.versao_pipeline,
         itens={t: n for t, n in pronta.itens.items() if t not in tipos},
