@@ -1,16 +1,12 @@
 # Mescla de índices do Firestore (#542): em vez de um índice por combinação de filtros (68),
 # um índice por filtro com o campo da ordem (17), e o Firestore cruza os índices na consulta.
-# Os da mescla já existem entre os por combinação (a combinação de um filtro só), então esta
-# publicação não cria nem muda índice: só deixa pronta a lista do que sai.
-#
-# DEPLOY SEGUINTE (remoção): trocar o `for_each` de `acervo` (main.tf), `acervo_por_mes`
-# (listagem_por_mes.tf), `auditoria` (main.tf) e `auditoria_na_seguranca`
-# (banco_de_seguranca.tf) pelos locals `*_da_mescla` abaixo. O `terraform plan` tem de
-# destruir exatamente os índices da saída `indices_a_remover` e mais nada. Só então, depois de
-# medir as listas do Acervo e da auditoria no dev com os filtros pouco seletivos (ex.: só
-# sistema), apagar os antigos. A mescla também precisa ser conferida no dev com dados reais:
-# `estado in` e `palavras array-contains` junto com os outros filtros e a ordem; o que não
-# atender volta a ter índice próprio.
+# Os `for_each` de `acervo` (main.tf), `acervo_por_mes` (listagem_por_mes.tf), `auditoria`
+# (main.tf) e `auditoria_na_seguranca` (banco_de_seguranca.tf) usam os locals `*_da_mescla`
+# abaixo; as chaves dos que ficam não mudam, então nada é recriado, só os 51 de
+# `indices_a_remover` são destruídos. Sem exceção: `in` (disjunção de igualdades),
+# `array-contains` e a igualdade entram na mescla (a documentação do Firestore só cita `==`
+# e pede índice composto para `array-contains` com outros filtros, por desempenho). Se uma
+# consulta ficar lenta, volta a ter índice próprio: incluir a chave no `if` do local.
 locals {
   # Chaves dos recursos atuais que ficam: combinações de um campo só (potência de 2).
   indices_do_acervo_da_mescla = {
@@ -40,7 +36,18 @@ output "indices_da_mescla" {
   }
 }
 
-# Os índices por combinação que a mescla dispensa: o que o deploy seguinte destrói.
+# Os índices por combinação que a mescla dispensa: o que o deploy da remoção destrói.
 output "indices_a_remover" {
   value = local.indices_a_remover
+}
+
+# As chaves dos recursos que o plano mantém (lidas dos recursos, não dos locals), para o teste
+# conferir que sobra só a mescla.
+output "indices_que_ficam" {
+  value = {
+    acervo                 = keys(google_firestore_index.acervo)
+    acervo_por_mes         = keys(google_firestore_index.acervo_por_mes)
+    auditoria              = keys(google_firestore_index.auditoria)
+    auditoria_na_seguranca = keys(google_firestore_index.auditoria_na_seguranca)
+  }
 }

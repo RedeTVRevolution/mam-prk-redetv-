@@ -551,7 +551,7 @@ locals {
 }
 
 resource "google_firestore_index" "acervo" {
-  for_each   = local.indices_do_acervo
+  for_each   = local.indices_do_acervo_da_mescla
   database   = google_firestore_database.mam.name
   collection = "jobs"
 
@@ -585,7 +585,7 @@ locals {
 }
 
 resource "google_firestore_index" "auditoria" {
-  for_each   = local.indices_da_auditoria
+  for_each   = local.indices_da_auditoria_da_mescla
   database   = google_firestore_database.mam.name
   collection = "auditoria"
 

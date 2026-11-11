@@ -674,3 +674,7 @@ output "indices_da_mescla" {
 output "indices_a_remover" {
   value = module.mam.indices_a_remover
 }
+
+output "indices_que_ficam" {
+  value = module.mam.indices_que_ficam
+}

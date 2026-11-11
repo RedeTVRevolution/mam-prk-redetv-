@@ -11,7 +11,7 @@ locals {
 }
 
 resource "google_firestore_index" "acervo_por_mes" {
-  for_each   = local.indices_do_acervo_por_mes
+  for_each   = local.indices_do_acervo_por_mes_da_mescla
   database   = google_firestore_database.mam.name
   collection = "jobs"
 
