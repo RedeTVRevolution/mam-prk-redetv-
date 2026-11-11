@@ -44,6 +44,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
 import { BotaoDeIcone } from './comum.tsx'
 import { type Secao, TIPOS, type TipoDaFaixa, tipoDaChave } from './tipos.ts'
 import { type Instante, useNoInstante } from './instante.ts'
+import { escolherMiniaturas } from './miniaturas.ts'
 
 const SECOES: { chave: Secao; rotulo: string; tipo: TipoDaFaixa; vazio: string }[] = [
   { chave: 'pessoas', rotulo: 'Pessoas', tipo: 'aparicao', vazio: 'Nenhuma pessoa na imagem neste vídeo.' },
@@ -82,7 +83,7 @@ export interface AcoesDeCorrecao {
 
 type Linha =
   | { tipo: 'item'; chave: string; item: ItemDoPainel; recuo: boolean }
-  | { tipo: 'pessoa'; chave: string; id: string; nome: string; apoio: string | null; aparicoes: ItemDoPainel[]; aberta: boolean }
+  | { tipo: 'pessoa'; chave: string; id: string; nome: string; apoio: string | null; aparicoes: ItemDoPainel[]; miniatura: string | undefined; aberta: boolean }
   | { tipo: 'objeto'; chave: string; dados: DadosDoObjeto; ocorrencias: ItemDoPainel[]; aberta: boolean }
   // O inventário dos planos: a categoria, o objeto (que abre os planos em que aparece) e o plano.
   | { tipo: 'categoria'; chave: string; nome: string }
@@ -126,13 +127,15 @@ function linhasDaSecao(
   const item = (i: ItemDoPainel, recuo = false): Linha => ({ tipo: 'item', chave: i.chave, item: i, recuo })
   if (secao === 'pessoas') {
     const linhas: Linha[] = []
-    for (const p of d.pessoas) {
-      const aparicoes = doTipo('aparicao').filter((i) => i.pessoa === p.id)
-      if (aparicoes.length === 0) continue
+    const porPessoa = d.pessoas
+      .map((p) => ({ p, aparicoes: doTipo('aparicao').filter((i) => i.pessoa === p.id) }))
+      .filter((x) => x.aparicoes.length > 0)
+    const miniaturas = escolherMiniaturas(porPessoa.map((x) => ({ id: x.p.id, aparicoes: x.aparicoes })))
+    for (const { p, aparicoes } of porPessoa) {
       const nome = aparicoes[0].titulo
       if (!casa(`${p.nome} ${nome}`, filtro)) continue
       const aberta = abertas.has(`pessoa:${p.id}`)
-      linhas.push({ tipo: 'pessoa', chave: `pessoa:${p.id}`, id: p.id, nome, apoio: nome === NAO_IDENTIFICADO ? (aparicoes[0].linhas[0] ?? null) : null, aparicoes, aberta })
+      linhas.push({ tipo: 'pessoa', chave: `pessoa:${p.id}`, id: p.id, nome, apoio: nome === NAO_IDENTIFICADO ? (aparicoes[0].linhas[0] ?? null) : null, aparicoes, miniatura: miniaturas.get(p.id), aberta })
       if (aberta) linhas.push(...aparicoes.map((a) => item(a, true)))
     }
     return linhas
@@ -690,7 +693,7 @@ function LinhaDaPessoa({
       onClick={aoAlternar}
       className={cn('relative flex w-full items-center gap-2 border-b border-border/60 px-3 py-1.5 text-left hover:bg-card', atual && ATUAL)}
     >
-      <Miniatura caminho={linha.aparicoes.find((a) => a.quadro)?.quadro} urlDoQuadro={urlDoQuadro} className="size-9 rounded-sm" />
+      <Miniatura caminho={linha.miniatura} urlDoQuadro={urlDoQuadro} className="size-9 rounded-sm" />
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className={cn('truncate text-sm font-medium', semNome && 'font-normal text-muted-foreground italic')}>{linha.nome}</span>
