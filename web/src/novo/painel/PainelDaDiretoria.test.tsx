@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from "../../auth/falso.ts";
 import catalogo from "../../catalogo.fixture.json";
 import App from "../App.tsx";
+import { NOTA_DO_DIA } from "./formato.ts";
 
 // Os mesmos casos de src/PainelDaDiretoria.test.tsx (interface antiga), na interface nova; as
 // tabelas ficam atrás do "Tabela" de cada seção, e o gráfico vem primeiro.
@@ -385,6 +386,13 @@ test("a aba Acessos mostra o total, os dias e os usuários", async () => {
   expect(linhasDe(await tabela("Usuários ativos por mês"))).toEqual([
     ["11/2026", "2"],
   ]);
+});
+
+test("a nota do painel diz que os números se atualizam a cada hora", async () => {
+  expect(NOTA_DO_DIA).toContain("a cada hora");
+  expect(NOTA_DO_DIA).not.toContain("10 minutos");
+  await abrir("/painel/acessos");
+  expect(await screen.findByText(/os números se atualizam a cada hora/)).toBeTruthy();
 });
 
 test("os filtros vão à API e ao endereço, e o programa nunca vai em acessos", async () => {
