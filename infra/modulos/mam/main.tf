@@ -919,7 +919,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 # no `make copiar-para-bigquery`, e a web, a cada Correção) é dataEditor só no dataset.
 locals {
   dataset_do_bigquery = "mam_decupagens_${local.marca_da_regiao}"
-  # Tabela dividida por dia (#260): fica até a cópia para a por ano (#356) e a remoção à mão.
+  # Tabela dividida por dia (#260), apagada no apply 1 da #567; só o nome fica, até o apply 2.
   tabela_antiga_de_momentos = "momentos"
   # Tabela em uso (#356): dividida por ano, em `momentos_por_ano.tf`.
   tabela_de_momentos = "momentos_por_ano"
@@ -961,19 +961,6 @@ resource "google_bigquery_dataset" "decupagens" {
   location                   = var.regiao
   delete_contents_on_destroy = false
   depends_on                 = [google_project_service.apis]
-}
-
-resource "google_bigquery_table" "momentos" {
-  dataset_id = google_bigquery_dataset.decupagens.dataset_id
-  table_id   = local.tabela_antiga_de_momentos
-  # Etapa 1 da remoção (#564): sem proteção, ainda presente; a etapa 2 tira o recurso do código.
-  deletion_protection = false
-  time_partitioning {
-    type  = "DAY"
-    field = "data_de_exibicao"
-  }
-  clustering = ["programa", "job_id"]
-  schema     = local.esquema_dos_momentos
 }
 
 # A `taxa` (#455) troca as linhas diárias; a `purga` (#504) apaga as linhas do vídeo.

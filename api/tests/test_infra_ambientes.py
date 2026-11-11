@@ -49,6 +49,8 @@ def test_cada_recurso_do_modulo_tem_o_seu_bloco_moved() -> None:
         de_tipo == para_tipo and de_nome == para_nome
         for de_tipo, de_nome, para_tipo, para_nome in movidos
     )
+    # O `moved` da tabela apagada no apply 1 da #567 sai no apply 2.
+    movidos = [m for m in movidos if m[:2] != ("google_bigquery_table", "momentos")]
     assert sorted(recursos) == sorted((t, n) for t, n, _, _ in movidos)
 
 

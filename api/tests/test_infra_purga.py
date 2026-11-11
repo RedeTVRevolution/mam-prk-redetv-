@@ -37,3 +37,8 @@ def test_consulta_agendada_le_o_marcador_sob_a_mesma_trava_da_purga() -> None:
         < sql.index("DELETE FROM `${tabela}` WHERE FALSE;")
         < sql.index("CREATE TEMP TABLE janela")
     )
+
+
+def test_tabela_antiga_de_momentos_nao_existe_mais_no_codigo() -> None:
+    """Etapa 2, apply 1 (#567): só o recurso sai; a variável e o IAM ficam até o apply 2."""
+    assert 'resource "google_bigquery_table" "momentos"' not in MAIN

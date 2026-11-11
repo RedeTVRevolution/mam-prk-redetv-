@@ -19,7 +19,7 @@ from api.correcoes import (
     RepositorioDeCorrecoesEmMemoria,
     versao_do_modelo,
 )
-from api.itens_da_decupagem import ItensDaDecupagem
+from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
 from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
 from api.main import criar_app
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
@@ -34,7 +34,7 @@ BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 def _modelo(pessoas: int, pautas: int, pipeline: str | None = "v1") -> dict[str, Any]:
     return {
         "versao_pipeline": pipeline,
-        "pessoas": [{"id": f"p{n}"} for n in range(pessoas)],
+        "pessoas": [{"id": f"p{n}", "nome": f"n{n}"} for n in range(pessoas)],
         "pautas": [{"id": f"t{n}"} for n in range(pautas)],
     }
 
@@ -490,3 +490,111 @@ def test_tipo_novo_sem_irmao_tira_o_video_da_taxa() -> None:
     tipos_da_pauta = [t for t in CORRIGIVEIS if t.startswith("pauta.")]
 
     assert _taxa_com_contagem_sem(*tipos_da_pauta) == []
+
+
+_PAUTA = {"id": "t0", "titulo": "x", "inicio_ms": 0, "fim_ms": 1_000}
+
+
+def _regravada(pauta_depois: dict[str, Any], desfeita: bool = False) -> list[Any]:
+    """j1 com uma pauta corrigida sobre o JSON antigo; a decupagem foi regravada
+    com mais uma pessoa (outro sha256) e a pauta como `pauta_depois`."""
+    antes = {"versao_pipeline": "v1", "pessoas": [], "pautas": [_PAUTA]}
+    depois = {**antes, "pessoas": [{"nome": "Ana"}], "pautas": [pauta_depois]}
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j1", "Jornal"))
+    correcoes = RepositorioDeCorrecoesEmMemoria()
+    correcoes.acrescentar(_c("a", "j1", antes, "pauta.titulo"))
+    if desfeita:
+        correcoes.acrescentar(
+            _c("b", "j1", antes, "desfazer", desfaz="a", antes="", depois="")
+        )
+    revisao = RepositorioDeRevisaoEmMemoria()
+    _pulsar(revisao, "j1")
+    return calcular(jobs, Decupagens({"j1": depois}), correcoes, revisao)
+
+
+def test_correcao_reconciliada_com_a_versao_atual_conta() -> None:
+    linhas = _regravada(_PAUTA)
+
+    assert _taxa(linhas, "Jornal", "pauta.titulo").correcoes == 1
+
+
+def test_correcao_que_nao_casa_com_a_versao_atual_nao_conta() -> None:
+    linhas = _regravada({**_PAUTA, "inicio_ms": 5_000, "fim_ms": 6_000})
+
+    assert _taxa(linhas, "Jornal", "pauta.titulo").correcoes == 0
+
+
+def test_correcao_desfeita_apos_regravar_nao_conta() -> None:
+    linhas = _regravada(_PAUTA, desfeita=True)
+
+    assert _taxa(linhas, "Jornal", "pauta.titulo").correcoes == 0
+
+
+_ANTES = {"versao_pipeline": "v1", "pessoas": [], "pautas": [_PAUTA]}
+_DEPOIS = {**_ANTES, "pessoas": [{"nome": "Ana"}]}
+
+
+def _calcular_regravada(
+    modelo_do_job: Any, extras: list[Correcao] | None = None, **periodo: Any
+) -> list[Any]:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j1", "Jornal"))
+    correcoes = RepositorioDeCorrecoesEmMemoria()
+    for c in extras if extras is not None else [_c("a", "j1", _ANTES, "pauta.titulo")]:
+        correcoes.acrescentar(c)
+    revisao = RepositorioDeRevisaoEmMemoria()
+    _pulsar(revisao, "j1")
+    itens = contar_itens(json.dumps(_DEPOIS).encode())
+    return taxa.calcular_com_itens(
+        jobs,
+        lambda _: itens,
+        correcoes,
+        revisao,
+        modelo_do_job=modelo_do_job,
+        **periodo,
+    )
+
+
+def test_decupagem_indisponivel_na_reconciliacao_derruba_o_calculo() -> None:
+    def indisponivel(_job_id: str) -> dict[str, Any]:
+        raise ServicoIndisponivel
+
+    with pytest.raises(ServicoIndisponivel):
+        _calcular_regravada(indisponivel)
+
+
+def test_decupagem_corrompida_na_reconciliacao_tira_o_job_da_taxa() -> None:
+    def corrompida(_job_id: str) -> dict[str, Any]:
+        raise ValueError("json")
+
+    assert _calcular_regravada(corrompida) == []
+
+
+def test_sem_correcao_de_outra_versao_valendo_nao_le_a_decupagem() -> None:
+    casos = {
+        "desfeita": [
+            _c("a", "j1", _ANTES, "pauta.titulo"),
+            _c("b", "j1", _ANTES, "desfazer", desfaz="a", antes="", depois=""),
+        ],
+        "pendente": [_c("a", "j1", _ANTES, "pauta.titulo", exige_aprovacao=True)],
+        "descartada": [
+            _c("a", "j1", _ANTES, "pauta.titulo"),
+            _c("b", "j1", _ANTES, "descartar", descarta="a", antes="", depois=""),
+        ],
+        "fora do periodo": [_c("a", "j1", _ANTES, "pauta.titulo", dias=-30)],
+    }
+    chamadas: list[str] = []
+
+    def modelo(job_id: str) -> dict[str, Any]:
+        chamadas.append(job_id)
+        return _DEPOIS
+
+    for correcoes in casos.values():
+        _calcular_regravada(
+            modelo,
+            correcoes,
+            desde=BASE - timedelta(days=1),
+            ate=BASE + timedelta(days=1),
+        )
+    assert chamadas == []

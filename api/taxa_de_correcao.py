@@ -23,12 +23,14 @@ A taxa é `None` se o denominador é zero. Ambiente do comando: `GCP_PROJECT_ID`
 `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`.
 """
 
+import json
 import logging
 import os
 import sys
 from collections.abc import Callable, Mapping
+from collections.abc import Set as AbstractSet
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud.storage import Client as ClienteStorage
@@ -42,6 +44,7 @@ from api.correcoes import (
     Correcao,
     RepositorioDeCorrecoes,
     estado_das,
+    reconciliar,
 )
 from api.csv_seguro import csv_em_texto
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
@@ -101,6 +104,10 @@ def _itens_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> ItensDaDe
     return contar_itens(b"".join(decupagens.abrir_decupagem(job_id)))
 
 
+def modelo_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> dict[str, Any]:
+    return json.loads(b"".join(decupagens.abrir_decupagem(job_id)))  # type: ignore[no-any-return]
+
+
 def calcular(
     repositorio: RepositorioDeJobs,
     decupagens: LeitorDeDecupagem,
@@ -119,6 +126,7 @@ def calcular(
         desde,
         ate,
         programa,
+        lambda job_id: modelo_da_decupagem(decupagens, job_id),
     )
     somas: dict[tuple[str | None, str | None, str], tuple[int, int]] = {}
     for _, linha in por_job:
@@ -148,10 +156,15 @@ def calcular_com_itens(
     desde: datetime | None = None,
     ate: datetime | None = None,
     programa: str | None = None,
+    modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[tuple[str, LinhaDaTaxa]]:
     """O cálculo por Job, com a contagem de itens vinda de `itens_do_job` (a decupagem
     inteira, ou o objeto de contagem gravado com ela, #455). `itens_do_job` levanta
-    `ServicoIndisponivel`, `ValueError`, `KeyError` ou `TypeError` se não lê."""
+    `ServicoIndisponivel`, `ValueError`, `KeyError` ou `TypeError` se não lê.
+
+    `modelo_do_job` (o JSON da decupagem) só é chamado para o Job que tem correção em vigor
+    feita sobre outra versão do JSON, para a `reconciliar` dizer quais casam com a atual
+    (#571). Sem ele, essas ficam fora."""
     pulsados = {
         m.job_id
         for m in revisao.todas(desde)
@@ -171,12 +184,23 @@ def calcular_com_itens(
             continue
         try:
             contagem = itens_do_job(job.id)
-            vigor = _em_vigor_no_periodo(feitas, contagem.versao_do_modelo, desde, ate)
+        except (ServicoIndisponivel, ValueError, KeyError, TypeError):
+            log.warning("decupagem de %s não lida: fora da taxa", job.id)
+            continue
+        try:
+            # `ServicoIndisponivel` da leitura do JSON escapa: a tabela não troca o dado
+            # certo por um incompleto, e a próxima execução tenta de novo.
+            reconciliadas = _reconciliadas(
+                job.id, feitas, contagem.versao_do_modelo, desde, ate, modelo_do_job
+            )
+            vigor = _em_vigor_no_periodo(
+                feitas, contagem.versao_do_modelo, desde, ate, reconciliadas
+            )
             do_job = {
                 tipo: (sum(c.tipo == tipo for c in vigor), contagem.itens_do_tipo(tipo))
                 for tipo in CORRIGIVEIS
             }
-        except (ServicoIndisponivel, ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError):
             log.warning("decupagem de %s não lida: fora da taxa", job.id)
             continue
         for tipo, (n, itens) in do_job.items():
@@ -196,14 +220,36 @@ def calcular_com_itens(
     return linhas
 
 
+def _reconciliadas(
+    job_id: str,
+    todas: list[Correcao],
+    versao: str,
+    desde: datetime | None,
+    ate: datetime | None,
+    modelo_do_job: Callable[[str], dict[str, Any]] | None,
+) -> set[str]:
+    """Os ids das feitas sobre outro JSON que a `reconciliar` (a regra que as aplica no
+    vídeo) casa com o atual. Só lê a decupagem se alguma de outra versão pode contar:
+    casável (em vigor e na fila, como a `reconciliar` a vê) e que passou a valer no período."""
+    estado = estado_das(todas)
+    a_valer = _em_vigor_no_periodo(todas, versao, desde, ate, {c.id for c in todas})
+    if modelo_do_job is None or not any(
+        c.ancora.versao != versao and estado.casavel(c.id) for c in a_valer
+    ):
+        return set()
+    return {c.id for c in reconciliar(modelo_do_job(job_id), versao, todas).casadas}
+
+
 def _em_vigor_no_periodo(
     todas: list[Correcao],
     versao: str,
     desde: datetime | None,
     ate: datetime | None,
+    reconciliadas: AbstractSet[str] = frozenset(),
 ) -> list[Correcao]:
     """As em vigor segundo o histórico inteiro (o desfazer pode ser de fora do
-    período), feitas sobre este JSON do modelo e que passaram a valer no período."""
+    período), feitas sobre este JSON do modelo (ou reconciliadas com ele) e que passaram
+    a valer no período."""
     estado = estado_das(todas)
     aprovada_em = {c.aprova: c.criada_em for c in todas if c.aprova}
     return [
@@ -211,7 +257,7 @@ def _em_vigor_no_periodo(
         for c in todas
         if c.tipo in CORRIGIVEIS
         and estado.em_vigor(c.id)
-        and c.ancora.versao == versao
+        and (c.ancora.versao == versao or c.id in reconciliadas)
         and _no_periodo(aprovada_em.get(c.id, c.criada_em), desde, ate)
     ]
 

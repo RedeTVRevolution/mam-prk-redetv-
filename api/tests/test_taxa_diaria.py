@@ -90,7 +90,16 @@ def test_cada_dia_da_tabela_e_o_calculo_de_hoje_sobre_aquele_dia() -> None:
 
     for dias in range(-12, 14):
         d = DIA + timedelta(days=dias)
-        da_tabela = _somar(linhas_do_dia(d, jobs, itens, correcoes, revisao))
+        da_tabela = _somar(
+            linhas_do_dia(
+                d,
+                jobs,
+                itens,
+                correcoes,
+                revisao,
+                lambda job_id: json.loads(b"".join(decupagens.abrir_decupagem(job_id))),
+            )
+        )
         assert da_tabela == _de_hoje(jobs, decupagens, correcoes, revisao, d), d
 
 

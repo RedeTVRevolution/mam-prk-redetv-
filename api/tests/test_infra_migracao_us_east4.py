@@ -21,6 +21,8 @@ TIPOS_QUE_RECRIAM = re.compile(
 # create_before_destroy, o plan mostraria `delete`. Sem chave de for_each: o `state rm` no
 # recurso tira todas as instâncias, e o create do iam_member é idempotente.
 MAIS_UM = {"google_project_iam_member.mam"}
+# Apagada no apply 1 da #567; o endereço sai da lista (e daqui) no apply 2.
+APAGADOS_ATE_O_APPLY_2 = {"google_bigquery_table.momentos"}
 
 
 def _recursos() -> dict[str, str]:
@@ -76,7 +78,8 @@ def _esperados() -> set[str]:
 
 
 def test_a_lista_do_wizard_e_exatamente_o_que_o_plan_recriaria() -> None:
-    assert set(_enderecos_da_lista()) == {f"module.mam.{k}" for k in _esperados()}
+    esperados = _esperados() | APAGADOS_ATE_O_APPLY_2
+    assert set(_enderecos_da_lista()) == {f"module.mam.{k}" for k in esperados}
 
 
 def test_a_lista_tem_so_enderecos_do_modulo_sem_duplicata_nem_chave() -> None:
@@ -84,7 +87,10 @@ def test_a_lista_tem_so_enderecos_do_modulo_sem_duplicata_nem_chave() -> None:
     assert enderecos and len(enderecos) == len(set(enderecos))
     for endereco in enderecos:
         assert re.fullmatch(r"module\.mam\.google_\w+\.\w+", endereco), endereco
-        assert endereco.removeprefix("module.mam.") in _recursos(), endereco
+        sem_prefixo = endereco.removeprefix("module.mam.")
+        assert sem_prefixo in _recursos() | dict.fromkeys(APAGADOS_ATE_O_APPLY_2), (
+            endereco
+        )
 
 
 def test_o_que_ja_esta_em_us_east4_ou_atualiza_no_lugar_fica_fora_da_lista() -> None:

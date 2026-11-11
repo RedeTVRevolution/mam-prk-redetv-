@@ -101,13 +101,18 @@ class BigQueryFalso:
             p["name"]: p["parameterValue"]["value"] for p in corpo["queryParameters"]
         }
         antes = self.banco.total_changes
-        for comando in (
-            corpo["query"]
-            .replace("CURRENT_TIMESTAMP()", "CURRENT_TIMESTAMP")
-            .split(";")
-        ):
-            if comando.strip():
-                self.banco.execute(comando, parametros)
+        try:
+            for comando in (
+                corpo["query"]
+                .replace("CURRENT_TIMESTAMP()", "CURRENT_TIMESTAMP")
+                .split(";")
+            ):
+                if comando.strip():
+                    self.banco.execute(comando, parametros)
+        except sqlite3.Error:
+            # Como o BigQuery: erro no meio do script desfaz a transação inteira.
+            self.banco.rollback()
+            raise
         return {
             "jobComplete": True,
             "numDmlAffectedRows": str(self.banco.total_changes - antes),
@@ -209,6 +214,33 @@ def test_sem_tabela_antiga_configurada_a_purga_continua(
     assert bq.banco.execute("SELECT * FROM `projeto-teste.dados.jobs`").fetchall() == [
         ("j2",)
     ]
+
+
+def test_sem_a_tabela_antiga_a_purga_falha_antes_de_apagar_e_desfaz_o_bigquery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entre os dois applies da #567 a variável aponta para uma tabela que não existe."""
+    from api.dados_da_purga import DadosDaPurga
+
+    banco = FirestoreFalso(monkeypatch)
+    banco.dados[COLECAO_DA_REVISAO] = {"j1:a": {"job_id": "j1"}}
+    bq = BigQueryFalso()
+    bq.banco.execute("DROP TABLE `projeto-teste.dados.momentos_antigos`")
+    bq.banco.commit()
+    mundo = Mundo()
+    dados = DadosDaPurga(banco, AMBIENTE, bq)  # type: ignore[arg-type]
+    purga = mundo.purga(apagar_dados=dados.apagar)
+    with pytest.raises(sqlite3.OperationalError):
+        purga.purgar("j1", None)
+    assert (job := mundo.jobs.obter("j1")) is not None and job.lixeira is not None
+    assert set(banco.dados[COLECAO_DA_REVISAO]) == {"j1:a"}
+    for tabela in ("momentos_atuais", "jobs", "revisao"):
+        assert bq.banco.execute(
+            f"SELECT * FROM `projeto-teste.dados.{tabela}`"
+        ).fetchall() == [("j1",), ("j2",)]
+    assert (
+        bq.banco.execute("SELECT * FROM `projeto-teste.dados.eventos`").fetchall() == []
+    )
 
 
 def test_limpeza_unica_resumida_e_idempotente_sem_tocar_nos_jobs_vivos(

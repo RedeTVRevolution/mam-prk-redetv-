@@ -56,9 +56,15 @@ run "plano" {
     error_message = "O output da limpeza dá a idade de cada repositório."
   }
 
-  # Etapa 1 da remoção da tabela antiga de momentos: sem proteção e ainda presente.
+  # Etapa 2 da tabela antiga de momentos, apply 1 (#567): a tabela sumiu do código, mas a
+  # variável dela continua no mam-web e na purga até o apply 2.
   assert {
-    condition     = google_bigquery_table.momentos.deletion_protection == false
-    error_message = "A tabela antiga de momentos fica sem a proteção, ainda presente."
+    condition = alltrue([
+      for env in [
+        google_cloud_run_v2_service.web.template[0].containers[0].env,
+        google_cloud_run_v2_job.purga.template[0].template[0].containers[0].env,
+      ] : one([for e in env : e.value if e.name == "BIGQUERY_TABELA_ANTIGA"]) == "momentos"
+    ])
+    error_message = "No apply 1 a variável da tabela antiga continua no mam-web e na purga."
   }
 }
