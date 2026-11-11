@@ -18,7 +18,6 @@ from api.auth import Usuario
 from api.busca import (
     TETO_DA_LISTA_BYTES,
     TETO_DE_ASSINATURAS,
-    TETO_DE_CONSULTAS_AO_INDICE,
     TETO_DE_REGISTROS,
     TETO_DO_RANKING,
     Ajustes,
@@ -275,36 +274,49 @@ def _mundo_de_varias_clausulas(indice: IndiceEspia | None = None) -> Mundo:
     return m
 
 
-def test_as_clausulas_vao_ao_indice_ao_mesmo_tempo_e_com_limite() -> None:
-    class IndiceLento(IndiceEspia):
-        """As primeiras consultas só passam quando o teto inteiro está em voo."""
+class _IndiceEmTurma(IndiceEspia):
+    """As `turma` primeiras consultas só passam quando todas estão em voo ao mesmo tempo."""
 
-        def __init__(self) -> None:
-            super().__init__()
-            self.em_voo = 0
-            self.pico = 0
-            self.chegadas = 0
-            self.trava = threading.Lock()
-            self.turma = threading.Barrier(TETO_DE_CONSULTAS_AO_INDICE, timeout=5)
+    def __init__(self, turma: int) -> None:
+        super().__init__()
+        self.em_voo = 0
+        self.pico = 0
+        self.chegadas = 0
+        self.turma_toda = turma
+        self.trava = threading.Lock()
+        self.turma = threading.Barrier(turma, timeout=5)
 
-        def buscar(self, consulta: Consulta) -> list[Registro]:
+    def buscar(self, consulta: Consulta) -> list[Registro]:
+        with self.trava:
+            self.em_voo += 1
+            self.pico = max(self.pico, self.em_voo)
+            self.chegadas += 1
+            da_turma = self.chegadas <= self.turma_toda
+        try:
+            if da_turma:
+                self.turma.wait()
+            return super().buscar(consulta)
+        finally:
             with self.trava:
-                self.em_voo += 1
-                self.pico = max(self.pico, self.em_voo)
-                self.chegadas += 1
-                da_turma = self.chegadas <= TETO_DE_CONSULTAS_AO_INDICE
-            try:
-                if da_turma:
-                    self.turma.wait()
-                return super().buscar(consulta)
-            finally:
-                with self.trava:
-                    self.em_voo -= 1
+                self.em_voo -= 1
 
-    lento = IndiceLento()
-    resultado = buscar(_mundo_de_varias_clausulas(lento), "Sabrina Sato")
-    assert len(lento.consultas) > TETO_DE_CONSULTAS_AO_INDICE
-    assert lento.pico == TETO_DE_CONSULTAS_AO_INDICE
+
+def test_as_quatro_clausulas_da_busca_por_pessoa_vao_ao_indice_juntas() -> None:
+    indice = _IndiceEmTurma(4)
+    resultado = buscar(_mundo_de_varias_clausulas(indice), "Sabrina Sato")
+    assert len(indice.consultas) == 4
+    assert indice.pico == 4
+    assert resultado.videos
+
+
+def test_as_consultas_ao_indice_respeitam_o_teto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.busca.TETO_DE_CONSULTAS_AO_INDICE", 2)
+    indice = _IndiceEmTurma(2)
+    resultado = buscar(_mundo_de_varias_clausulas(indice), "Sabrina Sato")
+    assert len(indice.consultas) > 2
+    assert indice.pico == 2
     assert resultado.videos
 
 

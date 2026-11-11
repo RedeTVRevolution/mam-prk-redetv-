@@ -78,9 +78,10 @@ JUNCAO_MS = 3_000
 # Assinaturas simultâneas para a chave de sistema: cada uma é uma ida ao IAM, e cem
 # momentos em fila passavam dos 15 s da rota.
 TETO_DE_ASSINATURAS = 16
-# Consultas ao índice simultâneas numa busca. Pequeno de propósito: cada busca já ocupa
-# um worker do executor da rota, numa instância de 1 vCPU.
-TETO_DE_CONSULTAS_AO_INDICE = 3
+# Consultas ao índice simultâneas numa busca. A espera é de rede (as threads soltam o GIL),
+# então o teto cobre as consultas de uma busca típica (pessoa com 4 cláusulas; #568); busca
+# com mais que isso espera uma rodada. `pool.map` entrega na ordem das consultas.
+TETO_DE_CONSULTAS_AO_INDICE = 8
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
 ROTULO_DO_TIPO: dict[str, str] = {
