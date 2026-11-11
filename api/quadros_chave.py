@@ -24,7 +24,7 @@ from api.decupagem import Decupagem, caminho_do_quadro
 from api.jobs import RepositorioDeJobs
 from api.nuvem import QuadrosStorage, RepositorioFirestore
 from api.quadros import FalhaNosQuadros
-from api.quadros_das_pessoas import extrair_quadros
+from api.quadros_das_pessoas import extrair_quadros_em_lote
 
 # ponytail: limiar fixo, calibrar com os quadros do piloto
 LIMIAR_DE_ESCURO = 20  # luminância média, de 0 a 255
@@ -75,36 +75,96 @@ def com_quadros_chave(
     # Instante (ms) -> (o JPEG, se é escuro). O resultado só depende do instante, e o meio de
     # uma aparição ou objeto cai muitas vezes no de um plano; o `e_escuro` decodifica o JPEG
     # inteiro, então também fica guardado. Só os acertos entram: a falha (timeout passageiro,
-    # ffmpeg que saiu com erro) é tentada de novo pelo próximo momento no mesmo instante.
+    # ffmpeg que saiu com erro) é tentada de novo na rodada seguinte, se algum candidato ainda
+    # a pedir.
     # ponytail: nunca é esvaziado; um vídeo tem poucos milhares de instantes.
     cache: dict[int, tuple[bytes, bool]] = {}
 
-    def jpeg_em(instante: int) -> tuple[bytes, bool] | None:
-        if instante not in cache:
-            try:
-                [jpeg] = extrair_quadros(video, [instante])
-            except FalhaNosQuadros:
-                return None
-            cache[instante] = (jpeg, e_escuro(jpeg))
-        return cache[instante]
+    def candidatos(alvo_ms: int, inicio_ms: int, fim_ms: int) -> list[int]:
+        """Em ordem: o alvo, depois ±1 s, ±2 s e ±3 s dele (os que cabem no momento)."""
+        return [
+            alvo_ms + desvio
+            for desvio in (0, *DESVIOS_MS)
+            if not desvio
+            or inicio_ms + FOLGA_DAS_BORDAS_MS
+            <= alvo_ms + desvio
+            <= fim_ms - FOLGA_DAS_BORDAS_MS
+        ]
 
-    def claro(alvo_ms: int, inicio_ms: int, fim_ms: int) -> tuple[int, bytes] | None:
-        """O primeiro quadro não escuro: o alvo, depois ±1 s, ±2 s e ±3 s dele."""
-        for desvio in (0, *DESVIOS_MS):
-            instante = alvo_ms + desvio
-            if desvio and not (
-                inicio_ms + FOLGA_DAS_BORDAS_MS
-                <= instante
-                <= fim_ms - FOLGA_DAS_BORDAS_MS
+    def acha_claros(
+        pedidos: list[tuple[int, int, int]],
+    ) -> list[tuple[int, bytes] | None]:
+        """Para cada (alvo, início, fim), o primeiro quadro não escuro na ordem dos candidatos.
+
+        Rodada por rodada: o candidato atual de todos os pedidos pendentes vai junto ao
+        ffmpeg (em lotes); quem saiu escuro passa ao candidato seguinte. O instante ausente
+        ganha uma rodada extra antes (falha passageira, #548): só com 2 falhas é que quem o
+        pedia avança.
+        """
+        falhas: dict[int, int] = {}
+        lista = [candidatos(*p) for p in pedidos]
+        posicao = [0] * len(pedidos)
+        achados: list[tuple[int, bytes] | None] = [None] * len(pedidos)
+        pendentes = [i for i, c in enumerate(lista) if c]
+        while pendentes:
+            faltam = list(
+                dict.fromkeys(
+                    lista[i][posicao[i]]
+                    for i in pendentes
+                    if lista[i][posicao[i]] not in cache
+                )
+            )
+            for instante, jpeg in zip(
+                faltam, extrair_quadros_em_lote(video, faltam), strict=True
             ):
-                continue
-            achado = jpeg_em(instante)
-            if achado is not None and not achado[1]:
-                return instante, achado[0]
-        return None
+                if jpeg is not None:
+                    cache[instante] = (jpeg, e_escuro(jpeg))
+                else:
+                    falhas[instante] = falhas.get(instante, 0) + 1
+            seguintes = []
+            for i in pendentes:
+                instante = lista[i][posicao[i]]
+                if instante in cache and not cache[instante][1]:
+                    achados[i] = (instante, cache[instante][0])
+                    continue
+                if instante not in cache and falhas[instante] < 2:
+                    seguintes.append(i)
+                    continue
+                posicao[i] += 1
+                if posicao[i] < len(lista[i]):
+                    seguintes.append(i)
+            pendentes = seguintes
+        return achados
 
-    def quadro(nome: str, inicio_ms: int, fim_ms: int) -> str | None:
-        achado = claro((inicio_ms + fim_ms) // 2, inicio_ms, fim_ms)
+    # Todos os momentos de uma vez, na ordem de sempre: planos (alvo a alvo), aparições, objetos.
+    pedidos: list[tuple[int, int, int]] = []
+    for plano in pronta.planos:
+        for alvo in instantes_alvo(plano.inicio_ms, plano.fim_ms):
+            pedidos.append((alvo, plano.inicio_ms, plano.fim_ms))
+    for pessoa in pronta.pessoas:
+        for aparicao in pessoa.na_imagem:
+            pedidos.append(
+                (
+                    (aparicao.inicio_ms + aparicao.fim_ms) // 2,
+                    aparicao.inicio_ms,
+                    aparicao.fim_ms,
+                )
+            )
+    primeiras = [
+        min(objeto.ocorrencias, key=lambda o: o.inicio_ms) for objeto in pronta.objetos
+    ]
+    for primeira in primeiras:
+        pedidos.append(
+            (
+                (primeira.inicio_ms + primeira.fim_ms) // 2,
+                primeira.inicio_ms,
+                primeira.fim_ms,
+            )
+        )
+    claros = iter(acha_claros(pedidos))
+
+    def quadro(nome: str) -> str | None:
+        achado = next(claros)
         if achado is None:
             return None
         caminho = caminho_do_quadro(f"{nome}.jpg")
@@ -113,8 +173,8 @@ def com_quadros_chave(
 
     for i, plano in enumerate(pronta.planos):
         achados: dict[int, bytes] = {}
-        for alvo in instantes_alvo(plano.inicio_ms, plano.fim_ms):
-            achado = claro(alvo, plano.inicio_ms, plano.fim_ms)
+        for _ in instantes_alvo(plano.inicio_ms, plano.fim_ms):
+            achado = next(claros)
             if achado is not None:
                 achados.setdefault(*achado)
         meio = (plano.inicio_ms + plano.fim_ms) / 2
@@ -135,12 +195,9 @@ def com_quadros_chave(
                 plano.quadro = caminho
     for i, pessoa in enumerate(pronta.pessoas):
         for j, aparicao in enumerate(pessoa.na_imagem):
-            aparicao.quadro = quadro(
-                f"aparicao-{i}-{j}", aparicao.inicio_ms, aparicao.fim_ms
-            )
+            aparicao.quadro = quadro(f"aparicao-{i}-{j}")
     for i, objeto in enumerate(pronta.objetos):
-        primeira = min(objeto.ocorrencias, key=lambda o: o.inicio_ms)
-        objeto.quadro = quadro(f"objeto-{i}", primeira.inicio_ms, primeira.fim_ms)
+        objeto.quadro = quadro(f"objeto-{i}")
     return pronta
 
 

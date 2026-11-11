@@ -1,5 +1,6 @@
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
 from typing import Any
@@ -9,6 +10,7 @@ import pytest
 from api.agent_retrieval import (
     CAMPOS_DE_FILTRO,
     CAMPOS_DO_REGISTRO,
+    CONEXOES_AO_INDICE,
     FRACAO_DA_COTA,
     AgentRetrieval,
     ConfigDaBusca,
@@ -16,8 +18,10 @@ from api.agent_retrieval import (
     EsquemaIncompativel,
     JaExiste,
     _criacao,
+    _fundir_por_rrf,
     _registro,
     apagar_colecao,
+    aquecer_o_indice,
     conferir_esquema,
     criar_colecao,
     esperar,
@@ -29,6 +33,7 @@ from api.agent_retrieval import (
     pedido_de_busca,
     transporte_http,
 )
+from api.busca import TETO_DE_CONSULTAS_AO_INDICE
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.orcamento_de_escrita import reservar_na_janela
 
@@ -242,7 +247,7 @@ def test_sem_os_indices_ann_buscar_calcula_o_vetor_da_consulta_na_regiao_da_busc
     AgentRetrieval(SEM_INDICES, transporte).buscar(
         Consulta(texto="vestido", significado="vestido", filtros=Filtros(tipo="plano"))
     )
-    [(_, url, corpo), (_, caminho, busca)] = transporte.chamadas
+    [(_, url, corpo), *buscas] = transporte.chamadas
     assert url == (
         "https://reg-y-aiplatform.googleapis.com/v1/projects/proj-x/locations/reg-y/"
         "publishers/google/models/gemini-embedding-001:predict"
@@ -251,16 +256,15 @@ def test_sem_os_indices_ann_buscar_calcula_o_vetor_da_consulta_na_regiao_da_busc
         "instances": [{"content": "vestido", "task_type": "RETRIEVAL_QUERY"}],
         "parameters": {"outputDimensionality": 256},
     }
-    assert caminho.endswith("/dataObjects:batchSearch")
-    assert busca is not None
-    assert busca["searches"][1]["vectorSearch"]["vector"] == {"values": [0.5] * 256}
-
-
-def test_com_os_indices_ann_buscar_nao_calcula_embedding() -> None:
-    transporte = TransporteFalso({"results": []})
-    AgentRetrieval(CONFIG, transporte).buscar(Consulta(significado="vestido"))
-    [(_, caminho, _)] = transporte.chamadas
-    assert caminho.endswith("/dataObjects:batchSearch")
+    # Dois pedidos (#568): o do texto e o do significado, com o vetor da consulta.
+    assert all(c.endswith("/dataObjects:batchSearch") for _, c, _ in buscas)
+    # Os pedidos vão em threads: a ordem de chegada não é fixa.
+    corpos = sorted(
+        (b["searches"][0] for _, _, b in buscas if b is not None),
+        key=lambda c: next(iter(c)),
+    )
+    assert [next(iter(c)) for c in corpos] == ["textSearch", "vectorSearch"]
+    assert corpos[1]["vectorSearch"]["vector"] == {"values": [0.5] * 256}
 
 
 def test_o_mesmo_texto_e_embutido_uma_vez_so() -> None:
@@ -770,22 +774,35 @@ def _achado(id: str, texto: str, *distancias: tuple[int, float]) -> dict[str, An
     }
 
 
+def _por_busca(
+    do_texto: list[dict[str, Any]], do_significado: list[dict[str, Any]]
+) -> tuple[Callable[..., Any], list[dict[str, Any]]]:
+    """Um transporte que responde cada `batchSearch` de uma busca só (#568): a lista do texto
+    ao pedido de texto e a do significado ao de significado. Devolve também os corpos."""
+    corpos: list[dict[str, Any]] = []
+
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        if caminho.endswith(":predict"):  # o vetor da consulta, para o cache
+            return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
+        corpos.append(corpo)
+        [busca] = corpo["searches"]
+        achados = do_texto if "textSearch" in busca else do_significado
+        return {"results": [{"results": achados}]}
+
+    return transporte, corpos
+
+
 def test_so_do_significado_volta_o_que_esta_perto_e_tem_palavras_bastantes() -> None:
     # Medido no dev: "terno" achava "ok." a 0,30 e "Tchau," a 0,32 só pelo vetor.
     config = replace(CONFIG, distancia_maxima=0.25, palavras_minimas=3)
-    transporte = TransporteFalso(
-        {
-            "results": [
-                {
-                    "results": [
-                        _achado("pelo-texto", "terno", (0, 1.26), (1, 0.32)),
-                        _achado("perto", "terno preto de alfaiataria", (1, 0.20)),
-                        _achado("longe", "calça vinho estilo pantalona", (1, 0.30)),
-                        _achado("curta", "ok.", (1, 0.10)),
-                    ]
-                }
-            ]
-        }
+    transporte, corpos = _por_busca(
+        [_achado("pelo-texto", "terno")],
+        [
+            _achado("pelo-texto", "terno", (0, 0.32)),
+            _achado("perto", "terno preto de alfaiataria", (0, 0.20)),
+            _achado("longe", "calça vinho estilo pantalona", (0, 0.30)),
+            _achado("curta", "ok.", (0, 0.10)),
+        ],
     )
     adaptador = AgentRetrieval(config, transporte)
     consulta = Consulta(
@@ -794,13 +811,153 @@ def test_so_do_significado_volta_o_que_esta_perto_e_tem_palavras_bastantes() -> 
         cortar_significado=True,
         filtros=Filtros(tipo="plano"),
     )
+    # O achado pelo texto escapa do corte (a distância dele é a de outra busca).
     assert [r.id for r in adaptador.buscar(consulta)] == ["pelo-texto", "perto"]
-    [(_, _, corpo)] = transporte.chamadas
-    assert corpo is not None
-    assert corpo["metadataOptions"] == {"searchSignalsEnabled": True}
+    # Os pedidos vão em threads: a ordem de chegada não é fixa.
+    [do_texto, do_significado] = sorted(
+        corpos, key=lambda c: "textSearch" not in c["searches"][0]
+    )
+    # Só o pedido do significado pede os sinais; nenhum leva `combine`.
+    assert "metadataOptions" not in do_texto
+    assert do_significado["metadataOptions"] == {"searchSignalsEnabled": True}
+    assert "combine" not in do_texto and "combine" not in do_significado
     # Sem o pedido de corte (a cláusula de pessoa na imagem), volta tudo.
     sem_corte = replace(consulta, cortar_significado=False)
     assert len(adaptador.buscar(sem_corte)) == 4
+    assert all("metadataOptions" not in c for c in corpos[2:])
+
+
+def test_corte_do_significado_sem_distancia_ou_so_no_texto() -> None:
+    # Sem sinais na resposta, a distância cai no campo `distance`; sem nenhum dos dois, e
+    # com corte configurado, o resultado só do significado não passa.
+    config = replace(CONFIG, distancia_maxima=0.25, palavras_minimas=1)
+    com_campo = _achado("campo", "plano perto")
+    com_campo["distance"] = 0.1
+    transporte, _ = _por_busca(
+        [_achado("so-texto", "palavra")],
+        [com_campo, _achado("sem-distancia", "plano sem distância")],
+    )
+    consulta = Consulta(texto="x", significado="y", cortar_significado=True)
+    ids = [r.id for r in AgentRetrieval(config, transporte).buscar(consulta)]
+    assert set(ids) == {"so-texto", "campo"}
+
+
+def test_texto_e_significado_vao_em_dois_pedidos_ao_mesmo_tempo() -> None:
+    barreira = threading.Barrier(2)
+
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        if caminho.endswith(":predict"):
+            return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
+        barreira.wait(timeout=2)  # falha se um esperar o outro terminar
+        return {"results": [{"results": []}]}
+
+    AgentRetrieval(CONFIG, transporte).buscar(
+        Consulta(texto="a", significado="b", filtros=Filtros(tipo="plano"), limite=9)
+    )
+
+
+def test_pedidos_separados_levam_o_limite_o_filtro_e_o_indice_de_antes() -> None:
+    transporte, corpos = _por_busca([], [])
+    consulta = Consulta(
+        texto="a", significado="b", filtros=Filtros(tipo="plano"), limite=9
+    )
+    AgentRetrieval(CONFIG, transporte).buscar(consulta)
+    esperado = pedido_de_busca(CONFIG, consulta)["searches"]
+    assert sorted(
+        (c["searches"][0] for c in corpos), key=lambda b: next(iter(b))
+    ) == sorted(esperado, key=lambda b: next(iter(b)))
+    assert all(next(iter(c["searches"][0].values()))["topK"] == 9 for c in corpos)
+
+
+def _ids(*ids: str) -> list[tuple[Registro, dict[str, Any]]]:
+    return [(_reg(i, "plano"), {}) for i in ids]
+
+
+def test_rrf_e_a_soma_de_1_sobre_60_mais_a_posicao_comecando_em_1() -> None:
+    texto = _ids("a", "b", "c")
+    significado = _ids("c", "d")
+    fundido = _fundir_por_rrf(texto, significado, 10)
+    # c: 1/63 + 1/61; a: 1/61; b e d: 1/62 (b só no texto, d só no significado; d antes).
+    assert [r.id for r, _ in fundido] == ["c", "a", "d", "b"]
+    # O limite corta depois da fusão.
+    assert [r.id for r, _ in _fundir_por_rrf(texto, significado, 2)] == ["c", "a"]
+
+
+def test_rrf_empate_fica_na_ordem_do_significado_e_depois_do_texto() -> None:
+    # a e b: nota igual (texto 1 / significado 2, e texto 2 / significado 1).
+    assert [r.id for r, _ in _fundir_por_rrf(_ids("a", "b"), _ids("b", "a"), 9)] == [
+        "b",
+        "a",
+    ]
+    # Só no texto na posição 1 e só no significado na posição 1: nota igual, e quem tem
+    # posição no significado vem antes.
+    assert [r.id for r, _ in _fundir_por_rrf(_ids("t"), _ids("s"), 9)] == ["s", "t"]
+    # Repetível: a mesma entrada dá sempre a mesma ordem.
+    entradas = (_ids("a", "b", "c", "d"), _ids("d", "c", "b", "a"))
+    assert _fundir_por_rrf(*entradas, 9) == _fundir_por_rrf(*entradas, 9)
+
+
+def test_rrf_guarda_o_resultado_do_significado_que_traz_a_distancia() -> None:
+    do_texto = [(_reg("a", "plano"), {"origem": "texto"})]
+    do_significado = [(_reg("a", "plano"), {"origem": "significado"})]
+    [(_, cru)] = _fundir_por_rrf(do_texto, do_significado, 5)
+    assert cru == {"origem": "significado"}
+    [(_, so_texto)] = _fundir_por_rrf(do_texto, [], 5)
+    assert so_texto == {"origem": "texto"}
+
+
+def test_buscar_funde_as_duas_respostas_por_rrf_e_corta_no_limite() -> None:
+    transporte, _ = _por_busca(
+        [_achado("a", "um"), _achado("b", "dois"), _achado("c", "tres")],
+        [_achado("c", "tres"), _achado("b", "dois"), _achado("d", "quatro")],
+    )
+    consulta = Consulta(texto="x", significado="y", filtros=Filtros(tipo="plano"))
+    # c: 1/63+1/61 = 0,03227; b: 2/62 = 0,03226; a: 1/61; d: 1/63.
+    assert [r.id for r in AgentRetrieval(CONFIG, transporte).buscar(consulta)] == [
+        "c",
+        "b",
+        "a",
+        "d",
+    ]
+    assert (
+        len(AgentRetrieval(CONFIG, transporte).buscar(replace(consulta, limite=2))) == 2
+    )
+
+
+def test_pedido_com_uma_busca_so_vai_em_um_pedido() -> None:
+    transporte, corpos = _por_busca([_achado("a", "um")], [])
+    AgentRetrieval(CONFIG, transporte).buscar(
+        Consulta(texto="x", filtros=Filtros(tipo="plano"))
+    )
+    assert len(corpos) == 1 and len(corpos[0]["searches"]) == 1
+
+
+def test_o_pool_do_indice_cobre_o_pico_de_pedidos_simultaneos() -> None:
+    # Pico: `TETO_DE_CONSULTAS_AO_INDICE` consultas juntas, cada uma com 2 pedidos nos
+    # planos e 1 na coleção de texto.
+    assert CONEXOES_AO_INDICE == TETO_DE_CONSULTAS_AO_INDICE * (2 + 1) == 24
+    assert CONEXOES_AO_INDICE > 10  # o padrão do requests
+
+
+def test_transporte_http_monta_o_pool_do_indice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import requests
+
+    sessoes: list[requests.Session] = []
+
+    class Sessao(requests.Session):
+        def __init__(self, _: object) -> None:
+            super().__init__()
+            sessoes.append(self)
+
+    monkeypatch.setattr("google.auth.default", lambda scopes: (None, None))
+    monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", Sessao)
+    chamada = transporte_http()
+    [sessao] = sessoes
+    adaptador = sessao.get_adapter("https://vectorsearch.googleapis.com/v1beta/x")
+    assert adaptador._pool_maxsize == CONEXOES_AO_INDICE  # type: ignore[attr-defined]
+    assert chamada is not None
 
 
 def test_so_o_significado_tambem_e_cortado() -> None:
@@ -1131,6 +1288,8 @@ def test_transporte_http_levanta_cota_esgotada_no_429(
     class Sessao:
         def __init__(self, _: object) -> None: ...
 
+        def mount(self, *_: object) -> None: ...
+
         def request(self, *_: object, **__: object) -> Resposta:
             return Resposta()
 
@@ -1155,6 +1314,8 @@ def test_transporte_http_leitura_do_indice_tem_15_s_e_o_resto_60_s(
 
     class Sessao:
         def __init__(self, _: object) -> None: ...
+
+        def mount(self, *_: object) -> None: ...
 
         def request(self, _m: str, url: str, **kw: object) -> Resposta:
             prazos[url.rsplit("/", 1)[-1]] = kw["timeout"]
@@ -1817,6 +1978,7 @@ def test_buscar_roteia_tipo_e_so_embute_o_significado_dos_planos(
     AgentRetrieval(config, transporte).buscar(
         Consulta(texto="terno", significado="paletó", filtros=Filtros(tipo=tipo))
     )
+    _esperar_o_cache()
     buscas = [(c, b) for _, c, b in transporte.chamadas if c.endswith(":batchSearch")]
     assert {c.split("/collections/")[1].split("/")[0] for c, _ in buscas} == (
         {"col-z"}
@@ -1825,16 +1987,27 @@ def test_buscar_roteia_tipo_e_so_embute_o_significado_dos_planos(
         if tipo
         else {"col-z", "col-texto"}
     )
-    for caminho, corpo in buscas:
+    for _, corpo in buscas:
         assert corpo is not None
-        campos = set(_buscas(corpo))
-        assert campos == (
-            {"textSearch"}
-            if "/col-texto/" in caminho
-            else {"textSearch", "semanticSearch" if ligados else "vectorSearch"}
+        assert "combine" not in corpo
+        assert len(corpo["searches"]) == 1
+    # Os planos vão em dois pedidos, um por busca (#568); a coleção de texto, em um.
+    campos = [
+        (("/col-texto/" in caminho), next(iter(corpo["searches"][0])))
+        for caminho, corpo in buscas
+        if corpo is not None
+    ]
+    significado = "semanticSearch" if ligados else "vectorSearch"
+    assert sorted(campos) == sorted(
+        (
+            [(False, "textSearch"), (False, significado)]
+            if tipo in (None, "plano")
+            else []
         )
+        + ([(True, "textSearch")] if tipo != "plano" else [])
+    )
     assert sum(c.endswith(":predict") for _, c, _ in transporte.chamadas) == (
-        1 if not ligados and tipo in (None, "plano") else 0
+        1 if tipo in (None, "plano") else 0
     )
 
 
@@ -1857,7 +2030,8 @@ def test_tipo_de_texto_sem_texto_devolve_vazio_sem_chamar_api(
 def test_busca_livre_roda_as_colecoes_juntas_intercala_corta_e_so_filtra_o_vetor(
     ligados: bool,
 ) -> None:
-    barreira = threading.Barrier(2)
+    # Três pedidos juntos: texto e significado dos planos, e o da coleção de texto.
+    barreira = threading.Barrier(3)
     chamados: list[str] = []
 
     def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
@@ -1868,6 +2042,8 @@ def test_busca_livre_roda_as_colecoes_juntas_intercala_corta_e_so_filtra_o_vetor
         barreira.wait(timeout=2)
         if "/col-texto/" in caminho:
             achados = [_achado("t1", "oi"), _achado("t2", "olá")]
+        elif "textSearch" in corpo["searches"][0]:
+            achados = []
         else:
             achados = [
                 _achado("longe", "plano distante", (1, 0.9)),
@@ -1885,7 +2061,7 @@ def test_busca_livre_roda_as_colecoes_juntas_intercala_corta_e_so_filtra_o_vetor
     achados = indice.buscar(
         Consulta(texto="terno", significado="paletó", cortar_significado=True, limite=3)
     )
-    assert len(chamados) == 2
+    assert len(chamados) == 3
     assert [r.id for r in achados] == ["p1", "t1", "p2"]
 
 
@@ -1980,3 +2156,120 @@ def test_cria_as_duas_colecoes_texto_sem_vetor_significado_nem_indice(
     assert "significado" not in propriedades
     assert set(CAMPOS_DE_FILTRO + ["texto_da_busca"]) <= set(propriedades)
     assert not any("/col-texto/indexes" in c for _, c, _ in transporte.chamadas)
+
+
+def _esperar_o_cache() -> None:
+    """O embedding do cache roda numa thread solta (`_buscar_na_colecao`); espera por ela."""
+    for t in threading.enumerate():
+        if t.name == "embedding-do-cache":
+            t.join(5)
+
+
+def _transporte_de_busca(chamadas: list[tuple[str, Any]]) -> Callable[..., Any]:
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        chamadas.append((caminho, corpo))
+        if caminho.endswith(":predict"):
+            return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
+        return {}
+
+    return transporte
+
+
+def test_com_ann_vetor_fora_do_cache_vai_semantic_e_enche_o_cache_uma_vez() -> None:
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(CONFIG, _transporte_de_busca(chamadas))
+    indice.buscar(Consulta(significado="paletó", filtros=Filtros(tipo="plano")))
+    _esperar_o_cache()
+    busca = next(c for p, c in chamadas if p.endswith(":batchSearch"))
+    assert set(_buscas(busca)) == {"semanticSearch"}
+    assert sum(p.endswith(":predict") for p, _ in chamadas) == 1
+
+
+def test_com_ann_vetor_no_cache_vai_vector_search_com_index_hint() -> None:
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(CONFIG, _transporte_de_busca(chamadas))
+    consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
+    indice.buscar(consulta)
+    _esperar_o_cache()
+    chamadas.clear()
+    indice.buscar(consulta)
+    assert [p for p, _ in chamadas if p.endswith(":predict")] == []
+    (busca,) = _buscas(next(c for p, c in chamadas))
+    corpo = _buscas(next(c for p, c in chamadas))[busca]
+    assert busca == "vectorSearch"
+    assert corpo["vector"] == {"values": [0.1] * 256}
+    assert corpo["searchHint"]["indexHint"]["name"].endswith("/indexes/ind-d")
+    assert "semanticSearch" not in str(corpo)
+
+
+def test_com_ann_falha_do_embedding_do_cache_nao_derruba_a_busca() -> None:
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        if caminho.endswith(":predict"):
+            raise RuntimeError("429")
+        return {}
+
+    indice = AgentRetrieval(CONFIG, transporte)
+    assert indice.buscar(Consulta(significado="x", filtros=Filtros(tipo="plano"))) == []
+
+
+def test_com_ann_threads_juntas_embutem_o_texto_uma_vez() -> None:
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(CONFIG, _transporte_de_busca(chamadas))
+    consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
+    with ThreadPoolExecutor(4) as pool:
+        list(pool.map(lambda _: indice.buscar(consulta), range(4)))
+    _esperar_o_cache()
+    assert sum(p.endswith(":predict") for p, _ in chamadas) == 1
+
+
+def test_aquecer_o_indice_toca_um_host_de_cada_servico() -> None:
+    hosts: list[str] = []
+
+    class Quente:
+        aquecer = staticmethod(hosts.append)
+
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            return {}
+
+    aquecer_o_indice(Quente(), CONFIG)
+    assert hosts == [
+        "vectorsearch.googleapis.com",
+        f"{CONFIG.regiao}-aiplatform.googleapis.com",
+    ]
+    aquecer_o_indice(TransporteFalso(), CONFIG)  # sem `aquecer`: não faz nada
+
+
+def test_com_ann_texto_ja_enchendo_nao_abre_outra_thread() -> None:
+    liberar = threading.Event()
+    chamadas: list[str] = []
+
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        chamadas.append(caminho)
+        if caminho.endswith(":predict"):
+            liberar.wait(5)
+            return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
+        return {}
+
+    indice = AgentRetrieval(CONFIG, transporte)
+    consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
+    for _ in range(10):
+        indice.buscar(consulta)
+    abertas = [t for t in threading.enumerate() if t.name == "embedding-do-cache"]
+    liberar.set()
+    _esperar_o_cache()
+    assert len(abertas) == 1
+    assert sum(c.endswith(":predict") for c in chamadas) == 1
+
+
+def test_com_ann_thread_que_nao_inicia_libera_a_reserva(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(CONFIG, _transporte_de_busca(chamadas))
+
+    def falha(self: threading.Thread) -> None:
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", falha)
+    indice.buscar(Consulta(significado="paletó", filtros=Filtros(tipo="plano")))
+    assert indice._enchendo == set()

@@ -24,12 +24,14 @@ from dataclasses import dataclass, fields, replace
 from datetime import date
 from time import sleep, time
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import google.auth
 import google.auth.transport.requests
 import requests
 
-from api.busca import _intercalar
+from api.busca import RRF_K, TETO_DE_CONSULTAS_AO_INDICE, _intercalar
+from api.busca_na_nuvem import com_pool, tocar_o_host
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.orcamento_de_escrita import Orcamento
@@ -38,6 +40,13 @@ log = logging.getLogger(__name__)
 
 URL_BASE = "https://vectorsearch.googleapis.com/v1beta"
 RECALL_ALVO = 0.95
+# Threads que enchem o cache de vetores ao mesmo tempo (`_encher_o_cache`).
+TETO_DE_ENCHIMENTOS = 4
+# Pedidos simultâneos ao índice no pico: `TETO_DE_CONSULTAS_AO_INDICE` consultas juntas, e
+# cada uma vai a até 2 coleções (planos e texto), a dos planos em 2 pedidos (texto e
+# significado, #568) e a de texto em 1: 2 + 1 = 3. A sessão guarda uma conexão para cada um
+# (o pool padrão do `requests` guarda 10, e cada conexão acima disso custa ~800 ms).
+CONEXOES_AO_INDICE = TETO_DE_CONSULTAS_AO_INDICE * 3
 # O KNN aceita até 100 mil registros; a gravação avisa ao passar deste limite (sem índice).
 AVISO_DO_TETO_DO_KNN = 80_000
 REGISTROS_POR_LOTE = 200
@@ -228,7 +237,10 @@ def pedido_de_busca(
     padrão do KNN é o produto escalar, que não serve a vetores sem norma 1). O
     `semanticSearch` não aceita `distanceMetric` e no KNN ordena por produto escalar: o
     significado vai então como `vectorSearch` com `vetor_do_significado`, o embedding da
-    consulta (`AgentRetrieval.vetor_da_consulta`), obrigatório nesse caso. A busca por
+    consulta (`AgentRetrieval.vetor_da_consulta`), obrigatório nesse caso. Com o ANN,
+    `vetor_do_significado` é opcional: dado (vetor já no cache), vai o mesmo `vectorSearch`
+    com o `indexHint`, medido idêntico ao `semanticSearch` e mais rápido; ausente, o
+    `semanticSearch` calcula o embedding no servidor. A busca por
     texto não é KNN e não usa índice de vetor. Só filtros não é busca: levanta
     `ValueError`.
     """
@@ -268,7 +280,9 @@ def pedido_de_busca(
         )
         texto = {"text": normalizado, "fields": CAMPOS_DE_TEXTO}
         buscas.append({"textSearch": {**comum, "structuredQuery": {"text": texto}}})
-    if consulta.significado and not config.indices_ligados:
+    if consulta.significado and (
+        vetor_do_significado is not None or not config.indices_ligados
+    ):
         if vetor_do_significado is None:
             raise ValueError(
                 "sem os índices ANN, o significado pede o vetor da consulta"
@@ -304,6 +318,52 @@ def pedido_de_busca(
             "outputFields": comum["outputFields"],
         }
     return pedido
+
+
+def _lido(resposta: dict[str, Any]) -> list[tuple[Registro, dict[str, Any]]]:
+    """Os resultados do `batchSearch` (uma lista por busca), na ordem, com o resultado cru
+    de cada um (a distância vem nele)."""
+    return [
+        (_registro(r["dataObject"]["data"]), r)
+        for lista in resposta.get("results", [])
+        for r in lista.get("results", [])
+    ]
+
+
+def _fundir_por_rrf(
+    do_texto: list[tuple[Registro, dict[str, Any]]],
+    do_significado: list[tuple[Registro, dict[str, Any]]],
+    limite: int,
+) -> list[tuple[Registro, dict[str, Any]]]:
+    """O RRF do serviço, medido em 11/11/2026: nota = soma de 1 / (60 + posição) em cada
+    busca que achou o registro, com a posição começando em 1 e pesos iguais.
+
+    O desempate do serviço não se reproduz (a regra dele não é a melhor posição no texto
+    nem no significado). Aqui, registros de nota igual ficam na ordem da posição no
+    significado e, depois, no texto (só em um: a posição que falta conta como a última).
+    Só a ordem entre empates difere do serviço. O resultado cru guardado é o do
+    significado, que traz a distância; o do texto vale para os achados só nele."""
+    nota: dict[str, float] = {}
+    no_texto: dict[str, int] = {}
+    no_significado: dict[str, int] = {}
+    resultado: dict[str, tuple[Registro, dict[str, Any]]] = {}
+    for posicoes, achados in ((no_texto, do_texto), (no_significado, do_significado)):
+        for posicao, achado in enumerate(achados, 1):
+            id = achado[0].id
+            nota[id] = nota.get(id, 0.0) + 1 / (RRF_K + posicao)
+            posicoes[id] = posicao
+            # O do significado vem por último e vale: é nele que está a distância.
+            resultado[id] = achado
+    ultima = len(do_texto) + len(do_significado) + 1
+    ordem = sorted(
+        nota,
+        key=lambda i: (
+            -nota[i],
+            no_significado.get(i, ultima),
+            no_texto.get(i, ultima),
+        ),
+    )
+    return [resultado[i] for i in ordem[:limite]]
 
 
 def esquema_da_colecao(config: ConfigDaBusca) -> dict[str, Any]:
@@ -758,6 +818,9 @@ class AgentRetrieval:
         # está embutindo espera por ele, em vez de pagar a mesma chamada de novo.
         self._embutindo: dict[str, threading.Lock] = {}
         self._trava_do_embutindo = threading.Lock()
+        # Os textos com uma thread enchendo o cache (`_buscar_na_colecao`): uma por texto,
+        # no máximo `TETO_DE_ENCHIMENTOS` juntas; a busca que não cabe só não enche.
+        self._enchendo: set[str] = set()
 
     def _chamar(
         self,
@@ -1048,6 +1111,37 @@ class AgentRetrieval:
             with self._trava_do_embutindo:
                 self._embutindo.pop(texto, None)
 
+    def _guardar_o_vetor(self, texto: str) -> None:
+        """Enche o cache; falha não atrapalha a busca (o `semanticSearch` já responde)."""
+        try:
+            self.vetor_da_consulta(texto)
+        except Exception:
+            log.warning("embedding do cache da busca falhou", exc_info=True)
+        finally:
+            with self._trava_do_embutindo:
+                self._enchendo.discard(texto)
+
+    def _encher_o_cache(self, texto: str) -> None:
+        """Embute o texto numa thread solta, sem a busca esperar: o embedding pode demorar
+        mais que ela (p90 ~450 ms medido). Uma thread por texto, e no máximo
+        `TETO_DE_ENCHIMENTOS` juntas, para um embedding lento não acumular threads."""
+        with self._trava_do_embutindo:
+            if texto in self._enchendo or len(self._enchendo) >= TETO_DE_ENCHIMENTOS:
+                return
+            self._enchendo.add(texto)
+        try:
+            threading.Thread(
+                target=self._guardar_o_vetor,
+                args=(texto,),
+                name="embedding-do-cache",
+                daemon=True,
+            ).start()
+        except RuntimeError:
+            # Sem thread (falta de recursos): a reserva sai, e a busca segue sem encher.
+            with self._trava_do_embutindo:
+                self._enchendo.discard(texto)
+            log.warning("thread do embedding do cache não iniciou", exc_info=True)
+
     def _embutir(self, texto: str) -> list[float]:
         """Chama o modelo de embedding e guarda o vetor no cache."""
         resposta = self._transporte(
@@ -1092,31 +1186,57 @@ class AgentRetrieval:
         return _intercalar([f.result() for f in futuros])[: consulta.limite]
 
     def _buscar_na_colecao(self, colecao: str, consulta: Consulta) -> list[Registro]:
-        # Sem índice ANN a consulta vira vetor aqui (`pedido_de_busca`).
-        vetor = (
-            self.vetor_da_consulta(consulta.significado)
-            if consulta.significado and not self._config.indices_ligados
-            else None
-        )
-        resposta = self._chamar(
-            "dataObjects:batchSearch",
-            pedido_de_busca(self._config, consulta, vetor),
-            colecao=colecao,
-        )
-        # Uma lista de resultados por busca; com o RRF, uma lista só, já fundida.
-        registros = [
-            (_registro(r["dataObject"]["data"]), r)
-            for lista in resposta.get("results", [])
-            for r in lista.get("results", [])
-        ]
-        if consulta.cortar_significado and consulta.significado:
-            # A busca por significado vem depois da por texto (`pedido_de_busca`).
-            busca = 1 if consulta.texto else 0
-            registros = [(r, x) for r, x in registros if self._perto(r, x, busca)]
+        # Sem índice ANN a consulta vira vetor aqui (`pedido_de_busca`). Com o ANN, o
+        # vetor só serve se já está no cache (vectorSearch, #568); senão vai o
+        # semanticSearch e, em paralelo, o vetor entra no cache para os próximos pedidos.
+        if not consulta.significado:
+            vetor = None
+        elif not self._config.indices_ligados:
+            vetor = self.vetor_da_consulta(consulta.significado)
+        else:
+            vetor = self._vetores.get(consulta.significado)
+            if vetor is None:
+                self._encher_o_cache(consulta.significado)
+        pedido = pedido_de_busca(self._config, consulta, vetor)
+        cortar = consulta.cortar_significado and bool(consulta.significado)
+        if len(pedido["searches"]) > 1:
+            # Texto e significado vão em dois pedidos paralelos, e a fusão é feita aqui
+            # (`_fundir_por_rrf`): mais rápido que o `combine` do serviço (~130 ms no p50,
+            # #568). A busca por significado é a segunda, e só ela pede os sinais.
+            texto, significado = pedido["searches"]
+            base = {k: v for k, v in pedido.items() if k not in ("combine", "searches")}
+            sem_sinais = {k: v for k, v in base.items() if k != "metadataOptions"}
+            corpos = [
+                {**sem_sinais, "searches": [texto]},
+                {**base, "searches": [significado]},
+            ]
+            with ThreadPoolExecutor(2) as pool:
+                futuros = [
+                    pool.submit(
+                        self._chamar, "dataObjects:batchSearch", c, colecao=colecao
+                    )
+                    for c in corpos
+                ]
+            do_texto, do_significado = (_lido(f.result()) for f in futuros)
+            registros = _fundir_por_rrf(do_texto, do_significado, consulta.limite)
+            if cortar:
+                achados_no_texto = {r.id for r, _ in do_texto}
+                registros = [
+                    (r, x)
+                    for r, x in registros
+                    if r.id in achados_no_texto or self._perto(r, x)
+                ]
+            return [r for r, _ in registros]
+        resposta = self._chamar("dataObjects:batchSearch", pedido, colecao=colecao)
+        registros = _lido(resposta)
+        if cortar:
+            # Uma busca só, a de índice 0.
+            registros = [(r, x) for r, x in registros if self._perto(r, x)]
         return [r for r, _ in registros]
 
-    def _perto(self, r: Registro, resultado: dict[str, Any], busca: int) -> bool:
-        """Achado por outra busca, ou perto o bastante e com palavras bastantes.
+    def _perto(self, r: Registro, resultado: dict[str, Any]) -> bool:
+        """Perto o bastante e com palavras bastantes (o "achado por outra busca" é
+        conferido por quem chama: com a fusão aqui, é só olhar a lista do texto).
 
         ponytail: corte fixo, calibrado em 3 vídeos do dev; com a API de Ranking no ar,
         o corte passa a ser a nota dela."""
@@ -1126,9 +1246,8 @@ class AgentRetrieval:
                 "searchDistances", []
             )
         }
-        if any(i != busca for i in distancias):
-            return True
-        distancia = distancias.get(busca, resultado.get("distance"))
+        # O resultado é de uma busca só (a do significado): a distância é a única.
+        distancia = next(iter(distancias.values()), resultado.get("distance"))
         maxima = self._config.distancia_maxima
         return (
             maxima is None or (distancia is not None and distancia <= maxima)
@@ -1141,12 +1260,31 @@ class AgentRetrieval:
         return sum(int(r.get("count", 0)) for r in resposta.get("aggregateResults", []))
 
 
+def aquecer_o_indice(transporte: Transporte, config: ConfigDaBusca) -> None:
+    """Abre a conexão e pega o token para o índice e para o embedding, uma chamada por host.
+    Só o transporte real (`transporte_http`) sabe aquecer; um falso não faz nada."""
+    aquecer = getattr(transporte, "aquecer", None)
+    if aquecer is None:
+        return
+    for host in (
+        urlsplit(URL_BASE).netloc,
+        f"{config.regiao}-aiplatform.googleapis.com",
+    ):
+        aquecer(host)
+
+
 def transporte_http() -> Transporte:
     """O transporte real: REST com as credenciais padrão (ADC) de quem roda."""
     credenciais, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
-    sessao = google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
+    sessao = com_pool(
+        google.auth.transport.requests.AuthorizedSession(credenciais),  # type: ignore[no-untyped-call]
+        CONEXOES_AO_INDICE,
+    )
+
+    def aquecer(host: str) -> None:
+        tocar_o_host(sessao, host)
 
     def chamar(
         metodo: str, caminho: str, corpo: dict[str, Any] | None
@@ -1157,9 +1295,7 @@ def transporte_http() -> Transporte:
         # sem isso a chamada presa segura o worker por até 60 s. Escrita e purga ficam em 60 s.
         prazo = 15 if caminho.endswith(":batchSearch") else 60
         try:
-            resposta = sessao.request(  # type: ignore[no-untyped-call]
-                metodo, url, json=corpo, timeout=prazo
-            )
+            resposta = sessao.request(metodo, url, json=corpo, timeout=prazo)
         except requests.exceptions.Timeout:
             # O `TimeoutError` é o que a rota da busca já traduz em 504 (e o 500 não).
             raise TimeoutError(
@@ -1176,4 +1312,5 @@ def transporte_http() -> Transporte:
             )
         return dict(resposta.json()) if resposta.content else {}
 
+    chamar.aquecer = aquecer  # type: ignore[attr-defined]
     return chamar

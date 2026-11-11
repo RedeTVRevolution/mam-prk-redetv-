@@ -129,6 +129,10 @@ def test_medida_temporaria_nao_escreve_nem_apaga_na_colecao_de_texto(
         if metodo == "DELETE" or "/indexes?" in caminho:
             return {}
         if caminho.endswith(":batchSearch"):
+            if (
+                "textSearch" not in corpo["searches"][0]
+            ):  # o pedido do significado (#568)
+                return {"results": [{"results": []}]}
             pedido = corpo["searches"][0]["textSearch"]
             ausente = {"pessoas": {"$in": ["cat-ausente"]}} in pedido["filter"]["$and"]
             return {

@@ -2443,6 +2443,8 @@ def test_leitura_do_indice_que_estoura_o_prazo_do_transporte_responde_504(
     class Sessao:
         def __init__(self, _: object) -> None: ...
 
+        def mount(self, *_: object) -> None: ...
+
         def request(self, *_: object, **__: object) -> None:
             raise requests.exceptions.ReadTimeout("batchSearch")
 

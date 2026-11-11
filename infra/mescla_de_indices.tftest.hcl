@@ -57,4 +57,24 @@ run "mescla_de_indices" {
     condition     = length(output.indices_a_remover) == 68 - (8 + 1 + 4 + 4)
     error_message = "A lista de remoção deve ter os índices por combinação que a mescla dispensa."
   }
+  # A remoção: os recursos que sobram no plano são exatamente os da mescla, e todo recurso
+  # antigo está na lista dos destruídos ou entre os que ficam (nenhum some sem constar).
+  assert {
+    condition = (
+      length(output.indices_que_ficam.acervo) == 8 &&
+      length(output.indices_que_ficam.acervo_por_mes) == 1 &&
+      length(output.indices_que_ficam.auditoria) == 4 &&
+      length(output.indices_que_ficam.auditoria_na_seguranca) == 4
+    )
+    error_message = "Devem ficar 8 + 1 + 4 + 4 índices."
+  }
+  assert {
+    condition = toset(output.indices_a_remover) == toset(concat(
+      [for k in [for par in setproduct(range(1, 16), ["criado_em", "data_exibicao"]) : "${par[1]}-${par[0]}"] : "acervo/${k}" if !contains(output.indices_que_ficam.acervo, k)],
+      [for k in [for n in range(0, 16) : tostring(n)] : "acervo_por_mes/${k}" if !contains(output.indices_que_ficam.acervo_por_mes, k)],
+      [for k in [for n in range(1, 16) : tostring(n) if !(floor(n / 1) % 2 == 1 && floor(n / 2) % 2 == 1)] : "auditoria/${k}" if !contains(output.indices_que_ficam.auditoria, k)],
+      [for k in [for n in range(1, 16) : tostring(n) if !(floor(n / 1) % 2 == 1 && floor(n / 2) % 2 == 1)] : "auditoria_na_seguranca/${k}" if !contains(output.indices_que_ficam.auditoria_na_seguranca, k)],
+    ))
+    error_message = "Os destruídos devem ser exatamente os antigos que não ficam."
+  }
 }

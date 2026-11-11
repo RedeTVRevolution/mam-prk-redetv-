@@ -6,7 +6,14 @@ from typing import Any
 import pytest
 import requests
 
-from api.busca_na_nuvem import RankingReal, adaptadores_da_busca
+from api.busca_na_nuvem import (
+    MODELO_DA_RANKING,
+    TEMPO_DA_RANKING_S,
+    RankingReal,
+    adaptadores_da_busca,
+    aquecer_na_partida,
+    tocar_o_host,
+)
 from api.gemini import MODO_STANDARD, Chamada, ErroHttp, TransporteVertex
 from api.indice_da_busca import Registro
 from api.tests.test_gemini import RespostaFalsa, RespostaSemJson, SessaoFalsa
@@ -237,3 +244,59 @@ def test_a_consulta_vai_em_standard_sem_os_cabecalhos_do_flex() -> None:
     TransporteVertex("proj", sessao).gerar(chamada)
 
     assert sessao.pedidos[0]["headers"] == {}
+
+
+def test_ranking_usa_o_prazo_de_2_s_e_o_modelo_fixado() -> None:
+    ranking, sessao = _ranking(_ordem("a"))
+    ranking.reordenar("q", [_r("a", texto="oi")])
+    assert TEMPO_DA_RANKING_S == 2.0
+    assert sessao.pedidos[0]["timeout"] == 2.0
+    assert sessao.pedidos[0]["json"]["model"] == "semantic-ranker-default-005"
+    assert MODELO_DA_RANKING == "semantic-ranker-default-005"
+
+
+class SessaoDeGet:
+    def __init__(self) -> None:
+        self.urls: list[tuple[str, float]] = []
+
+    def get(self, url: str, timeout: float) -> None:
+        self.urls.append((url, timeout))
+
+
+def test_tocar_o_host_faz_um_get_barato() -> None:
+    sessao = SessaoDeGet()
+    tocar_o_host(sessao, "discoveryengine.googleapis.com")
+    assert sessao.urls == [("https://discoveryengine.googleapis.com/", 5)]
+
+
+def test_aquecer_na_partida_roda_em_segundo_plano_e_so_loga_a_falha(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    feitas: list[str] = []
+
+    def falha() -> None:
+        raise RuntimeError("sem rede")
+
+    aquecer_na_partida([falha, lambda: feitas.append("b")]).join(timeout=2)
+    assert feitas == ["b"]
+    assert "aquecimento da conexão falhou" in caplog.text
+
+
+def test_o_aquecimento_da_ranking_so_existe_com_a_configuracao() -> None:
+    sessao = SessaoDeGet()
+    com = adaptadores_da_busca(AMBIENTE, lambda: sessao)  # type: ignore[arg-type,return-value]
+    assert com.aquecer is not None
+    com.aquecer()
+    assert [u for u, _ in sessao.urls] == ["https://discoveryengine.googleapis.com/"]
+    sem = adaptadores_da_busca({"GCP_PROJECT_ID": "proj"}, lambda: SessaoFalsa())
+    assert sem.aquecer is None
+
+
+def test_com_pool_guarda_as_conexoes_pedidas_por_host() -> None:
+    import requests
+
+    from api.busca_na_nuvem import com_pool
+
+    sessao = com_pool(requests.Session(), 24)
+    adaptador = sessao.get_adapter("https://discoveryengine.googleapis.com/")
+    assert adaptador._pool_maxsize == 24

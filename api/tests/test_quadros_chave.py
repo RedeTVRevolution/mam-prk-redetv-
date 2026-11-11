@@ -11,7 +11,7 @@ import pytest
 from api.decupagem import Decupagem, esquema_do_modelo
 from api.jobs import Job, RepositorioEmMemoria
 from api.quadros_chave import com_quadros_chave, e_escuro, executar, instantes_alvo
-from api.quadros_das_pessoas import extrair_quadros
+from api.quadros_das_pessoas import extrair_quadros, extrair_quadros_em_lote
 
 precisa_de_ffmpeg = pytest.mark.skipif(
     shutil.which("ffmpeg") is None, reason="sem ffmpeg"
@@ -318,37 +318,33 @@ def test_job_que_nao_concluiu_nao_ganha_quadros(tmp_path: Path) -> None:
     )
 
 
-def test_timeout_passageiro_nao_deixa_o_mesmo_instante_sem_quadro(
+@precisa_de_ffmpeg
+def test_lote_que_estoura_o_tempo_e_tentado_de_novo_um_a_um(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # Plano, aparição e objeto com o meio em 3 s: a falha do ffmpeg na 1ª tentativa (a do
-    # plano) não pode ficar guardada, senão aparição e objeto ficam sem quadro (#548).
-    import io
+    # Timeout passageiro do processo do lote (#548): os instantes não ficam sem quadro.
+    video = _video(tmp_path / "v.mp4")
+    esperado = extrair_quadros(video, [500, 2_500])
+    executar_de_verdade = subprocess.run
 
-    from PIL import Image
+    def run(comando: list[str], *args: Any, **kwargs: Any) -> Any:
+        if comando.count("-i") > 1:
+            raise subprocess.TimeoutExpired(comando, 1)
+        return executar_de_verdade(comando, *args, **kwargs)
 
-    from api.quadros import FalhaNosQuadros
+    monkeypatch.setattr("api.quadros_das_pessoas.subprocess.run", run)
 
-    buffer = io.BytesIO()
-    Image.new("RGB", (16, 16), (200, 200, 200)).save(buffer, "JPEG")
-    claro = buffer.getvalue()
-    chamadas: list[int] = []
+    assert extrair_quadros_em_lote(video, [500, 2_500]) == esperado
 
-    def extrair(video: Path, instantes: list[int]) -> list[bytes]:
-        chamadas.append(instantes[0])
-        if instantes[0] == 3_000 and chamadas.count(3_000) == 1:
-            raise FalhaNosQuadros
-        return [claro for _ in instantes]
 
-    monkeypatch.setattr("api.quadros_chave.extrair_quadros", extrair)
-    decupagem = _decupagem()
-    decupagem.objetos[0].ocorrencias = [
-        decupagem.objetos[0]
-        .ocorrencias[0]
-        .model_copy(update={"inicio_ms": 2_200, "fim_ms": 3_800})
-    ]
+@precisa_de_ffmpeg
+def test_lote_do_ffmpeg_sai_igual_ao_quadro_a_quadro_e_o_que_falta_vem_none(
+    tmp_path: Path,
+) -> None:
+    video = _video(tmp_path / "v.mp4")  # 6 s
+    instantes = [500, 2_500, 99_000, 5_500]
 
-    pronta = com_quadros_chave(tmp_path / "v.mp4", decupagem, lambda c, j: None)
+    lote = extrair_quadros_em_lote(video, instantes)
 
-    assert pronta.pessoas[0].na_imagem[1].quadro is not None
-    assert pronta.objetos[0].quadro is not None
+    assert lote[2] is None
+    assert [lote[0], lote[1], lote[3]] == extrair_quadros(video, [500, 2_500, 5_500])
