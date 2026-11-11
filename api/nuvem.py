@@ -1422,7 +1422,15 @@ class DisparoDaIndexacaoNoCloudRun:
     def iniciar(self, job_id: str) -> None:
         corpo = {
             "overrides": {
-                "containerOverrides": [{"env": [{"name": "JOB_ID", "value": job_id}]}]
+                "containerOverrides": [
+                    {
+                        "env": [
+                            {"name": "JOB_ID", "value": job_id},
+                            # Só o disparo da API alerta a falha (o Workflow a conta).
+                            {"name": "ORIGEM_DO_DISPARO", "value": "api"},
+                        ]
+                    }
+                ]
             }
         }
         try:
