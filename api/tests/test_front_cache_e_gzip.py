@@ -56,8 +56,7 @@ def test_gzip_nas_respostas_grandes(cliente: TestClient) -> None:
 
 
 def test_sem_gzip_abaixo_de_1_kb() -> None:
-    # Direto no middleware: pelo app, os `@app.middleware("http")` entregam o corpo em pedaços
-    # e o Starlette comprime resposta em pedaços de qualquer tamanho.
+    # Direto no middleware; pela app inteira, o teste é o do `/v1/health` abaixo.
     async def pequena(request: Request) -> Response:
         return Response("a" * 1000)
 
