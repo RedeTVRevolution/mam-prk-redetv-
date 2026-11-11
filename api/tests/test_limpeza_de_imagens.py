@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -223,11 +224,10 @@ def test_cada_repositorio_tem_a_sua_idade() -> None:
     assert _veredito(s, "sha256:w20").motivo.endswith("mais de 14 dias")
 
 
-def test_aceita_o_output_antigo_com_um_numero_so_para_os_dois_repositorios():
+def test_aceita_o_output_antigo_com_um_numero_so_para_os_dois_repositorios() -> None:
     # Antes do primeiro apply, o estado ainda tem `idade_minima_s` como um número só (#564).
-    antigo = dict(
-        SAIDA_DO_TERRAFORM["limpeza_de_imagens"]["value"], idade_minima_s=14 * 86400
-    )
+    novo: dict[str, Any] = SAIDA_DO_TERRAFORM["limpeza_de_imagens"]["value"]  # type: ignore[index]
+    antigo = {**novo, "idade_minima_s": 14 * 86400}
     regras = Regras.do_terraform(antigo)
     assert regras.idade_de("host/p/mam") == 14 * 86400
     assert regras.idade_de("host/p/mam-gpu") == 14 * 86400

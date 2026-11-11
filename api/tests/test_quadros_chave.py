@@ -327,7 +327,7 @@ def test_timeout_passageiro_nao_deixa_o_mesmo_instante_sem_quadro(
 
     from PIL import Image
 
-    from api.quadros_das_pessoas import FalhaNosQuadros
+    from api.quadros import FalhaNosQuadros
 
     buffer = io.BytesIO()
     Image.new("RGB", (16, 16), (200, 200, 200)).save(buffer, "JPEG")
