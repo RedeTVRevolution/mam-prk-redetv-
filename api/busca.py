@@ -475,8 +475,13 @@ class Busca:
             )
             return self._indice.buscar(c)
 
+        prontas: list[tuple[Consulta, list[Registro]]] = []
+
         def consultar(c: Consulta) -> list[Registro]:
-            achados = do_indice(c)
+            """Só na thread da busca: o dicionário de Jobs não é escrito por mais de uma."""
+            achados = next((a for q, a in prontas if q == c), None)
+            if achados is None:
+                achados = do_indice(c)
             carregar_jobs(r.job_id for r in achados)
             return [r for r in achados if job(r.job_id)]
 
@@ -518,6 +523,7 @@ class Busca:
             pool.shutdown(wait=False, cancel_futures=True)
         t_indice = _agora() - inicio
         brutos = [[next(entregues) for _ in qs] for qs in por_clausula]
+        prontas.extend(zip(planas, (l for da in brutos for l in da), strict=True))
         carregar_jobs(
             r.job_id for da_clausula in brutos for lista in da_clausula for r in lista
         )
@@ -579,14 +585,41 @@ class Busca:
         t_videos = _agora() - inicio
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
+        candidatas = [
+            (c, achados_da_clausula)
+            for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
+            if c.pessoa_na_imagem
+        ]
+        # "Nenhuma aparição" fala do acervo, não do que a faceta deixou. Sem facetas, vale o
+        # resultado da cláusula; com elas, a consulta de novo sem as facetas. As consultas
+        # que podem ser precisas (as duas de menções e a sem facetas) vão ao índice juntas,
+        # só a rede em paralelo; os Jobs são lidos depois, aqui. A consulta que já foi ao
+        # índice nesta busca não vai de novo.
+        pedidas: list[Consulta] = []
+        for c, achados_da_clausula in candidatas:
+            if sem_facetas and achados_da_clausula:
+                continue
+            quem = nome(c.pessoa_na_imagem) or ""
+            for q in (
+                *([] if sem_facetas else [c.consulta]),
+                *_consultas_das_mencoes(quem, entendida),
+            ):
+                if q not in pedidas and all(q != p for p, _ in prontas):
+                    pedidas.append(q)
+        if pedidas:
+            pool = ThreadPoolExecutor(
+                max_workers=max(1, min(TETO_DE_CONSULTAS_AO_INDICE, len(pedidas)))
+            )
+            try:
+                prontas.extend(zip(pedidas, pool.map(do_indice, pedidas), strict=True))
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
         vazios = [
             self._sem_aparicao(
                 nome(c.pessoa_na_imagem) or "", c.pessoa_na_imagem, entendida, consultar
             )
-            for c, achados_da_clausula in zip(clausulas, resultados, strict=True)
-            # "Nenhuma aparição" fala do acervo, não do que a faceta deixou.
-            if c.pessoa_na_imagem
-            and not (achados_da_clausula if sem_facetas else consultar(c.consulta))
+            for c, achados_da_clausula in candidatas
+            if not (achados_da_clausula if sem_facetas else consultar(c.consulta))
         ]
         log.info(
             "busca em %d ms: %d vídeos, %d clausulas; desde o início: entender %d ms, "
@@ -887,21 +920,25 @@ class Busca:
         consultar: Callable[[Consulta], list[Registro]],
     ) -> SemAparicao:
         """Quantas vezes a pessoa sem aparição é citada, no mesmo programa e período."""
-        base = _base(e)
-        na_fala = consultar(
-            Consulta(filtros=replace(base, tipo="fala"), texto=normalizar(quem))
-        )
-        na_tela = consultar(
-            Consulta(
-                filtros=replace(base, tipo="texto_na_tela"), texto=normalizar(quem)
-            )
-        )
+        fala, tela = _consultas_das_mencoes(quem, e)
+        na_fala = consultar(fala)
+        na_tela = consultar(tela)
         return SemAparicao(
             pessoa_id=pessoa,
             nome=quem,
             mencoes_na_fala=len(na_fala),
             mencoes_na_tela=len(na_tela),
         )
+
+
+def _consultas_das_mencoes(quem: str, e: ConsultaEntendida) -> tuple[Consulta, Consulta]:
+    """O nome na fala e no texto na tela, no programa e período da busca, sem a frase."""
+    base = _base(e)
+    texto = normalizar(quem)
+    return (
+        Consulta(filtros=replace(base, tipo="fala"), texto=texto),
+        Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=texto),
+    )
 
 
 def _casa(r: Registro, a: Ajustes) -> bool:

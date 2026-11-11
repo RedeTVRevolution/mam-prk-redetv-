@@ -638,6 +638,129 @@ def test_sem_aparicoes_diz_quantas_mencoes_ha_na_fala_e_na_tela() -> None:
     )
 
 
+class _IndiceDeMencoesEmTurma(IndiceEspia):
+    """As consultas que só uma pessoa sem aparição faz (menções e a sem facetas) esperam
+    umas pelas outras: passam só quando `turma` estão em voo ao mesmo tempo."""
+
+    def __init__(self, turma: int, *, reconsulta: bool = False) -> None:
+        super().__init__()
+        self.em_voo = 0
+        self.pico = 0
+        self.trava = threading.Lock()
+        self.turma = threading.Barrier(turma, timeout=5)
+        self.reconsulta = reconsulta
+
+    def buscar(self, consulta: Consulta) -> list[Registro]:
+        f = consulta.filtros
+        da_turma = (
+            f.tipo in ("fala", "texto_na_tela") and consulta.texto is not None
+        ) or (self.reconsulta and f.tipo == "plano")
+        if not da_turma:
+            return super().buscar(consulta)
+        with self.trava:
+            self.em_voo += 1
+            self.pico = max(self.pico, self.em_voo)
+        try:
+            self.turma.wait()
+            return super().buscar(consulta)
+        finally:
+            with self.trava:
+                self.em_voo -= 1
+
+
+def _mundo_sem_aparicao(indice: IndiceEspia | None = None) -> Mundo:
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]))
+    m.indice = indice or m.indice
+    m.com(
+        job("j1"),
+        _fala("f1", "a Sabrina Sato chegou"),
+        Registro(
+            id="t1",
+            tipo="texto_na_tela",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="SABRINA SATO",
+        ),
+    )
+    return m
+
+
+def test_as_duas_consultas_de_mencoes_da_pessoa_sem_aparicao_saem_juntas() -> None:
+    indice = _IndiceDeMencoesEmTurma(2)
+    resultado = buscar(
+        _mundo_sem_aparicao(indice),
+        "Sabrina Sato",
+        ajustes=Ajustes(evidencias=("imagem",)),
+    )
+    assert indice.pico == 2
+    (vazio,) = resultado.sem_aparicoes
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (1, 1)
+
+
+def test_com_faceta_as_mencoes_saem_juntas_com_a_consulta_sem_facetas() -> None:
+    # A faceta tipo=fala exclui a cláusula de imagem; a consulta sem facetas acha a
+    # pessoa no plano, então não há "sem aparição", mas as 3 já saíram juntas.
+    indice = _IndiceDeMencoesEmTurma(3, reconsulta=True)
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]))
+    m.indice = indice
+    m.com(
+        job("j1"),
+        Registro(
+            id="p1",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            pessoas=[m.sabrina],
+        ),
+    )
+    resultado = buscar(
+        m,
+        "Sabrina Sato",
+        ajustes=Ajustes(evidencias=("imagem",), tipo="fala"),
+    )
+    assert indice.pico == 3
+    assert resultado.sem_aparicoes == []
+
+
+def test_com_faceta_sem_aparicao_so_se_a_consulta_sem_facetas_tambem_vem_vazia() -> None:
+    m = _mundo_sem_aparicao()
+    resultado = buscar(
+        m,
+        "Sabrina Sato",
+        ajustes=Ajustes(evidencias=("imagem",), tipo="objeto"),
+    )
+    (vazio,) = resultado.sem_aparicoes
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (1, 1)
+
+
+def test_sem_facetas_a_frase_exata_que_esvazia_a_clausula_conta_como_sem_aparicao() -> (
+    None
+):
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]))
+    m.com(
+        job("j1"),
+        Registro(
+            id="p1",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            pessoas=[m.sabrina],
+            descricao="vestido vermelho",
+        ),
+        _fala("f1", "Sabrina Sato por aqui vestido azul"),
+    )
+    resultado = buscar(
+        m, 'Sabrina Sato "vestido azul"', ajustes=Ajustes(evidencias=("imagem",))
+    )
+    assert resultado.videos == []
+    (vazio,) = resultado.sem_aparicoes
+    # As menções não levam o filtro da frase (a fala acima tem a frase, mas conta igual).
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (1, 0)
+
+
 def test_nome_fora_do_catalogo_em_consulta_composta_fica_no_texto_inteiro() -> None:
     fulano = {**VESTIDO, "pessoa": "Fulano"}
     m = Mundo(pedido(pessoas=["Fulano"], objetos=[fulano]))
