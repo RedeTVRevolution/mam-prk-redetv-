@@ -355,6 +355,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     cliente = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
+    saida = 0
     colecao = cliente.collection(COLECAO_DE_JOBS)
     print(f"Jobs falsos antes: {contar(colecao)}")
     if args.comando == "gravar":
@@ -363,7 +364,14 @@ def main(argv: list[str]) -> int:
             f"Por Job: 1 documento, {entradas_automaticas(amostra)} entradas dos índices simples e "
             f"{entradas_compostas(amostra)} dos 10 compostos (estimativa)"
         )
-        print(f"{gravar(cliente, args.n)} gravados")
+        gravados = gravar(cliente, args.n)
+        print(f"{gravados} gravados")
+        if gravados < args.n:
+            # Falhou alguma escrita: a medição não teria a população pedida.
+            print(
+                f"Faltaram {args.n - gravados}; rode de novo (regravar é idempotente)."
+            )
+            saida = 1
     elif args.comando == "apagar":
         print(f"{apagar(cliente)} apagados")
     else:
@@ -375,7 +383,7 @@ def main(argv: list[str]) -> int:
             datetime.now(UTC).date(),
         )
     print(f"Jobs falsos depois: {contar(colecao)}")
-    return 0
+    return saida
 
 
 if __name__ == "__main__":
