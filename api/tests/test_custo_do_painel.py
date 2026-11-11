@@ -478,6 +478,27 @@ def test_os_filtros_vao_como_parametros_e_o_sem_dono_so_vem_sem_programa_nem_usu
     assert "'sem_dono'" not in com_filtro["query"]
 
 
+def test_com_desde_a_exportacao_e_lida_so_a_partir_da_particao_do_periodo() -> None:
+    fonte, transporte = _fonte([])
+
+    fonte.custos(FiltroDeCusto(date(2026, 11, 1), date(2026, 11, 30), None, None))
+
+    sql = transporte.corpos[0]["query"]
+    # Filtro pelo parâmetro, sem valor interpolado, e sem limite superior (o último dia é
+    # exportado no dia seguinte).
+    assert "_PARTITIONTIME >= TIMESTAMP(@desde)" in sql
+    assert sql.count("_PARTITIONTIME") == 1
+    assert "2026-11-01" not in sql
+
+
+def test_so_com_ate_a_consulta_nao_ganha_filtro_de_particao() -> None:
+    fonte, transporte = _fonte([])
+
+    fonte.custos(FiltroDeCusto(None, date(2026, 11, 30), None, None))
+
+    assert "_PARTITIONTIME" not in transporte.corpos[0]["query"]
+
+
 def test_sem_periodo_a_consulta_nao_filtra_o_dia() -> None:
     fonte, transporte = _fonte([])
 
@@ -485,6 +506,7 @@ def test_sem_periodo_a_consulta_nao_filtra_o_dia() -> None:
 
     assert base == BaseDeCusto([], [], [], frozenset())
     assert transporte.corpos[0]["queryParameters"] == []
+    assert "_PARTITIONTIME" not in transporte.corpos[0]["query"]
 
 
 def test_o_csv_traz_o_numero_de_videos_concluidos_e_vazio_no_custo_sem_dono() -> None:

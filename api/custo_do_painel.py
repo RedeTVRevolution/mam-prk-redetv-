@@ -239,7 +239,9 @@ class FaturamentoBigQuery:
         onde_do_custo_sem_dono = ["TRUE"]
         if filtro.desde is not None:
             parametros.append(_parametro("desde", filtro.desde.isoformat(), "DATE"))
-            onde_do_faturamento = f"{dia} >= @desde"
+            # A partição vem do instante do uso, em UTC: sem folga, pois o dia de SP começa
+            # às 03:00Z. O `ate` não limita a partição (o uso do último dia chega no seguinte).
+            onde_do_faturamento = f"{dia} >= @desde AND _PARTITIONTIME >= TIMESTAMP(@desde)"
             onde_do_job.append(f"j.criado_em >= TIMESTAMP(@desde, {fuso})")
             onde_do_custo_sem_dono.append("l.dia >= @desde")
         if filtro.ate is not None:
