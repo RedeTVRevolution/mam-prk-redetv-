@@ -11,9 +11,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as ExcecaoHttp
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import Response
-from starlette.types import Scope
+from starlette.types import Receive, Scope, Send
 
 from api.acessos import AcessosNaAuditoria
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
@@ -88,6 +90,7 @@ from api.jobs import (
     ServicoIndisponivel,
     TipoNaoSuportado,
     _chave_com_algum,
+    aceita_gzip,
     agora_utc,
     criar_rotas,
     papeis_da_pessoa,
@@ -218,6 +221,7 @@ from api.usuarios import (
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
+CACHE_DOS_ASSETS = "public, max-age=31536000, immutable"
 
 
 class _SemVerificador:
@@ -247,14 +251,34 @@ class _FrontComEnderecos(StaticFiles):
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:
-            return await super().get_response(path, scope)
+            resposta = await super().get_response(path, scope)
         except ExcecaoHttp as erro:
             ultimo = path.rsplit("/", 1)[-1]
             if erro.status_code != 404 or "." in ultimo:
                 raise
             if path == "v1" or path.startswith("v1/"):
                 raise
-            return await super().get_response("index.html", scope)
+            resposta = await super().get_response("index.html", scope)
+            resposta.headers["Cache-Control"] = "no-cache"
+            return resposta
+        # `assets/*` leva o hash no nome (#558); o resto revalida pelo ETag a cada visita,
+        # para um deploy novo nunca deixar um `index.html` velho em cache.
+        resposta.headers["Cache-Control"] = (
+            CACHE_DOS_ASSETS if path.startswith("assets/") else "no-cache"
+        )
+        return resposta
+
+
+class _GZipQueRespeitaQZero(GZipMiddleware):
+    """O do Starlette só procura "gzip" no texto: `gzip;q=0` ainda comprimiria."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and not aceita_gzip(
+            Headers(scope=scope).get("accept-encoding", "")
+        ):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
 
 
 # Cabeçalhos de segurança de toda resposta (#372). O Storage está em `img-src` (capas e
@@ -341,6 +365,7 @@ def criar_app(
     taxa_de_correcao: LeitorDaTaxa | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     cache_do_painel: CacheCurto | None = None,
+    cache_da_lista: CacheCurto | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     ranking: Ranking | None = None,
@@ -425,6 +450,8 @@ def criar_app(
         return resposta
 
     app.middleware("http")(_cabecalhos_de_seguranca)
+    # O mais externo de todos: comprime a partir de 1 KB, nível 6 (#558).
+    app.add_middleware(_GZipQueRespeitaQZero, minimum_size=1024, compresslevel=6)
 
     def _registrar_login(pessoa: Usuario) -> None:
         """O que a API vê do login: a primeira chamada de `/eu` depois dele, que o front
@@ -508,6 +535,7 @@ def criar_app(
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
             idempotencia,
             publicador,
+            cache_da_lista,
         )
     )
     leitura_de_passadas = passadas or PassadasEmMemoria()
