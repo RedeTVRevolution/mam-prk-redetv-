@@ -18,7 +18,6 @@ from api.auth import Usuario
 from api.busca import (
     TETO_DA_LISTA_BYTES,
     TETO_DE_ASSINATURAS,
-    TETO_DE_CONSULTAS_AO_INDICE,
     TETO_DE_REGISTROS,
     TETO_DO_RANKING,
     Ajustes,
@@ -34,11 +33,12 @@ from api.busca import (
     VideoGuardado,
     filtros_do_servidor,
 )
+from api.cache_curto import CacheCurto
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import (
     TEMPO_DA_CONSULTA_S,
 )
-from api.eventos_de_uso import Eventos
+from api.eventos_de_uso import Eventos, EventosEmMemoria
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import CursorInvalido, Job, RepositorioEmMemoria
@@ -138,6 +138,7 @@ class Mundo:
         self,
         ranking: Ranking | None = None,
         relogio: Callable[[], datetime] = lambda: BASE,
+        cache: CacheCurto | None = None,
     ) -> Busca:
         return Busca(
             transporte=self.transporte,
@@ -147,6 +148,7 @@ class Mundo:
             repositorio=self.jobs,
             armazenamento=self.armazenamento,
             relogio=relogio,
+            cache_de_candidatos=cache,
         )
 
     def com(self, j: Job, *registros: Registro) -> None:
@@ -275,36 +277,49 @@ def _mundo_de_varias_clausulas(indice: IndiceEspia | None = None) -> Mundo:
     return m
 
 
-def test_as_clausulas_vao_ao_indice_ao_mesmo_tempo_e_com_limite() -> None:
-    class IndiceLento(IndiceEspia):
-        """As primeiras consultas só passam quando o teto inteiro está em voo."""
+class _IndiceEmTurma(IndiceEspia):
+    """As `turma` primeiras consultas só passam quando todas estão em voo ao mesmo tempo."""
 
-        def __init__(self) -> None:
-            super().__init__()
-            self.em_voo = 0
-            self.pico = 0
-            self.chegadas = 0
-            self.trava = threading.Lock()
-            self.turma = threading.Barrier(TETO_DE_CONSULTAS_AO_INDICE, timeout=5)
+    def __init__(self, turma: int) -> None:
+        super().__init__()
+        self.em_voo = 0
+        self.pico = 0
+        self.chegadas = 0
+        self.turma_toda = turma
+        self.trava = threading.Lock()
+        self.turma = threading.Barrier(turma, timeout=5)
 
-        def buscar(self, consulta: Consulta) -> list[Registro]:
+    def buscar(self, consulta: Consulta) -> list[Registro]:
+        with self.trava:
+            self.em_voo += 1
+            self.pico = max(self.pico, self.em_voo)
+            self.chegadas += 1
+            da_turma = self.chegadas <= self.turma_toda
+        try:
+            if da_turma:
+                self.turma.wait()
+            return super().buscar(consulta)
+        finally:
             with self.trava:
-                self.em_voo += 1
-                self.pico = max(self.pico, self.em_voo)
-                self.chegadas += 1
-                da_turma = self.chegadas <= TETO_DE_CONSULTAS_AO_INDICE
-            try:
-                if da_turma:
-                    self.turma.wait()
-                return super().buscar(consulta)
-            finally:
-                with self.trava:
-                    self.em_voo -= 1
+                self.em_voo -= 1
 
-    lento = IndiceLento()
-    resultado = buscar(_mundo_de_varias_clausulas(lento), "Sabrina Sato")
-    assert len(lento.consultas) > TETO_DE_CONSULTAS_AO_INDICE
-    assert lento.pico == TETO_DE_CONSULTAS_AO_INDICE
+
+def test_as_quatro_clausulas_da_busca_por_pessoa_vao_ao_indice_juntas() -> None:
+    indice = _IndiceEmTurma(4)
+    resultado = buscar(_mundo_de_varias_clausulas(indice), "Sabrina Sato")
+    assert len(indice.consultas) == 4
+    assert indice.pico == 4
+    assert resultado.videos
+
+
+def test_as_consultas_ao_indice_respeitam_o_teto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.busca.TETO_DE_CONSULTAS_AO_INDICE", 2)
+    indice = _IndiceEmTurma(2)
+    resultado = buscar(_mundo_de_varias_clausulas(indice), "Sabrina Sato")
+    assert len(indice.consultas) > 2
+    assert indice.pico == 2
     assert resultado.videos
 
 
@@ -624,6 +639,168 @@ def test_sem_aparicoes_diz_quantas_mencoes_ha_na_fala_e_na_tela() -> None:
         2,
         1,
     )
+
+
+class _IndiceDeMencoesEmTurma(IndiceEspia):
+    """As consultas que só uma pessoa sem aparição faz (menções e a sem facetas) esperam
+    umas pelas outras: passam só quando `turma` estão em voo ao mesmo tempo."""
+
+    def __init__(self, turma: int, *, reconsulta: bool = False) -> None:
+        super().__init__()
+        self.em_voo = 0
+        self.pico = 0
+        self.trava = threading.Lock()
+        self.turma = threading.Barrier(turma, timeout=5)
+        self.reconsulta = reconsulta
+
+    def buscar(self, consulta: Consulta) -> list[Registro]:
+        f = consulta.filtros
+        da_turma = (
+            f.tipo in ("fala", "texto_na_tela") and consulta.texto is not None
+        ) or (self.reconsulta and f.tipo == "plano")
+        if not da_turma:
+            return super().buscar(consulta)
+        with self.trava:
+            self.em_voo += 1
+            self.pico = max(self.pico, self.em_voo)
+        try:
+            self.turma.wait()
+            return super().buscar(consulta)
+        finally:
+            with self.trava:
+                self.em_voo -= 1
+
+
+def _mundo_sem_aparicao(indice: IndiceEspia | None = None) -> Mundo:
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]))
+    m.indice = indice or m.indice
+    m.com(
+        job("j1"),
+        _fala("f1", "a Sabrina Sato chegou"),
+        Registro(
+            id="t1",
+            tipo="texto_na_tela",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="SABRINA SATO",
+        ),
+    )
+    return m
+
+
+def test_as_duas_consultas_de_mencoes_da_pessoa_sem_aparicao_saem_juntas() -> None:
+    indice = _IndiceDeMencoesEmTurma(2)
+    resultado = buscar(
+        _mundo_sem_aparicao(indice),
+        "Sabrina Sato",
+        ajustes=Ajustes(evidencias=("imagem",)),
+    )
+    assert indice.pico == 2
+    (vazio,) = resultado.sem_aparicoes
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (1, 1)
+
+
+def test_com_faceta_as_mencoes_saem_juntas_com_a_consulta_sem_facetas() -> None:
+    # A faceta tipo=fala exclui a cláusula de imagem; a consulta sem facetas acha a
+    # pessoa no plano, então não há "sem aparição", mas as 3 já saíram juntas.
+    indice = _IndiceDeMencoesEmTurma(3, reconsulta=True)
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]))
+    m.indice = indice
+    m.com(
+        job("j1"),
+        Registro(
+            id="p1",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            pessoas=[m.sabrina],
+        ),
+    )
+    resultado = buscar(
+        m,
+        "Sabrina Sato",
+        ajustes=Ajustes(evidencias=("imagem",), tipo="fala"),
+    )
+    assert indice.pico == 3
+    assert resultado.sem_aparicoes == []
+
+
+class _IndiceSemMencoes(IndiceEspia):
+    def buscar(self, consulta: Consulta) -> list[Registro]:
+        if consulta.filtros.tipo in ("fala", "texto_na_tela") and consulta.texto:
+            raise RuntimeError("índice fora do ar para menções")
+        return super().buscar(consulta)
+
+
+def test_falha_nas_mencoes_que_nao_fazem_falta_nao_derruba_a_busca() -> None:
+    # Com faceta, as menções saem antes de saber se a pessoa aparece; se aparece, o erro
+    # delas não conta, como antes do #568, quando nem eram consultadas.
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]))
+    m.indice = _IndiceSemMencoes()
+    m.com(
+        job("j1"),
+        Registro(
+            id="p1",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            pessoas=[m.sabrina],
+        ),
+    )
+    resultado = buscar(
+        m, "Sabrina Sato", ajustes=Ajustes(evidencias=("imagem",), tipo="fala")
+    )
+    assert resultado.sem_aparicoes == []
+
+
+def test_falha_nas_mencoes_que_fazem_falta_continua_derrubando_a_busca() -> None:
+    m = _mundo_sem_aparicao(_IndiceSemMencoes())
+    with pytest.raises(RuntimeError, match="menções"):
+        buscar(
+            m, "Sabrina Sato", ajustes=Ajustes(evidencias=("imagem",), tipo="objeto")
+        )
+
+
+def test_com_faceta_sem_aparicao_so_se_a_consulta_sem_facetas_tambem_vem_vazia() -> (
+    None
+):
+    m = _mundo_sem_aparicao()
+    resultado = buscar(
+        m,
+        "Sabrina Sato",
+        ajustes=Ajustes(evidencias=("imagem",), tipo="objeto"),
+    )
+    (vazio,) = resultado.sem_aparicoes
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (1, 1)
+
+
+def test_sem_facetas_a_frase_exata_que_esvazia_a_clausula_conta_como_sem_aparicao() -> (
+    None
+):
+    m = Mundo(pedido(pessoas=["Sabrina Sato"]))
+    m.com(
+        job("j1"),
+        Registro(
+            id="p1",
+            tipo="plano",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            pessoas=[m.sabrina],
+            descricao="vestido vermelho",
+        ),
+        _fala("f1", "Sabrina Sato por aqui vestido azul"),
+    )
+    resultado = buscar(
+        m, 'Sabrina Sato "vestido azul"', ajustes=Ajustes(evidencias=("imagem",))
+    )
+    assert resultado.videos == []
+    (vazio,) = resultado.sem_aparicoes
+    # As menções não levam o filtro da frase (a fala acima tem a frase, mas conta igual).
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (1, 0)
 
 
 def test_nome_fora_do_catalogo_em_consulta_composta_fica_no_texto_inteiro() -> None:
@@ -2276,3 +2453,140 @@ def test_leitura_do_indice_que_estoura_o_prazo_do_transporte_responde_504(
     r = c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
 
     assert r.status_code == 504
+
+
+# --- cache curto dos candidatos (#568 item 5) -----------------------------------------
+
+
+class RankingContado:
+    def __init__(self) -> None:
+        self.chamadas = 0
+
+    def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+        self.chamadas += 1
+        return registros
+
+
+def _mundo_com_cache(n: int = 3) -> Mundo:
+    return mundo_de_videos(n, *[pedido(texto_livre="vestido")] * 6)
+
+
+def test_busca_repetida_nao_chama_indice_nem_ranking() -> None:
+    m = _mundo_com_cache()
+    ranking = RankingContado()
+    busca = m.busca(ranking=ranking)
+
+    primeira = busca.buscar("vestido", dono="u1")
+    consultas = len(m.indice.consultas)
+    segunda = busca.buscar("vestido", dono="u1")
+
+    assert consultas > 0 and ranking.chamadas == 1
+    assert len(m.indice.consultas) == consultas
+    assert ranking.chamadas == 1
+    assert segunda.videos == primeira.videos
+
+
+def test_o_cache_vence_e_a_busca_volta_ao_indice() -> None:
+    m = _mundo_com_cache()
+    agora = [0.0]
+    busca = m.busca(cache=CacheCurto(validade=60, relogio=lambda: agora[0]))
+    busca.buscar("vestido", dono="u1")
+    consultas = len(m.indice.consultas)
+    agora[0] = 59
+    busca.buscar("vestido", dono="u1")
+    assert len(m.indice.consultas) == consultas
+    agora[0] = 61
+    busca.buscar("vestido", dono="u1")
+    assert len(m.indice.consultas) == 2 * consultas
+
+
+def test_video_que_foi_para_a_lixeira_some_da_busca_repetida() -> None:
+    m = _mundo_com_cache()
+    busca = m.busca()
+    antes = [v.job_id for v in busca.buscar("vestido", dono="u1").videos]
+    lixo = EnvioParaLixeira(
+        em=BASE, por_uid="adm", por_email="adm@redetv.com", motivo="duplicado"
+    )
+    j = m.jobs.obter(antes[0])
+    assert j is not None
+    m.jobs.salvar(j.model_copy(update={"lixeira": lixo}))
+    consultas = len(m.indice.consultas)
+
+    depois = [v.job_id for v in busca.buscar("vestido", dono="u1").videos]
+
+    assert len(m.indice.consultas) == consultas  # veio do cache; os Jobs foram relidos
+    assert depois == antes[1:]
+
+
+def test_dono_diferente_recebe_cursor_proprio_da_busca_em_cache() -> None:
+    m = _mundo_com_cache(4)
+    busca = m.busca()
+    a = busca.buscar("vestido", limite=2, dono="ua")
+    consultas = len(m.indice.consultas)
+    b = busca.buscar("vestido", limite=2, dono="ub")
+    assert len(m.indice.consultas) == consultas
+    assert a._proximo_cursor and b._proximo_cursor
+    assert a._proximo_cursor != b._proximo_cursor
+    with pytest.raises(CursorInvalido):
+        busca.buscar("vestido", limite=2, dono="ub", cursor=a._proximo_cursor)
+    assert busca.buscar("vestido", limite=2, dono="ub", cursor=b._proximo_cursor).videos
+
+
+def test_o_limite_nao_vai_na_chave_do_cache() -> None:
+    m = _mundo_com_cache(4)
+    busca = m.busca()
+    pequena = busca.buscar("vestido", limite=1, dono="u1")
+    consultas = len(m.indice.consultas)
+    grande = busca.buscar("vestido", limite=4, dono="u1")
+    assert len(m.indice.consultas) == consultas
+    assert len(pequena.videos) == 1 and len(grande.videos) == 4
+
+
+def test_o_cache_nao_guarda_url_assinada_e_cada_busca_assina_de_novo() -> None:
+    m = Mundo(*[pedido(texto_livre="vestido")] * 4)
+    m.com(job("j1", sistema="s"), objeto("o1", "j1", 0, 1_000, quadro="quadros/o1.jpg"))
+    assinadas: list[str] = []
+    original = m.armazenamento.url_do_quadro
+
+    def assina(job_id: str, caminho: str, validade: timedelta) -> str:
+        url = f"{original(job_id, caminho, validade)}&n={len(assinadas)}"
+        assinadas.append(url)
+        return url
+
+    m.armazenamento.url_do_quadro = assina  # type: ignore[method-assign]
+    agora = [BASE]
+    busca = m.busca(relogio=lambda: agora[0])
+    a = busca.buscar("vestido", sistema="s", dono="u1")
+    consultas = len(m.indice.consultas)
+    agora[0] = BASE + timedelta(seconds=30)
+    b = busca.buscar("vestido", sistema="s", dono="u1")
+
+    assert len(m.indice.consultas) == consultas
+    assert len(assinadas) == 2
+    assert a.videos[0].momentos[0].quadro_url != b.videos[0].momentos[0].quadro_url
+    assert b.quadros_expiram_em == a.quadros_expiram_em + timedelta(seconds=30)
+
+
+def test_mexer_no_resultado_nao_muda_a_busca_seguinte() -> None:
+    m = _mundo_com_cache()
+    busca = m.busca()
+    a = busca.buscar("vestido", dono="u1")
+    esperado = busca.buscar("vestido", dono="u1").model_copy(deep=True)
+    a.videos.clear()
+    assert busca.buscar("vestido", dono="u1") == esperado
+
+
+def test_a_rota_conta_a_busca_repetida_no_limite_e_no_evento_a_cada_chamada() -> None:
+    eventos = EventosEmMemoria()
+    c, _ = cliente(
+        ["consulta"],
+        *[pedido(texto_livre="vestido")] * 3,
+        maximo_por_minuto=2,
+        eventos=eventos,
+    )
+    codigos = [
+        c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO).status_code
+        for _ in range(3)
+    ]
+    assert codigos == [200, 200, 429]
+    assert [e.tipo for e in eventos.publicados].count("busca") == 2

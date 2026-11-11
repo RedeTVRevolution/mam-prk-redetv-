@@ -88,25 +88,65 @@ def _sem_aspas(texto: str) -> str:
     return "".join(" " if c in ASPAS else c for c in texto)
 
 
+class IndiceDeNomesCitados:
+    """`nome normalizado -> ids` de uma cópia do catálogo, montado uma vez por cópia (a lista
+    que a `CopiaCurta` devolve; outra lista refaz). Acha os nomes como o regex
+    `(?<!\\w)nome(?!\\w)` achava: o limite é o caractere vizinho não ser `\\w` (Unicode),
+    então pontuação separa e uma tokenização por espaço daria outro resultado."""
+
+    def __init__(self) -> None:
+        self._atual: tuple[list[PessoaDoCatalogo], dict[str, list[str]], int] | None = (
+            None
+        )
+
+    def _de(self, pessoas: list[PessoaDoCatalogo]) -> tuple[dict[str, list[str]], int]:
+        atual = self._atual
+        if atual is None or atual[0] is not pessoas:
+            nomes: dict[str, list[str]] = {}
+            for p in pessoas:
+                if nome := normalizar(p.nome):
+                    nomes.setdefault(nome, []).append(p.id)
+            # Homônimos caem na mesma posição: só os de menor id passam do teto.
+            nomes = {n: sorted(ids)[:MAXIMO_DE_PESSOAS] for n, ids in nomes.items()}
+            atual = (pessoas, nomes, max(map(len, nomes), default=0))
+            self._atual = atual
+        return atual[1], atual[2]
+
+    def achar(
+        self, chave: str, pessoas: list[PessoaDoCatalogo]
+    ) -> list[tuple[int, str]]:
+        """`(posição da primeira ocorrência, id)` de cada pessoa citada em `chave`, em
+        ordem de posição e depois de id."""
+        nomes, maior = self._de(pessoas)
+        primeira: dict[str, int] = {}
+        for ini in range(len(chave)):
+            if ini and _palavra(chave[ini - 1]):
+                continue
+            for fim in range(ini + 1, min(len(chave), ini + maior) + 1):
+                if fim < len(chave) and _palavra(chave[fim]):
+                    continue
+                for id in nomes.get(chave[ini:fim], ()):
+                    primeira.setdefault(id, ini)
+        return sorted((pos, id) for id, pos in primeira.items())
+
+
+def _palavra(c: str) -> bool:
+    return re.match(r"\w", c) is not None
+
+
 def entender(
     consulta: str,
     *,
     catalogo: Catalogo,
     todas: Callable[[], list[PessoaDoCatalogo]] | None = None,
+    indice: "IndiceDeNomesCitados | None" = None,
 ) -> ConsultaEntendida:
     """Saneia a frase e acha nomes inteiros do catálogo, sem acento nem maiúscula."""
     saneada = sanear(consulta)
     frase, resto = separar_aspas(saneada)
     chave = normalizar(saneada)
-    achadas = (
-        sorted(
-            (achado.start(), p.id)
-            for p in (todas or catalogo.todas)()
-            if (nome := normalizar(p.nome))
-            and (achado := re.search(r"(?<!\w)" + re.escape(nome) + r"(?!\w)", chave))
-        )
-        if chave
-        else []
+    achadas = (indice or IndiceDeNomesCitados()).achar(
+        chave, (todas or catalogo.todas)()
     )
     # cada pessoa vira cláusulas no índice: o teto segura o custo de uma consulta longa
     pessoas = tuple(dict.fromkeys(i for _, i in achadas))[:MAXIMO_DE_PESSOAS]
