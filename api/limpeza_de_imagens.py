@@ -34,7 +34,9 @@ class Regras:
     @classmethod
     def do_terraform(cls, saida: dict[str, Any]) -> "Regras":
         idade = saida["idade_minima_s"]
-        if not isinstance(idade, dict):  # output antigo, um número só, vale para os dois repositórios
+        if not isinstance(
+            idade, dict
+        ):  # output antigo, um número só, vale para os dois repositórios
             idade = {"mam": idade, "mam-gpu": idade}
         return cls(
             manter_ultimas=int(saida["manter_ultimas"]),

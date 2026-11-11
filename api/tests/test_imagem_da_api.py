@@ -23,8 +23,14 @@ JOBS_GPU = {
         + _alvo("\nFROM transcricao-base AS transcricao-gpu"),
         "uv sync --locked --no-dev --group transcricao --group transcricao-gpu",
     ),
-    "ocr-gpu": (_alvo("\nFROM python:3.12-slim-bookworm AS ocr-gpu"), "uv sync --locked --no-dev --group ocr-gpu"),
-    "objetos-gpu": (_alvo("\nFROM python:3.12-slim-bookworm AS objetos-gpu"), "uv sync --locked --no-dev --group objetos"),
+    "ocr-gpu": (
+        _alvo("\nFROM python:3.12-slim-bookworm AS ocr-gpu"),
+        "uv sync --locked --no-dev --group ocr-gpu",
+    ),
+    "objetos-gpu": (
+        _alvo("\nFROM python:3.12-slim-bookworm AS objetos-gpu"),
+        "uv sync --locked --no-dev --group objetos",
+    ),
 }
 
 
@@ -46,5 +52,9 @@ def test_os_jobs_com_gpu_vem_compilados_como_o_servico(alvo: str) -> None:
     trecho, sync = JOBS_GPU[alvo]
     assert f"{sync} --compile-bytecode" in trecho
     # Depois de copiar os módulos da API e antes do USER: os .pyc ficam do root e só leitura.
-    assert trecho.rindex("api/whisper.py api/") < trecho.index("compileall -q api") < trecho.index("USER nobody")
+    assert (
+        trecho.rindex("api/whisper.py api/")
+        < trecho.index("compileall -q api")
+        < trecho.index("USER nobody")
+    )
     assert "PYTHONDONTWRITEBYTECODE" not in trecho

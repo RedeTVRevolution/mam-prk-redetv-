@@ -171,7 +171,9 @@ def test_assina_os_quadros_em_paralelo_com_teto_de_8(monkeypatch: Any) -> None:
             pico = max(pico, ativas)
             if ativas == 8:
                 cheio.set()
-        cheio.wait(timeout=5)  # só protege contra travamento: com pool menor, o pico fica abaixo de 8
+        cheio.wait(
+            timeout=5
+        )  # só protege contra travamento: com pool menor, o pico fica abaixo de 8
         with trava:
             ativas -= 1
         return f"https://storage.exemplo/{job_id}/{caminho}"

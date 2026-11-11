@@ -73,7 +73,9 @@ def test_sem_gzip_abaixo_de_1_kb() -> None:
     "cabecalho",
     ["*;q=1, gzip;q=0", "gzip;q=0, *;q=1", "gzip;q=0, *", "*, gzip;q=0"],
 )
-def test_gzip_explicito_prevalece_sobre_o_curinga_em_qualquer_ordem(cabecalho: str) -> None:
+def test_gzip_explicito_prevalece_sobre_o_curinga_em_qualquer_ordem(
+    cabecalho: str,
+) -> None:
     assert aceita_gzip(cabecalho) is False
 
 
@@ -95,7 +97,9 @@ def test_resposta_pequena_da_app_inteira_sai_sem_gzip(cliente: TestClient) -> No
 
     assert resposta.json() == {"status": "ok"}
     assert "content-encoding" not in resposta.headers
-    assert resposta.headers["x-content-type-options"]  # a pilha de segurança segue de fora
+    assert resposta.headers[
+        "x-content-type-options"
+    ]  # a pilha de segurança segue de fora
 
 
 def test_sem_gzip_com_q_zero(cliente: TestClient) -> None:

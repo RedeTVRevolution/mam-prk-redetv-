@@ -1162,7 +1162,9 @@ def transporte_http() -> Transporte:
             )
         except requests.exceptions.Timeout:
             # O `TimeoutError` é o que a rota da busca já traduz em 504 (e o 500 não).
-            raise TimeoutError(f"{metodo} {caminho}: sem resposta em {prazo} s") from None
+            raise TimeoutError(
+                f"{metodo} {caminho}: sem resposta em {prazo} s"
+            ) from None
         if resposta.status_code == 409:
             raise JaExiste(caminho)
         if resposta.status_code == 429:

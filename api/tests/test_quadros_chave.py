@@ -343,9 +343,9 @@ def test_timeout_passageiro_nao_deixa_o_mesmo_instante_sem_quadro(
     monkeypatch.setattr("api.quadros_chave.extrair_quadros", extrair)
     decupagem = _decupagem()
     decupagem.objetos[0].ocorrencias = [
-        decupagem.objetos[0].ocorrencias[0].model_copy(
-            update={"inicio_ms": 2_200, "fim_ms": 3_800}
-        )
+        decupagem.objetos[0]
+        .ocorrencias[0]
+        .model_copy(update={"inicio_ms": 2_200, "fim_ms": 3_800})
     ]
 
     pronta = com_quadros_chave(tmp_path / "v.mp4", decupagem, lambda c, j: None)
