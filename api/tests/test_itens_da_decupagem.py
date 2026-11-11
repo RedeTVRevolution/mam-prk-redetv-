@@ -130,7 +130,9 @@ def test_tipo_novo_usa_a_contagem_de_um_irmao_do_mesmo_tipo_de_item() -> None:
 
 def test_tipo_novo_sem_irmao_continua_um_erro() -> None:
     itens = _sem(contar_itens(_conteudo(3, 2)), "pauta.titulo", "pauta.resumo")
-    itens = _sem(itens, "pauta.tom", "pauta.acrescentar", "pauta.juntar", "pauta.dividir")
+    itens = _sem(
+        itens, "pauta.tom", "pauta.acrescentar", "pauta.juntar", "pauta.dividir"
+    )
 
     with pytest.raises(KeyError):
         itens.itens_do_tipo("pauta.titulo")
