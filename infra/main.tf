@@ -671,3 +671,11 @@ moved {
   from = google_monitoring_dashboard.painel
   to   = module.mam.google_monitoring_dashboard.painel
 }
+
+output "indices_da_mescla" {
+  value = module.mam.indices_da_mescla
+}
+
+output "indices_a_remover" {
+  value = module.mam.indices_a_remover
+}
