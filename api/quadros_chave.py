@@ -72,17 +72,20 @@ def com_quadros_chave(
     se perdem por ele.
     """
     pronta = decupagem.model_copy(deep=True)
-    # Instante (ms) -> o JPEG, ou None se o ffmpeg não o tira. O resultado só depende do
-    # instante, e o meio de uma aparição ou objeto cai muitas vezes no de um plano.
+    # Instante (ms) -> (o JPEG, se é escuro). O resultado só depende do instante, e o meio de
+    # uma aparição ou objeto cai muitas vezes no de um plano; o `e_escuro` decodifica o JPEG
+    # inteiro, então também fica guardado. Só os acertos entram: a falha (timeout passageiro,
+    # ffmpeg que saiu com erro) é tentada de novo pelo próximo momento no mesmo instante.
     # ponytail: nunca é esvaziado; um vídeo tem poucos milhares de instantes.
-    cache: dict[int, bytes | None] = {}
+    cache: dict[int, tuple[bytes, bool]] = {}
 
-    def jpeg_em(instante: int) -> bytes | None:
+    def jpeg_em(instante: int) -> tuple[bytes, bool] | None:
         if instante not in cache:
             try:
-                [cache[instante]] = extrair_quadros(video, [instante])
+                [jpeg] = extrair_quadros(video, [instante])
             except FalhaNosQuadros:
-                cache[instante] = None
+                return None
+            cache[instante] = (jpeg, e_escuro(jpeg))
         return cache[instante]
 
     def claro(alvo_ms: int, inicio_ms: int, fim_ms: int) -> tuple[int, bytes] | None:
@@ -95,9 +98,9 @@ def com_quadros_chave(
                 <= fim_ms - FOLGA_DAS_BORDAS_MS
             ):
                 continue
-            jpeg = jpeg_em(instante)
-            if jpeg is not None and not e_escuro(jpeg):
-                return instante, jpeg
+            achado = jpeg_em(instante)
+            if achado is not None and not achado[1]:
+                return instante, achado[0]
         return None
 
     def quadro(nome: str, inicio_ms: int, fim_ms: int) -> str | None:

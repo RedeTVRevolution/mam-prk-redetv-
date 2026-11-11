@@ -1,5 +1,6 @@
 """`POST /v1/jobs/quadros` e a rota unitária lendo o Job uma vez (#481)."""
 
+import threading
 import time
 from collections.abc import Iterable
 from typing import Any
@@ -157,17 +158,33 @@ def _assinaturas_lentas(monkeypatch: Any, atraso: float = 0.2) -> list[tuple[str
     return chamadas
 
 
-def test_assina_os_quadros_em_paralelo(monkeypatch: Any) -> None:
-    _assinaturas_lentas(monkeypatch)
+def test_assina_os_quadros_em_paralelo_com_teto_de_8(monkeypatch: Any) -> None:
+    ativas = 0
+    pico = 0
+    trava = threading.Lock()
+    cheio = threading.Event()  # as 8 vagas ocupadas ao mesmo tempo
+
+    def url_do_quadro(self: Any, job_id: str, caminho: str, validade: Any) -> str:
+        nonlocal ativas, pico
+        with trava:
+            ativas += 1
+            pico = max(pico, ativas)
+            if ativas == 8:
+                cheio.set()
+        cheio.wait(
+            timeout=5
+        )  # só protege contra travamento: com pool menor, o pico fica abaixo de 8
+        with trava:
+            ativas -= 1
+        return f"https://storage.exemplo/{job_id}/{caminho}"
+
+    monkeypatch.setattr(ArmazenamentoFalso, "url_do_quadro", url_do_quadro)
     mundo = Mundo(_job("a"))
 
-    inicio = time.monotonic()
-    resposta = _pedir(mundo, [_par("a", f"plano-{n}.jpg") for n in range(8)])
-    duracao = time.monotonic() - inicio
+    resposta = _pedir(mundo, [_par("a", f"plano-{n}.jpg") for n in range(12)])
 
     assert all(q["url"] for q in resposta.json())
-    # Em fila seriam 8 x 0,2 = 1,6 s; em paralelo, uma rodada.
-    assert duracao < 0.8
+    assert pico == 8
 
 
 def test_repetido_e_assinado_uma_vez_e_a_ordem_e_os_vazios_ficam(

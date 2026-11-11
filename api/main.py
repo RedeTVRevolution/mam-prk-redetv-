@@ -437,6 +437,10 @@ def criar_app(
             )
         return resposta
 
+    # O mais interno dos middlewares: comprime a partir de 1 KB, nível 6 (#558). Por dentro dos
+    # `@app.middleware("http")`, vê a resposta inteira: por fora, eles a entregariam em pedaços
+    # (`more_body=True`) e o Starlette ignoraria o `minimum_size`.
+    app.add_middleware(_GZipQueRespeitaQZero, minimum_size=1024, compresslevel=6)
     app.middleware("http")(_registrar_chamada_de_api)
     app.middleware("http")(exigir_autenticacao)
 
@@ -450,8 +454,6 @@ def criar_app(
         return resposta
 
     app.middleware("http")(_cabecalhos_de_seguranca)
-    # O mais externo de todos: comprime a partir de 1 KB, nível 6 (#558).
-    app.add_middleware(_GZipQueRespeitaQZero, minimum_size=1024, compresslevel=6)
 
     def _registrar_login(pessoa: Usuario) -> None:
         """O que a API vê do login: a primeira chamada de `/eu` depois dele, que o front

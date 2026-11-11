@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from api.jobs import aceita_gzip
 from api.main import _GZipQueRespeitaQZero, criar_app
 
 GRANDE = "console.log('aaaaaaaaaaaaaaaa');" * 200  # bem acima de 1 KB
@@ -55,8 +56,7 @@ def test_gzip_nas_respostas_grandes(cliente: TestClient) -> None:
 
 
 def test_sem_gzip_abaixo_de_1_kb() -> None:
-    # Direto no middleware: pelo app, os `@app.middleware("http")` entregam o corpo em pedaços
-    # e o Starlette comprime resposta em pedaços de qualquer tamanho.
+    # Direto no middleware; pela app inteira, o teste é o do `/v1/health` abaixo.
     async def pequena(request: Request) -> Response:
         return Response("a" * 1000)
 
@@ -67,6 +67,39 @@ def test_sem_gzip_abaixo_de_1_kb() -> None:
     resposta = TestClient(app).get("/", headers={"Accept-Encoding": "gzip"})
 
     assert "content-encoding" not in resposta.headers
+
+
+@pytest.mark.parametrize(
+    "cabecalho",
+    ["*;q=1, gzip;q=0", "gzip;q=0, *;q=1", "gzip;q=0, *", "*, gzip;q=0"],
+)
+def test_gzip_explicito_prevalece_sobre_o_curinga_em_qualquer_ordem(
+    cabecalho: str,
+) -> None:
+    assert aceita_gzip(cabecalho) is False
+
+
+@pytest.mark.parametrize("cabecalho", ["*;q=0, gzip", "gzip, *;q=0", "*", "gzip;q=0.5"])
+def test_aceita_gzip_quando_nao_recusado(cabecalho: str) -> None:
+    assert aceita_gzip(cabecalho) is True
+
+
+def test_sem_gzip_com_curinga_e_gzip_q_zero_pela_app(cliente: TestClient) -> None:
+    resposta = cliente.get(
+        "/assets/app-abc123.js", headers={"Accept-Encoding": "*;q=1, gzip;q=0"}
+    )
+
+    assert "content-encoding" not in resposta.headers
+
+
+def test_resposta_pequena_da_app_inteira_sai_sem_gzip(cliente: TestClient) -> None:
+    resposta = cliente.get("/v1/health", headers={"Accept-Encoding": "gzip"})
+
+    assert resposta.json() == {"status": "ok"}
+    assert "content-encoding" not in resposta.headers
+    assert resposta.headers[
+        "x-content-type-options"
+    ]  # a pilha de segurança segue de fora
 
 
 def test_sem_gzip_com_q_zero(cliente: TestClient) -> None:
