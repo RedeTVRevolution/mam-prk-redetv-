@@ -15,7 +15,7 @@ import os
 import sys
 import uuid
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from datetime import datetime
 from functools import partial
 from typing import Any, NamedTuple, Protocol, get_args
@@ -53,6 +53,7 @@ from api.nuvem import (
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
 from api.programas import RepositorioDeProgramas, terminar_o_pendente
+from api.sinais import Registrar, imprimir, registro_da_falha_de_etapa
 from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
 from api.tipos_de_objeto import TiposDeObjeto
 
@@ -289,19 +290,22 @@ def reindexar(
     Toma a vez de indexar o vídeo: se outra execução a tem, ou, com `so_se_pedida`, se nada
     foi pedido, devolve `None` sem gravar. O que se pedir durante a rodada é atendido na
     volta, por esta mesma execução. Nunca levanta por falha do índice ou da cópia: cada uma
-    fica no seu estado no Job. `None` também se o Job não está `concluido`. Com `sinal`, o
+    fica no seu estado no Job. `None` também se o Job não está `concluido`. Erro nas duas
+    tentativas de tomar a vez, ou de fechar a rodada, devolve `falhou` sem gravar (#563). Com `sinal`, o
     vídeo copiado é comparado com o histórico do programa (#287); com `tipos_de_objeto`, os
     tipos dos objetos entram no autocompletar (#308); os dois só vão ao log se falham. Com
     `programas`, o vídeo sai dos pendentes da troca de nome do programa ao terminar.
     """
     rodada_id = uuid.uuid4().hex
-    try:
-        atual = tomar_a_rodada(
+    # Erro ao tomar a vez é falha (#563); `None` ("sem vez") não se tenta de novo.
+    tomou, atual = _tentar_duas_vezes(
+        lambda: tomar_a_rodada(
             repositorio, job.id, relogio(), rodada_id, so_se_pedida=so_se_pedida
-        )
-    except Exception:
-        log.exception("vez de indexar %s não tomada", job.id)
-        return None
+        ),
+        f"vez de indexar {job.id} não tomada",
+    )
+    if not tomou:
+        return Indexacao(estado="falhou", em=relogio())
     if atual is None:
         return None
     fechado: Job | None = None
@@ -321,7 +325,7 @@ def reindexar(
             pessoas,
         )
         # Sem fechar, a vez fica presa até `PRAZO_DA_RODADA` e a tela em "Finalizando".
-        fechado = _duas_tentativas(
+        fechou, fechado = _tentar_duas_vezes(
             partial(
                 fechar_a_rodada,
                 repositorio,
@@ -334,6 +338,9 @@ def reindexar(
             ),
             f"rodada de {job.id} não fechada",
         )
+        if not fechou:
+            # Não fechou: até uma indexação que deu certo sai como falha (#563).
+            return Indexacao(estado="falhou", em=relogio())
         if fechado is None or fechado.rodada_da_indexacao is None:
             break
         atual = fechado
@@ -349,14 +356,38 @@ def reindexar(
     return fechado.indexacao if fechado else None
 
 
-def _duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
-    """`acao()`, tentada de novo uma vez se levanta; `None` (e o log) se as duas falham."""
+def _tentar_duas_vezes[T](acao: Callable[[], T], falha: str) -> tuple[bool, T | None]:
+    """`(True, acao())`, tentada de novo uma vez se levanta; `(False, None)` (e o log) se as duas falham."""
     for tentativa in (1, 2):
         try:
-            return acao()
+            return True, acao()
         except Exception:
             log.exception("%s (tentativa %d)", falha, tentativa)
-    return None
+    return False, None
+
+
+def _duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
+    """`acao()` com duas tentativas; `None` se as duas falham."""
+    return _tentar_duas_vezes(acao, falha)[1]
+
+
+ORIGEM_API = "api"
+
+
+def registrar_falhas_da_api(
+    resultado: dict[str, str],
+    ambiente: Mapping[str, str],
+    registrar: Registrar = imprimir,
+) -> None:
+    """Só quando a API disparou (`ORIGEM_DO_DISPARO`), cada Job que falhou aciona o alerta
+    de falha de etapa; o Workflow já conta a falha dele (#563)."""
+    if ambiente.get("ORIGEM_DO_DISPARO") != ORIGEM_API:
+        return
+    for job_id, estado in resultado.items():
+        if estado == "falhou":
+            registrar(
+                registro_da_falha_de_etapa("indexacao", job_id, "reindexação falhou")
+            )
 
 
 def reindexar_jobs(
@@ -452,6 +483,7 @@ def main(argv: list[str]) -> int:
     )
     for job_id, estado in resultado.items():
         print(f"{job_id}: {estado}")
+    registrar_falhas_da_api(resultado, os.environ)
     return 1 if {"falhou", "inexistente"} & set(resultado.values()) else 0
 
 

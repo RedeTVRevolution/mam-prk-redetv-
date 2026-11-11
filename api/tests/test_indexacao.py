@@ -306,10 +306,11 @@ def test_falha_ao_gravar_o_estado_nao_derruba_nem_impede_a_indexacao() -> None:
     jobs = JobsQueNaoGravam()
     jobs.salvar(_job())
 
-    assert (
-        reindexar(_job(), jobs, mundo.armazenamento, mundo.correcoes, mundo.indice)
-        is None
+    indexacao = reindexar(
+        _job(), jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
     )
+    # Falhou ao fechar a rodada nas duas tentativas: é falha, não "ignorado" (#563).
+    assert indexacao is not None and indexacao.estado == "falhou"
     assert mundo.indice.total() == 6
 
 
@@ -852,3 +853,125 @@ def test_reindexar_id_explicito_na_lixeira_grava_as_duas_colecoes_marcadas() -> 
         ("/col-z/" in n) == (d["tipo"] == "plano")
         for n, d in transporte.objetos.items()
     )
+
+
+class JobsQueFalhamAoTomarAVez(RepositorioEmMemoria):
+    """Levanta nas primeiras `falhas` tentativas de tomar a vez; conta as tentativas."""
+
+    def __init__(self, falhas: int) -> None:
+        super().__init__()
+        self.falhas = falhas
+        self.tentativas = 0
+
+    def trocar(self, job_id: str, mudar: Any) -> Job | None:
+        def tomar_ou_cair(job: Job) -> dict[str, Any] | None:
+            mudancas: dict[str, Any] | None = mudar(job)
+            if mudancas and mudancas.get("rodada_da_indexacao"):
+                self.tentativas += 1
+                if self.tentativas <= self.falhas:
+                    raise ConnectionError("Firestore fora do ar")
+            return mudancas
+
+        return super().trocar(job_id, tomar_ou_cair)
+
+
+def test_erro_so_na_primeira_tentativa_de_tomar_a_vez_indexa_normalmente() -> None:
+    mundo = Mundo()
+    jobs = JobsQueFalhamAoTomarAVez(falhas=1)
+    jobs.salvar(_job())
+
+    indexacao = reindexar(
+        _job(), jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
+    )
+
+    assert indexacao is not None and indexacao.estado == "indexado"
+    assert jobs.tentativas == 2 and mundo.indice.total() == 6
+
+
+def test_erro_nas_duas_tentativas_de_tomar_a_vez_sai_como_falhou() -> None:
+    mundo = Mundo()
+    jobs = JobsQueFalhamAoTomarAVez(falhas=2)
+    jobs.salvar(_job())
+
+    resultado = reindexar_jobs(
+        ["j1"], jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
+    )
+
+    assert resultado == {"j1": "falhou"} and mundo.indice.total() == 0
+
+
+class JobsQueTrocamContando(RepositorioEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.trocas = 0
+
+    def trocar(self, job_id: str, mudar: Any) -> Job | None:
+        self.trocas += 1
+        return super().trocar(job_id, mudar)
+
+
+def test_sem_vez_nao_tenta_de_novo_e_sai_como_ignorado() -> None:
+    mundo = Mundo()
+    jobs = JobsQueTrocamContando()
+    jobs.salvar(_job())  # concluído, mas nada pedido: com `so_se_pedida` não há vez
+    jobs.trocas = 0
+
+    resultado = reindexar_jobs(
+        ["j1"],
+        jobs,
+        mundo.armazenamento,
+        mundo.correcoes,
+        mundo.indice,
+        so_se_pedida=True,
+    )
+
+    assert resultado == {"j1": "ignorado"} and jobs.trocas == 1
+
+
+class JobsQueNuncaFecham(RepositorioEmMemoria):
+    def trocar(self, job_id: str, mudar: Any) -> Job | None:
+        def sem_fechar(job: Job) -> dict[str, Any] | None:
+            mudancas: dict[str, Any] | None = mudar(job)
+            if mudancas and "versao_indexada" in mudancas:
+                raise ConnectionError("Firestore fora do ar")
+            return mudancas
+
+        return super().trocar(job_id, sem_fechar)
+
+
+def test_falha_nas_duas_tentativas_de_fechar_a_rodada_sai_como_falhou() -> None:
+    mundo = Mundo()
+    jobs = JobsQueNuncaFecham()
+    jobs.salvar(_job())
+
+    assert reindexar_jobs(
+        ["j1"], jobs, mundo.armazenamento, mundo.correcoes, mundo.indice
+    ) == {"j1": "falhou"}
+
+
+def test_origem_api_alerta_so_os_jobs_que_falharam() -> None:
+    from api.indexacao import registrar_falhas_da_api
+
+    linhas: list[str] = []
+
+    registrar_falhas_da_api(
+        {"a": "falhou", "b": "indexado", "c": "ignorado", "d": "inexistente"},
+        {"ORIGEM_DO_DISPARO": "api"},
+        linhas.append,
+    )
+
+    [linha] = linhas
+    registro = json.loads(linha)
+    assert registro["evento"] == "falha_de_etapa"
+    assert (registro["etapa"], registro["job_id"]) == ("indexacao", "a")
+
+
+def test_origem_workflow_ou_sem_origem_nao_alerta() -> None:
+    from api.indexacao import registrar_falhas_da_api
+
+    linhas: list[str] = []
+
+    registrar_falhas_da_api({"a": "falhou"}, {}, linhas.append)
+    registrar_falhas_da_api({"a": "falhou"}, {"ORIGEM_DO_DISPARO": "x"}, linhas.append)
+
+    assert linhas == []
