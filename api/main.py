@@ -365,6 +365,7 @@ def criar_app(
     taxa_de_correcao: LeitorDaTaxa | None = None,
     relatorio_de_marcas: ConsultaDeInsercoes | None = None,
     cache_do_painel: CacheCurto | None = None,
+    cache_da_lista: CacheCurto | None = None,
     passadas: LeituraDePassadas | None = None,
     transporte_da_consulta: Transporte | None = None,
     ranking: Ranking | None = None,
@@ -534,6 +535,7 @@ def criar_app(
             AcessosNaAuditoria(repositorio_de_auditoria, relogio),
             idempotencia,
             publicador,
+            cache_da_lista,
         )
     )
     leitura_de_passadas = passadas or PassadasEmMemoria()

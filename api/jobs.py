@@ -35,6 +35,7 @@ from api.auth import (
     Sistema,
     Usuario,
 )
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, EnvioParaLixeira
 from api.catalogo_apagado import (
     com_pessoas_fundidas,
@@ -159,6 +160,9 @@ CodigoDeFalha = Literal[
 
 EstadoDaIndexacao = Literal["pendente", "indexado", "falhou"]
 
+
+# Quanto a lista sem capa (o polling da busca) fica guardada: o selo "Finalizando" atrasa até isto.
+VALIDADE_DA_LISTA_S = 15.0
 
 # Teto de assinaturas de capa ao mesmo tempo na listagem do Acervo.
 ASSINATURAS_SIMULTANEAS = 8
@@ -1080,8 +1084,10 @@ def criar_rotas(
     acessos: AcessosAoVideo,
     idempotencia: RepositorioDeIdempotencia | None = None,
     eventos: Eventos | None = None,
+    cache_da_lista: CacheCurto | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
+    cache_da_lista = cache_da_lista or CacheCurto(VALIDADE_DA_LISTA_S)
     publicador = eventos or SemEventos()
     chaves_de_idempotencia = idempotencia or RepositorioDeIdempotenciaEmMemoria()
 
@@ -1217,6 +1223,12 @@ def criar_rotas(
     def _sem_capa(job: Job) -> dict[str, Any]:
         return JobResumido.de(job).model_dump(mode="json", exclude={"capa_url"})
 
+    def _lista_sem_capa(
+        filtro: FiltroDeJobs,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        pagina = repositorio.consultar(filtro)
+        return [_sem_capa(j) for j in pagina.jobs], pagina.proximo_cursor
+
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
@@ -1248,22 +1260,32 @@ def criar_rotas(
             cursor=cursor,
             so_os_da_lista=True,
         )
+        if not capa:
+            # Quem só conta (o polling da busca) lê a lista guardada por 15 s. A chave é o
+            # filtro efetivo inteiro, com o sistema já forçado ao do chamador; entra depois
+            # da checagem de permissão (`_exige`), que roda a cada chamada.
+            try:
+                corpo, proximo = cache_da_lista.obter(
+                    filtro, lambda: _lista_sem_capa(filtro)
+                )
+            except CursorInvalido:
+                raise HTTPException(422, "Cursor inválido") from None
+            return JSONResponse(
+                corpo, headers={"X-Proximo-Cursor": proximo} if proximo else {}
+            )
         try:
             pagina = repositorio.consultar(filtro)
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        if capa:
-            # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
-            with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
-                publicos = list(assinando.map(_com_capa, pagina.jobs))
-            corpo = [p.model_dump(mode="json") for p in publicos]
-        else:
-            # Quem só conta (o aviso "Finalizando" da busca) não paga as assinaturas.
-            corpo = [_sem_capa(j) for j in pagina.jobs]
+        # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
+        with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
+            publicos = list(assinando.map(_com_capa, pagina.jobs))
         cabecalhos = (
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )
-        return JSONResponse(corpo, headers=cabecalhos)
+        return JSONResponse(
+            [p.model_dump(mode="json") for p in publicos], headers=cabecalhos
+        )
 
     @rotas.get("/andamento", response_model=list[JobResumido])
     def andamento(

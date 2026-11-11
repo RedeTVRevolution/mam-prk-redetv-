@@ -88,6 +88,7 @@ COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
      api/bancos.py \
+     api/cache_curto.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -166,6 +167,7 @@ COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
      api/bancos.py \
+     api/cache_curto.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -276,6 +278,7 @@ COPY api/__init__.py \
      api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
+     api/cache_curto.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -337,8 +340,11 @@ FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev
+# Bytecode pronto (#558): `nobody` não grava `.pyc` em /app, então sem isto cada partida a frio
+# compila tudo de novo na memória. Os `.pyc` são do root e só leitura, como os `.py`.
+RUN uv sync --locked --no-dev --compile-bytecode
 COPY api/ api/
+RUN /app/.venv/bin/python -m compileall -q api
 COPY --from=web /web/dist web/dist
 USER nobody
 ENV PATH=/app/.venv/bin:$PATH
