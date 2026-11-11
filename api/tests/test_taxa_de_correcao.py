@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from api import taxa_de_correcao as taxa
 from api.auth import Usuario
 from api.correcoes import (
+    CORRIGIVEIS,
     Ancora,
     Correcao,
     RepositorioDeCorrecoesEmMemoria,
@@ -462,3 +463,31 @@ def test_comando_imprime_o_csv_do_periodo_e_do_programa(
         "itens": "10",
         "taxa_de_correcao": "0.2",
     } in lidas
+
+
+def _taxa_com_contagem_sem(*tipos: str) -> list[Any]:
+    jobs, decupagens, correcoes, revisao = _mundo()
+    _pulsar(revisao, "j1")
+    pronta = taxa._itens_da_decupagem(decupagens, "j1")
+    gravada = taxa.ItensDaDecupagem(
+        versao_do_modelo=pronta.versao_do_modelo,
+        versao_pipeline=pronta.versao_pipeline,
+        itens={t: n for t, n in pronta.itens.items() if t not in tipos},
+    )
+    por_job = taxa.calcular_com_itens(
+        jobs, lambda _job_id: gravada, correcoes, revisao
+    )
+    return [linha for _, linha in por_job]
+
+
+def test_tipo_novo_com_irmao_mantem_o_video_na_taxa() -> None:
+    linhas = _taxa_com_contagem_sem("pessoa.renomear")
+
+    assert _taxa(linhas, "Jornal", "pessoa.renomear").itens == 10
+    assert _taxa(linhas, "Jornal", "pessoa.renomear").correcoes == 2
+
+
+def test_tipo_novo_sem_irmao_tira_o_video_da_taxa() -> None:
+    tipos_da_pauta = [t for t in CORRIGIVEIS if t.startswith("pauta.")]
+
+    assert _taxa_com_contagem_sem(*tipos_da_pauta) == []
