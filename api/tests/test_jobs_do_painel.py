@@ -269,6 +269,14 @@ def test_a_consulta_agendada_usa_a_conta_dos_resumos_e_o_nome_vem_do_terraform()
     assert 'output "bigquery_tabela_de_jobs"' in TF
 
 
+def test_as_duas_consultas_agendadas_do_painel_rodam_de_hora_em_hora_na_mesma_janela() -> None:
+    resumos = (MODULO / "resumos_de_uso.tf").read_text()
+    for tf in (TF, resumos):
+        assert 'schedule             = "every 1 hours"' in tf
+        assert "local.janela_dos_resumos_em_dias - 1" in tf
+    assert "janela_dos_resumos_em_dias = 2" in resumos
+
+
 def _job(**mudancas: Any) -> Job:
     base: dict[str, Any] = {
         "id": "v1",
