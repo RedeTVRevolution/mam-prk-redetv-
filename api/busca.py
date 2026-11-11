@@ -25,6 +25,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.comparador import normalizar
 from api.entendimento_da_consulta import (
@@ -82,6 +83,12 @@ TETO_DE_ASSINATURAS = 16
 # então o teto cobre as consultas de uma busca típica (pessoa com 4 cláusulas; #568); busca
 # com mais que isso espera uma rodada. `pool.map` entrega na ordem das consultas.
 TETO_DE_CONSULTAS_AO_INDICE = 8
+# Quanto a mesma busca reaproveita os candidatos do índice e a ordem do ranking (#568). Um
+# minuto cobre quem volta, reordena ou repete a busca; vídeo indexado dentro dele só
+# aparece quando o cache vence. Os Jobs (sistema, estado, lixeira) são relidos a cada busca.
+VALIDADE_DOS_CANDIDATOS_S = 60.0
+# Até uns 500 registros por entrada: poucas entradas, para a memória da instância.
+MAXIMO_DE_CANDIDATOS = 48
 # Valores mostrados por faceta: os de mais vídeos.
 TETO_DE_VALORES_POR_FACETA = 20
 ROTULO_DO_TIPO: dict[str, str] = {
@@ -382,8 +389,12 @@ class Busca:
         relogio: Callable[[], datetime],
         copia_do_catalogo: CopiaCurta[PessoaDoCatalogo] | None = None,
         listas: ListasDaBusca | None = None,
+        cache_de_candidatos: CacheCurto | None = None,
     ) -> None:
         self._listas = listas or ListasDaBuscaEmMemoria()
+        self._candidatos = cache_de_candidatos or CacheCurto(
+            validade=VALIDADE_DOS_CANDIDATOS_S, maximo=MAXIMO_DE_CANDIDATOS
+        )
         # A mesma cópia do autocompletar, se a aplicação a passa: uma só recarga para todos.
         self._nomes_citados = IndiceDeNomesCitados()
         self._copia_do_catalogo = copia_do_catalogo or CopiaCurta(
@@ -473,7 +484,14 @@ class Busca:
                 filtros=com_filtros_do_servidor(c.filtros, impostos),
                 limite=TETO_DE_REGISTROS,
             )
-            return self._indice.buscar(c)
+            # O cache guarda a lista do índice; cada busca recebe cópias, porque os
+            # registros levam listas que ninguém de fora pode compartilhar.
+            return [
+                replace(r, pessoas=list(r.pessoas), cor_base=list(r.cor_base))
+                for r in self._candidatos.obter(
+                    ("indice", impressao, c), lambda: self._indice.buscar(c)
+                )
+            ]
 
         prontas: list[tuple[Consulta, list[Registro]]] = []
 
@@ -555,8 +573,8 @@ class Busca:
         if _texto_da_busca(entendida) and achados:
             try:
                 achados = [
-                    *self._ranking.reordenar(
-                        _texto_da_busca(entendida), achados[:TETO_DO_RANKING]
+                    *self._reordenar(
+                        impressao, _texto_da_busca(entendida), achados[:TETO_DO_RANKING]
                     ),
                     *achados[TETO_DO_RANKING:],
                 ]
@@ -653,6 +671,18 @@ class Busca:
                 resultado, todos, termos, dono, impressao, limite
             )
         return resultado
+
+    def _reordenar(
+        self, impressao: str, texto: str, registros: list[Registro]
+    ) -> list[Registro]:
+        """A Ranking API com cache: a chave leva os IDs enviados, então um vídeo que saiu
+        (lixeira) pede um ranking novo; só a ordem dos IDs fica guardada."""
+        ids = self._candidatos.obter(
+            ("ranking", impressao, texto, tuple(r.id for r in registros)),
+            lambda: [r.id for r in self._ranking.reordenar(texto, registros)],
+        )
+        por_id = {r.id: r for r in registros}
+        return [por_id[i] for i in ids if i in por_id]
 
     def _guardar(
         self,

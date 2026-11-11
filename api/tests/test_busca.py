@@ -37,7 +37,8 @@ from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import (
     TEMPO_DA_CONSULTA_S,
 )
-from api.eventos_de_uso import Eventos
+from api.cache_curto import CacheCurto
+from api.eventos_de_uso import Eventos, EventosEmMemoria
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import CursorInvalido, Job, RepositorioEmMemoria
@@ -137,6 +138,7 @@ class Mundo:
         self,
         ranking: Ranking | None = None,
         relogio: Callable[[], datetime] = lambda: BASE,
+        cache: CacheCurto | None = None,
     ) -> Busca:
         return Busca(
             transporte=self.transporte,
@@ -146,6 +148,7 @@ class Mundo:
             repositorio=self.jobs,
             armazenamento=self.armazenamento,
             relogio=relogio,
+            cache_de_candidatos=cache,
         )
 
     def com(self, j: Job, *registros: Registro) -> None:
@@ -2411,3 +2414,140 @@ def test_leitura_do_indice_que_estoura_o_prazo_do_transporte_responde_504(
     r = c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
 
     assert r.status_code == 504
+
+
+# --- cache curto dos candidatos (#568 item 5) -----------------------------------------
+
+
+class RankingContado:
+    def __init__(self) -> None:
+        self.chamadas = 0
+
+    def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+        self.chamadas += 1
+        return registros
+
+
+def _mundo_com_cache(n: int = 3) -> Mundo:
+    return mundo_de_videos(n, *[pedido(texto_livre="vestido")] * 6)
+
+
+def test_busca_repetida_nao_chama_indice_nem_ranking() -> None:
+    m = _mundo_com_cache()
+    ranking = RankingContado()
+    busca = m.busca(ranking=ranking)
+
+    primeira = busca.buscar("vestido", dono="u1")
+    consultas = len(m.indice.consultas)
+    segunda = busca.buscar("vestido", dono="u1")
+
+    assert consultas > 0 and ranking.chamadas == 1
+    assert len(m.indice.consultas) == consultas
+    assert ranking.chamadas == 1
+    assert segunda.videos == primeira.videos
+
+
+def test_o_cache_vence_e_a_busca_volta_ao_indice() -> None:
+    m = _mundo_com_cache()
+    agora = [0.0]
+    busca = m.busca(cache=CacheCurto(validade=60, relogio=lambda: agora[0]))
+    busca.buscar("vestido", dono="u1")
+    consultas = len(m.indice.consultas)
+    agora[0] = 59
+    busca.buscar("vestido", dono="u1")
+    assert len(m.indice.consultas) == consultas
+    agora[0] = 61
+    busca.buscar("vestido", dono="u1")
+    assert len(m.indice.consultas) == 2 * consultas
+
+
+def test_video_que_foi_para_a_lixeira_some_da_busca_repetida() -> None:
+    m = _mundo_com_cache()
+    busca = m.busca()
+    antes = [v.job_id for v in busca.buscar("vestido", dono="u1").videos]
+    lixo = EnvioParaLixeira(
+        em=BASE, por_uid="adm", por_email="adm@redetv.com", motivo="duplicado"
+    )
+    j = m.jobs.obter(antes[0])
+    assert j is not None
+    m.jobs.salvar(j.model_copy(update={"lixeira": lixo}))
+    consultas = len(m.indice.consultas)
+
+    depois = [v.job_id for v in busca.buscar("vestido", dono="u1").videos]
+
+    assert len(m.indice.consultas) == consultas  # veio do cache; os Jobs foram relidos
+    assert depois == antes[1:]
+
+
+def test_dono_diferente_recebe_cursor_proprio_da_busca_em_cache() -> None:
+    m = _mundo_com_cache(4)
+    busca = m.busca()
+    a = busca.buscar("vestido", limite=2, dono="ua")
+    consultas = len(m.indice.consultas)
+    b = busca.buscar("vestido", limite=2, dono="ub")
+    assert len(m.indice.consultas) == consultas
+    assert a._proximo_cursor and b._proximo_cursor
+    assert a._proximo_cursor != b._proximo_cursor
+    with pytest.raises(CursorInvalido):
+        busca.buscar("vestido", limite=2, dono="ub", cursor=a._proximo_cursor)
+    assert busca.buscar("vestido", limite=2, dono="ub", cursor=b._proximo_cursor).videos
+
+
+def test_o_limite_nao_vai_na_chave_do_cache() -> None:
+    m = _mundo_com_cache(4)
+    busca = m.busca()
+    pequena = busca.buscar("vestido", limite=1, dono="u1")
+    consultas = len(m.indice.consultas)
+    grande = busca.buscar("vestido", limite=4, dono="u1")
+    assert len(m.indice.consultas) == consultas
+    assert len(pequena.videos) == 1 and len(grande.videos) == 4
+
+
+def test_o_cache_nao_guarda_url_assinada_e_cada_busca_assina_de_novo() -> None:
+    m = Mundo(*[pedido(texto_livre="vestido")] * 4)
+    m.com(job("j1", sistema="s"), objeto("o1", "j1", 0, 1_000, quadro="quadros/o1.jpg"))
+    assinadas: list[str] = []
+    original = m.armazenamento.url_do_quadro
+
+    def assina(job_id: str, caminho: str, validade: timedelta) -> str:
+        url = f"{original(job_id, caminho, validade)}&n={len(assinadas)}"
+        assinadas.append(url)
+        return url
+
+    m.armazenamento.url_do_quadro = assina  # type: ignore[method-assign]
+    agora = [BASE]
+    busca = m.busca(relogio=lambda: agora[0])
+    a = busca.buscar("vestido", sistema="s", dono="u1")
+    consultas = len(m.indice.consultas)
+    agora[0] = BASE + timedelta(seconds=30)
+    b = busca.buscar("vestido", sistema="s", dono="u1")
+
+    assert len(m.indice.consultas) == consultas
+    assert len(assinadas) == 2
+    assert a.videos[0].momentos[0].quadro_url != b.videos[0].momentos[0].quadro_url
+    assert b.quadros_expiram_em == a.quadros_expiram_em + timedelta(seconds=30)
+
+
+def test_mexer_no_resultado_nao_muda_a_busca_seguinte() -> None:
+    m = _mundo_com_cache()
+    busca = m.busca()
+    a = busca.buscar("vestido", dono="u1")
+    esperado = busca.buscar("vestido", dono="u1").model_copy(deep=True)
+    a.videos.clear()
+    assert busca.buscar("vestido", dono="u1") == esperado
+
+
+def test_a_rota_conta_a_busca_repetida_no_limite_e_no_evento_a_cada_chamada() -> None:
+    eventos = EventosEmMemoria()
+    c, _ = cliente(
+        ["consulta"],
+        *[pedido(texto_livre="vestido")] * 3,
+        maximo_por_minuto=2,
+        eventos=eventos,
+    )
+    codigos = [
+        c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO).status_code
+        for _ in range(3)
+    ]
+    assert codigos == [200, 200, 429]
+    assert [e.tipo for e in eventos.publicados].count("busca") == 2
