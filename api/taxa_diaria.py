@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
@@ -50,7 +50,7 @@ from api.nuvem import (
 )
 from api.reprocessar_versao import LeitorDeDecupagem
 from api.revisao import RepositorioDeRevisao
-from api.taxa_de_correcao import calcular_com_itens
+from api.taxa_de_correcao import _modelo_da_decupagem, calcular_com_itens
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +159,7 @@ def linhas_do_dia(
     itens: LeitorDeItens,
     correcoes: RepositorioDeCorrecoes,
     revisao: RepositorioDeRevisao,
+    modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[LinhaDiaria]:
     inicio, fim = _periodo_do_dia(dia)
     return [
@@ -172,7 +173,13 @@ def linhas_do_dia(
             x.itens,
         )
         for job_id, x in calcular_com_itens(
-            repositorio, itens.ler_itens, correcoes, revisao, inicio, fim
+            repositorio,
+            itens.ler_itens,
+            correcoes,
+            revisao,
+            inicio,
+            fim,
+            modelo_do_job=modelo_do_job,
         )
     ]
 
@@ -184,12 +191,15 @@ def atualizar(
     correcoes: RepositorioDeCorrecoes,
     revisao: RepositorioDeRevisao,
     tabela: TabelaDaTaxa,
+    modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> int:
     """Refaz os `dias` na tabela e devolve quantas linhas gravou."""
     linhas = [
         linha
         for dia in dias
-        for linha in linhas_do_dia(dia, repositorio, itens, correcoes, revisao)
+        for linha in linhas_do_dia(
+            dia, repositorio, itens, correcoes, revisao, modelo_do_job
+        )
     ]
     tabela.substituir(dias, linhas)
     return len(linhas)
@@ -366,10 +376,10 @@ def main(argumentos: list[str]) -> int:
     banco = cliente_do_firestore(config.projeto)
     jobs = RepositorioFirestore(banco)
     itens = ItensNoStorage(cliente, os.environ["BUCKET_DECUPAGENS"])
+    decupagens = DecupagensStorage(
+        cliente, os.environ["BUCKET_ACEITOS"], os.environ["BUCKET_DECUPAGENS"]
+    )
     if preenchendo:
-        decupagens = DecupagensStorage(
-            cliente, os.environ["BUCKET_ACEITOS"], os.environ["BUCKET_DECUPAGENS"]
-        )
         print(f"{preencher_itens(jobs, decupagens, itens)} contagens gravadas")
     gravadas = atualizar(
         dias_recentes(datetime.now(SAO_PAULO).date(), quantos),
@@ -378,6 +388,7 @@ def main(argumentos: list[str]) -> int:
         RepositorioDeCorrecoesFirestore(banco),
         RepositorioDeRevisaoFirestore(banco),
         TabelaDaTaxaBigQuery(config, transporte_http(config.projeto)),
+        lambda job_id: _modelo_da_decupagem(decupagens, job_id),
     )
     print(f"{gravadas} linhas gravadas em {quantos} dias")
     return 0

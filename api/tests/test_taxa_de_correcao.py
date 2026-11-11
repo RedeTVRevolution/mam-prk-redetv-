@@ -490,3 +490,42 @@ def test_tipo_novo_sem_irmao_tira_o_video_da_taxa() -> None:
     tipos_da_pauta = [t for t in CORRIGIVEIS if t.startswith("pauta.")]
 
     assert _taxa_com_contagem_sem(*tipos_da_pauta) == []
+
+
+_PAUTA = {"id": "t0", "titulo": "x", "inicio_ms": 0, "fim_ms": 1_000}
+
+
+def _regravada(pauta_depois: dict[str, Any], desfeita: bool = False) -> list[Any]:
+    """j1 com uma pauta corrigida sobre o JSON antigo; a decupagem foi regravada
+    com mais uma pessoa (outro sha256) e a pauta como `pauta_depois`."""
+    antes = {"versao_pipeline": "v1", "pessoas": [], "pautas": [_PAUTA]}
+    depois = {**antes, "pessoas": [{"nome": "Ana"}], "pautas": [pauta_depois]}
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j1", "Jornal"))
+    correcoes = RepositorioDeCorrecoesEmMemoria()
+    correcoes.acrescentar(_c("a", "j1", antes, "pauta.titulo"))
+    if desfeita:
+        correcoes.acrescentar(
+            _c("b", "j1", antes, "desfazer", desfaz="a", antes="", depois="")
+        )
+    revisao = RepositorioDeRevisaoEmMemoria()
+    _pulsar(revisao, "j1")
+    return calcular(jobs, Decupagens({"j1": depois}), correcoes, revisao)
+
+
+def test_correcao_reconciliada_com_a_versao_atual_conta() -> None:
+    linhas = _regravada(_PAUTA)
+
+    assert _taxa(linhas, "Jornal", "pauta.titulo").correcoes == 1
+
+
+def test_correcao_que_nao_casa_com_a_versao_atual_nao_conta() -> None:
+    linhas = _regravada({**_PAUTA, "inicio_ms": 5_000, "fim_ms": 6_000})
+
+    assert _taxa(linhas, "Jornal", "pauta.titulo").correcoes == 0
+
+
+def test_correcao_desfeita_apos_regravar_nao_conta() -> None:
+    linhas = _regravada(_PAUTA, desfeita=True)
+
+    assert _taxa(linhas, "Jornal", "pauta.titulo").correcoes == 0
