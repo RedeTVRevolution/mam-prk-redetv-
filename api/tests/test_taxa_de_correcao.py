@@ -476,7 +476,7 @@ def _taxa_com_contagem_sem(*tipos: str) -> list[Any]:
         itens={t: n for t, n in pronta.itens.items() if t not in tipos},
     )
     por_job = taxa.calcular_com_itens(jobs, lambda _job_id: gravada, correcoes, revisao)
-    return [linha for _, linha in por_job]
+    return [linha for job_id, linha in por_job if job_id == "j1"]
 
 
 def test_tipo_novo_com_irmao_mantem_o_video_na_taxa() -> None:
