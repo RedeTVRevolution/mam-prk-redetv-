@@ -17,3 +17,9 @@ Mudar a região ou o nome de um recurso força a troca (destruir e criar), e o `
 ## Apagar São Paulo
 
 Depois da cópia e da conferência, o wizard apaga o que sobrou em São Paulo **uma vez só, por `gcloud`**, no mesmo dia. Isso não contradiz a regra "mudança na nuvem só pelo Terraform": esses recursos já não estão no estado, e o Terraform nunca soube apagá-los sem destruir o que o plan não pode destruir. Ficam de fora o key ring do KMS, que o Google não deixa apagar (destrói-se a versão da chave), e o bucket do estado do Terraform, que migra por último (`terraform init -migrate-state`).
+
+## O que fica fora de us-east4, de propósito
+
+- **Gemini e a Ranking API (Discovery Engine) no endpoint global** ([ADR 0001](0001-gemini-endpoint-global.md)): o modo Flex (50% de desconto) só existe no global, e a configuração `default_ranking_config` da Ranking API é global, já existe no projeto e não aceita região. Nenhum dado fica guardado neles, só passa.
+- **A chave KMS de São Paulo (key ring `mam`)**: o Google não deixa apagar key ring nem chave, só destruir as versões; por isso o anel antigo continua existindo em `southamerica-east1`, vazio de versões ativas depois do passo de apagar. A chave em uso é a nova, em `us-east4`.
+- **Os buckets de log padrão (`_Default` e `_Required` do Cloud Logging)**: o projeto os cria sozinho, na localização `global`, e eles não mudam de região. Não guardam vídeo nem decupagem.
