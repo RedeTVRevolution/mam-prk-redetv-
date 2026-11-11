@@ -107,11 +107,16 @@ export function etapasEmAndamento(job: Job): string[] {
 
 /**
  * O tempo total da passada: do início dela até agora, ou até a última etapa quando terminou.
+ * Com a indexação concluída na passada, para no fim dela (uma etapa refeita depois não conta).
  * `null` no legado reprocessado sem início.
  */
 export function tempoDaEntradaMs(job: Job, agora: number): number | null {
   if (!job.inicio_da_passada && (job.reprocessamentos ?? 0) > 0) return null
   const inicio = new Date(job.inicio_da_passada ?? job.criado_em).getTime()
+  const indexada = (job.etapas ?? []).find(
+    (e) => e.nome === 'indexacao' && e.resultado === 'concluida' && e.fim && new Date(e.fim).getTime() >= inicio,
+  )
+  if (indexada?.fim) return new Date(indexada.fim).getTime() - inicio
   if (emAndamento(job)) return Math.max(agora - inicio, 0)
   const fins = (job.etapas ?? []).flatMap((e) => (e.fim ? [new Date(e.fim).getTime()] : []))
   const fim = fins.length ? Math.max(...fins) : new Date(job.atualizado_em ?? job.criado_em).getTime()
