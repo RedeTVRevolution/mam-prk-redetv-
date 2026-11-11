@@ -1378,31 +1378,44 @@ def criar_rotas(
             )
         }
         expira_em = relogio() + VALIDADE_INFORMADA_DA_IMAGEM
-        resposta: list[QuadroDoLote] = []
-        for par in pedido.quadros:
-            job = jobs.get(par.job)
-            visivel = (
+
+        def visivel(job_id: str) -> bool:
+            job = jobs.get(job_id)
+            return (
                 job is not None
                 and job.estado == "concluido"
                 and job.lixeira is None
                 and not _de_outro_sistema(chamador, job)
             )
-            url = (
-                armazenamento.url_do_quadro(
-                    par.job, caminho_do_quadro(par.arquivo), VALIDADE_DA_IMAGEM
+
+        # Só os pares visíveis, uma vez cada, vão ao IAM, em paralelo (como as capas).
+        unicos = [
+            p
+            for p in dict.fromkeys((q.job, q.arquivo) for q in pedido.quadros)
+            if visivel(p[0])
+        ]
+        with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
+            urls = dict(
+                zip(
+                    unicos,
+                    assinando.map(
+                        lambda p: armazenamento.url_do_quadro(
+                            p[0], caminho_do_quadro(p[1]), VALIDADE_DA_IMAGEM
+                        ),
+                        unicos,
+                    ),
+                    strict=True,
                 )
-                if visivel
-                else None
             )
-            resposta.append(
-                QuadroDoLote(
-                    job=par.job,
-                    arquivo=par.arquivo,
-                    url=url,
-                    expira_em=expira_em if url else None,
-                )
+        return [
+            QuadroDoLote(
+                job=q.job,
+                arquivo=q.arquivo,
+                url=(url := urls.get((q.job, q.arquivo))),
+                expira_em=expira_em if url else None,
             )
-        return resposta
+            for q in pedido.quadros
+        ]
 
     @rotas.get("/{job_id}/quadros/{arquivo}")
     def quadro(
