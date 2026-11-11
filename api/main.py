@@ -3,6 +3,7 @@ import threading
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
+from functools import partial
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Request
@@ -18,7 +19,12 @@ from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
 from api.acessos import AcessosNaAuditoria
-from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.agent_retrieval import (
+    AgentRetrieval,
+    ConfigDaBusca,
+    aquecer_o_indice,
+    transporte_http,
+)
 from api.aprovacao import criar_rotas_da_aprovacao
 from api.auditoria import (
     RepositorioDeAuditoria,
@@ -45,7 +51,7 @@ from api.busca import (
     Ranking,
     RankingEmOrdem,
 )
-from api.busca_na_nuvem import adaptadores_da_busca
+from api.busca_na_nuvem import adaptadores_da_busca, aquecer_na_partida
 from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CatalogoEmMemoria, CopiaCurta
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
@@ -802,6 +808,7 @@ if _projeto:
     _busca = (
         ConfigDaBusca.do_ambiente(os.environ) if "BUSCA_COLECAO" in os.environ else None
     )
+    _transporte_do_indice = transporte_http() if _busca else None
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(
@@ -869,11 +876,11 @@ if _projeto:
         indice=(
             AgentRetrieval(
                 _busca,
-                transporte_http(),
+                _transporte_do_indice,
                 tentar_no_429=True,
                 orcamento=OrcamentoFirestore(cliente_do_firestore(_projeto)),
             )
-            if _busca
+            if _busca and _transporte_do_indice
             else None
         ),
         copia=copia_do_ambiente(os.environ),
@@ -904,5 +911,13 @@ if _projeto:
         transporte_da_consulta=_adaptadores.transporte_da_consulta,
         ranking=_adaptadores.ranking,
     )
+    # Conexão TLS e token do índice, do embedding e da Ranking prontos antes da 1ª busca (#568).
+    # Em segundo plano: não atrasa a partida nem o readiness.
+    _aquecimentos: list[Callable[[], None]] = []
+    if _busca and _transporte_do_indice:
+        _aquecimentos.append(partial(aquecer_o_indice, _transporte_do_indice, _busca))
+    if _adaptadores.aquecer:
+        _aquecimentos.append(_adaptadores.aquecer)
+    aquecer_na_partida(_aquecimentos)
 else:
     app = criar_app()

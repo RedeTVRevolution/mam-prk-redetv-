@@ -1,6 +1,7 @@
 """Adaptadores reais da busca: descrição da foto pelo Gemini e Ranking API."""
 
 import logging
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
@@ -15,11 +16,17 @@ from api.indice_da_busca import Registro
 
 log = logging.getLogger(__name__)
 
-TEMPO_DA_RANKING_S = 5.0
+# Passado o prazo, a busca segue na ordem do índice. Vira o `timeout` do `requests` (conexão e
+# leitura, 1 s cada): a resposta da Ranking é um JSON pequeno que chega de uma vez, então a
+# leitura é, na prática, o tempo até a resposta; uma conexão quente (aquecida na partida)
+# não paga o TLS.
+TEMPO_DA_RANKING_S = 1.0
 # O limite de registros por pedido da Ranking API (RankRequest.records: no máximo 200);
 # a busca funde várias cláusulas de até 100 registros, então passar disso é comum.
 REGISTROS_POR_PEDIDO = 200
-MODELO_DA_RANKING = "semantic-ranker-default@latest"
+MODELO_DA_RANKING = (
+    "semantic-ranker-default-005"  # o que o @latest apontava em 11/11/2026
+)
 
 
 def _postar(
@@ -94,6 +101,34 @@ class RankingReal:
 class AdaptadoresDaBusca:
     transporte_da_consulta: Transporte | None = None
     ranking: Ranking | None = None
+    # Abre a conexão TLS e pega o token da sessão da Ranking (uma chamada, sem custo).
+    aquecer: Callable[[], None] | None = None
+
+
+HOST_DA_RANKING = "discoveryengine.googleapis.com"
+
+
+def tocar_o_host(sessao: Any, host: str) -> None:
+    """Uma chamada barata ao host: a sessão pega o token e deixa a conexão TLS aberta no
+    pool, que o próximo pedido ao mesmo host reaproveita. A resposta não importa (um 404
+    serve), só a conexão."""
+    sessao.get(f"https://{host}/", timeout=5)
+
+
+def aquecer_na_partida(tarefas: list[Callable[[], None]]) -> threading.Thread:
+    """Roda as tarefas numa thread em segundo plano, sem atrasar a partida; falha só vai
+    ao log."""
+
+    def rodar() -> None:
+        for tarefa in tarefas:
+            try:
+                tarefa()
+            except Exception:
+                log.warning("aquecimento da conexão falhou", exc_info=True)
+
+    thread = threading.Thread(target=rodar, name="aquecer-conexoes", daemon=True)
+    thread.start()
+    return thread
 
 
 def adaptadores_da_busca(
@@ -113,6 +148,11 @@ def adaptadores_da_busca(
 
     configuracao = ambiente.get("RANKING_CONFIG")
     return AdaptadoresDaBusca(
+        aquecer=(
+            (lambda: tocar_o_host(sessao_http(), HOST_DA_RANKING))
+            if configuracao
+            else None
+        ),
         transporte_da_consulta=TransporteVertex(projeto, sessao_http(), etapa="busca"),
         ranking=(
             RankingReal(projeto, configuracao, sessao_http()) if configuracao else None

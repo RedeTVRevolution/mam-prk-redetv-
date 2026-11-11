@@ -24,12 +24,14 @@ from dataclasses import dataclass, fields, replace
 from datetime import date
 from time import sleep, time
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import google.auth
 import google.auth.transport.requests
 import requests
 
 from api.busca import _intercalar
+from api.busca_na_nuvem import tocar_o_host
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.orcamento_de_escrita import Orcamento
@@ -38,6 +40,8 @@ log = logging.getLogger(__name__)
 
 URL_BASE = "https://vectorsearch.googleapis.com/v1beta"
 RECALL_ALVO = 0.95
+# Threads que enchem o cache de vetores ao mesmo tempo (`_encher_o_cache`).
+TETO_DE_ENCHIMENTOS = 4
 # O KNN aceita até 100 mil registros; a gravação avisa ao passar deste limite (sem índice).
 AVISO_DO_TETO_DO_KNN = 80_000
 REGISTROS_POR_LOTE = 200
@@ -228,7 +232,10 @@ def pedido_de_busca(
     padrão do KNN é o produto escalar, que não serve a vetores sem norma 1). O
     `semanticSearch` não aceita `distanceMetric` e no KNN ordena por produto escalar: o
     significado vai então como `vectorSearch` com `vetor_do_significado`, o embedding da
-    consulta (`AgentRetrieval.vetor_da_consulta`), obrigatório nesse caso. A busca por
+    consulta (`AgentRetrieval.vetor_da_consulta`), obrigatório nesse caso. Com o ANN,
+    `vetor_do_significado` é opcional: dado (vetor já no cache), vai o mesmo `vectorSearch`
+    com o `indexHint`, medido idêntico ao `semanticSearch` e mais rápido; ausente, o
+    `semanticSearch` calcula o embedding no servidor. A busca por
     texto não é KNN e não usa índice de vetor. Só filtros não é busca: levanta
     `ValueError`.
     """
@@ -268,7 +275,9 @@ def pedido_de_busca(
         )
         texto = {"text": normalizado, "fields": CAMPOS_DE_TEXTO}
         buscas.append({"textSearch": {**comum, "structuredQuery": {"text": texto}}})
-    if consulta.significado and not config.indices_ligados:
+    if consulta.significado and (
+        vetor_do_significado is not None or not config.indices_ligados
+    ):
         if vetor_do_significado is None:
             raise ValueError(
                 "sem os índices ANN, o significado pede o vetor da consulta"
@@ -758,6 +767,9 @@ class AgentRetrieval:
         # está embutindo espera por ele, em vez de pagar a mesma chamada de novo.
         self._embutindo: dict[str, threading.Lock] = {}
         self._trava_do_embutindo = threading.Lock()
+        # Os textos com uma thread enchendo o cache (`_buscar_na_colecao`): uma por texto,
+        # no máximo `TETO_DE_ENCHIMENTOS` juntas; a busca que não cabe só não enche.
+        self._enchendo: set[str] = set()
 
     def _chamar(
         self,
@@ -1048,6 +1060,37 @@ class AgentRetrieval:
             with self._trava_do_embutindo:
                 self._embutindo.pop(texto, None)
 
+    def _guardar_o_vetor(self, texto: str) -> None:
+        """Enche o cache; falha não atrapalha a busca (o `semanticSearch` já responde)."""
+        try:
+            self.vetor_da_consulta(texto)
+        except Exception:
+            log.warning("embedding do cache da busca falhou", exc_info=True)
+        finally:
+            with self._trava_do_embutindo:
+                self._enchendo.discard(texto)
+
+    def _encher_o_cache(self, texto: str) -> None:
+        """Embute o texto numa thread solta, sem a busca esperar: o embedding pode demorar
+        mais que ela (p90 ~450 ms medido). Uma thread por texto, e no máximo
+        `TETO_DE_ENCHIMENTOS` juntas, para um embedding lento não acumular threads."""
+        with self._trava_do_embutindo:
+            if texto in self._enchendo or len(self._enchendo) >= TETO_DE_ENCHIMENTOS:
+                return
+            self._enchendo.add(texto)
+        try:
+            threading.Thread(
+                target=self._guardar_o_vetor,
+                args=(texto,),
+                name="embedding-do-cache",
+                daemon=True,
+            ).start()
+        except RuntimeError:
+            # Sem thread (falta de recursos): a reserva sai, e a busca segue sem encher.
+            with self._trava_do_embutindo:
+                self._enchendo.discard(texto)
+            log.warning("thread do embedding do cache não iniciou", exc_info=True)
+
     def _embutir(self, texto: str) -> list[float]:
         """Chama o modelo de embedding e guarda o vetor no cache."""
         resposta = self._transporte(
@@ -1092,12 +1135,17 @@ class AgentRetrieval:
         return _intercalar([f.result() for f in futuros])[: consulta.limite]
 
     def _buscar_na_colecao(self, colecao: str, consulta: Consulta) -> list[Registro]:
-        # Sem índice ANN a consulta vira vetor aqui (`pedido_de_busca`).
-        vetor = (
-            self.vetor_da_consulta(consulta.significado)
-            if consulta.significado and not self._config.indices_ligados
-            else None
-        )
+        # Sem índice ANN a consulta vira vetor aqui (`pedido_de_busca`). Com o ANN, o
+        # vetor só serve se já está no cache (vectorSearch, #568); senão vai o
+        # semanticSearch e, em paralelo, o vetor entra no cache para os próximos pedidos.
+        if not consulta.significado:
+            vetor = None
+        elif not self._config.indices_ligados:
+            vetor = self.vetor_da_consulta(consulta.significado)
+        else:
+            vetor = self._vetores.get(consulta.significado)
+            if vetor is None:
+                self._encher_o_cache(consulta.significado)
         resposta = self._chamar(
             "dataObjects:batchSearch",
             pedido_de_busca(self._config, consulta, vetor),
@@ -1141,12 +1189,28 @@ class AgentRetrieval:
         return sum(int(r.get("count", 0)) for r in resposta.get("aggregateResults", []))
 
 
+def aquecer_o_indice(transporte: Transporte, config: ConfigDaBusca) -> None:
+    """Abre a conexão e pega o token para o índice e para o embedding, uma chamada por host.
+    Só o transporte real (`transporte_http`) sabe aquecer; um falso não faz nada."""
+    aquecer = getattr(transporte, "aquecer", None)
+    if aquecer is None:
+        return
+    for host in (
+        urlsplit(URL_BASE).netloc,
+        f"{config.regiao}-aiplatform.googleapis.com",
+    ):
+        aquecer(host)
+
+
 def transporte_http() -> Transporte:
     """O transporte real: REST com as credenciais padrão (ADC) de quem roda."""
     credenciais, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     sessao = google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
+
+    def aquecer(host: str) -> None:
+        tocar_o_host(sessao, host)
 
     def chamar(
         metodo: str, caminho: str, corpo: dict[str, Any] | None
@@ -1176,4 +1240,5 @@ def transporte_http() -> Transporte:
             )
         return dict(resposta.json()) if resposta.content else {}
 
+    chamar.aquecer = aquecer  # type: ignore[attr-defined]
     return chamar

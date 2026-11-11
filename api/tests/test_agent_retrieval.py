@@ -1,5 +1,6 @@
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
 from typing import Any
@@ -18,6 +19,7 @@ from api.agent_retrieval import (
     _criacao,
     _registro,
     apagar_colecao,
+    aquecer_o_indice,
     conferir_esquema,
     criar_colecao,
     esperar,
@@ -254,13 +256,6 @@ def test_sem_os_indices_ann_buscar_calcula_o_vetor_da_consulta_na_regiao_da_busc
     assert caminho.endswith("/dataObjects:batchSearch")
     assert busca is not None
     assert busca["searches"][1]["vectorSearch"]["vector"] == {"values": [0.5] * 256}
-
-
-def test_com_os_indices_ann_buscar_nao_calcula_embedding() -> None:
-    transporte = TransporteFalso({"results": []})
-    AgentRetrieval(CONFIG, transporte).buscar(Consulta(significado="vestido"))
-    [(_, caminho, _)] = transporte.chamadas
-    assert caminho.endswith("/dataObjects:batchSearch")
 
 
 def test_o_mesmo_texto_e_embutido_uma_vez_so() -> None:
@@ -795,7 +790,7 @@ def test_so_do_significado_volta_o_que_esta_perto_e_tem_palavras_bastantes() -> 
         filtros=Filtros(tipo="plano"),
     )
     assert [r.id for r in adaptador.buscar(consulta)] == ["pelo-texto", "perto"]
-    [(_, _, corpo)] = transporte.chamadas
+    [(_, _, corpo)] = [c for c in transporte.chamadas if c[1].endswith(":batchSearch")]
     assert corpo is not None
     assert corpo["metadataOptions"] == {"searchSignalsEnabled": True}
     # Sem o pedido de corte (a cláusula de pessoa na imagem), volta tudo.
@@ -1817,6 +1812,7 @@ def test_buscar_roteia_tipo_e_so_embute_o_significado_dos_planos(
     AgentRetrieval(config, transporte).buscar(
         Consulta(texto="terno", significado="paletó", filtros=Filtros(tipo=tipo))
     )
+    _esperar_o_cache()
     buscas = [(c, b) for _, c, b in transporte.chamadas if c.endswith(":batchSearch")]
     assert {c.split("/collections/")[1].split("/")[0] for c, _ in buscas} == (
         {"col-z"}
@@ -1834,7 +1830,7 @@ def test_buscar_roteia_tipo_e_so_embute_o_significado_dos_planos(
             else {"textSearch", "semanticSearch" if ligados else "vectorSearch"}
         )
     assert sum(c.endswith(":predict") for _, c, _ in transporte.chamadas) == (
-        1 if not ligados and tipo in (None, "plano") else 0
+        1 if tipo in (None, "plano") else 0
     )
 
 
@@ -1980,3 +1976,120 @@ def test_cria_as_duas_colecoes_texto_sem_vetor_significado_nem_indice(
     assert "significado" not in propriedades
     assert set(CAMPOS_DE_FILTRO + ["texto_da_busca"]) <= set(propriedades)
     assert not any("/col-texto/indexes" in c for _, c, _ in transporte.chamadas)
+
+
+def _esperar_o_cache() -> None:
+    """O embedding do cache roda numa thread solta (`_buscar_na_colecao`); espera por ela."""
+    for t in threading.enumerate():
+        if t.name == "embedding-do-cache":
+            t.join(5)
+
+
+def _transporte_de_busca(chamadas: list[tuple[str, Any]]) -> Callable[..., Any]:
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        chamadas.append((caminho, corpo))
+        if caminho.endswith(":predict"):
+            return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
+        return {}
+
+    return transporte
+
+
+def test_com_ann_vetor_fora_do_cache_vai_semantic_e_enche_o_cache_uma_vez() -> None:
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(CONFIG, _transporte_de_busca(chamadas))
+    indice.buscar(Consulta(significado="paletó", filtros=Filtros(tipo="plano")))
+    _esperar_o_cache()
+    busca = next(c for p, c in chamadas if p.endswith(":batchSearch"))
+    assert set(_buscas(busca)) == {"semanticSearch"}
+    assert sum(p.endswith(":predict") for p, _ in chamadas) == 1
+
+
+def test_com_ann_vetor_no_cache_vai_vector_search_com_index_hint() -> None:
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(CONFIG, _transporte_de_busca(chamadas))
+    consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
+    indice.buscar(consulta)
+    _esperar_o_cache()
+    chamadas.clear()
+    indice.buscar(consulta)
+    assert [p for p, _ in chamadas if p.endswith(":predict")] == []
+    (busca,) = _buscas(next(c for p, c in chamadas))
+    corpo = _buscas(next(c for p, c in chamadas))[busca]
+    assert busca == "vectorSearch"
+    assert corpo["vector"] == {"values": [0.1] * 256}
+    assert corpo["searchHint"]["indexHint"]["name"].endswith("/indexes/ind-d")
+    assert "semanticSearch" not in str(corpo)
+
+
+def test_com_ann_falha_do_embedding_do_cache_nao_derruba_a_busca() -> None:
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        if caminho.endswith(":predict"):
+            raise RuntimeError("429")
+        return {}
+
+    indice = AgentRetrieval(CONFIG, transporte)
+    assert indice.buscar(Consulta(significado="x", filtros=Filtros(tipo="plano"))) == []
+
+
+def test_com_ann_threads_juntas_embutem_o_texto_uma_vez() -> None:
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(CONFIG, _transporte_de_busca(chamadas))
+    consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
+    with ThreadPoolExecutor(4) as pool:
+        list(pool.map(lambda _: indice.buscar(consulta), range(4)))
+    _esperar_o_cache()
+    assert sum(p.endswith(":predict") for p, _ in chamadas) == 1
+
+
+def test_aquecer_o_indice_toca_um_host_de_cada_servico() -> None:
+    hosts: list[str] = []
+
+    class Quente:
+        aquecer = staticmethod(hosts.append)
+
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            return {}
+
+    aquecer_o_indice(Quente(), CONFIG)
+    assert hosts == [
+        "vectorsearch.googleapis.com",
+        f"{CONFIG.regiao}-aiplatform.googleapis.com",
+    ]
+    aquecer_o_indice(TransporteFalso(), CONFIG)  # sem `aquecer`: não faz nada
+
+
+def test_com_ann_texto_ja_enchendo_nao_abre_outra_thread() -> None:
+    liberar = threading.Event()
+    chamadas: list[str] = []
+
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        chamadas.append(caminho)
+        if caminho.endswith(":predict"):
+            liberar.wait(5)
+            return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
+        return {}
+
+    indice = AgentRetrieval(CONFIG, transporte)
+    consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
+    for _ in range(10):
+        indice.buscar(consulta)
+    abertas = [t for t in threading.enumerate() if t.name == "embedding-do-cache"]
+    liberar.set()
+    _esperar_o_cache()
+    assert len(abertas) == 1
+    assert sum(c.endswith(":predict") for c in chamadas) == 1
+
+
+def test_com_ann_thread_que_nao_inicia_libera_a_reserva(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(CONFIG, _transporte_de_busca(chamadas))
+
+    def falha(self: threading.Thread) -> None:
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", falha)
+    indice.buscar(Consulta(significado="paletó", filtros=Filtros(tipo="plano")))
+    assert indice._enchendo == set()
