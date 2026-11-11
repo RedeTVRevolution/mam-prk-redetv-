@@ -29,3 +29,13 @@ test('sem alternativa fica a primeira aparição com quadro; sem quadro nenhum, 
   expect(m.get('b')).toBe('b2')
   expect(m.get('c')).toBeUndefined()
 })
+
+test('meio a exatamente 1 s do escolhido ainda conta como perto: o limite é "mais de 1 s"', () => {
+  const m = escolherMiniaturas([
+    { id: 'a', aparicoes: [ap(4_000, 6_000, 'a1')] }, // meio 5 000
+    { id: 'b', aparicoes: [ap(5_500, 6_500, 'b1'), ap(20_000, 22_000, 'b2')] }, // meio 6 000 = 5 000 + 1 000
+    { id: 'c', aparicoes: [ap(5_501, 6_501, 'c1'), ap(20_000, 22_000, 'c2')] }, // meio 6 001, a 1 ms de passar
+  ])
+  expect(m.get('b')).toBe('b2')
+  expect(m.get('c')).toBe('c1')
+})

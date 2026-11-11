@@ -674,3 +674,26 @@ test('Planos mostra os grupos recorrentes com a contagem e o tempo, e o filtro d
   expect(planos.getAllByRole('button', { name: /^(Estúdio|Externa)/ })).toHaveLength(2)
   expect(planos.queryByRole('button', { name: /^Externa/ })).toBeNull()
 })
+
+test('a segunda pessoa com a primeira aparição no mesmo instante da primeira mostra a miniatura da aparição alternativa', async () => {
+  const pessoa = (id: string, nome: string, na_imagem: object[]) => ({ id, nome, na_imagem, citada_na_fala: [], citada_no_texto: [] })
+  decupagem = {
+    ...VAZIA,
+    pessoas: [
+      pessoa('p1', 'Ana Silva', [{ inicio_ms: 100_000, fim_ms: 110_000, evidencia: 'rosto', quadro: 'quadros/a1.jpg' }]),
+      pessoa('p2', 'Bia Souza', [
+        { inicio_ms: 100_000, fim_ms: 110_000, evidencia: 'rosto', quadro: 'quadros/b1.jpg' },
+        { inicio_ms: 300_000, fim_ms: 310_000, evidencia: 'rosto', quadro: 'quadros/b2.jpg' },
+      ]),
+    ],
+  }
+  await abrirVideo()
+
+  await waitFor(() =>
+    expect(lista('Pessoas').getByRole('button', { name: 'Bia Souza, 2 aparições' }).querySelector('img')?.getAttribute('src')).toBe(
+      'https://exemplo.test/b2.jpg',
+    ),
+  )
+  expect(lista('Pessoas').getByRole('button', { name: /^Ana Silva/ }).querySelector('img')?.getAttribute('src')).toBe('https://exemplo.test/a1.jpg')
+  expect(quadrosPedidos).not.toContain('b1.jpg')
+})
