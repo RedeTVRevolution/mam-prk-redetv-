@@ -951,7 +951,7 @@ def agora_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def _aceita_gzip(accept_encoding: str) -> bool:
+def aceita_gzip(accept_encoding: str) -> bool:
     """`gzip` (ou `*`) no `Accept-Encoding`, sem `q=0`."""
     for opcao in accept_encoding.split(","):
         nome, *parametros = (parte.strip() for parte in opcao.split(";"))
@@ -1423,7 +1423,7 @@ def criar_rotas(
 
     def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
         cabecalhos = {"Vary": "Accept-Encoding"}
-        if _aceita_gzip(request.headers.get("accept-encoding", "")):
+        if aceita_gzip(request.headers.get("accept-encoding", "")):
             cabecalhos["Content-Encoding"] = "gzip"
             corpo = _comprimir(corpo)
         return StreamingResponse(
