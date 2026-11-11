@@ -212,7 +212,9 @@ def test_cada_repositorio_tem_a_sua_idade() -> None:
     comum = "us-east4-docker.pkg.dev/p/mam"
     idades = (1, 2, 3, 9, 20)
     gpu = [_versao(f"sha256:g{d}", d) for d in idades]
-    web = [Versao(comum, "web", f"sha256:w{d}", AGORA - timedelta(days=d)) for d in idades]
+    web = [
+        Versao(comum, "web", f"sha256:w{d}", AGORA - timedelta(days=d)) for d in idades
+    ]
     s = simular([*gpu, *web], REGRAS, AGORA)
     assert _veredito(s, "sha256:g9").apagar
     assert _veredito(s, "sha256:g9").motivo.endswith("mais de 7 dias")
