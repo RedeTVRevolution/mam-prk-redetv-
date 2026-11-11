@@ -99,6 +99,14 @@ def test_teto_de_pessoas_vem_depois_da_deduplicacao() -> None:
     assert len(_confere(c, " ".join(nomes))) == MAXIMO_DE_PESSOAS
 
 
+def test_homonimos_alem_do_teto_ficam_os_de_menor_id() -> None:
+    c = _catalogo(*["Ana"] * 7, "Bia")
+    assert _confere(c, "Bia e Ana") == tuple(
+        [next(p.id for p in c.todas() if p.nome == "Bia")]
+        + sorted(p.id for p in c.todas() if p.nome == "Ana")[: MAXIMO_DE_PESSOAS - 1]
+    )
+
+
 @settings(max_examples=300, deadline=None)
 @given(
     nomes=st.lists(st.text(alphabet="aAbé_.- 1", min_size=0, max_size=6), max_size=8),

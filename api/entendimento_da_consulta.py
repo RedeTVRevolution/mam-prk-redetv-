@@ -106,6 +106,8 @@ class IndiceDeNomesCitados:
             for p in pessoas:
                 if nome := normalizar(p.nome):
                     nomes.setdefault(nome, []).append(p.id)
+            # Homônimos caem na mesma posição: só os de menor id passam do teto.
+            nomes = {n: sorted(ids)[:MAXIMO_DE_PESSOAS] for n, ids in nomes.items()}
             atual = (pessoas, nomes, max(map(len, nomes), default=0))
             self._atual = atual
         return atual[1], atual[2]
