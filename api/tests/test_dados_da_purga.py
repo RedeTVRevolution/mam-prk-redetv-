@@ -238,7 +238,9 @@ def test_sem_a_tabela_antiga_a_purga_falha_antes_de_apagar_e_desfaz_o_bigquery(
         assert bq.banco.execute(
             f"SELECT * FROM `projeto-teste.dados.{tabela}`"
         ).fetchall() == [("j1",), ("j2",)]
-    assert bq.banco.execute("SELECT * FROM `projeto-teste.dados.eventos`").fetchall() == []
+    assert (
+        bq.banco.execute("SELECT * FROM `projeto-teste.dados.eventos`").fetchall() == []
+    )
 
 
 def test_limpeza_unica_resumida_e_idempotente_sem_tocar_nos_jobs_vivos(
