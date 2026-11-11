@@ -415,8 +415,8 @@ resource "google_project_service" "apis" {
 #   sem mudança, reaproveitado de um build antigo, fica pelo índice novo.
 # - O cache das camadas (docker-bake.hcl) é uma tag fixa por alvo no pacote `cache`, sobrescrita a
 #   cada build: a versão com tag fica sempre; as que perderam a tag saem.
-# - KEEP vence DELETE: o resto, com ou sem tag, sai quando a versão tem mais de 14 dias desde
-#   que foi criada (não desde o último uso). O registro não sabe o que o Cloud Run usa, então o
+# - KEEP vence DELETE: o resto, com ou sem tag, sai quando a versão tem mais de 14 dias (7 no
+#   repositório com GPU, `mam-gpu`) desde que foi criada (não desde o último uso). O registro não sabe o que o Cloud Run usa, então o
 #   scripts/deploy-dev.sh põe duas tags no digest amd64 de cada imagem (tags_protegidas): `em-uso`
 #   no build que o serviço e os Jobs usam depois do apply, e `volta` no build que os Jobs com GPU
 #   tinham antes dele, o que o testar-jobs-gpu.sh restaura se o teste de GPU falha. Um KEEP guarda
@@ -430,12 +430,13 @@ resource "google_project_service" "apis" {
 #   #456; para voltar ao ensaio basta trocar o valor, sem recriar o repositório.
 locals {
   versoes_guardadas_por_imagem = 3 * var.builds_de_imagem_guardados
-  idade_minima_para_apagar     = "1209600s"
-  limpeza_so_ensaia            = false
-  pacotes_do_cache             = ["cache"]
-  tag_do_build_em_uso          = "em-uso"
-  tag_da_volta                 = "volta"
-  tags_protegidas              = [local.tag_do_build_em_uso, local.tag_da_volta]
+  # Idade por repositório: a GPU, que pesa mais, sai em 7 dias; a comum, em 14.
+  idade_minima_para_apagar = { mam = "1209600s", mam-gpu = "604800s" }
+  limpeza_so_ensaia        = false
+  pacotes_do_cache         = ["cache"]
+  tag_do_build_em_uso      = "em-uso"
+  tag_da_volta             = "volta"
+  tags_protegidas          = [local.tag_do_build_em_uso, local.tag_da_volta]
 }
 
 resource "google_artifact_registry_repository" "mam" {
@@ -472,7 +473,7 @@ resource "google_artifact_registry_repository" "mam" {
     action = "DELETE"
     condition {
       tag_state  = "ANY"
-      older_than = local.idade_minima_para_apagar
+      older_than = local.idade_minima_para_apagar["mam"]
     }
   }
 }
@@ -514,7 +515,7 @@ resource "google_artifact_registry_repository" "mam_gpu" {
     action = "DELETE"
     condition {
       tag_state  = "ANY"
-      older_than = local.idade_minima_para_apagar
+      older_than = local.idade_minima_para_apagar["mam-gpu"]
     }
   }
 }
@@ -963,9 +964,10 @@ resource "google_bigquery_dataset" "decupagens" {
 }
 
 resource "google_bigquery_table" "momentos" {
-  dataset_id          = google_bigquery_dataset.decupagens.dataset_id
-  table_id            = local.tabela_antiga_de_momentos
-  deletion_protection = true
+  dataset_id = google_bigquery_dataset.decupagens.dataset_id
+  table_id   = local.tabela_antiga_de_momentos
+  # Etapa 1 da remoção (#564): sem proteção, ainda presente; a etapa 2 tira o recurso do código.
+  deletion_protection = false
   time_partitioning {
     type  = "DAY"
     field = "data_de_exibicao"
@@ -2948,7 +2950,7 @@ output "repositorio_gpu" {
 output "limpeza_de_imagens" {
   value = {
     manter_ultimas      = local.versoes_guardadas_por_imagem
-    idade_minima_s      = tonumber(trimsuffix(local.idade_minima_para_apagar, "s"))
+    idade_minima_s      = { for r, i in local.idade_minima_para_apagar : r => tonumber(trimsuffix(i, "s")) }
     pacotes_do_cache    = local.pacotes_do_cache
     tags_protegidas     = local.tags_protegidas
     tag_do_build_em_uso = local.tag_do_build_em_uso

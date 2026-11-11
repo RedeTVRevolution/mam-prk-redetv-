@@ -343,3 +343,26 @@ def test_a_mesma_foto_pagina_pelo_cursor_sem_chamar_o_modelo_de_novo() -> None:
     # A 2ª página sai da lista guardada, e o termo da foto vai junto na `entendida`.
     assert len(m.transporte.chamadas) == 1
     assert r2.json()["entendida"]["termo_da_foto"] == "vestido"
+
+
+def test_leitura_do_indice_que_estoura_o_prazo_do_transporte_responde_504(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O `ReadTimeout` do `batchSearch` (15 s) vira 504, não 500 (#560).
+    import requests
+
+    from api.agent_retrieval import AgentRetrieval, transporte_http
+    from api.tests.test_agent_retrieval import SEM_INDICES
+
+    class Sessao:
+        def __init__(self, _: object) -> None: ...
+
+        def request(self, *_: object, **__: object) -> None:
+            raise requests.exceptions.ReadTimeout("batchSearch")
+
+    monkeypatch.setattr("google.auth.default", lambda scopes: (None, None))
+    monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", Sessao)
+    indice: Any = AgentRetrieval(SEM_INDICES, transporte_http())
+    c, _ = com_vestido(indice=indice)
+
+    assert enviar(c, foto("JPEG")).status_code == 504

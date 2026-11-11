@@ -53,12 +53,12 @@ RUN mkdir /modelo && for arquivo in config.json model.bin preprocessor_config.js
     && sha256sum -c /tmp/hashes && rm /tmp/hashes
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --group transcricao
+RUN uv sync --locked --no-dev --group transcricao --compile-bytecode
 # Os testes usam um modelo falso: aqui o faster-whisper decodifica um WAV de verdade pelo
 # PyAV instalado, para a imagem não ser construída com versões que não conversam.
 RUN /app/.venv/bin/python -c "import wave; w = wave.open('/tmp/s.wav', 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(32000)); w.close(); from faster_whisper.audio import decode_audio; assert len(decode_audio('/tmp/s.wav')) == 16000" \
     && rm /tmp/s.wav
-ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
+ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLINE=1
 
 # As amostras do teste dos Jobs com GPU (#238): uns segundos de fala, que o espeak-ng gera
 # na construção (sem arquivo binário no repositório). A frase é a de `api/teste_dos_jobs.py`
@@ -77,7 +77,7 @@ RUN apt-get update \
 # PyPI. O driver (580, CUDA 13) é do Cloud Run, que o monta em /usr/local/nvidia/lib64;
 # um runtime CUDA 12 roda nele. Esta imagem só roda com GPU (`DISPOSITIVO=gpu`).
 FROM transcricao-base AS transcricao-gpu
-RUN uv sync --locked --no-dev --group transcricao --group transcricao-gpu
+RUN uv sync --locked --no-dev --group transcricao --group transcricao-gpu --compile-bytecode
 COPY --from=amostras /amostras /amostras
 ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/nvidia/lib64 \
     AMOSTRAS=/amostras DISPOSITIVO=gpu
@@ -88,6 +88,7 @@ COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
      api/bancos.py \
+     api/cache_curto.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -134,6 +135,8 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
+RUN /app/.venv/bin/python -m compileall -q api
 # A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
 # que o faster-whisper transcreve a amostra em CPU (a mesma conferência do teste depois da
 # publicação, `MODO_TESTE=1`, que lá exige a GPU). Não se confere o driver, a GPU nem o
@@ -158,7 +161,7 @@ COPY scripts/baixar-modelos-ocr.sh /usr/local/bin/baixar-modelos-ocr
 RUN baixar-modelos-ocr "$DETECTOR"
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --group ocr-gpu
+RUN uv sync --locked --no-dev --group ocr-gpu --compile-bytecode
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
 COPY api/__init__.py \
@@ -166,6 +169,7 @@ COPY api/__init__.py \
      api/auditoria.py \
      api/auth.py \
      api/bancos.py \
+     api/cache_curto.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -214,9 +218,11 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
+RUN /app/.venv/bin/python -m compileall -q api
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_cupti/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufft/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufile/lib:/app/.venv/lib/python3.12/site-packages/nvidia/curand/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/app/.venv/lib/python3.12/site-packages/cusparselt/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nccl/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvtx/lib:/usr/local/nvidia/lib64 \
-    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu DETECTOR=$DETECTOR
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True DISPOSITIVO=gpu DETECTOR=$DETECTOR
 # A máquina da construção não tem GPU nem o driver, e o `paddlepaddle-gpu` pede o
 # `libcuda.so.1` (do driver) já no `import paddle`: aqui ele não pode ser importado. Esta
 # etapa só grava o quadro de amostra (do teste depois da publicação, `MODO_TESTE=1`),
@@ -269,13 +275,14 @@ RUN mkdir -p /amostras \
     && sha256sum -c /tmp/hashes && rm /tmp/hashes
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --group objetos
+RUN uv sync --locked --no-dev --group objetos --compile-bytecode
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
 COPY api/__init__.py \
      api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
+     api/cache_curto.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -321,9 +328,11 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
+RUN /app/.venv/bin/python -m compileall -q api
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DO_MODELO=/modelo AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/usr/local/nvidia/lib64 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
-    PYTHONDONTWRITEBYTECODE=1 DISPOSITIVO=gpu
+    DISPOSITIVO=gpu
 # A máquina da construção não tem GPU: confere que o torch e o transformers instalam e que o
 # Florence-2 acha o carro da amostra (a mesma conferência do teste depois da publicação,
 # `MODO_TESTE=1`, que lá exige a GPU) em CPU, com os pesos da imagem. Não pega o driver nem
@@ -337,8 +346,11 @@ FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev
+# Bytecode pronto (#558): `nobody` não grava `.pyc` em /app, então sem isto cada partida a frio
+# compila tudo de novo na memória. Os `.pyc` são do root e só leitura, como os `.py`.
+RUN uv sync --locked --no-dev --compile-bytecode
 COPY api/ api/
+RUN /app/.venv/bin/python -m compileall -q api
 COPY --from=web /web/dist web/dist
 USER nobody
 ENV PATH=/app/.venv/bin:$PATH

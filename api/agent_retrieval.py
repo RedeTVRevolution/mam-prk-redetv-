@@ -27,6 +27,7 @@ from typing import Any, Protocol
 
 import google.auth
 import google.auth.transport.requests
+import requests
 
 from api.busca import _intercalar
 from api.comparador import normalizar
@@ -1152,9 +1153,18 @@ def transporte_http() -> Transporte:
     ) -> dict[str, Any]:
         # `caminho` é relativo à URL base, salvo o embedding da consulta (outro serviço).
         url = caminho if caminho.startswith("https://") else f"{URL_BASE}/{caminho}"
-        resposta = sessao.request(  # type: ignore[no-untyped-call]
-            metodo, url, json=corpo, timeout=60
-        )
+        # A leitura do índice tem prazo próprio: a rota da busca já devolve 504 em 15 s, e
+        # sem isso a chamada presa segura o worker por até 60 s. Escrita e purga ficam em 60 s.
+        prazo = 15 if caminho.endswith(":batchSearch") else 60
+        try:
+            resposta = sessao.request(  # type: ignore[no-untyped-call]
+                metodo, url, json=corpo, timeout=prazo
+            )
+        except requests.exceptions.Timeout:
+            # O `TimeoutError` é o que a rota da busca já traduz em 504 (e o 500 não).
+            raise TimeoutError(
+                f"{metodo} {caminho}: sem resposta em {prazo} s"
+            ) from None
         if resposta.status_code == 409:
             raise JaExiste(caminho)
         if resposta.status_code == 429:

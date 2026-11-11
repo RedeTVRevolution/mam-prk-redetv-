@@ -330,6 +330,21 @@ test('acrescentar aparição pede tempos e evidência e vai para a pessoa', () =
   ])
 })
 
+test('acrescentar aparição diz o motivo exato da recusa', () => {
+  const e = editorDeNovaAparicao(D.pessoas[0], 61_000, catalogo)
+  const motivo = (v: Record<string, string>) => e.motivoDaRecusa?.({ ...e.inicial, ...v })
+
+  expect(motivo({ evidencia: '  ' })).toBe('Falta a evidência: descreva o que mostra a pessoa na imagem.')
+  expect(motivo({ evidencia: 'rosto', inicio: '01:10', fim: '01:06' })).toBe('O início tem de ser antes do fim.')
+  expect(motivo({ evidencia: 'rosto', inicio: '1:99:99x' })).toBe('Tempo fora do formato MM:SS ou H:MM:SS.')
+  expect(motivo({ evidencia: 'rosto' })).toBeNull()
+})
+
+test('acrescentar aparição rotula a evidência como obrigatória', () => {
+  const e = editorDeNovaAparicao(D.pessoas[0], 0, catalogo)
+  expect(e.campos.find((c) => c.chave === 'evidencia')?.rotulo).toBe('Evidência na imagem (obrigatória)')
+})
+
 test('acima de uma hora os campos mostram e leem H:MM:SS', () => {
   const e = editorDeNovaAparicao(D.pessoas[0], 3_661_000, catalogo)
 

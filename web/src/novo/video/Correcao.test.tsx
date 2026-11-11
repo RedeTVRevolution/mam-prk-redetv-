@@ -405,19 +405,31 @@ test('acrescentar aparição grava e cancela pelos botões', async () => {
   const usuario = await abrirAparicao()
   await usuario.click(detalhe().getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' }))
   let formulario = await screen.findByRole('form', { name: 'Acrescentar aparição de Leão Lobo' })
-  await usuario.type(within(formulario).getByLabelText('Evidência na imagem'), 'rosto')
+  await usuario.type(within(formulario).getByLabelText('Evidência na imagem (obrigatória)'), 'rosto')
   await usuario.click(within(formulario).getByRole('button', { name: 'Cancelar' }))
   await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
   expect(correcoes).toEqual([])
 
   await usuario.click(detalhe().getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' }))
   formulario = await screen.findByRole('form', { name: 'Acrescentar aparição de Leão Lobo' })
-  await usuario.type(within(formulario).getByLabelText('Evidência na imagem'), 'rosto')
+  await usuario.type(within(formulario).getByLabelText('Evidência na imagem (obrigatória)'), 'rosto')
   await usuario.keyboard('{Enter}')
 
   await waitFor(() => expect(correcoes).toHaveLength(1))
   expect(correcoes[0]).toMatchObject({ tipo: 'pessoa.acrescentar_aparicao', item_id: 'p1' })
   expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({ evidencia: 'rosto' })
+})
+
+test('acrescentar aparição sem evidência mostra o motivo específico', async () => {
+  const usuario = await abrirAparicao()
+  await usuario.click(detalhe().getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' }))
+  const formulario = await screen.findByRole('form', { name: 'Acrescentar aparição de Leão Lobo' })
+  await usuario.keyboard('{Enter}')
+
+  expect((await within(formulario).findByRole('alert')).textContent).toBe(
+    'Falta a evidência: descreva o que mostra a pessoa na imagem.',
+  )
+  expect(correcoes).toEqual([])
 })
 
 test('separar pessoa: mostra o motivo de cada origem e grava pessoa.separar', async () => {

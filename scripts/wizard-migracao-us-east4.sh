@@ -892,7 +892,7 @@ NOMES=("" "Pré-condições" "Estado do Terraform: só criar" "Criar tudo em $RE
   "Contagens lado a lado" "Login e vídeo inteiro (manual)" "Apagar $REGIAO_ANTIGA" "Estado do Terraform em $REGIAO_NOVA")
 
 set -E
-trap 'warn "O passo falhou. Corrija e rode de novo: ele retoma deste passo."' ERR
+trap 'warn "O passo falhou. Corrija e rode de novo: ele retoma deste passo." >&2' ERR
 
 FEITO=0
 [[ ! -f "$ARQ_PASSO" ]] || FEITO=$(<"$ARQ_PASSO")

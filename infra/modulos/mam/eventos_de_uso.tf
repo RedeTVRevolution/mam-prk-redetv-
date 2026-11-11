@@ -14,6 +14,9 @@ resource "google_pubsub_schema" "evento_de_uso" {
 }
 
 resource "google_pubsub_topic" "eventos_de_uso" {
+  message_storage_policy {
+    allowed_persistence_regions = [var.regiao]
+  }
   name       = "mam-eventos-de-uso"
   depends_on = [google_pubsub_schema.evento_de_uso]
   schema_settings {

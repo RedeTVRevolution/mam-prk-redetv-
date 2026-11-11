@@ -330,6 +330,45 @@ def test_se_uma_consulta_ao_indice_falha_o_erro_sobe_como_em_serie() -> None:
         buscar(_mundo_de_varias_clausulas(indice))
 
 
+def test_com_uma_consulta_lenta_a_busca_nao_espera_o_executor_terminar() -> None:
+    solta = threading.Event()
+
+    class IndiceTravado(IndiceEspia):
+        """A 1ª consulta falha; as outras ficam presas até o teste soltá-las."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.chegadas = 0
+            self.trava = threading.Lock()
+
+        def buscar(self, consulta: Consulta) -> list[Registro]:
+            with self.trava:
+                self.chegadas += 1
+                primeira = self.chegadas == 1
+            if primeira:
+                raise RuntimeError("índice fora do ar")
+            solta.wait(timeout=30)
+            return super().buscar(consulta)
+
+    erros: list[RuntimeError] = []
+
+    def rodar() -> None:
+        try:
+            buscar(_mundo_de_varias_clausulas(IndiceTravado()), "Sabrina Sato")
+        except RuntimeError as e:
+            erros.append(e)
+
+    fio = threading.Thread(target=rodar)
+    fio.start()
+    try:
+        fio.join(timeout=10)
+        assert not fio.is_alive(), "a busca ficou esperando as consultas presas"
+        assert "índice fora do ar" in str(erros[0])
+    finally:
+        solta.set()
+        fio.join(timeout=10)
+
+
 def test_dois_momentos_a_2_s_pelo_mesmo_motivo_viram_um_trecho_e_a_5_s_ficam_dois() -> (
     None
 ):
@@ -751,6 +790,21 @@ def test_a_busca_registra_o_tempo_no_log(caplog: pytest.LogCaptureFixture) -> No
     with caplog.at_level(logging.INFO, logger="api.busca"):
         buscar(m, "vestido")
     assert any("busca" in r.message and " ms" in r.message for r in caplog.records)
+
+
+def test_o_log_traz_o_tempo_de_cada_etapa_desde_o_inicio_da_busca(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ms = iter(range(0, 1_000, 10))
+    monkeypatch.setattr("api.busca._agora", lambda: next(ms) / 1000, raising=False)
+    m = Mundo(pedido(texto_livre="vestido"))
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+    with caplog.at_level(logging.INFO, logger="api.busca"):
+        buscar(m, "vestido")
+    (linha,) = [r.message for r in caplog.records if r.message.startswith("busca em")]
+    assert (
+        "entender 10 ms, índice 20 ms, jobs 30 ms, ranking 40 ms, vídeos 50 ms" in linha
+    )
 
 
 def test_o_teto_de_videos_corta_o_resultado() -> None:
@@ -2197,3 +2251,28 @@ def test_nome_inteiro_do_catalogo_na_frase_gera_imagem_fala_e_gc() -> None:
         if c.filtros.tipo != "plano"
     )
     assert m.transporte.chamadas == []
+
+
+def test_leitura_do_indice_que_estoura_o_prazo_do_transporte_responde_504(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O prazo de 15 s do `batchSearch` levanta `ReadTimeout` do requests: vira 504, não 500 (#560).
+    import requests
+
+    from api.agent_retrieval import AgentRetrieval, transporte_http
+    from api.tests.test_agent_retrieval import SEM_INDICES
+
+    class Sessao:
+        def __init__(self, _: object) -> None: ...
+
+        def request(self, *_: object, **__: object) -> None:
+            raise requests.exceptions.ReadTimeout("batchSearch")
+
+    monkeypatch.setattr("google.auth.default", lambda scopes: (None, None))
+    monkeypatch.setattr("google.auth.transport.requests.AuthorizedSession", Sessao)
+    indice: Any = AgentRetrieval(SEM_INDICES, transporte_http())
+    c, _ = cliente(["consulta"], pedido(texto_livre="vestido"), indice=indice)
+
+    r = c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
+
+    assert r.status_code == 504

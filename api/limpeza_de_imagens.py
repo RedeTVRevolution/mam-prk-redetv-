@@ -11,7 +11,7 @@ Nada aqui escreve na nuvem: só `gcloud ... list/describe` e `terraform output`.
 import json
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -26,20 +26,29 @@ class Regras:
     """As regras do Terraform: N últimas por imagem, cache e tags guardados, idade mínima."""
 
     manter_ultimas: int
-    idade_minima_s: int
+    idade_minima_s: Mapping[str, int]  # por repositório (`mam`, `mam-gpu`), em segundos
     pacotes_do_cache: tuple[str, ...]
     tags_protegidas: tuple[str, ...]
     tag_da_volta: str
 
     @classmethod
     def do_terraform(cls, saida: dict[str, Any]) -> "Regras":
+        idade = saida["idade_minima_s"]
+        if not isinstance(
+            idade, dict
+        ):  # output antigo, um número só, vale para os dois repositórios
+            idade = {"mam": idade, "mam-gpu": idade}
         return cls(
             manter_ultimas=int(saida["manter_ultimas"]),
-            idade_minima_s=int(saida["idade_minima_s"]),
+            idade_minima_s={r: int(i) for r, i in idade.items()},
             pacotes_do_cache=tuple(saida["pacotes_do_cache"]),
             tags_protegidas=tuple(saida["tags_protegidas"]),
             tag_da_volta=saida["tag_da_volta"],
         )
+
+    def idade_de(self, repositorio: str) -> int:
+        """A idade mínima do repositório, dado pelo caminho completo (`host/projeto/mam-gpu`)."""
+        return self.idade_minima_s[repositorio.rsplit("/", 1)[-1]]
 
 
 @dataclass(frozen=True)
@@ -95,14 +104,15 @@ def simular(
             (repositorio, pacote, v.digest) for v in recentes[: regras.manter_ultimas]
         }
 
-    dias = _dias(regras.idade_minima_s)
     vereditos = []
     for v in versoes:
         motivo = _motivo_para_guardar(v, regras, ultimas)
         apagar = motivo is None
         if apagar:
+            minima = regras.idade_de(v.repositorio)
+            dias = _dias(minima)
             idade = (agora - v.criada_em).total_seconds()
-            if idade <= regras.idade_minima_s:
+            if idade <= minima:
                 apagar, motivo = False, f"tem menos de {dias}: a regra não alcança"
             else:
                 motivo = f"sem regra que a guarde e com mais de {dias}"

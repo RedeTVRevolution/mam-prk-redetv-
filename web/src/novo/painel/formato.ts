@@ -21,4 +21,4 @@ export function revisaoVazia(r: RelatorioDeRevisao) {
   return r.correcoes.por_dia.length === 0 && r.taxa_de_correcao.por_tipo.length === 0 && r.tempo_de_revisao.por_pessoa.length === 0
 }
 
-export const NOTA_DO_DIA = 'O dia é o de São Paulo; os números se atualizam a cada 10 minutos.'
+export const NOTA_DO_DIA = 'O dia é o de São Paulo; os números se atualizam a cada hora.'

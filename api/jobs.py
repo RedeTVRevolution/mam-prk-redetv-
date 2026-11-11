@@ -35,6 +35,7 @@ from api.auth import (
     Sistema,
     Usuario,
 )
+from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, EnvioParaLixeira
 from api.catalogo_apagado import (
     com_pessoas_fundidas,
@@ -159,6 +160,9 @@ CodigoDeFalha = Literal[
 
 EstadoDaIndexacao = Literal["pendente", "indexado", "falhou"]
 
+
+# Quanto a lista sem capa (o polling da busca) fica guardada: o selo "Finalizando" atrasa até isto.
+VALIDADE_DA_LISTA_S = 15.0
 
 # Teto de assinaturas de capa ao mesmo tempo na listagem do Acervo.
 ASSINATURAS_SIMULTANEAS = 8
@@ -951,21 +955,23 @@ def agora_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def _aceita_gzip(accept_encoding: str) -> bool:
-    """`gzip` (ou `*`) no `Accept-Encoding`, sem `q=0`."""
+def aceita_gzip(accept_encoding: str) -> bool:
+    """`gzip` (ou `*`) no `Accept-Encoding`, sem `q=0`. O `gzip` explícito vale mais que o `*`."""
+    qs: dict[str, float] = {}
     for opcao in accept_encoding.split(","):
-        nome, *parametros = (parte.strip() for parte in opcao.split(";"))
-        if nome.lower() not in ("gzip", "*"):
+        nome, *parametros = (parte.strip().lower() for parte in opcao.split(";"))
+        if nome not in ("gzip", "*"):
             continue
+        q = 1.0
         for parametro in parametros:
             chave, _, valor = parametro.partition("=")
-            if chave.strip().lower() == "q":
+            if chave.strip() == "q":
                 try:
-                    return float(valor) > 0
+                    q = float(valor)
                 except ValueError:
-                    return False
-        return True
-    return False
+                    q = 0.0
+        qs.setdefault(nome, q)
+    return qs.get("gzip", qs.get("*", 0.0)) > 0
 
 
 def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
@@ -1080,8 +1086,10 @@ def criar_rotas(
     acessos: AcessosAoVideo,
     idempotencia: RepositorioDeIdempotencia | None = None,
     eventos: Eventos | None = None,
+    cache_da_lista: CacheCurto | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/jobs")
+    cache_da_lista = cache_da_lista or CacheCurto(VALIDADE_DA_LISTA_S)
     publicador = eventos or SemEventos()
     chaves_de_idempotencia = idempotencia or RepositorioDeIdempotenciaEmMemoria()
 
@@ -1217,6 +1225,12 @@ def criar_rotas(
     def _sem_capa(job: Job) -> dict[str, Any]:
         return JobResumido.de(job).model_dump(mode="json", exclude={"capa_url"})
 
+    def _lista_sem_capa(
+        filtro: FiltroDeJobs,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        pagina = repositorio.consultar(filtro)
+        return [_sem_capa(j) for j in pagina.jobs], pagina.proximo_cursor
+
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
@@ -1248,22 +1262,32 @@ def criar_rotas(
             cursor=cursor,
             so_os_da_lista=True,
         )
+        if not capa:
+            # Quem só conta (o polling da busca) lê a lista guardada por 15 s. A chave é o
+            # filtro efetivo inteiro, com o sistema já forçado ao do chamador; entra depois
+            # da checagem de permissão (`_exige`), que roda a cada chamada.
+            try:
+                corpo, proximo = cache_da_lista.obter(
+                    filtro, lambda: _lista_sem_capa(filtro)
+                )
+            except CursorInvalido:
+                raise HTTPException(422, "Cursor inválido") from None
+            return JSONResponse(
+                corpo, headers={"X-Proximo-Cursor": proximo} if proximo else {}
+            )
         try:
             pagina = repositorio.consultar(filtro)
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        if capa:
-            # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
-            with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
-                publicos = list(assinando.map(_com_capa, pagina.jobs))
-            corpo = [p.model_dump(mode="json") for p in publicos]
-        else:
-            # Quem só conta (o aviso "Finalizando" da busca) não paga as assinaturas.
-            corpo = [_sem_capa(j) for j in pagina.jobs]
+        # As capas são assinadas em paralelo, com teto de chamadas simultâneas.
+        with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
+            publicos = list(assinando.map(_com_capa, pagina.jobs))
         cabecalhos = (
             {"X-Proximo-Cursor": pagina.proximo_cursor} if pagina.proximo_cursor else {}
         )
-        return JSONResponse(corpo, headers=cabecalhos)
+        return JSONResponse(
+            [p.model_dump(mode="json") for p in publicos], headers=cabecalhos
+        )
 
     @rotas.get("/andamento", response_model=list[JobResumido])
     def andamento(
@@ -1378,31 +1402,44 @@ def criar_rotas(
             )
         }
         expira_em = relogio() + VALIDADE_INFORMADA_DA_IMAGEM
-        resposta: list[QuadroDoLote] = []
-        for par in pedido.quadros:
-            job = jobs.get(par.job)
-            visivel = (
+
+        def visivel(job_id: str) -> bool:
+            job = jobs.get(job_id)
+            return (
                 job is not None
                 and job.estado == "concluido"
                 and job.lixeira is None
                 and not _de_outro_sistema(chamador, job)
             )
-            url = (
-                armazenamento.url_do_quadro(
-                    par.job, caminho_do_quadro(par.arquivo), VALIDADE_DA_IMAGEM
+
+        # Só os pares visíveis, uma vez cada, vão ao IAM, em paralelo (como as capas).
+        unicos = [
+            p
+            for p in dict.fromkeys((q.job, q.arquivo) for q in pedido.quadros)
+            if visivel(p[0])
+        ]
+        with ThreadPoolExecutor(ASSINATURAS_SIMULTANEAS) as assinando:
+            urls = dict(
+                zip(
+                    unicos,
+                    assinando.map(
+                        lambda p: armazenamento.url_do_quadro(
+                            p[0], caminho_do_quadro(p[1]), VALIDADE_DA_IMAGEM
+                        ),
+                        unicos,
+                    ),
+                    strict=True,
                 )
-                if visivel
-                else None
             )
-            resposta.append(
-                QuadroDoLote(
-                    job=par.job,
-                    arquivo=par.arquivo,
-                    url=url,
-                    expira_em=expira_em if url else None,
-                )
+        return [
+            QuadroDoLote(
+                job=q.job,
+                arquivo=q.arquivo,
+                url=(url := urls.get((q.job, q.arquivo))),
+                expira_em=expira_em if url else None,
             )
-        return resposta
+            for q in pedido.quadros
+        ]
 
     @rotas.get("/{job_id}/quadros/{arquivo}")
     def quadro(
@@ -1423,7 +1460,7 @@ def criar_rotas(
 
     def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
         cabecalhos = {"Vary": "Accept-Encoding"}
-        if _aceita_gzip(request.headers.get("accept-encoding", "")):
+        if aceita_gzip(request.headers.get("accept-encoding", "")):
             cabecalhos["Content-Encoding"] = "gzip"
             corpo = _comprimir(corpo)
         return StreamingResponse(

@@ -458,7 +458,14 @@ def test_o_disparo_da_indexacao_roda_o_job_com_o_job_id_sem_esperar() -> None:
     )
     assert kwargs["json"] == {
         "overrides": {
-            "containerOverrides": [{"env": [{"name": "JOB_ID", "value": "j1"}]}]
+            "containerOverrides": [
+                {
+                    "env": [
+                        {"name": "JOB_ID", "value": "j1"},
+                        {"name": "ORIGEM_DO_DISPARO", "value": "api"},
+                    ]
+                }
+            ]
         }
     }
 

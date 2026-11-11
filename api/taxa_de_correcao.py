@@ -173,7 +173,7 @@ def calcular_com_itens(
             contagem = itens_do_job(job.id)
             vigor = _em_vigor_no_periodo(feitas, contagem.versao_do_modelo, desde, ate)
             do_job = {
-                tipo: (sum(c.tipo == tipo for c in vigor), contagem.itens[tipo])
+                tipo: (sum(c.tipo == tipo for c in vigor), contagem.itens_do_tipo(tipo))
                 for tipo in CORRIGIVEIS
             }
         except (ServicoIndisponivel, ValueError, KeyError, TypeError):

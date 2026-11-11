@@ -2,6 +2,7 @@ import { IconAlertTriangle, IconCircleCheck, IconLoader2, type Icon } from '@tab
 import { cn } from 'cn'
 import type { ReactNode, RefObject } from 'react'
 import { Button } from '../ui/button.tsx'
+import { iniciais } from './iniciais.ts'
 
 /** As peças que as abas da administração dividem. Os campos são nativos: o `<select>` vale como o Select do shadcn aqui. */
 export const CAMPO =
@@ -95,12 +96,6 @@ export function Selo({ tom, Icone, children }: { tom: keyof typeof TOM; Icone?: 
       {children}
     </span>
   )
-}
-
-/** As iniciais do nome, para o círculo de 24 px. */
-function iniciais(nome: string): string {
-  const partes = nome.trim().split(/[\s.@_-]+/).filter(Boolean)
-  return ((partes[0]?.[0] ?? '') + (partes.length > 1 ? (partes[1]?.[0] ?? '') : '')).toUpperCase() || '?'
 }
 
 export function Iniciais({ nome, className }: { nome: string; className?: string }) {
