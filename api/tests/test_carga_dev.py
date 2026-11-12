@@ -1,6 +1,12 @@
+import os
 import random
+import signal
+import subprocess
+import sys
+import textwrap
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -104,3 +110,107 @@ def test_interrupcao_para_todos_os_usuarios_logo() -> None:
             parar,
         )
     assert parar.is_set() and time.monotonic() - inicio < 5
+
+
+def test_pedido_nao_iniciado_nao_sai_depois_da_parada() -> None:
+    chamadas: list[tuple[str, str]] = []
+    parar = threading.Event()
+
+    def para_na_primeira(
+        metodo: str, caminho: str, params: dict[str, Any] | None, corpo: Any
+    ) -> tuple[int, Any]:
+        chamadas.append((metodo, caminho))
+        parar.set()  # a parada chega com o primeiro pedido no ar
+        return 200, {
+            "id": "j1",
+            "videos": [{"job_id": "j1", "momentos": [{"quadro": "q/a.jpg"}]}],
+        }
+
+    pessoa = Usuario(para_na_primeira, Medidas(), ["x"], random.Random(1), parar)
+    pessoa._ids = ["j1"]
+    pessoa.abrir()  # dois pedidos
+    pessoa.buscar()  # busca + quadros
+    assert len(chamadas) == 1
+
+
+def test_relatorio_mostra_concluidos_e_no_ar() -> None:
+    m = Medidas()
+    m.iniciar()
+    m.registrar("GET /v1/jobs", 200, 0.1)
+    m.iniciar()  # fica no ar
+    texto = m.copia().texto()
+    assert "Total de pedidos: 1 (0 com erro)" in texto
+    assert "No ar na parada: 1" in texto
+    assert "No ar na parada" not in Medidas().texto()
+
+
+def test_copia_nao_muda_quando_pedido_termina_depois() -> None:
+    m = Medidas()
+    m.iniciar()
+    c = m.copia()
+    m.registrar("GET /v1/jobs", 500, 0.1)
+    assert (c.total(), c.falhas(), c.no_ar) == (0, 0, 1)
+    assert (m.total(), m.falhas(), m.no_ar) == (1, 1, 0)
+
+
+def test_fim_normal_espera_pedido_que_demora() -> None:
+    def lento(
+        metodo: str, caminho: str, params: dict[str, Any] | None, corpo: Any
+    ) -> tuple[int, Any]:
+        time.sleep(0.5)  # passa da duração
+        return 200, {}
+
+    medidas = Medidas()
+    rodar([lento], 1, 0.1, 0, lambda: 0.01, ["x"], medidas, threading.Event())
+    assert medidas.total() >= 1 and medidas.no_ar == 0
+
+
+def test_sigint_termina_o_processo_sem_esperar_o_pedido_bloqueado(
+    tmp_path: Path,
+) -> None:
+    marca = tmp_path / "bloqueado"
+    codigo = textwrap.dedent(
+        f"""
+        import signal, sys, threading
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        import api.carga_dev as c
+        def transporte(url, token):
+            def chamar(*a):
+                open({str(marca)!r}, "w").close()
+                threading.Event().wait(120)  # o pedido preso
+                return 200, {{}}
+            return chamar
+        c.transporte_http = transporte
+        sys.exit(c.main())
+        """
+    )
+    env = {
+        **os.environ,
+        "URL": "http://x",
+        "TOKEN": "t",
+        "USUARIOS": "2",
+        "RAMPA_S": "0",
+        "DURACAO_S": "300",
+        "PAUSA_S": "1",
+    }
+    raiz = Path(__file__).parents[2]
+    proc = subprocess.Popen(
+        [sys.executable, "-c", codigo],
+        cwd=raiz,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        fim = time.monotonic() + 60
+        while not marca.exists():
+            assert time.monotonic() < fim and proc.poll() is None
+            time.sleep(0.05)
+        proc.send_signal(signal.SIGINT)
+        inicio = time.monotonic()
+        proc.wait(timeout=20)
+        assert time.monotonic() - inicio < 15
+        assert proc.returncode == 1  # nenhum pedido concluído
+    finally:
+        proc.kill()
+        proc.communicate()

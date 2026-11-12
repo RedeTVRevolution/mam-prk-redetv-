@@ -21,7 +21,6 @@ import time
 import tomllib
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -72,27 +71,50 @@ def percentil(ordenados: list[float], p: float) -> float:
 
 class Medidas:
     def __init__(self) -> None:
-        self._trava = threading.Lock()
+        self._trava = threading.RLock()  # reentrante: `texto` chama as outras leituras
         self._por_rota: dict[str, list[tuple[int, float]]] = defaultdict(list)
+        self.no_ar = 0
+
+    def iniciar(self) -> None:
+        with self._trava:
+            self.no_ar += 1
 
     def registrar(self, rota: str, status: int, duracao_s: float) -> None:
         with self._trava:
             self._por_rota[rota].append((status, duracao_s))
+            self.no_ar = max(0, self.no_ar - 1)
+
+    def copia(self) -> "Medidas":
+        """Foto sob a trava: o que termina depois não a altera."""
+        with self._trava:
+            c = Medidas()
+            c._por_rota = defaultdict(
+                list, {r: list(v) for r, v in self._por_rota.items()}
+            )
+            c.no_ar = self.no_ar
+            return c
 
     def total(self) -> int:
-        return sum(len(v) for v in self._por_rota.values())
+        with self._trava:
+            return sum(len(v) for v in self._por_rota.values())
 
     def falhas(self) -> int:
-        return sum(
-            1 for v in self._por_rota.values() for s, _ in v if not 200 <= s < 400
-        )
+        with self._trava:
+            return sum(
+                1 for v in self._por_rota.values() for s, _ in v if not 200 <= s < 400
+            )
 
     def buscas(self) -> tuple[int, int]:
         """(enviadas, executadas): 429, 4xx de entrada e falha de rede não chegam a buscar."""
-        v = self._por_rota.get(ROTA_DA_BUSCA, [])
+        with self._trava:
+            v = list(self._por_rota.get(ROTA_DA_BUSCA, []))
         return len(v), sum(1 for s, _ in v if s not in (0, 401, 403, 422, 429))
 
     def texto(self) -> str:
+        with self._trava:
+            return self._texto()
+
+    def _texto(self) -> str:
         linhas = [
             f"{'rota':<34}{'n':>6}  {'erros':<22}{'p50':>7}{'p95':>7}{'p99':>7}{'max':>7} (ms)"
         ]
@@ -111,6 +133,10 @@ class Medidas:
             f"Buscas feitas: {enviadas} enviadas, {executadas} executadas "
             f"(as outras foram recusadas antes de buscar)"
         )
+        if self.no_ar:
+            linhas.append(
+                f"No ar na parada: {self.no_ar} (não entram nas medidas acima)"
+            )
         return "\n".join(linhas)
 
 
@@ -132,7 +158,9 @@ class Usuario:
         medidas: Medidas,
         termos: list[str],
         rng: random.Random,
+        parar: threading.Event | None = None,
     ) -> None:
+        self._parar = parar or threading.Event()
         self._t = transporte
         self._m = medidas
         self._termos = termos
@@ -146,7 +174,10 @@ class Usuario:
         params: dict[str, Any] | None = None,
         corpo: Any = None,
     ) -> Any:
+        if self._parar.is_set():
+            return None
         inicio = time.monotonic()
+        self._m.iniciar()
         status, json = self._t(rota.split()[0], caminho, params, corpo)
         self._m.registrar(rota, status, time.monotonic() - inicio)
         return json if 200 <= status < 300 else None
@@ -212,25 +243,41 @@ def rodar(
 ) -> None:
     inicio = time.monotonic()
 
-    def um(i: int) -> None:
-        if parar.wait(rampa_s * i / usuarios):
-            return
-        pessoa = Usuario(
-            transportes[i % len(transportes)], medidas, termos, random.Random(i)
-        )
-        while time.monotonic() - inicio < duracao_s and not parar.is_set():
-            pessoa.agir()
-            parar.wait(min(pausa(), max(0.0, duracao_s - (time.monotonic() - inicio))))
+    erros: list[BaseException] = []
 
-    with ThreadPoolExecutor(usuarios) as pool:
-        futuros = [pool.submit(um, i) for i in range(usuarios)]
+    def um(i: int) -> None:
         try:
-            for f in futuros:
-                f.result()
-        except BaseException:
-            # Antes de sair do `with`, que espera as threads: senão o Ctrl+C só para no fim.
+            if parar.wait(rampa_s * i / usuarios):
+                return
+            pessoa = Usuario(
+                transportes[i % len(transportes)],
+                medidas,
+                termos,
+                random.Random(i),
+                parar,
+            )
+            while time.monotonic() - inicio < duracao_s and not parar.is_set():
+                pessoa.agir()
+                restante = max(0.0, duracao_s - (time.monotonic() - inicio))
+                parar.wait(min(pausa(), restante))
+        except BaseException as e:  # noqa: BLE001 - repassa à thread principal
+            erros.append(e)
             parar.set()
-            raise
+
+    # Daemon: na interrupção o Python não espera os pedidos presos no timeout.
+    threads = [
+        threading.Thread(target=um, args=(i,), daemon=True) for i in range(usuarios)
+    ]
+    for t in threads:
+        t.start()
+    try:
+        for t in threads:  # fim normal: espera os pedidos em curso
+            t.join()
+    except BaseException:
+        parar.set()
+        raise
+    if erros:
+        raise erros[0]
 
 
 def main() -> int:
@@ -270,11 +317,12 @@ def main() -> int:
         )
     except KeyboardInterrupt:
         parar.set()
-    if not medidas.total():
-        print("Nenhum pedido feito.", file=sys.stderr)
+    foto = medidas.copia()  # uma só: relatório e código de saída saem dela
+    if not foto.total():
+        print(f"Nenhum pedido concluído ({foto.no_ar} no ar).", file=sys.stderr)
         return 1
-    print(medidas.texto())
-    return 1 if medidas.falhas() else 0
+    print(foto.texto())
+    return 1 if foto.falhas() else 0
 
 
 if __name__ == "__main__":
