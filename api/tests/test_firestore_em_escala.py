@@ -179,9 +179,13 @@ def ids(n: int) -> list[str]:
     return [f"teste_{i:07d}" for i in range(n)]
 
 
-def test_apagar_colecao_vazia() -> None:
+def test_apagar_colecao_vazia(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     r = apagar(ClienteFalso([]))
     assert (r.confirmados, r.motivo, r.faltou) == (0, None, False)
+    assert _roda(monkeypatch, ClienteFalso([])) == 0
+    assert "0 apagados nesta rodada" in capsys.readouterr().out
 
 
 def test_apagar_tudo_confirmado_em_varios_lotes(
@@ -194,10 +198,15 @@ def test_apagar_tudo_confirmado_em_varios_lotes(
     assert not c.docs
 
 
-def test_apagar_falha_transitoria_que_se_recupera_nao_e_falha() -> None:
-    c = ClienteFalso(ids(2), {"teste_0000000": ["indisponivel"]})
-    r = apagar(c)
+def test_apagar_falha_transitoria_que_se_recupera_nao_e_falha(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    falhas = {"teste_0000000": ["indisponivel"]}
+    r = apagar(ClienteFalso(ids(2), falhas))
     assert (r.confirmados, r.motivo, r.faltou) == (2, None, False)
+    assert _roda(monkeypatch, ClienteFalso(ids(2), falhas)) == 0
+    saida = capsys.readouterr().out
+    assert "2 apagados nesta rodada" in saida and "Faltou" not in saida
 
 
 def test_apagar_falha_definitiva_para_com_o_primeiro_motivo() -> None:
@@ -213,16 +222,25 @@ def test_apagar_lote_sem_callback_termina_e_nao_inventa_motivo() -> None:
     assert (r.confirmados, r.faltou, r.motivo) == (0, True, None)
 
 
-def test_apagar_retoma_na_nova_rodada() -> None:
+def test_apagar_retoma_na_nova_rodada(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     c = ClienteFalso(ids(3), {"teste_0000001": ["x"] * 4})
     assert apagar(c).faltou
-    assert not apagar(c).faltou
+    c = ClienteFalso(ids(3), {"teste_0000001": ["x"] * 4})
+    assert _roda(monkeypatch, c) != 0
+    assert "Faltou confirmação" in capsys.readouterr().out
+    assert _roda(monkeypatch, c) == 0
+    assert "apagados nesta rodada" in capsys.readouterr().out
     assert not c.docs
 
 
-def test_apagar_nunca_toca_documento_fora_do_prefixo() -> None:
+def test_apagar_nunca_toca_documento_fora_do_prefixo(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     c = ClienteFalso([*ids(2), "job_real", "teste", "testf_1"])
-    apagar(c)
+    assert _roda(monkeypatch, c) == 0
+    assert "2 apagados nesta rodada" in capsys.readouterr().out
     assert c.docs == {"job_real", "teste", "testf_1"}
 
 
@@ -256,6 +274,6 @@ def test_comando_apagar_sem_callback_diz_que_faltou_confirmacao(
     saida = capsys.readouterr().out
     assert (
         "Faltou confirmação" in saida
-        and "sem callback" in saida
+        and "sem motivo conhecido" in saida
         and "restam 2" in saida
     )

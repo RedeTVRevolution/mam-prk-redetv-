@@ -37,14 +37,20 @@ from api.imagens_hostis import (
 from api.indice_da_busca import TipoDeRegistro
 from api.jobs import CursorInvalido, _exige
 from api.teste_de_carga import CABECALHO_DE_TESTE, VALOR_DO_CABECALHO
-from api.texto_como_dado import LinhaDaConsulta
+from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta
 
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
 # O cabeçalho da carga fica fora do OpenAPI: não é parte do contrato para os sistemas.
 TesteDeCarga = Annotated[
-    str | None, Header(alias=CABECALHO_DE_TESTE, include_in_schema=False)
+    str | None,
+    Header(
+        alias=CABECALHO_DE_TESTE,
+        include_in_schema=False,
+        max_length=16,
+        pattern=PADRAO_DA_LINHA,
+    ),
 ]
 
 

@@ -412,7 +412,7 @@ def main(argv: list[str]) -> int:
         if r.faltou:
             print(
                 f"Faltou confirmação: restam {contar(colecao)} Jobs falsos. "
-                f"Motivo: {r.motivo or 'sem callback de erro (falha no envio do lote)'}. "
+                f"Motivo: {r.motivo or 'sem motivo conhecido'}. "
                 "Rode de novo para retomar."
             )
             saida = 1

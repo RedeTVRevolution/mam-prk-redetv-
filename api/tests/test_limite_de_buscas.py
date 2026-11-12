@@ -110,6 +110,14 @@ def test_so_a_chave_ligada_com_o_cabecalho_1_suprime_o_evento(
 
 
 @pytest.mark.parametrize("rota", ["texto", "imagem"])
+@pytest.mark.parametrize("cabecalho", ["1" * 17, "1\x01", "1\x7f"])
+def test_cabecalho_longo_ou_com_controle_volta_422(rota: str, cabecalho: str) -> None:
+    c, eventos = _cliente_de_teste(True)
+    assert _pedir(c, rota, cabecalho).status_code == 422
+    assert _buscas(eventos) == 0
+
+
+@pytest.mark.parametrize("rota", ["texto", "imagem"])
 @pytest.mark.parametrize("cabecalho", [None, "1"])
 def test_o_cabecalho_nao_isenta_do_limite(rota: str, cabecalho: str | None) -> None:
     c, _ = _cliente_de_teste(True, maximo=1)
