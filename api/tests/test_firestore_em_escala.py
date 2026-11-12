@@ -201,10 +201,16 @@ def test_apagar_tudo_confirmado_em_varios_lotes(
 def test_apagar_falha_transitoria_que_se_recupera_nao_e_falha(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    falhas = {"teste_0000000": ["indisponivel"]}
-    r = apagar(ClienteFalso(ids(2), falhas))
+    def falhas() -> dict[
+        str, list[str]
+    ]:  # nova a cada uso: o escritor falso consome a lista
+        return {"teste_0000000": ["indisponivel"]}
+
+    r = apagar(ClienteFalso(ids(2), falhas()))
     assert (r.confirmados, r.motivo, r.faltou) == (2, None, False)
-    assert _roda(monkeypatch, ClienteFalso(ids(2), falhas)) == 0
+    c = ClienteFalso(ids(2), falhas())
+    assert _roda(monkeypatch, c) == 0
+    assert not c.falhas.get("teste_0000000"), "o comando passou pela falha transitória"
     saida = capsys.readouterr().out
     assert "2 apagados nesta rodada" in saida and "Faltou" not in saida
 
