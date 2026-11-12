@@ -1,17 +1,23 @@
 """A lógica pura do teste em escala: Jobs falsos com prefixo, intervalo do apagar, contas."""
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
+from api import firestore_em_escala
 from api.firestore_em_escala import (
     FIM_DO_INTERVALO,
     PREFIXO,
     PROGRAMAS,
+    apagar,
     casos,
     entradas_automaticas,
     entradas_compostas,
     job_falso,
     limites_do_apagar,
+    main,
 )
 
 AGORA = datetime(2026, 11, 11, tzinfo=UTC)
@@ -64,3 +70,192 @@ def test_os_casos_incluem_o_pior_caso_com_pagina_de_50() -> None:
     todos = casos(AGORA.date())
     assert [c for c in todos if "RUIM" in c.nome]
     assert all(c.filtro.limite == 50 for c in todos)
+
+
+class ConsultaFalsa:
+    def __init__(
+        self,
+        cliente: "ClienteFalso",
+        ini: str = "",
+        fim: str = "\U0010ffff",
+        n: int | None = None,
+    ):
+        self.cliente, self.ini, self.fim, self.n = cliente, ini, fim, n
+
+    def where(self, filter: Any) -> "ConsultaFalsa":
+        if filter.op_string == ">=":
+            return ConsultaFalsa(self.cliente, filter.value, self.fim, self.n)
+        return ConsultaFalsa(self.cliente, self.ini, filter.value, self.n)
+
+    def select(self, _: Any) -> "ConsultaFalsa":
+        return self
+
+    def order_by(self, _: Any) -> "ConsultaFalsa":
+        return self
+
+    def limit(self, n: int) -> "ConsultaFalsa":
+        return ConsultaFalsa(self.cliente, self.ini, self.fim, n)
+
+    def _ids(self) -> list[str]:
+        ids = sorted(i for i in self.cliente.docs if self.ini <= i < self.fim)
+        return ids[: self.n]
+
+    def stream(self) -> list[Any]:
+        return [SimpleNamespace(reference=i) for i in self._ids()]
+
+    def count(self) -> "ConsultaFalsa":
+        return self
+
+    def get(self) -> list[list[Any]]:
+        return [[SimpleNamespace(value=len(self._ids()))]]
+
+
+class EscritorFalso:
+    """Imita o BulkWriter: `flush` entrega cada exclusão aos callbacks, com as tentativas."""
+
+    def __init__(self, cliente: "ClienteFalso"):
+        self.cliente = cliente
+        self.fila: list[str] = []
+        self.ok: Any = None
+        self.erro: Any = None
+
+    def on_write_result(self, cb: Any) -> None:
+        self.ok = cb
+
+    def on_write_error(self, cb: Any) -> None:
+        self.erro = cb
+
+    def delete(self, ref: str) -> None:
+        self.fila.append(ref)
+
+    def flush(self) -> None:
+        fila, self.fila = self.fila, []
+        if self.cliente.sem_callback:
+            return  # o envio do lote falhou: nenhum callback é chamado
+        for ref in fila:
+            tentativas = 0
+            while True:
+                falha = self.cliente.falhas.get(ref, [])
+                if not falha:
+                    self.cliente.docs.discard(ref)
+                    self.ok(ref, None, self)
+                    break
+                motivo = falha.pop(0)
+                if not self.erro(
+                    SimpleNamespace(attempts=tentativas, message=motivo), self
+                ):
+                    break
+                tentativas += 1
+
+    def close(self) -> None:
+        pass
+
+
+class ClienteFalso:
+    def __init__(
+        self,
+        docs: list[str],
+        falhas: dict[str, list[str]] | None = None,
+        sem_callback: bool = False,
+    ):
+        self.docs = set(docs)
+        self.falhas = falhas or {}
+        self.sem_callback = sem_callback
+
+    def collection(self, _: str) -> "ClienteFalso":
+        return self
+
+    def document(self, id: str) -> str:
+        return id
+
+    def where(self, filter: Any) -> ConsultaFalsa:
+        return ConsultaFalsa(self).where(filter)
+
+    def bulk_writer(self, _: Any = None) -> EscritorFalso:
+        return EscritorFalso(self)
+
+
+def ids(n: int) -> list[str]:
+    return [f"teste_{i:07d}" for i in range(n)]
+
+
+def test_apagar_colecao_vazia() -> None:
+    r = apagar(ClienteFalso([]))
+    assert (r.confirmados, r.motivo, r.faltou) == (0, None, False)
+
+
+def test_apagar_tudo_confirmado_em_varios_lotes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(firestore_em_escala, "LOTE_DO_APAGAR", 2)
+    c = ClienteFalso(ids(5))
+    r = apagar(c)
+    assert (r.confirmados, r.faltou) == (5, False)
+    assert not c.docs
+
+
+def test_apagar_falha_transitoria_que_se_recupera_nao_e_falha() -> None:
+    c = ClienteFalso(ids(2), {"teste_0000000": ["indisponivel"]})
+    r = apagar(c)
+    assert (r.confirmados, r.motivo, r.faltou) == (2, None, False)
+
+
+def test_apagar_falha_definitiva_para_com_o_primeiro_motivo() -> None:
+    c = ClienteFalso(ids(3), {"teste_0000001": ["sem permissao"] * 100})
+    r = apagar(c)
+    assert (r.confirmados, r.faltou, r.motivo) == (2, True, "sem permissao")
+    assert c.docs == {"teste_0000001"}
+
+
+def test_apagar_lote_sem_callback_termina_e_nao_inventa_motivo() -> None:
+    c = ClienteFalso(ids(3), sem_callback=True)
+    r = apagar(c)
+    assert (r.confirmados, r.faltou, r.motivo) == (0, True, None)
+
+
+def test_apagar_retoma_na_nova_rodada() -> None:
+    c = ClienteFalso(ids(3), {"teste_0000001": ["x"] * 4})
+    assert apagar(c).faltou
+    assert not apagar(c).faltou
+    assert not c.docs
+
+
+def test_apagar_nunca_toca_documento_fora_do_prefixo() -> None:
+    c = ClienteFalso([*ids(2), "job_real", "teste", "testf_1"])
+    apagar(c)
+    assert c.docs == {"job_real", "teste", "testf_1"}
+
+
+def _roda(monkeypatch: pytest.MonkeyPatch, cliente: ClienteFalso) -> int:
+    monkeypatch.setenv("GCP_PROJECT_ID", "p")
+    monkeypatch.setattr(firestore_em_escala, "cliente_do_firestore", lambda _: cliente)
+    return main(["apagar"])
+
+
+def test_comando_apagar_informa_e_sai_zero(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _roda(monkeypatch, ClienteFalso(ids(3))) == 0
+    assert "3 apagados nesta rodada" in capsys.readouterr().out
+
+
+def test_comando_apagar_com_falha_sai_diferente_de_zero(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    c = ClienteFalso(ids(3), {"teste_0000001": ["sem permissao"] * 100})
+    assert _roda(monkeypatch, c) != 0
+    saida = capsys.readouterr().out
+    assert "2 apagados nesta rodada" in saida
+    assert "restam 1" in saida and "sem permissao" in saida
+
+
+def test_comando_apagar_sem_callback_diz_que_faltou_confirmacao(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _roda(monkeypatch, ClienteFalso(ids(2), sem_callback=True)) != 0
+    saida = capsys.readouterr().out
+    assert (
+        "Faltou confirmação" in saida
+        and "sem callback" in saida
+        and "restam 2" in saida
+    )

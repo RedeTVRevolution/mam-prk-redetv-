@@ -20,6 +20,7 @@ import os
 import random
 import statistics
 import sys
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -47,6 +48,7 @@ FIM_DO_INTERVALO = "teste" + chr(ord("_") + 1)
 TETO_DE_N = 2_000_000
 LOTE_DA_GRAVACAO = 5_000
 LOTE_DO_APAGAR = 500
+TENTATIVAS_DO_APAGAR = 3
 
 PROGRAMAS = [f"TESTE Programa {n:02d}" for n in range(1, 41)]
 PROGRAMAS_GRANDES = 3  # os três primeiros: 35%, 20% e 10% dos Jobs
@@ -191,27 +193,59 @@ def gravar(cliente: Any, quantos: int, agora: datetime | None = None) -> int:
     return feitos[0]
 
 
-def apagar(cliente: Any) -> int:
-    """Apaga todo documento `teste_*` de `jobs` (só chaves lidas, em lotes de 500)."""
+@dataclass
+class Apagados:
+    confirmados: int = 0
+    faltou: bool = False  # algum lote não foi todo confirmado: o apagar parou
+    motivo: str | None = (
+        None  # primeiro motivo conhecido (nenhum se não houve callback)
+    )
+
+
+def apagar(cliente: Any) -> Apagados:
+    """Apaga todo documento `teste_*` de `jobs` (só chaves lidas, em lotes de 500).
+
+    Conta só o que o callback de sucesso confirmou. Se um lote não for todo confirmado, para
+    (rodar de novo retoma de onde parou) em vez de repetir a consulta sem fim."""
     colecao = cliente.collection(COLECAO_DE_JOBS)
     consulta = _dos_falsos(colecao).select([]).order_by("__name__")
     escritor = cliente.bulk_writer(
         BulkWriterOptions(initial_ops_per_second=500, max_ops_per_second=2000)
     )
-    apagados = 0
+    trava = threading.Lock()  # os callbacks podem rodar em paralelo
+    r = Apagados()
+
+    def confirmou(*_: Any) -> None:
+        with trava:
+            r.confirmados += 1
+
+    def errou(falha: Any, _: Any) -> bool:
+        if falha.attempts < TENTATIVAS_DO_APAGAR:
+            return True
+        with trava:
+            r.motivo = r.motivo or str(falha.message)
+        return False
+
+    escritor.on_write_result(confirmou)
+    escritor.on_write_error(errou)
     inicio = time.monotonic()
     while True:
         # Sem cursor: o que foi apagado já não volta na consulta seguinte.
         docs = list(consulta.limit(LOTE_DO_APAGAR).stream())
         if not docs:
             break
+        antes = r.confirmados
         for doc in docs:
             escritor.delete(doc.reference)
         escritor.flush()
-        apagados += len(docs)
-        print(f"{apagados} apagados, {apagados / (time.monotonic() - inicio):.0f}/s")
+        print(
+            f"{r.confirmados} apagados, {r.confirmados / (time.monotonic() - inicio):.0f}/s"
+        )
+        if r.confirmados - antes < len(docs):
+            r.faltou = True
+            break
     escritor.close()
-    return apagados
+    return r
 
 
 @dataclass(frozen=True)
@@ -373,7 +407,15 @@ def main(argv: list[str]) -> int:
             )
             saida = 1
     elif args.comando == "apagar":
-        print(f"{apagar(cliente)} apagados")
+        r = apagar(cliente)
+        print(f"{r.confirmados} apagados nesta rodada")
+        if r.faltou:
+            print(
+                f"Faltou confirmação: restam {contar(colecao)} Jobs falsos. "
+                f"Motivo: {r.motivo or 'sem callback de erro (falha no envio do lote)'}. "
+                "Rode de novo para retomar."
+            )
+            saida = 1
     else:
         por_mes = listagem_por_mes_do_ambiente(os.environ)
         print(f"LISTAGEM_POR_MES={por_mes}")
