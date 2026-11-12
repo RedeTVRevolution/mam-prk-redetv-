@@ -135,9 +135,9 @@ def test_pedido_nao_iniciado_nao_sai_depois_da_parada() -> None:
 
 def test_relatorio_mostra_concluidos_e_no_ar() -> None:
     m = Medidas()
-    m.iniciar()
+    m.iniciar(threading.Event())
     m.registrar("GET /v1/jobs", 200, 0.1)
-    m.iniciar()  # fica no ar
+    m.iniciar(threading.Event())  # fica no ar
     texto = m.copia().texto()
     assert "Total de pedidos: 1 (0 com erro)" in texto
     assert "No ar na parada: 1" in texto
@@ -146,7 +146,7 @@ def test_relatorio_mostra_concluidos_e_no_ar() -> None:
 
 def test_copia_nao_muda_quando_pedido_termina_depois() -> None:
     m = Medidas()
-    m.iniciar()
+    m.iniciar(threading.Event())
     c = m.copia()
     m.registrar("GET /v1/jobs", 500, 0.1)
     assert (c.total(), c.falhas(), c.no_ar) == (0, 0, 1)
@@ -214,3 +214,23 @@ def test_sigint_termina_o_processo_sem_esperar_o_pedido_bloqueado(
     finally:
         proc.kill()
         proc.communicate()
+
+
+def test_admissao_depois_da_parada_recusa_e_nao_conta_no_ar() -> None:
+    m, parar = Medidas(), threading.Event()
+    assert m.iniciar(parar) is True and m.no_ar == 1
+    parar.set()
+    assert m.iniciar(parar) is False and m.no_ar == 1
+
+
+def test_pedido_que_levanta_excecao_sai_do_no_ar_sem_virar_medida() -> None:
+    def quebra(
+        metodo: str, caminho: str, params: dict[str, Any] | None, corpo: Any
+    ) -> tuple[int, Any]:
+        raise KeyboardInterrupt
+
+    m = Medidas()
+    pessoa = Usuario(quebra, m, ["x"], random.Random(1))
+    with pytest.raises(KeyboardInterrupt):
+        pessoa.listar()
+    assert (m.no_ar, m.total()) == (0, 0)

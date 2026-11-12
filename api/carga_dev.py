@@ -75,9 +75,17 @@ class Medidas:
         self._por_rota: dict[str, list[tuple[int, float]]] = defaultdict(list)
         self.no_ar = 0
 
-    def iniciar(self) -> None:
+    def iniciar(self, parar: threading.Event) -> bool:
+        """Admite um pedido; conferir a parada e contar no ar é uma operação só."""
         with self._trava:
+            if parar.is_set():
+                return False
             self.no_ar += 1
+            return True
+
+    def desistir(self) -> None:
+        with self._trava:
+            self.no_ar = max(0, self.no_ar - 1)
 
     def registrar(self, rota: str, status: int, duracao_s: float) -> None:
         with self._trava:
@@ -174,11 +182,14 @@ class Usuario:
         params: dict[str, Any] | None = None,
         corpo: Any = None,
     ) -> Any:
-        if self._parar.is_set():
+        if not self._m.iniciar(self._parar):
             return None
         inicio = time.monotonic()
-        self._m.iniciar()
-        status, json = self._t(rota.split()[0], caminho, params, corpo)
+        try:
+            status, json = self._t(rota.split()[0], caminho, params, corpo)
+        except BaseException:
+            self._m.desistir()
+            raise
         self._m.registrar(rota, status, time.monotonic() - inicio)
         return json if 200 <= status < 300 else None
 
