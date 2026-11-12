@@ -1003,6 +1003,7 @@ def cliente(
     indice: IndiceEmMemoria | None = None,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     eventos: Eventos | None = None,
+    aceita_teste_de_carga: bool = False,
 ) -> tuple[TestClient, Mundo]:
     m = Mundo(*respostas)
     m.com(job("j1"), objeto("a", "j1", 0, 1_000))
@@ -1021,6 +1022,7 @@ def cliente(
         tempo_maximo_da_busca_s=tempo_maximo_s,
         limites_da_imagem=limites_da_imagem,
         eventos=eventos,
+        aceita_teste_de_carga=aceita_teste_de_carga,
     )
     return TestClient(app), m
 

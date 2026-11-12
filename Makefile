@@ -1,4 +1,4 @@
-.PHONY: preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: gravar-jobs-falsos medir-jobs-falsos apagar-jobs-falsos preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -211,6 +211,24 @@ reindexar:
 preencher-filtros-da-busca:
 	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.preencher_filtros_da_busca
 
+# Teste do Firestore em escala (#542), só no dev: grava Jobs falsos (id `teste_NNNNNNN`), mede as listas
+# do acervo com filtros combinados e apaga tudo. Veja o docstring de api/firestore_em_escala.py.
+#   make gravar-jobs-falsos N=100000 ; make medir-jobs-falsos ; make apagar-jobs-falsos
+ESCALA = set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	FIRESTORE_BANCO="$${FIRESTORE_BANCO:-$$(terraform -chdir=infra output -raw banco_firestore)}" \
+	LISTAGEM_POR_MES="$${LISTAGEM_POR_MES:-true}" \
+	uv run --locked python -m api.firestore_em_escala
+
+gravar-jobs-falsos:
+	$(ESCALA) gravar $${N:?use N=<quantos>}
+
+medir-jobs-falsos:
+	$(ESCALA) medir
+
+apagar-jobs-falsos:
+	$(ESCALA) apagar
+
 # Agrupa os planos recorrentes (mesma câmera, mesmo enquadramento) do acervo antigo (#546):
 # make preencher-planos-recorrentes [GRAVAR=1]. Usa só os quadros-chave e a Decupagem do bucket, sem
 # modelo. Sem GRAVAR=1 é a prévia: mostra a contagem de planos e grupos antes e depois e não escreve
@@ -396,6 +414,11 @@ taxa-de-correcao:
 # Com CLIPE= o clipe passa pelo pipeline inteiro (gasta Gemini e GPU); sem ele, só a API.
 caos-dev:
 	URL="$(URL)" CHAVE_A="$(CHAVE_A)" CHAVE_B="$(CHAVE_B)" CLIPE="$(CLIPE)" uv run --locked python -m api.caos_dev
+
+# Carga no mam-web do dev: make carga-dev URL=https://... TOKEN=<ID token da sua sessão> [USUARIOS=200 DURACAO_S=300 RAMPA_S=30 PAUSA_S=5-15]
+# Só leituras e a busca por texto (que gasta embedding e Vector Search); vários tokens separados por vírgula.
+carga-dev:
+	URL="$(URL)" TOKEN="$(TOKEN)" USUARIOS="$(USUARIOS)" DURACAO_S="$(DURACAO_S)" RAMPA_S="$(RAMPA_S)" PAUSA_S="$(PAUSA_S)" uv run --locked python -m api.carga_dev
 
 # O OpenAPI dos sistemas (#277) em docs/api/openapi.json; um teste do `make verificar` confere que bate.
 atualizar-openapi:

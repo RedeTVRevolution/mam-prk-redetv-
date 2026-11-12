@@ -3,14 +3,14 @@
 import logging
 import threading
 from collections import defaultdict, deque
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TempoEsgotado
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
@@ -36,11 +36,40 @@ from api.imagens_hostis import (
 )
 from api.indice_da_busca import TipoDeRegistro
 from api.jobs import CursorInvalido, _exige
-from api.texto_como_dado import LinhaDaConsulta
+from api.teste_de_carga import CABECALHO_DE_TESTE, VALOR_DO_CABECALHO
+from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta
 
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
+# O cabeçalho da carga fica fora do OpenAPI: não é parte do contrato para os sistemas.
+TesteDeCarga = Annotated[
+    str | None,
+    Header(
+        alias=CABECALHO_DE_TESTE,
+        include_in_schema=False,
+        max_length=16,
+        pattern=PADRAO_DA_LINHA,
+    ),
+]
+
+
+def consultas_por_minuto_do_ambiente(env: Mapping[str, str]) -> int:
+    """O limite de `BUSCA_CONSULTAS_POR_MINUTO`; ausente ou vazia vale o padrão."""
+    bruto = env.get("BUSCA_CONSULTAS_POR_MINUTO") or ""
+    if not bruto:
+        return CONSULTAS_POR_MINUTO
+    try:
+        valor = int(bruto)
+    except ValueError:
+        valor = 0
+    if valor < 1:
+        raise ValueError(
+            f"BUSCA_CONSULTAS_POR_MINUTO deve ser um inteiro a partir de 1, veio {bruto!r}"
+        )
+    return valor
+
+
 # O plano limita o texto da busca (docs/Plano_MAM.md); o campo do front tem o mesmo teto.
 TAMANHO_DA_CONSULTA = 300
 # Descrição das rotas da busca no OpenAPI, para os sistemas (docs/Plano_MAM.md, "Busca").
@@ -111,10 +140,15 @@ def criar_rotas_da_busca(
     tempo_maximo_s: float = TEMPO_MAXIMO_S,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     eventos: Eventos | None = None,
+    aceita_teste_de_carga: bool = False,
 ) -> APIRouter:
     rotas = APIRouter()
     publicador = eventos or SemEventos()
     limite = LimiteDeConsultas(consultas_por_minuto, relogio)
+
+    def da_carga(cabecalho: str | None) -> bool:
+        """Só a chave ligada com o valor exato `1` tira a busca dos indicadores de uso."""
+        return aceita_teste_de_carga and cabecalho == VALOR_DO_CABECALHO
 
     def registrar_busca(
         chamador: Chamador,
@@ -158,6 +192,7 @@ def criar_rotas_da_busca(
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
         cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        teste_de_carga: TesteDeCarga = None,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
@@ -195,7 +230,9 @@ def criar_rotas_da_busca(
             raise HTTPException(504, "A busca demorou demais") from None
         except CursorInvalido:
             raise HTTPException(422, "Cursor inválido") from None
-        if cursor is None:  # a página seguinte não conta como busca nova
+        if cursor is None and not da_carga(
+            teste_de_carga
+        ):  # a 2ª página não é busca nova
             registrar_busca(
                 chamador,
                 len(q),
@@ -264,6 +301,7 @@ def criar_rotas_da_busca(
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
         cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        teste_de_carga: TesteDeCarga = None,
     ) -> ResultadoDaBusca:
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
@@ -314,7 +352,9 @@ def criar_rotas_da_busca(
             raise HTTPException(
                 503, "A busca por imagem não está disponível agora"
             ) from None
-        if cursor is None:  # a página seguinte não conta como busca nova
+        if cursor is None and not da_carga(
+            teste_de_carga
+        ):  # a 2ª página não é busca nova
             registrar_busca(
                 chamador,
                 len(dados),

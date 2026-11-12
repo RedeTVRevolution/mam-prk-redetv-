@@ -196,6 +196,7 @@ from api.rota_da_busca import (
     LIMITES_DA_IMAGEM,
     TEMPO_MAXIMO_S,
     LimitesDaImagem,
+    consultas_por_minuto_do_ambiente,
     criar_rotas_da_busca,
 )
 from api.rotas_das_chaves import (
@@ -213,6 +214,7 @@ from api.tempo_de_tela import (
     consulta_do_ambiente,
     criar_rotas_do_tempo_de_tela,
 )
+from api.teste_de_carga import aceita_teste_de_carga_do_ambiente
 from api.texto_como_dado import conferir_ids_e_consultas
 from api.tipos_de_objeto import (
     TiposDeObjeto,
@@ -379,6 +381,7 @@ def criar_app(
     busca_por_minuto: int = CONSULTAS_POR_MINUTO,
     tempo_maximo_da_busca_s: float = TEMPO_MAXIMO_S,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
+    aceita_teste_de_carga: bool = False,
     tamanho_maximo_bytes: int = TAMANHO_MAXIMO_PADRAO_BYTES,
     limite_de_inatividade_s: float = LIMITE_DE_INATIVIDADE_S,
     login_recente: timedelta = LOGIN_RECENTE_PADRAO,
@@ -630,6 +633,7 @@ def criar_app(
             tempo_maximo_da_busca_s,
             limites_da_imagem,
             publicador,
+            aceita_teste_de_carga,
         )
     )
     v1.include_router(criar_rotas_da_auditoria(repositorio_de_auditoria))
@@ -888,6 +892,8 @@ if _projeto:
         apagar_dados_da_purga=dados_do_ambiente(
             cliente_do_firestore(_projeto), os.environ
         ).apagar,
+        busca_por_minuto=consultas_por_minuto_do_ambiente(os.environ),
+        aceita_teste_de_carga=aceita_teste_de_carga_do_ambiente(os.environ),
         limites_da_imagem=LimitesDaImagem(
             max_bytes=int(
                 os.environ.get("BUSCA_IMAGEM_MAX_BYTES") or LimitesDaImagem.max_bytes
