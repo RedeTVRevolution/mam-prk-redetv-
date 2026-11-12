@@ -85,6 +85,16 @@ variable "dominio" {
   default     = ""
 }
 
+variable "busca_consultas_por_minuto" {
+  description = "Buscas por minuto, por usuário e por instância do mam-web. Sobe só durante a carga e volta a 30."
+  type        = number
+  default     = 30
+  validation {
+    condition     = floor(var.busca_consultas_por_minuto) == var.busca_consultas_por_minuto && var.busca_consultas_por_minuto >= 1
+    error_message = "busca_consultas_por_minuto é um inteiro a partir de 1."
+  }
+}
+
 variable "banco_firestore" {
   type        = string
   default     = "mam-principal"
@@ -121,6 +131,7 @@ module "mam" {
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
   vagas_de_gpu                 = var.vagas_de_gpu
+  busca_consultas_por_minuto   = var.busca_consultas_por_minuto
   banco_firestore              = var.banco_firestore
 
   # O índice ANN da descrição (~R$ 290/mês; ADR 0006): o KNN sem índice aceita só 100 mil
@@ -279,6 +290,10 @@ output "busca_cota_de_escrita" {
 
 output "busca_distancia_maxima" {
   value = module.mam.busca_distancia_maxima
+}
+
+output "busca_consultas_por_minuto" {
+  value = module.mam.busca_consultas_por_minuto
 }
 
 output "busca_palavras_minimas" {

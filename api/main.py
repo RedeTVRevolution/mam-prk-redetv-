@@ -196,6 +196,7 @@ from api.rota_da_busca import (
     LIMITES_DA_IMAGEM,
     TEMPO_MAXIMO_S,
     LimitesDaImagem,
+    consultas_por_minuto_do_ambiente,
     criar_rotas_da_busca,
 )
 from api.rotas_das_chaves import (
@@ -888,6 +889,7 @@ if _projeto:
         apagar_dados_da_purga=dados_do_ambiente(
             cliente_do_firestore(_projeto), os.environ
         ).apagar,
+        busca_por_minuto=consultas_por_minuto_do_ambiente(os.environ),
         limites_da_imagem=LimitesDaImagem(
             max_bytes=int(
                 os.environ.get("BUSCA_IMAGEM_MAX_BYTES") or LimitesDaImagem.max_bytes

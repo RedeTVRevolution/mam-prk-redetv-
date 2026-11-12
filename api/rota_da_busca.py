@@ -3,7 +3,7 @@
 import logging
 import threading
 from collections import defaultdict, deque
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TempoEsgotado
 from dataclasses import dataclass
@@ -41,6 +41,24 @@ from api.texto_como_dado import LinhaDaConsulta
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
+
+
+def consultas_por_minuto_do_ambiente(env: Mapping[str, str]) -> int:
+    """O limite de `BUSCA_CONSULTAS_POR_MINUTO`; ausente ou vazia vale o padrão."""
+    bruto = env.get("BUSCA_CONSULTAS_POR_MINUTO") or ""
+    if not bruto:
+        return CONSULTAS_POR_MINUTO
+    try:
+        valor = int(bruto)
+    except ValueError:
+        valor = 0
+    if valor < 1:
+        raise ValueError(
+            f"BUSCA_CONSULTAS_POR_MINUTO deve ser um inteiro a partir de 1, veio {bruto!r}"
+        )
+    return valor
+
+
 # O plano limita o texto da busca (docs/Plano_MAM.md); o campo do front tem o mesmo teto.
 TAMANHO_DA_CONSULTA = 300
 # Descrição das rotas da busca no OpenAPI, para os sistemas (docs/Plano_MAM.md, "Busca").

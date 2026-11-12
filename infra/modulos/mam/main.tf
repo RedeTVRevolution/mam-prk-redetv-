@@ -64,6 +64,16 @@ variable "vagas_de_gpu" {
   }
 }
 
+variable "busca_consultas_por_minuto" {
+  description = "Buscas por minuto, por usuário e por instância do mam-web (texto e imagem somam)"
+  type        = number
+  default     = 30
+  validation {
+    condition     = floor(var.busca_consultas_por_minuto) == var.busca_consultas_por_minuto && var.busca_consultas_por_minuto >= 1
+    error_message = "busca_consultas_por_minuto é um inteiro a partir de 1."
+  }
+}
+
 # Falta de GPU ou de cota: a mesma espera vale para o Workflows (#239) e para o teste
 # depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*). O Job com GPU
 # tenta de novo, esperando `gpu_espera_s` antes da segunda tentativa e, a cada vez, a espera
@@ -1073,6 +1083,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "PURGA_LOGIN_RECENTE_MIN"
         value = tostring(var.minutos_do_login_recente)
+      }
+      env {
+        name  = "BUSCA_CONSULTAS_POR_MINUTO"
+        value = tostring(var.busca_consultas_por_minuto)
       }
       env {
         name  = "BUSCA_REGIAO"
@@ -3025,6 +3039,11 @@ output "busca_cota_de_escrita" {
 # O corte do serviço, para o make sondar-busca ver o mesmo que o dev.
 output "busca_distancia_maxima" {
   value = var.busca_distancia_maxima
+}
+
+# O valor que o mam-web de fato recebe, para o tftest da raiz conferir o repasse.
+output "busca_consultas_por_minuto" {
+  value = one([for e in google_cloud_run_v2_service.web.template[0].containers[0].env : e.value if e.name == "BUSCA_CONSULTAS_POR_MINUTO"])
 }
 
 output "busca_palavras_minimas" {
