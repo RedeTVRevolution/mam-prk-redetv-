@@ -38,6 +38,28 @@ run "valor_configurado_chega_ao_mam_web" {
   }
 }
 
+run "chave_do_cabecalho_de_teste_padrao_e_desligada" {
+  command = plan
+
+  assert {
+    condition     = output.busca_aceita_teste_de_carga == "false"
+    error_message = "Sem a variável, o mam-web recebe a chave desligada."
+  }
+}
+
+run "chave_do_cabecalho_de_teste_configurada_chega_ao_mam_web" {
+  command = plan
+
+  variables {
+    busca_aceita_teste_de_carga = true
+  }
+
+  assert {
+    condition     = output.busca_aceita_teste_de_carga == "true"
+    error_message = "O mam-web recebe o valor configurado na raiz."
+  }
+}
+
 run "recusa_zero" {
   command = plan
 

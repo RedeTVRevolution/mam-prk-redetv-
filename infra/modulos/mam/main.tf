@@ -74,6 +74,12 @@ variable "busca_consultas_por_minuto" {
   }
 }
 
+variable "busca_aceita_teste_de_carga" {
+  description = "A busca respeita o cabeçalho de teste de carga (sem evento de uso); só durante a carga"
+  type        = bool
+  default     = false
+}
+
 # Falta de GPU ou de cota: a mesma espera vale para o Workflows (#239) e para o teste
 # depois da publicação (scripts/testar-jobs-gpu.sh, que lê os outputs gpu_*). O Job com GPU
 # tenta de novo, esperando `gpu_espera_s` antes da segunda tentativa e, a cada vez, a espera
@@ -1087,6 +1093,10 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BUSCA_CONSULTAS_POR_MINUTO"
         value = tostring(var.busca_consultas_por_minuto)
+      }
+      env {
+        name  = "BUSCA_ACEITA_TESTE_DE_CARGA"
+        value = tostring(var.busca_aceita_teste_de_carga)
       }
       env {
         name  = "BUSCA_REGIAO"
@@ -3044,6 +3054,10 @@ output "busca_distancia_maxima" {
 # O valor que o mam-web de fato recebe, para o tftest da raiz conferir o repasse.
 output "busca_consultas_por_minuto" {
   value = one([for e in google_cloud_run_v2_service.web.template[0].containers[0].env : e.value if e.name == "BUSCA_CONSULTAS_POR_MINUTO"])
+}
+
+output "busca_aceita_teste_de_carga" {
+  value = one([for e in google_cloud_run_v2_service.web.template[0].containers[0].env : e.value if e.name == "BUSCA_ACEITA_TESTE_DE_CARGA"])
 }
 
 output "busca_palavras_minimas" {

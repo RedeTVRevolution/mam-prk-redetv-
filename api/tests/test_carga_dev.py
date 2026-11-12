@@ -19,6 +19,7 @@ from api.carga_dev import (
     percentil,
     rodar,
 )
+from api.teste_de_carga import CABECALHO_DE_TESTE
 
 
 def test_percentil_posto_mais_proximo() -> None:
@@ -234,3 +235,44 @@ def test_pedido_que_levanta_excecao_sai_do_no_ar_sem_virar_medida() -> None:
     with pytest.raises(KeyboardInterrupt):
         pessoa.listar()
     assert (m.no_ar, m.total()) == (0, 0)
+
+
+def test_a_sessao_http_manda_o_cabecalho_de_teste(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import requests
+
+    from api import carga_dev
+
+    visto: dict[str, str] = {}
+
+    class SessaoFalsa:
+        headers = visto
+
+        def request(self, *a: Any, **kw: Any) -> Any:
+            raise requests.RequestException
+
+    monkeypatch.setattr(requests, "Session", SessaoFalsa)
+    carga_dev.transporte_http("http://x", "tok")("GET", "/v1/jobs", None, None)
+    assert visto[CABECALHO_DE_TESTE] == "1"
+    assert visto["Authorization"] == "Bearer tok"
+
+
+def test_o_script_da_carga_nao_carrega_a_app() -> None:
+    codigo = "import sys, api.carga_dev; sys.exit('api.main' in sys.modules)"
+    assert subprocess.run([sys.executable, "-c", codigo], check=False).returncode == 0
+
+
+def test_o_inicio_lembra_de_conferir_a_chave_e_o_custo(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from api import carga_dev
+
+    monkeypatch.setenv("URL", "http://x")
+    monkeypatch.setenv("TOKEN", "t")
+    monkeypatch.setenv("DURACAO_S", "0")
+    monkeypatch.setattr(carga_dev, "rodar", lambda *a, **k: None)
+    carga_dev.main()
+    saida = capsys.readouterr().out
+    assert "BUSCA_ACEITA_TESTE_DE_CARGA" in saida
+    assert "Ranking" in saida

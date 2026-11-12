@@ -9,6 +9,7 @@ separados por vírgula, repartidos entre os usuários). Opcionais: `USUARIOS` (2
 (300), `RAMPA_S` (30) e `PAUSA_S` (`5-15`, sorteada a cada ação, ou um número fixo).
 Cuidado: a busca limita 30 consultas por minuto por pessoa e por instância (api/rota_da_busca.py);
 com um token só, quase todas as buscas voltam 429. O relatório mostra quantas foram recusadas.
+Todo pedido leva o cabeçalho de teste; a API só o respeita com BUSCA_ACEITA_TESTE_DE_CARGA ligada.
 Sai com 0 se nenhum pedido falhou, 1 se algum falhou e 2 se faltou configuração.
 """
 
@@ -26,6 +27,8 @@ from typing import Any, Protocol
 
 import requests
 
+from api.teste_de_carga import CABECALHO_DE_TESTE, VALOR_DO_CABECALHO
+
 CONSULTAS = Path(__file__).with_name("consultas_da_sonda.toml")
 ROTA_DA_BUSCA = "GET /v1/busca"
 # O campo da resposta da busca; escrito assim porque o nome entre aspas é o da coleção do
@@ -33,6 +36,14 @@ ROTA_DA_BUSCA = "GET /v1/busca"
 MOMENTOS = "mo" + "mentos"
 # Pesos do roteiro: a busca é o que a tela mais faz.
 PESOS = {"buscar": 4, "abrir": 3, "listar": 3}
+
+
+# Não confirma o estado do servidor: só lembra quem roda.
+LEMBRETE = (
+    "Antes de rodar, confira no dev a chave BUSCA_ACEITA_TESTE_DE_CARGA ligada e o limite "
+    "BUSCA_CONSULTAS_POR_MINUTO alto (depois do teste, volte a desligada e a 30).\n"
+    "A carga gera custo de embedding, Vector Search e Ranking API."
+)
 
 
 class Transporte(Protocol):
@@ -46,6 +57,7 @@ class Transporte(Protocol):
 def transporte_http(url: str, token: str) -> Transporte:
     sessao = requests.Session()  # uma por usuário, como um navegador
     sessao.headers["Authorization"] = f"Bearer {token}"
+    sessao.headers[CABECALHO_DE_TESTE] = VALOR_DO_CABECALHO
 
     def chamar(
         metodo: str, caminho: str, params: dict[str, Any] | None, corpo: Any
@@ -312,6 +324,7 @@ def main() -> int:
         transporte_http(url, t.strip()) for t in token.split(",") if t.strip()
     ]
     medidas, parar = Medidas(), threading.Event()
+    print(LEMBRETE)
     print(
         f"{usuarios} usuários por {duracao:.0f} s, rampa de {rampa:.0f} s; Ctrl+C encerra."
     )
