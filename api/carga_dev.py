@@ -7,9 +7,10 @@ vezes com filtro, com uma pausa de "pensar" entre as ações.
 Variáveis: `URL` (o serviço) e `TOKEN` (ID token da sessão de quem roda, vale 1 h; vários
 separados por vírgula, repartidos entre os usuários). Opcionais: `USUARIOS` (200), `DURACAO_S`
 (300), `RAMPA_S` (30) e `PAUSA_S` (`5-15`, sorteada a cada ação, ou um número fixo).
-Cuidado: a busca limita 30 consultas por minuto por pessoa e por instância (api/rota_da_busca.py);
-com um token só, quase todas as buscas voltam 429. O relatório mostra quantas foram recusadas.
+Cuidado: a busca limita BUSCA_CONSULTAS_POR_MINUTO (30 por padrão) por pessoa e por instância;
+com o padrão, quase todas as buscas voltam 429. O relatório mostra quantas foram recusadas.
 Todo pedido leva o cabeçalho de teste; a API só o respeita com BUSCA_ACEITA_TESTE_DE_CARGA ligada.
+Para o teste, suba o limite e ligue a chave pelo Terraform; depois volte a 30 e desligada.
 Sai com 0 se nenhum pedido falhou, 1 se algum falhou e 2 se faltou configuração.
 """
 
