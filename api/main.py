@@ -641,6 +641,7 @@ def criar_app(
                 copia_do_catalogo=copia_das_pessoas,
                 listas=listas_da_busca,
                 versao_da_lixeira=versao_da_lixeira,
+                marcas=catalogo_de_marcas,
             ),
             relogio,
             busca_por_minuto,

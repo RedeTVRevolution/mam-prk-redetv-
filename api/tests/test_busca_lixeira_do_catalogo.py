@@ -22,6 +22,7 @@ from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
 from api.jobs import CursorInvalido, agora_utc
 from api.lixeira_na_leitura import VersaoDaLixeiraEmMemoria
 from api.main import criar_app
+from api.marcas import CatalogoDeMarcasEmMemoria
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_agent_retrieval import SEM_INDICES
 from api.tests.test_auth import VerificadorFalso
@@ -96,6 +97,7 @@ class Cenario:
         self._indice = indice
         # Como no servidor, o marcador avança a cada mudança do catálogo (#591).
         self.versao = VersaoDaLixeiraEmMemoria()
+        self.marcas = CatalogoDeMarcasEmMemoria()
 
     def busca(
         self,
@@ -118,6 +120,7 @@ class Cenario:
             copia_do_catalogo=copia,
             listas=listas,
             versao_da_lixeira=self.versao,
+            marcas=self.marcas,
         )
 
     def plano(self, job_id: str, descricao: str, *pessoas: str) -> None:
@@ -145,6 +148,14 @@ class Cenario:
 
     def purgar(self, id: str) -> None:
         self.m.catalogo.apagar(id)
+        self.versao.avancar()
+
+    def marca_na_lixeira(self, id: str) -> None:
+        self.marcas.definir_lixeira(id, ENVIO)
+        self.versao.avancar()
+
+    def restaurar_marca(self, id: str) -> None:
+        self.marcas.definir_lixeira(id, None)
         self.versao.avancar()
 
 
@@ -581,3 +592,103 @@ def test_pela_api_a_busca_aberta_numa_instancia_da_422_apos_envio_e_purga_noutra
     nova = a.get("/v1/busca", params={"q": "estúdio", "limite": 2}, headers=admin)
     assert nova.status_code == 200
     assert [v["valor"] for v in nova.json()["facetas"]["pessoa"]] == [c.bia]
+
+
+# --- Marca na lixeira do catálogo (#594): sai do campo `marca`, da faceta e do filtro. ---
+
+
+def _faceta_de_marcas(resultado: Any) -> list[str]:
+    return [v.valor for v in resultado.facetas.marca]
+
+
+def _vestido(c: Cenario, job_id: str, marca: str) -> None:
+    c.m.com(job(job_id), objeto(f"{job_id}:objeto:0", job_id, 0, 1_000, marca=marca))
+
+
+def test_filtro_da_tela_por_marca_na_lixeira_devolve_vazio(cenario: Cenario) -> None:
+    nike = cenario.marcas.acrescentar("Nike", [])
+    _vestido(cenario, "j1", "Nike")
+    busca = cenario.busca()
+    pelo_filtro = Ajustes(marca="Nike")
+    assert _jobs(busca.buscar("vestido", ajustes=pelo_filtro)) == ["j1"]
+
+    cenario.marca_na_lixeira(nike.id)
+
+    assert busca.buscar("vestido", ajustes=pelo_filtro).videos == []
+    # O objeto continua achado pela descrição, sem a marca.
+    assert _jobs(busca.buscar("vestido")) == ["j1"]
+
+
+def test_marca_na_lixeira_some_da_faceta_pelo_nome_e_pelo_apelido(
+    cenario: Cenario,
+) -> None:
+    nike = cenario.marcas.acrescentar("Nike", ["Nik"])
+    cenario.marcas.acrescentar("Adidas", [])
+    _vestido(cenario, "j1", "Nike")
+    _vestido(cenario, "j2", "NIK")
+    _vestido(cenario, "j3", "Adidas")
+    busca = cenario.busca()
+    assert sorted(_faceta_de_marcas(busca.buscar("vestido"))) == [
+        "Adidas",
+        "NIK",
+        "Nike",
+    ]
+
+    cenario.marca_na_lixeira(nike.id)
+    depois = busca.buscar("vestido")
+
+    assert _faceta_de_marcas(depois) == ["Adidas"]
+    assert sorted(_jobs(depois)) == ["j1", "j2", "j3"]
+    assert busca.buscar("vestido", ajustes=Ajustes(marca="NIK")).videos == []
+
+
+def test_marca_volta_na_hora_ao_restaurar(cenario: Cenario) -> None:
+    nike = cenario.marcas.acrescentar("Nike", [])
+    _vestido(cenario, "j1", "Nike")
+    busca = cenario.busca()
+    cenario.marca_na_lixeira(nike.id)
+    assert _faceta_de_marcas(busca.buscar("vestido")) == []
+
+    cenario.restaurar_marca(nike.id)
+
+    assert _faceta_de_marcas(busca.buscar("vestido")) == ["Nike"]
+    assert _jobs(busca.buscar("vestido", ajustes=Ajustes(marca="Nike"))) == ["j1"]
+
+
+def test_video_novo_com_a_marca_na_lixeira_nao_a_traz_de_volta(
+    cenario: Cenario,
+) -> None:
+    nike = cenario.marcas.acrescentar("Nike", [])
+    cenario.marca_na_lixeira(nike.id)
+    _vestido(cenario, "j2", "Nike")
+
+    resultado = cenario.busca().buscar("vestido")
+
+    assert _jobs(resultado) == ["j2"]
+    assert _faceta_de_marcas(resultado) == []
+
+
+def test_marca_purgada_volta_a_contar(cenario: Cenario) -> None:
+    nike = cenario.marcas.acrescentar("Nike", [])
+    _vestido(cenario, "j1", "Nike")
+    cenario.marca_na_lixeira(nike.id)
+    cenario.marcas.apagar(nike.id)
+    cenario.versao.avancar()
+
+    assert _faceta_de_marcas(cenario.busca().buscar("vestido")) == ["Nike"]
+
+
+def test_cursor_aberto_antes_do_envio_de_marca_para_a_lixeira_e_recusado(
+    cenario: Cenario,
+) -> None:
+    nike = cenario.marcas.acrescentar("Nike", [])
+    for i in range(1, 5):
+        _vestido(cenario, f"j{i}", "Nike")
+    busca = cenario.busca()
+    cursor = busca.buscar("vestido", limite=2, dono="u1")._proximo_cursor
+    assert cursor is not None
+
+    cenario.marca_na_lixeira(nike.id)
+
+    with pytest.raises(CursorInvalido):
+        busca.buscar("vestido", limite=2, dono="u1", cursor=cursor)

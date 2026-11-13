@@ -53,8 +53,10 @@ from api.jobs import (
 from api.lixeira_na_leitura import (
     VersaoDaLixeira,
     VersaoDaLixeiraEmMemoria,
+    nomes_de_marca_na_lixeira,
     pessoas_que_contam,
 )
+from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.numero import com_as_formas, mesma_palavra, singular
 
 log = logging.getLogger(__name__)
@@ -399,7 +401,9 @@ class Busca:
         listas: ListasDaBusca | None = None,
         cache_de_candidatos: CacheCurto | None = None,
         versao_da_lixeira: VersaoDaLixeira | None = None,
+        marcas: CatalogoDeMarcas | None = None,
     ) -> None:
+        self._marcas = marcas or CatalogoDeMarcasEmMemoria()
         self._versao = versao_da_lixeira or VersaoDaLixeiraEmMemoria()
         self._listas = listas or ListasDaBuscaEmMemoria()
         self._candidatos = cache_de_candidatos or CacheCurto(
@@ -546,12 +550,15 @@ class Busca:
                 contam.update(pessoas_que_contam(self._catalogo, faltam))
 
         def sem_excluidas(c: Consulta, achados: list[Registro]) -> list[Registro]:
-            """Tira de `pessoas` e `dono` quem não conta e confere o registro de novo contra
-            os filtros de pessoa e dono da consulta (cláusula e tela): fica só se ainda casa.
-            O texto do registro não muda."""
+            """Tira de `pessoas`, `dono` e `marca` quem não conta e confere o registro de novo
+            contra os filtros de pessoa, dono e marca da consulta (cláusula e tela): fica só se
+            ainda casa. O texto do registro não muda."""
             decidir(p for r in achados for p in (*r.pessoas, r.dono))
-            limpos = [_sem_quem_nao_conta(r, contam) for r in achados]
+            limpos = [_sem_quem_nao_conta(r, contam, sem_marca) for r in achados]
             return [r for r in limpos if _ainda_casa(r, c.filtros)]
+
+        # A marca na lixeira (#594) é lida uma vez por busca, depois da versão.
+        sem_marca = nomes_de_marca_na_lixeira(self._marcas)
 
         decidir(entendida.pessoas)
         carregar_nomes(entendida.pessoas)
@@ -1058,18 +1065,23 @@ def _casa(r: Registro, a: Ajustes) -> bool:
     )
 
 
-def _sem_quem_nao_conta(r: Registro, contam: Collection[str]) -> Registro:
+def _sem_quem_nao_conta(
+    r: Registro, contam: Collection[str], sem_marca: Collection[str]
+) -> Registro:
     return replace(
         r,
         pessoas=[p for p in r.pessoas if p in contam],
         dono=r.dono if r.dono in contam else None,
+        marca=None if r.marca and normalizar(r.marca) in sem_marca else r.marca,
     )
 
 
 def _ainda_casa(r: Registro, f: Filtros) -> bool:
-    """Os filtros de pessoa e dono, que a exclusão pode ter deixado sem casar."""
-    return (f.pessoa is None or f.pessoa in r.pessoas) and (
-        f.dono is None or f.dono == r.dono
+    """Os filtros de pessoa, dono e marca, que a exclusão pode ter deixado sem casar."""
+    return (
+        (f.pessoa is None or f.pessoa in r.pessoas)
+        and (f.dono is None or f.dono == r.dono)
+        and (f.marca is None or f.marca == r.marca)
     )
 
 
