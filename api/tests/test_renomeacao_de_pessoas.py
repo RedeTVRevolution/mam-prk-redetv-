@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, RenomeacaoDaPessoa
-from api.catalogo_dos_jobs import ids_do_catalogo
+from api.catalogo_dos_jobs import ids_do_catalogo, passar_pessoa_nos_jobs
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.exemplos_da_busca import EXEMPLOS
 from api.indexacao import reindexar_jobs
@@ -159,6 +159,28 @@ def test_a_previa_deixa_a_fusao_para_a_leitura_e_pula_a_que_nao_abre(
     assert "j4" in caplog.text
     # só a rota lê a pessoa (`viva`); a prévia não resolve fusão por conta própria
     assert lidas == [mundo.sabrina.id]
+
+
+def test_a_previa_conta_tambem_quem_ja_foi_fundido_na_pessoa() -> None:
+    mundo = Mundo()
+    antes = mundo.renomear(previa=True).json()["momentos_afetados"]
+    mundo.catalogo.definir_fusao(
+        mundo.outra.id,
+        FusaoDaPessoa(
+            destino_id=mundo.sabrina.id,
+            em=BASE,
+            por_uid="cur",
+            por_email="cur@redetv.com",
+            motivo="duplicada",
+        ),
+    )
+    passar_pessoa_nos_jobs(mundo.jobs, mundo.outra.id, mundo.sabrina.id)
+
+    depois = mundo.renomear(previa=True).json()
+
+    # as decupagens seguem com o catalogo_id da fundida; a leitura a mostra como a pessoa
+    assert depois["videos"] == 3
+    assert depois["momentos_afetados"] > antes
 
 
 def test_a_previa_conta_videos_e_momentos_sem_mudar_nada() -> None:

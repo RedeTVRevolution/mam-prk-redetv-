@@ -283,7 +283,7 @@ def test_fundir_de_novo_conta_tambem_quem_ja_foi_fundido_na_origem() -> None:
     resposta = mundo.fundir(origem=mundo.sabrina.id, destino=terceira.id)
 
     assert resposta.status_code == 200, resposta.text
-    assert resposta.json()["videos"] == 2
+    assert (resposta.json()["videos"], resposta.json()["aparicoes"]) == (2, 4)
     lida = mundo.cliente.get("/v1/jobs/j1/decupagem", headers=CURADOR).json()
     assert lida["pessoas"][0]["catalogo_id"] == terceira.id
 
