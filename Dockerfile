@@ -101,6 +101,7 @@ COPY api/__init__.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
@@ -183,6 +184,7 @@ COPY api/__init__.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
@@ -297,6 +299,7 @@ COPY api/__init__.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/florence.py \

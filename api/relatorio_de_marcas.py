@@ -25,12 +25,12 @@ from api.comparador import normalizar
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _parametro
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
+from api.erros import lido
 from api.jobs import RepositorioDeJobs
 from api.lixeira_na_leitura import (
     PurgasDeMarca,
     conta_depois_do_corte,
     cortes_validos,
-    lido,
     nomes_de_marca_na_lixeira,
 )
 from api.marcas import CatalogoDeMarcas
