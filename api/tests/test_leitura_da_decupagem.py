@@ -349,12 +349,13 @@ def test_lote_inicial_com_ids_distintos_e_id_inexistente_sem_nova_leitura() -> N
     leitura = _leitura(
         _modelo(
             _pessoa("pes01", "Ana", a.id),
-            _pessoa("pes02", "Ana", a.id),
+            _pessoa("pes02", "Ana Maria", a.id),
             _pessoa("pes03", "Fantasma", "inexistente"),
         ),
         catalogo,
     )
     leitura.entregue("j1")
+    # Três pessoas, dois ids distintos: o lote leva cada id uma vez só.
     assert [sorted(lote) for lote in catalogo.lotes] == [sorted([a.id, "inexistente"])]
     assert catalogo.individuais == []
 
@@ -365,7 +366,7 @@ def test_destino_da_fusao_fora_do_lote_e_lido_uma_vez() -> None:
     b = catalogo.acrescentar("B", "p", [])
     catalogo.definir_fusao(a.id, _fundida_em(a, b.id).fundida)
     leitura = _leitura(
-        _modelo(_pessoa("pes01", "A", a.id), _pessoa("pes02", "A", a.id)), catalogo
+        _modelo(_pessoa("pes01", "A", a.id), _pessoa("pes02", "A2", a.id)), catalogo
     )
     leitura.entregue("j1")
     assert len(catalogo.lotes) == 1 and catalogo.lotes[0] == [a.id]
