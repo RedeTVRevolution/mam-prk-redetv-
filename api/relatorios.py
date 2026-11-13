@@ -96,15 +96,6 @@ def recorta[T](
     return lidos[:limite], {"X-Proximo-Cursor": proximo.rstrip("=")}
 
 
-def parametros_da_pagina(depois: int, limite: int) -> list[dict[str, Any]]:
-    """As posições da página (`@posicao_de` < posição <= `@posicao_ate`), lendo um além do
-    limite para saber se há mais."""
-    return [
-        parametro("posicao_de", str(depois), "INT64"),
-        parametro("posicao_ate", str(depois + limite + 1), "INT64"),
-    ]
-
-
 def resposta_em_csv(texto: str, arquivo: str) -> Response:
     return Response(
         texto,
