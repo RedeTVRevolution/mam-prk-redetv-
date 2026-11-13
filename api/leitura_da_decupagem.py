@@ -48,7 +48,7 @@ from api.catalogo_apagado import (
 from api.correcoes import (
     Correcao,
     RepositorioDeCorrecoes,
-    decupagem_entregue,
+    decupagem_com_correcoes,
     versao_do_modelo,
 )
 from api.marcas import MarcaDoCatalogo
@@ -117,7 +117,7 @@ class LeituraDaDecupagem:
     def _corrigida(self, job_id: str) -> tuple[dict[str, Any], Any]:
         """A leitura corrigida e o `obter` em lote das pessoas (ou `None`, sem catálogo)."""
         conteudo = b"".join(self._decupagens.abrir_decupagem(job_id))
-        lida = decupagem_entregue(
+        lida = decupagem_com_correcoes(
             json.loads(conteudo),
             versao_do_modelo(conteudo),
             self._correcoes.listar(job_id),

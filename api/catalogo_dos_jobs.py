@@ -1,18 +1,13 @@
-"""Quem aparece em cada Job (#359): os `catalogo_id` da Decupagem entregue, guardados no Job.
+"""Quem aparece em cada Job (#359): os `catalogo_id` da Decupagem corrigida, guardados no Job.
 
 O impacto de uma pessoa ou marca do catálogo acha os vídeos por `array_contains` nesses
-campos em vez de abrir todas as decupagens. Quem muda a Decupagem entregue (a indexação, as
+campos em vez de abrir todas as decupagens. Quem muda a Decupagem corrigida (a indexação, as
 Correções, a fusão de pessoas) regrava os dois campos; só grava se mudaram.
 """
 
-import json
 import logging
-from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
-from api.catalogo import PessoaDoCatalogo
-from api.catalogo_apagado import com_pessoas_fundidas
-from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
 from api.leitura_da_decupagem import LeituraDaDecupagem
 
 if TYPE_CHECKING:
@@ -21,12 +16,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class LeitorDeDecupagem(Protocol):
-    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
-
-
 def ids_do_catalogo(entregue: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """Os ids das pessoas e das marcas do catálogo na Decupagem entregue, sem repetir."""
+    """Os ids das pessoas e das marcas do catálogo na Decupagem corrigida, sem repetir."""
 
     def ids(chave: str) -> list[str]:
         achados = {
@@ -65,20 +56,6 @@ def gravar_catalogo_do_job(
         gravar_se_mudou(repositorio, job_id, entregue)
     except Exception:
         log.exception("catálogo do Job %s não gravado", job_id)
-
-
-def entregue_com_fundidas(
-    job_id: str,
-    decupagens: LeitorDeDecupagem,
-    correcoes: RepositorioDeCorrecoes,
-    pessoas: Callable[[str], PessoaDoCatalogo | None],
-) -> dict[str, Any]:
-    """A Decupagem entregue do Job, com as pessoas fundidas já resolvidas."""
-    conteudo = b"".join(decupagens.abrir_decupagem(job_id))
-    entregue = decupagem_entregue(
-        json.loads(conteudo), versao_do_modelo(conteudo), correcoes.listar(job_id)
-    )
-    return com_pessoas_fundidas(entregue, pessoas)
 
 
 def atualizar_catalogo_do_job(
