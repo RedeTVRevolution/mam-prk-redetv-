@@ -19,7 +19,7 @@ from api.copia_bigquery import (
     CopiaEmMemoria,
     LinhaDoMomento,
     Transporte,
-    _parametro,
+    parametro,
     transporte_http,
 )
 from api.sinais import Registrar, imprimir
@@ -165,9 +165,9 @@ FROM recentes
                 "location": c.regiao,
                 "timeoutMs": 60_000,
                 "queryParameters": [
-                    _parametro("programa", programa),
-                    _parametro("job_id", job_id),
-                    _parametro("n", str(videos), "INT64"),
+                    parametro("programa", programa),
+                    parametro("job_id", job_id),
+                    parametro("n", str(videos), "INT64"),
                 ],
             }
         )

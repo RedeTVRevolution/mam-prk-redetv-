@@ -241,8 +241,8 @@ class CopiaBigQuery:
                     f"t.data_de_exibicao BETWEEN @inicio_{ano} AND @fim_{ano}"
                 )
                 parametros += [
-                    _parametro(f"inicio_{ano}", f"{ano:04}-01-01", "DATE"),
-                    _parametro(f"fim_{ano}", f"{ano:04}-12-31", "DATE"),
+                    parametro(f"inicio_{ano}", f"{ano:04}-01-01", "DATE"),
+                    parametro(f"fim_{ano}", f"{ano:04}-12-31", "DATE"),
                 ]
             filtro = f" AND ({' OR '.join(predicados)})"
         consulta = f"""
@@ -287,8 +287,8 @@ VALUES
                 "location": c.regiao,
                 "timeoutMs": 120_000,
                 "queryParameters": [
-                    _parametro("job_id", job_id),
-                    _parametro(
+                    parametro("job_id", job_id),
+                    parametro(
                         "linhas",
                         json.dumps(
                             [_json_da_linha(x) for x in linhas], ensure_ascii=False
@@ -330,7 +330,7 @@ VALUES
             sleep(5)
 
 
-def _parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
+def parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
     return {
         "name": nome,
         "parameterType": {"type": tipo},

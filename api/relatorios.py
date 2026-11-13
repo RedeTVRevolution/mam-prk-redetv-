@@ -22,7 +22,7 @@ from api.copia_bigquery import (
     CopiaEmMemoria,
     LinhaDoMomento,
     Transporte,
-    _parametro,
+    parametro,
     transporte_http,
 )
 from api.jobs import RepositorioDeJobs, _confere_permissao
@@ -96,15 +96,6 @@ def recorta[T](
     return lidos[:limite], {"X-Proximo-Cursor": proximo.rstrip("=")}
 
 
-def parametros_da_pagina(depois: int, limite: int) -> list[dict[str, Any]]:
-    """As posições da página (`@posicao_de` < posição <= `@posicao_ate`), lendo um além do
-    limite para saber se há mais."""
-    return [
-        _parametro("posicao_de", str(depois), "INT64"),
-        _parametro("posicao_ate", str(depois + limite + 1), "INT64"),
-    ]
-
-
 def resposta_em_csv(texto: str, arquivo: str) -> Response:
     return Response(
         texto,
@@ -163,11 +154,11 @@ def consultar_no_bigquery(
     parametros = list(parametros)
     if programa is not None:
         onde.append("t.programa = @programa")
-        parametros.append(_parametro("programa", programa))
+        parametros.append(parametro("programa", programa))
     for nome, dia, comparacao in (("desde", desde, ">="), ("ate", ate, "<=")):
         if dia is not None:
             onde.append(f"t.data_de_exibicao {comparacao} @{nome}")
-            parametros.append(_parametro(nome, dia.isoformat(), "DATE"))
+            parametros.append(parametro(nome, dia.isoformat(), "DATE"))
     tabela = f"`{config.projeto}.{config.dataset}.{config.tabela}` AS t"
     if unnest_das_pessoas:
         tabela += ", UNNEST(t.pessoas) AS p"
