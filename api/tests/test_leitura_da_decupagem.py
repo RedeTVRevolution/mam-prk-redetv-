@@ -405,9 +405,13 @@ def test_iteradores_dao_a_corrigida_dos_concluidos_e_pulam_a_que_nao_abre(
     corr = RepositorioDeCorrecoesEmMemoria()
 
     # `configurar` do log estruturado troca os handlers da raiz (e o do caplog): ligo direto.
-    logging.getLogger("api.leitura_da_decupagem").addHandler(caplog.handler)
-    with caplog.at_level("WARNING"):
-        lidas = list(decupagens_dos_jobs(jobs, corr, decupagens, catalogo))
+    logger = logging.getLogger("api.leitura_da_decupagem")
+    logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level("WARNING"):
+            lidas = list(decupagens_dos_jobs(jobs, corr, decupagens, catalogo))
+    finally:
+        logger.removeHandler(caplog.handler)
 
     assert [(j.id, _nome(d), _vinculo(d)) for j, d in lidas] == [("j1", "Ana B", b.id)]
     assert "j2" in caplog.text
