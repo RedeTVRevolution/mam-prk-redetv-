@@ -110,6 +110,10 @@ class PurgaDeMarca(BaseModel):
     apelidos: list[str]
     nomes: list[str]
     em: datetime
+    # A marca que foi purgada. Se a marca ainda existe no catálogo, a purga não aconteceu
+    # (gravou o registro e o apagar falhou): o registro não vale. Sem id (gravado antes
+    # deste campo), vale.
+    marca_id: str | None = None
 
 
 class PurgasDeMarca(Protocol):
@@ -126,6 +130,7 @@ def _registro_da_purga(marca: MarcaDoCatalogo, em: datetime) -> PurgaDeMarca:
         apelidos=marca.apelidos,
         nomes=nomes_de_busca_da_marca(marca),
         em=em,
+        marca_id=marca.id,
     )
 
 
@@ -157,11 +162,11 @@ class PurgasDeMarcaFirestore:
         return [PurgaDeMarca(**(d.to_dict() or {})) for d in self._colecao.stream()]
 
 
-def cortes_das_purgas(purgas: PurgasDeMarca) -> dict[str, datetime]:
+def cortes_das_purgas(purgas: Iterable[PurgaDeMarca]) -> dict[str, datetime]:
     """Por nome normalizado, a purga mais recente: só vale a de cima, porque ela cobre
     tudo o que as anteriores já cortavam."""
     cortes: dict[str, datetime] = {}
-    for p in purgas.todas():
+    for p in purgas:
         for n in p.nomes:
             cortes[n] = max(p.em, cortes.get(n, p.em))
     return cortes

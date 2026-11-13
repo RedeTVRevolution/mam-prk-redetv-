@@ -18,6 +18,7 @@ from typing import Annotated, Any, Literal, Protocol, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from google.api_core.exceptions import GoogleAPIError
 from pydantic import BaseModel
 
 from api.cache_curto import CacheCurto
@@ -25,7 +26,7 @@ from api.comparador import normalizar
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _parametro
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
-from api.jobs import RepositorioDeJobs
+from api.jobs import RepositorioDeJobs, ServicoIndisponivel
 from api.lixeira_na_leitura import (
     PurgasDeMarca,
     cortes_das_purgas,
@@ -466,6 +467,14 @@ class ConsultaComCache:
         return lista_em_python(somas, marca, depois, limite)
 
 
+def _lido[T](ler: Callable[[], T]) -> T:
+    """Uma leitura do Firestore que falha vira 503 (`ServicoIndisponivel`), não 500."""
+    try:
+        return ler()
+    except GoogleAPIError as e:
+        raise ServicoIndisponivel(str(e)) from e
+
+
 class SoMarcasQueContam:
     """A lixeira do catálogo vale na hora (#593): tira das somas, antes do ranking, dos
     totais, das posições e da paginação, o texto que bate com o nome ou apelido de uma marca
@@ -489,6 +498,15 @@ class SoMarcasQueContam:
         self._purgas = purgas
         self._jobs = jobs
 
+    def _cortes(self, nomes: set[str]) -> dict[str, datetime]:
+        """O corte de cada nome de `nomes` com registro de purga que vale: o da marca que
+        ainda existe no catálogo não vale (a purga não terminou), o da homônima recriada
+        sim, porque o id é outro."""
+        achados = [p for p in _lido(self._purgas.todas) if nomes & set(p.nomes)]
+        ids = {p.marca_id for p in achados if p.marca_id}
+        vivas = _lido(lambda: self._marcas.obter_varios(ids)) if ids else {}
+        return cortes_das_purgas(p for p in achados if p.marca_id not in vivas)
+
     def somas(
         self,
         programa: str | None,
@@ -496,25 +514,18 @@ class SoMarcasQueContam:
         ate: date | None,
         tipo: str | None,
     ) -> list[InsercoesDaMarca]:
-        return self._somas(programa, desde, ate, tipo, cortes_das_purgas(self._purgas))
-
-    def _somas(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        cortes: dict[str, datetime],
-    ) -> list[InsercoesDaMarca]:
         somas = self._consulta.somas(programa, desde, ate, tipo)
         fora = nomes_de_marca_na_lixeira(self._marcas)
         somas = [s for s in somas if normalizar(s.marca) not in fora]
+        cortes = self._cortes({normalizar(s.marca) for s in somas})
         cortadas = [s for s in somas if normalizar(s.marca) in cortes]
         if not cortadas:
             return somas
         criados = {
             j.id: j.criado_em
-            for j in self._jobs.obter_varios({s.job_id for s in cortadas})
+            for j in _lido(
+                lambda: self._jobs.obter_varios({s.job_id for s in cortadas})
+            )
         }
         return [
             s
@@ -546,10 +557,9 @@ class SoMarcasQueContam:
     ) -> "list[InsercaoNoRelatorio]":
         if normalizar(marca) in nomes_de_marca_na_lixeira(self._marcas):
             return []
-        cortes = cortes_das_purgas(self._purgas)
-        if normalizar(marca) in cortes:
+        if self._cortes({normalizar(marca)}):
             # O corte é por vídeo: a lista sai das somas já cortadas, não do SQL da marca.
-            somas = self._somas(programa, desde, ate, tipo, cortes)
+            somas = self.somas(programa, desde, ate, tipo)
             return lista_em_python(somas, marca, depois, limite)
         return self._consulta.lista_da_marca(
             marca, programa, desde, ate, tipo, depois, limite

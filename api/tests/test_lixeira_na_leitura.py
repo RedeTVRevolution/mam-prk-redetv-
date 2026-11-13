@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from google.api_core.exceptions import ServiceUnavailable
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
 
@@ -28,6 +29,7 @@ from api.copia_bigquery import CopiaEmMemoria, LinhaDoMomento, PessoaDoMomento
 from api.jobs import RepositorioEmMemoria, agora_utc
 from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.lixeira_na_leitura import (
+    PurgaDeMarca,
     PurgasDeMarca,
     PurgasDeMarcaEmMemoria,
     PurgasDeMarcaFirestore,
@@ -912,6 +914,7 @@ def test_registro_da_purga_guarda_nome_apelidos_e_data(purgas: PurgasDeMarca) ->
         ["AB InBev"],
         CORTE,
     )
+    assert registro.marca_id == ambev.id
     assert registro.nomes == ["ab inbev", "ambev"]  # o texto que o relatório compara
 
 
@@ -931,10 +934,11 @@ class JobsEspiao(RepositorioEmMemoria):
         super().__init__()
         self.lotes: list[list[str]] = []
         self.falha = False
+        self.erro: Exception = RuntimeError("Firestore fora")
 
     def obter_varios(self, job_ids: Any) -> Any:
         if self.falha:
-            raise RuntimeError("Firestore fora")
+            raise self.erro
         self.lotes.append(list(job_ids))
         return super().obter_varios(self.lotes[-1])
 
@@ -1145,3 +1149,91 @@ def test_com_a_consulta_real_e_o_registro_no_firestore_o_corte_vale_no_ranking()
     cliente = m.instancia(consulta, purgas_de_marca=purgas)
 
     assert _nomes_das_marcas(_marcas(cliente)) == ["Ambev", "NESTLE"]
+
+
+def test_falha_real_do_firestore_na_leitura_do_job_vira_503() -> None:
+    m = MundoDaPurga()
+    cliente = m.instancia()
+    m.jobs.falha = True
+    m.jobs.erro = ServiceUnavailable("Firestore fora")
+
+    resposta = cliente.get(ROTA_DAS_MARCAS, params={"limite": 10}, headers=ADMIN)
+
+    assert resposta.status_code == 503
+
+
+class PurgasQueLeemMal(PurgasDeMarcaEmMemoria):
+    def todas(self) -> Any:
+        raise ServiceUnavailable("Firestore fora")
+
+
+def test_falha_real_do_firestore_na_leitura_dos_registros_vira_503() -> None:
+    m = MundoDasMarcas()
+    cliente = m.instancia(purgas_de_marca=PurgasQueLeemMal())
+
+    resposta = cliente.get(ROTA_DAS_MARCAS, params={"limite": 10}, headers=ADMIN)
+
+    assert resposta.status_code == 503
+
+
+class MarcasQueLeemMal(CatalogoDeMarcasEmMemoria):
+    falha = False
+
+    def obter_varios(self, ids: Any) -> Any:
+        if self.falha:
+            raise ServiceUnavailable("Firestore fora")
+        return super().obter_varios(ids)
+
+
+def test_falha_real_do_firestore_na_leitura_do_catalogo_dos_registros_vira_503() -> (
+    None
+):
+    m = MundoDaPurga()
+    marcas = MarcasQueLeemMal()
+    m.marcas = marcas
+    cliente = m.instancia()
+    marcas.falha = True
+
+    resposta = cliente.get(ROTA_DAS_MARCAS, params={"limite": 10}, headers=ADMIN)
+
+    assert resposta.status_code == 503
+
+
+class MarcasQueNaoApagam(CatalogoDeMarcasEmMemoria):
+    def apagar(self, id: str) -> None:
+        raise RuntimeError("Firestore fora")
+
+
+def test_registro_orfao_nao_corta_a_marca_restaurada_depois_de_apagar_falhar() -> None:
+    m = MundoDasMarcas()
+    m.marcas = MarcasQueNaoApagam()
+    ambev = m.marcas.acrescentar("Ambev", ["AB InBev"])
+    jobs = JobsEspiao()
+    jobs.salvar(_job_criado_em("j1", ANTES))
+    jobs.salvar(_job_criado_em("j2", ANTES))
+    purgas = PurgasDeMarcaEmMemoria()
+    cliente = m.instancia(repositorio=jobs, purgas_de_marca=purgas)
+    cliente.post(f"{LIXEIRA}/marcas/{ambev.id}", json={"motivo": "x"}, headers=ADMIN)
+
+    with pytest.raises(RuntimeError):  # o registro foi gravado, o apagar falhou
+        cliente.post(
+            f"{LIXEIRA}/marcas/{ambev.id}/purgar", json={"nome": "Ambev"}, headers=ADMIN
+        )
+    assert len(purgas.todas()) == 1
+    cliente.post(f"{LIXEIRA}/marcas/{ambev.id}/restaurar", headers=ADMIN)
+
+    assert "Ambev" in _nomes_das_marcas(_marcas(cliente))
+    assert "AB INBEV" in _nomes_das_marcas(_marcas(cliente))
+
+
+def test_registro_sem_id_de_marca_continua_valendo() -> None:
+    m = MundoDaPurga()
+    antigo = PurgasDeMarcaEmMemoria()
+    antigo._purgas.append(  # um registro gravado antes de existir o id
+        PurgaDeMarca(nome="Ambev", apelidos=[], nomes=["ambev", "ab inbev"], em=CORTE)
+    )
+    m.marcas.acrescentar("Ambev", ["AB InBev"])  # existe uma marca de mesmo nome
+
+    cliente = m.instancia(purgas_de_marca=antigo)
+
+    assert "AB INBEV" not in _nomes_das_marcas(_marcas(cliente))
