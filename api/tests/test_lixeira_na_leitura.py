@@ -1237,3 +1237,12 @@ def test_registro_sem_id_de_marca_continua_valendo() -> None:
     cliente = m.instancia(purgas_de_marca=antigo)
 
     assert "AB INBEV" not in _nomes_das_marcas(_marcas(cliente))
+
+
+def test_job_ausente_conta_como_anterior_a_purga() -> None:
+    from api.lixeira_na_leitura import conta_depois_do_corte
+
+    corte = datetime(2026, 1, 2, tzinfo=UTC)
+    assert not conta_depois_do_corte(None, corte)
+    assert not conta_depois_do_corte(corte, corte)
+    assert conta_depois_do_corte(corte + timedelta(seconds=1), corte)

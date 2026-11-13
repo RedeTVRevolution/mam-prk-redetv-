@@ -18,7 +18,6 @@ from typing import Annotated, Any, Literal, Protocol, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from google.api_core.exceptions import GoogleAPIError
 from pydantic import BaseModel
 
 from api.cache_curto import CacheCurto
@@ -26,10 +25,12 @@ from api.comparador import normalizar
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _parametro
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
-from api.jobs import RepositorioDeJobs, ServicoIndisponivel
+from api.jobs import RepositorioDeJobs
 from api.lixeira_na_leitura import (
     PurgasDeMarca,
-    cortes_das_purgas,
+    conta_depois_do_corte,
+    cortes_validos,
+    lido,
     nomes_de_marca_na_lixeira,
 )
 from api.marcas import CatalogoDeMarcas
@@ -467,14 +468,6 @@ class ConsultaComCache:
         return lista_em_python(somas, marca, depois, limite)
 
 
-def _lido[T](ler: Callable[[], T]) -> T:
-    """Uma leitura do Firestore que falha vira 503 (`ServicoIndisponivel`), não 500."""
-    try:
-        return ler()
-    except GoogleAPIError as e:
-        raise ServicoIndisponivel(str(e)) from e
-
-
 class SoMarcasQueContam:
     """A lixeira do catálogo vale na hora (#593): tira das somas, antes do ranking, dos
     totais, das posições e da paginação, o texto que bate com o nome ou apelido de uma marca
@@ -499,13 +492,7 @@ class SoMarcasQueContam:
         self._jobs = jobs
 
     def _cortes(self, nomes: set[str]) -> dict[str, datetime]:
-        """O corte de cada nome de `nomes` com registro de purga que vale: o da marca que
-        ainda existe no catálogo não vale (a purga não terminou), o da homônima recriada
-        sim, porque o id é outro."""
-        achados = [p for p in _lido(self._purgas.todas) if nomes & set(p.nomes)]
-        ids = {p.marca_id for p in achados if p.marca_id}
-        vivas = _lido(lambda: self._marcas.obter_varios(ids)) if ids else {}
-        return cortes_das_purgas(p for p in achados if p.marca_id not in vivas)
+        return cortes_validos(self._purgas, self._marcas, nomes)
 
     def somas(
         self,
@@ -523,15 +510,13 @@ class SoMarcasQueContam:
             return somas
         criados = {
             j.id: j.criado_em
-            for j in _lido(
-                lambda: self._jobs.obter_varios({s.job_id for s in cortadas})
-            )
+            for j in lido(lambda: self._jobs.obter_varios({s.job_id for s in cortadas}))
         }
         return [
             s
             for s in somas
             if (corte := cortes.get(normalizar(s.marca))) is None
-            or (s.job_id in criados and criados[s.job_id] > corte)
+            or conta_depois_do_corte(criados.get(s.job_id), corte)
         ]
 
     def ranking(

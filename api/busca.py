@@ -51,8 +51,13 @@ from api.jobs import (
     RepositorioDeJobs,
 )
 from api.lixeira_na_leitura import (
+    PurgasDeMarca,
+    PurgasDeMarcaEmMemoria,
     VersaoDaLixeira,
     VersaoDaLixeiraEmMemoria,
+    conta_depois_do_corte,
+    cortes_validos,
+    lido,
     nomes_de_marca_na_lixeira,
     pessoas_que_contam,
 )
@@ -402,8 +407,10 @@ class Busca:
         cache_de_candidatos: CacheCurto | None = None,
         versao_da_lixeira: VersaoDaLixeira | None = None,
         marcas: CatalogoDeMarcas | None = None,
+        purgas: PurgasDeMarca | None = None,
     ) -> None:
         self._marcas = marcas or CatalogoDeMarcasEmMemoria()
+        self._purgas = purgas or PurgasDeMarcaEmMemoria()
         self._versao = versao_da_lixeira or VersaoDaLixeiraEmMemoria()
         self._listas = listas or ListasDaBuscaEmMemoria()
         self._candidatos = cache_de_candidatos or CacheCurto(
@@ -486,7 +493,9 @@ class Busca:
             faltam = list(dict.fromkeys(i for i in ids if i not in jobs))
             if not faltam:
                 return
-            lidos = {j.id: j for j in self._repositorio.obter_varios(faltam)}
+            lidos = {
+                j.id: j for j in lido(lambda: self._repositorio.obter_varios(faltam))
+            }
             for i in faltam:
                 jobs[i] = self._visivel_de(lidos.get(i), sistema)
 
@@ -551,11 +560,39 @@ class Busca:
                 decididos.update(faltam)
                 contam.update(pessoas_que_contam(self._catalogo, faltam))
 
+        # A marca purgada (#599) corta por candidato, pelo `criado_em` do Job dele: o corte de
+        # cada nome é lido uma vez por busca.
+        cortes: dict[str, datetime] = {}
+        marcas_vistas: set[str] = set()
+
+        def sem_marca_purgada(achados: list[Registro]) -> list[Registro]:
+            """Tira a `marca` do registro de Job criado até a purga dela (Job ausente conta
+            como anterior); os Jobs dos candidatos com marca cortada são lidos aqui."""
+            novas = {normalizar(r.marca) for r in achados if r.marca} - marcas_vistas
+            if novas:
+                marcas_vistas.update(novas)
+                cortes.update(cortes_validos(self._purgas, self._marcas, novas))
+            carregar_jobs(
+                r.job_id for r in achados if r.marca and normalizar(r.marca) in cortes
+            )
+
+            def sai(r: Registro) -> bool:
+                corte = cortes.get(normalizar(r.marca)) if r.marca else None
+                if corte is None:
+                    return False
+                dele = jobs[r.job_id]
+                return not conta_depois_do_corte(
+                    dele.criado_em if dele else None, corte
+                )
+
+            return [replace(r, marca=None) if sai(r) else r for r in achados]
+
         def sem_excluidas(c: Consulta, achados: list[Registro]) -> list[Registro]:
             """Tira de `pessoas`, `dono` e `marca` quem não conta e confere o registro de novo
             contra os filtros de pessoa, dono e marca da consulta (cláusula e tela): fica só se
             ainda casa. O texto do registro não muda."""
             decidir(p for r in achados for p in (*r.pessoas, r.dono))
+            achados = sem_marca_purgada(achados)
             limpos = [_sem_quem_nao_conta(r, contam, sem_marca) for r in achados]
             return [r for r in limpos if _ainda_casa(r, c.filtros)]
 

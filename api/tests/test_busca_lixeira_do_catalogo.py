@@ -8,10 +8,12 @@ este sobre um servidor de índice simulado que entende o filtro JSON do `batchSe
 import json
 import zlib
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from google.api_core.exceptions import ServiceUnavailable
 
 from api.agent_retrieval import AgentRetrieval, _dados
 from api.auditoria import RepositorioDeAuditoriaEmMemoria
@@ -19,8 +21,8 @@ from api.auth import Usuario
 from api.busca import Ajustes, Busca, ListasDaBuscaEmMemoria, RankingEmOrdem
 from api.catalogo import CopiaCurta, EnvioParaLixeira
 from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
-from api.jobs import CursorInvalido, agora_utc
-from api.lixeira_na_leitura import VersaoDaLixeiraEmMemoria
+from api.jobs import CursorInvalido, ServicoIndisponivel, agora_utc
+from api.lixeira_na_leitura import PurgasDeMarcaEmMemoria, VersaoDaLixeiraEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
 from api.papeis import RepositorioDePapeisEmMemoria
@@ -98,6 +100,7 @@ class Cenario:
         # Como no servidor, o marcador avança a cada mudança do catálogo (#591).
         self.versao = VersaoDaLixeiraEmMemoria()
         self.marcas = CatalogoDeMarcasEmMemoria()
+        self.purgas = PurgasDeMarcaEmMemoria()
 
     def busca(
         self,
@@ -121,6 +124,7 @@ class Cenario:
             listas=listas,
             versao_da_lixeira=self.versao,
             marcas=self.marcas,
+            purgas=self.purgas,
         )
 
     def plano(self, job_id: str, descricao: str, *pessoas: str) -> None:
@@ -152,6 +156,12 @@ class Cenario:
 
     def marca_na_lixeira(self, id: str) -> None:
         self.marcas.definir_lixeira(id, ENVIO)
+        self.versao.avancar()
+
+    def purgar_marca(self, marca: Any, em: datetime) -> None:
+        """Como a purga: grava o registro, apaga a marca, avança a versão."""
+        self.purgas.gravar(marca, em)
+        self.marcas.apagar(marca.id)
         self.versao.avancar()
 
     def restaurar_marca(self, id: str) -> None:
@@ -692,3 +702,85 @@ def test_cursor_aberto_antes_do_envio_de_marca_para_a_lixeira_e_recusado(
 
     with pytest.raises(CursorInvalido):
         busca.buscar("vestido", limite=2, dono="u1", cursor=cursor)
+
+
+# --- Marca purgada (#599): o corte é por candidato, pelo `criado_em` do Job. ---
+
+PURGA = BASE + timedelta(days=1)
+
+
+def _vestido_criado(c: Cenario, job_id: str, marca: str, em: datetime) -> None:
+    c.m.com(
+        job(job_id, criado_em=em),
+        objeto(f"{job_id}:objeto:0", job_id, 0, 1_000, marca=marca),
+    )
+
+
+def _com_video_antigo_e_novo(c: Cenario, recriar: bool = False) -> None:
+    nike = c.marcas.acrescentar("Nike", [])
+    _vestido_criado(c, "velho", "Nike", BASE)
+    c.purgar_marca(nike, PURGA)
+    if recriar:
+        c.marcas.acrescentar("Nike", [])
+    _vestido_criado(c, "novo", "Nike", PURGA + timedelta(days=1))
+
+
+def test_marca_purgada_nao_conta_no_video_antigo_e_conta_no_novo(
+    cenario: Cenario,
+) -> None:
+    _com_video_antigo_e_novo(cenario)
+    busca = cenario.busca()
+
+    todos = busca.buscar("vestido")
+    assert sorted(_jobs(todos)) == ["novo", "velho"]  # o texto continua achado
+    assert [(f.valor, f.videos) for f in todos.facetas.marca] == [("Nike", 1)]
+    # O filtro da tela devolve os vídeos novos, não vazio.
+    assert _jobs(busca.buscar("vestido", ajustes=Ajustes(marca="Nike"))) == ["novo"]
+
+
+def test_marca_recriada_aparece_so_nos_videos_novos(cenario: Cenario) -> None:
+    _com_video_antigo_e_novo(cenario, recriar=True)
+    busca = cenario.busca()
+
+    assert _jobs(busca.buscar("vestido", ajustes=Ajustes(marca="Nike"))) == ["novo"]
+    assert [(f.valor, f.videos) for f in busca.buscar("vestido").facetas.marca] == [
+        ("Nike", 1)
+    ]
+
+
+def test_reprocessar_o_video_antigo_nao_ressuscita_a_marca_purgada(
+    cenario: Cenario,
+) -> None:
+    _com_video_antigo_e_novo(cenario)
+    # Reprocessado depois da purga: o `criado_em` do Job não muda.
+    cenario.m.jobs.salvar(
+        job("velho", criado_em=BASE, atualizado_em=PURGA + timedelta(days=5))
+    )
+    busca = cenario.busca()
+
+    assert _jobs(busca.buscar("vestido", ajustes=Ajustes(marca="Nike"))) == ["novo"]
+
+
+def test_marca_cuja_purga_nao_terminou_continua_contando(cenario: Cenario) -> None:
+    nike = cenario.marcas.acrescentar("Nike", [])
+    _vestido_criado(cenario, "velho", "Nike", BASE)
+    cenario.purgas.gravar(nike, PURGA)  # gravou o registro, o apagar falhou
+
+    busca = cenario.busca()
+
+    assert _jobs(busca.buscar("vestido", ajustes=Ajustes(marca="Nike"))) == ["velho"]
+
+
+def test_falha_na_leitura_do_job_com_marca_purgada_e_503_nao_job_ausente(
+    cenario: Cenario,
+) -> None:
+    _com_video_antigo_e_novo(cenario)
+    busca = cenario.busca()
+
+    def cai(ids: Any) -> Any:
+        raise ServiceUnavailable("firestore fora")
+
+    cenario.m.jobs.obter_varios = cai  # type: ignore[method-assign]
+
+    with pytest.raises(ServicoIndisponivel):
+        busca.buscar("vestido")

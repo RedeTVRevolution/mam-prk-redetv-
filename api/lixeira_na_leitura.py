@@ -17,14 +17,16 @@ lixeira não garantiria. A busca a usa para recusar o cursor velho.
 """
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from typing import Any, Protocol
 
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud import firestore
 from pydantic import BaseModel
 
 from api.catalogo import Catalogo, PessoaDoCatalogo
+from api.jobs import ServicoIndisponivel
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 
 COLECAO_DO_ESTADO_DA_LIXEIRA = "estado_da_lixeira"
@@ -170,3 +172,29 @@ def cortes_das_purgas(purgas: Iterable[PurgaDeMarca]) -> dict[str, datetime]:
         for n in p.nomes:
             cortes[n] = max(p.em, cortes.get(n, p.em))
     return cortes
+
+
+def lido[T](ler: Callable[[], T]) -> T:
+    """Uma leitura do Firestore que falha vira 503 (`ServicoIndisponivel`), não 500."""
+    try:
+        return ler()
+    except GoogleAPIError as e:
+        raise ServicoIndisponivel(str(e)) from e
+
+
+def cortes_validos(
+    purgas: PurgasDeMarca, marcas: CatalogoDeMarcas, nomes: set[str]
+) -> dict[str, datetime]:
+    """O corte de cada nome de `nomes` com registro de purga que vale (#595, #599): o da
+    marca que ainda existe no catálogo não vale (a purga não terminou), o da homônima
+    recriada sim, porque o id é outro."""
+    achados = [p for p in lido(purgas.todas) if nomes & set(p.nomes)]
+    ids = {p.marca_id for p in achados if p.marca_id}
+    vivas = lido(lambda: marcas.obter_varios(ids)) if ids else {}
+    return cortes_das_purgas(p for p in achados if p.marca_id not in vivas)
+
+
+def conta_depois_do_corte(criado_em: datetime | None, corte: datetime) -> bool:
+    """A ocorrência de um vídeo conta se o Job foi criado depois da purga; Job ausente
+    (`criado_em` `None`) conta como anterior."""
+    return criado_em is not None and criado_em > corte
