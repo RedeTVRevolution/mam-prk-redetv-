@@ -56,13 +56,10 @@ from api.lixeira_na_leitura import (
     PurgasDeMarcaEmMemoria,
     VersaoDaLixeira,
     VersaoDaLixeiraEmMemoria,
-    conta_depois_do_corte,
-    cortes_validos,
-    nomes_de_marca_na_lixeira,
-    pessoas_que_contam,
 )
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.numero import com_as_formas, mesma_palavra, singular
+from api.quem_conta import QuemConta
 
 log = logging.getLogger(__name__)
 
@@ -545,11 +542,12 @@ class Busca:
             return nomes.get(id or "") or None
 
         # A lixeira do catálogo vale na leitura (#583): só conta quem existe no catálogo, fora
-        # da lixeira. O estado é lido em lote, uma vez por id, e vale para toda a busca.
+        # da lixeira. Um Quem conta só responde por toda a busca (todos os lotes): lê cada id,
+        # a lixeira das marcas e as purgas uma vez, e o corte de uma marca é o mesmo em todos
+        # os lotes (#610).
+        quem_conta = QuemConta(self._catalogo, self._marcas, self._purgas)
         contam: set[str] = set()
         decididos: set[str] = set()
-        # A marca na lixeira (#594): uma leitura por busca, depois da versão.
-        sem_marca = nomes_de_marca_na_lixeira(self._marcas)
 
         # Uma mudança na lixeira no meio da busca mistura dois estados do catálogo nesta 1ª
         # página (consulta decidida antes do índice, registros depois); a `versao` do início
@@ -558,33 +556,27 @@ class Busca:
             faltam = {i for i in ids if i and i not in decididos}
             if faltam:
                 decididos.update(faltam)
-                contam.update(pessoas_que_contam(self._catalogo, faltam))
+                contam.update(quem_conta.contam(faltam))
 
-        # A marca purgada (#599) corta por candidato, pelo `criado_em` do Job dele: o registro
-        # das purgas é lido uma vez por busca, junto do estado da lixeira.
-        purgadas = lido(self._purgas.todas)
-        cortes: dict[str, datetime] = {}
-        marcas_vistas: set[str] = set()
-
-        def sem_marca_purgada(achados: list[Registro]) -> list[Registro]:
-            """Tira a `marca` do registro de Job criado até a purga dela (Job ausente conta
-            como anterior); os Jobs dos candidatos com marca cortada são lidos aqui."""
-            novas = {normalizar(r.marca) for r in achados if r.marca} - marcas_vistas
-            if novas:
-                marcas_vistas.update(novas)
-                cortes.update(cortes_validos(purgadas, self._marcas, novas))
+        def sem_marca_que_nao_conta(achados: list[Registro]) -> list[Registro]:
+            """Tira a `marca` que está na lixeira ou que a purga cortou: o registro de Job
+            criado até a purga (Job ausente conta como anterior). Os Jobs só são lidos
+            para as marcas com corte."""
+            cortes = quem_conta.cortes(
+                {normalizar(r.marca) for r in achados if r.marca}
+            )
             carregar_jobs(
-                r.job_id for r in achados if r.marca and normalizar(r.marca) in cortes
+                r.job_id
+                for r in achados
+                if r.marca and cortes.tem_corte(normalizar(r.marca))
             )
 
             def sai(r: Registro) -> bool:
-                corte = cortes.get(normalizar(r.marca)) if r.marca else None
-                if corte is None:
+                if not r.marca:
                     return False
-                dele = jobs[r.job_id]
-                return not conta_depois_do_corte(
-                    dele.criado_em if dele else None, corte
-                )
+                nome = normalizar(r.marca)
+                dele = jobs[r.job_id] if cortes.tem_corte(nome) else None
+                return not cortes.conta(nome, dele.criado_em if dele else None)
 
             return [replace(r, marca=None) if sai(r) else r for r in achados]
 
@@ -593,8 +585,9 @@ class Busca:
             contra os filtros de pessoa, dono e marca da consulta (cláusula e tela): fica só se
             ainda casa. O texto do registro não muda."""
             decidir(p for r in achados for p in (*r.pessoas, r.dono))
-            achados = sem_marca_purgada(achados)
-            limpos = [_sem_quem_nao_conta(r, contam, sem_marca) for r in achados]
+            limpos = [
+                _sem_quem_nao_conta(r, contam) for r in sem_marca_que_nao_conta(achados)
+            ]
             return [r for r in limpos if _ainda_casa(r, c.filtros)]
 
         decidir(entendida.pessoas)
@@ -1102,14 +1095,11 @@ def _casa(r: Registro, a: Ajustes) -> bool:
     )
 
 
-def _sem_quem_nao_conta(
-    r: Registro, contam: Collection[str], sem_marca: Collection[str]
-) -> Registro:
+def _sem_quem_nao_conta(r: Registro, contam: Collection[str]) -> Registro:
     return replace(
         r,
         pessoas=[p for p in r.pessoas if p in contam],
         dono=r.dono if r.dono in contam else None,
-        marca=None if r.marca and normalizar(r.marca) in sem_marca else r.marca,
     )
 
 

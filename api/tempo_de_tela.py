@@ -31,8 +31,8 @@ from api.copia_bigquery import (
 )
 from api.csv_seguro import csv_em_texto
 from api.jobs import RepositorioDeJobs
-from api.lixeira_na_leitura import pessoas_que_contam
 from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
+from api.quem_conta import QuemConta
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
@@ -322,7 +322,7 @@ class ConsultaComCache:
 
 class SoComQuemConta:
     """A lixeira do catálogo vale na hora (#591): tira das somas, antes do ranking, dos
-    totais, das posições e da paginação, a pessoa que não conta (`pessoas_que_contam`), com o
+    totais, das posições e da paginação, a pessoa que não conta (`QuemConta`), com o
     catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda."""
 
     def __init__(self, consulta: ConsultaDeMomentos, catalogo: Catalogo) -> None:
@@ -333,7 +333,7 @@ class SoComQuemConta:
         self, programa: str | None, desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
         somas = self._consulta.somas(programa, desde, ate)
-        contam = pessoas_que_contam(self._catalogo, {s.pessoa_id for s in somas})
+        contam = QuemConta(self._catalogo).contam({s.pessoa_id for s in somas})
         return [s for s in somas if s.pessoa_id in contam]
 
     def ranking(
@@ -355,7 +355,7 @@ class SoComQuemConta:
         depois: int,
         limite: int,
     ) -> "list[VideoDaPessoa]":
-        if not pessoas_que_contam(self._catalogo, [pessoa_id]):
+        if not QuemConta(self._catalogo).contam([pessoa_id]):
             return []
         somas = self._consulta.somas(programa, desde, ate)
         return videos_em_python(somas, pessoa_id, depois, limite)
