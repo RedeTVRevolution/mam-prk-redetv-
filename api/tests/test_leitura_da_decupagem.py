@@ -1,6 +1,7 @@
 """As duas leituras da Decupagem do Job (#584), pelo seam do módulo, com os dublês em memória."""
 
 import json
+import logging
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -15,7 +16,12 @@ from api.catalogo import (
     RenomeacaoDaPessoa,
 )
 from api.correcoes import Correcao, RepositorioDeCorrecoesEmMemoria, versao_do_modelo
-from api.leitura_da_decupagem import LeituraDaDecupagem
+from api.jobs import FiltroDeJobs, RepositorioEmMemoria
+from api.leitura_da_decupagem import (
+    LeituraDaDecupagem,
+    decupagens_dos_jobs,
+    decupagens_entregues,
+)
 from api.marcas import CatalogoDeMarcasEmMemoria, MarcaDoCatalogo
 
 BASE = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
@@ -371,3 +377,47 @@ def test_destino_da_fusao_fora_do_lote_e_lido_uma_vez() -> None:
     leitura.entregue("j1")
     assert len(catalogo.lotes) == 1 and catalogo.lotes[0] == [a.id]
     assert catalogo.individuais == [b.id]
+
+
+# --- Iteradores sobre os Jobs --------------------------------------------------------
+
+
+def test_iteradores_dao_a_corrigida_dos_concluidos_e_pulam_a_que_nao_abre(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from api.tests.test_lixeira import _job
+
+    catalogo = CatalogoEmMemoria()
+    a = catalogo.acrescentar("Ana A", "p", [])
+    b = catalogo.acrescentar("Ana B", "p", [])
+    catalogo.definir_fusao(a.id, _fundida_em(a, b.id).fundida)
+    jobs = RepositorioEmMemoria()
+    for id in ("j1", "j2"):
+        jobs.salvar(_job(id))
+    jobs.salvar(_job("j3", estado="analisando"))
+    por_job = {"j1": _modelo(_pessoa("pes01", "Ana A", a.id))}
+
+    class _PorJob:
+        def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
+            yield por_job[job_id]  # j2 não tem: KeyError, a leitura não abre
+
+    decupagens = _PorJob()
+    corr = RepositorioDeCorrecoesEmMemoria()
+
+    # `configurar` do log estruturado troca os handlers da raiz (e o do caplog): ligo direto.
+    logger = logging.getLogger("api.leitura_da_decupagem")
+    logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level("WARNING"):
+            lidas = list(decupagens_dos_jobs(jobs, corr, decupagens, catalogo))
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    assert [(j.id, _nome(d), _vinculo(d)) for j, d in lidas] == [("j1", "Ana B", b.id)]
+    assert "j2" in caplog.text
+    so_decupagens = list(decupagens_entregues(jobs, corr, decupagens, catalogo))
+    assert [_nome(d) for d in so_decupagens] == ["Ana B"]
+    filtradas = decupagens_dos_jobs(
+        jobs, corr, decupagens, catalogo, FiltroDeJobs(pessoa_do_catalogo="x")
+    )
+    assert list(filtradas) == []

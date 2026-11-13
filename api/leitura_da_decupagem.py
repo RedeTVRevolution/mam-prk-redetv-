@@ -34,8 +34,9 @@ vários Jobs decide pular e registrar.
 """
 
 import json
+import logging
 from collections.abc import Iterable, Iterator
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from api.catalogo import PessoaDoCatalogo
 from api.catalogo_apagado import (
@@ -44,8 +45,18 @@ from api.catalogo_apagado import (
     lido_em_lote,
     sem_catalogo_apagado,
 )
-from api.correcoes import Correcao, decupagem_entregue, versao_do_modelo
+from api.correcoes import (
+    Correcao,
+    RepositorioDeCorrecoes,
+    decupagem_entregue,
+    versao_do_modelo,
+)
 from api.marcas import MarcaDoCatalogo
+
+if TYPE_CHECKING:  # api.jobs importa este módulo
+    from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs
+
+log = logging.getLogger(__name__)
 
 
 class AbreDecupagem(Protocol):
@@ -121,3 +132,40 @@ class LeituraDaDecupagem:
             self._pessoas.obter,
         )
         return com_pessoas_fundidas(lida, pessoa), pessoa
+
+
+def decupagens_dos_jobs(
+    repositorio: "RepositorioDeJobs",
+    correcoes: RepositorioDeCorrecoes,
+    decupagens: AbreDecupagem,
+    pessoas: PessoasEmLote | None = None,
+    filtro: "FiltroDeJobs | None" = None,
+) -> Iterator[tuple["Job", dict[str, Any]]]:
+    """Cada vídeo concluído fora da lixeira (e que casa com `filtro`) com a Decupagem
+    corrigida; a que não lê é pulada, com log."""
+    from api.jobs import FiltroDeJobs  # local: api.jobs importa este módulo
+
+    leitura = LeituraDaDecupagem(decupagens, correcoes, pessoas)
+    for job in repositorio.consultar(filtro or FiltroDeJobs()).jobs:
+        if job.estado != "concluido":
+            continue
+        try:
+            corrigida = leitura.corrigida(job.id)
+        except Exception:  # noqa: BLE001 - uma Decupagem ruim não trava quem percorre
+            log.warning("decupagem de %s não lida; pulada", job.id)
+            continue
+        yield job, corrigida
+
+
+def decupagens_entregues(
+    repositorio: "RepositorioDeJobs",
+    correcoes: RepositorioDeCorrecoes,
+    decupagens: AbreDecupagem,
+    pessoas: PessoasEmLote | None = None,
+    filtro: "FiltroDeJobs | None" = None,
+) -> Iterator[dict[str, Any]]:
+    """A Decupagem corrigida de cada vídeo concluído fora da lixeira; a que não lê é pulada."""
+    for _job, corrigida in decupagens_dos_jobs(
+        repositorio, correcoes, decupagens, pessoas, filtro
+    ):
+        yield corrigida
