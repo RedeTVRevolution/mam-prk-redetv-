@@ -79,7 +79,7 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.decupagem import caminho_do_quadro
-from api.erros import ServicoIndisponivel
+from api.erros import ServicoIndisponivel as ServicoIndisponivel  # noqa: PLC0414 (reexport explícito para o mypy)
 from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
 from api.idempotencia import (
     TAMANHO_MAXIMO_DA_CHAVE,

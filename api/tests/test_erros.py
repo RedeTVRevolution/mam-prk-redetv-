@@ -1,10 +1,10 @@
 """O serviço indisponível mora num módulo leve de erros (#604), sem ciclo com o módulo de Jobs."""
 
 import ast
-import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from google.api_core.exceptions import GoogleAPIError
 
 import api.erros
@@ -32,12 +32,17 @@ def test_jobs_reexporta_a_mesma_classe() -> None:
 def test_excecao_do_modulo_de_erros_cai_no_503_da_aplicacao(tmp_path: Path) -> None:
     app = criar_app(pasta_web=tmp_path)
 
-    # O Starlette escolhe o handler pela classe da exceção levantada.
-    handler = app.exception_handlers[api.erros.ServicoIndisponivel]
-    resposta = handler(None, api.erros.ServicoIndisponivel("fora do ar"))
+    def falha() -> None:
+        raise api.erros.ServicoIndisponivel("fora do ar")
+
+    # Na frente das rotas da aplicação: a rota coringa do front responderia 404 antes.
+    app.add_api_route("/_falha", falha)
+    app.router.routes.insert(0, app.router.routes.pop())
+
+    resposta = TestClient(app, raise_server_exceptions=False).get("/_falha")
 
     assert resposta.status_code == 503
-    assert json.loads(resposta.body) == {"detail": "Serviço indisponível"}
+    assert resposta.json() == {"detail": "Serviço indisponível"}
 
 
 def test_lido_converte_erro_do_google_em_servico_indisponivel() -> None:
@@ -51,7 +56,7 @@ def test_lido_converte_erro_do_google_em_servico_indisponivel() -> None:
 def test_lido_devolve_o_valor_e_nao_engole_outros_erros() -> None:
     assert api.erros.lido(lambda: 7) == 7
     with pytest.raises(KeyError):
-        api.erros.lido(lambda: {}["x"])
+        api.erros.lido(lambda: {"a": 1}["x"])
 
 
 def test_modulo_de_erros_nao_importa_o_dominio() -> None:
