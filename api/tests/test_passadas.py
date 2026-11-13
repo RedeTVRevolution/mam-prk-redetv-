@@ -7,8 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 from google.api_core.exceptions import NotFound
 
+from api.ambiente import FaltaNoAmbiente
 from api.auth import Usuario
-from api.comparar_objetos import FaltaNoAmbiente, Preco
+from api.comparar_objetos import Preco
 from api.decupagem import Decupagem
 from api.gemini import Chamada
 from api.jobs import Job, RepositorioEmMemoria

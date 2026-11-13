@@ -38,6 +38,7 @@ from fastapi import Path as CaminhoDaRota
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auth import Chamador
 from api.bancos import cliente_do_firestore
 from api.comparador import (
@@ -49,12 +50,7 @@ from api.comparador import (
     normalizar,
     parear,
 )
-from api.comparar_objetos import (
-    FaltaNoAmbiente,
-    Preco,
-    exigir_do_ambiente,
-    precos_do_ambiente,
-)
+from api.comparar_objetos import Preco, precos_do_ambiente
 from api.decupagem import Decupagem
 from api.gemini import MODELO
 from api.jobs import Job, RepositorioDeJobs, _enxerga, _exige

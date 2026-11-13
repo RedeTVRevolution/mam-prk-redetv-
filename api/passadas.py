@@ -32,17 +32,12 @@ from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.analise_por_janelas import analisar_video
 from api.auth import Chamador
 from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo, CatalogoEmMemoria
-from api.comparar_objetos import (
-    FaltaNoAmbiente,
-    Preco,
-    exigir_do_ambiente,
-    precos_do_ambiente,
-    tokens_do_transporte,
-)
+from api.comparar_objetos import Preco, precos_do_ambiente, tokens_do_transporte
 from api.decupagem import Decupagem, Video
 from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
 from api.jobs import (
