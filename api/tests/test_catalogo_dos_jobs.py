@@ -1,12 +1,14 @@
 """O Job guarda quem aparece nele, e o impacto do catálogo lê só esses vídeos (#359)."""
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
-from api.catalogo import CatalogoEmMemoria
+from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.catalogo_dos_jobs import ids_do_catalogo
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.jobs import FiltroDeJobs, Job, RepositorioEmMemoria
+from api.leitura_da_decupagem import LeituraDaDecupagem
 from api.preencher_catalogo_dos_jobs import preencher
 from api.tests.test_correcoes import Mundo
 from api.tests.test_jobs import ArmazenamentoFalso
@@ -140,9 +142,9 @@ def test_a_carga_preenche_os_jobs_antigos_e_repetir_nao_muda_nada() -> None:
     def rodar() -> dict[str, int]:
         return preencher(
             repositorio,
-            armazenamento,
-            RepositorioDeCorrecoesEmMemoria(),
-            catalogo.obter,
+            LeituraDaDecupagem(
+                armazenamento, RepositorioDeCorrecoesEmMemoria(), catalogo
+            ),
         )
 
     assert rodar() == {"gravados": 1, "iguais": 1, "falhou": 0}
@@ -153,6 +155,54 @@ def test_a_carga_preenche_os_jobs_antigos_e_repetir_nao_muda_nada() -> None:
 
     assert rodar() == {"gravados": 0, "iguais": 2, "falhou": 0}
     assert {j.id: j for j in repositorio.listar()} == depois
+
+
+def test_a_carga_preenche_o_job_concluido_que_esta_na_lixeira() -> None:
+    repositorio = RepositorioEmMemoria()
+    armazenamento = ArmazenamentoFalso()
+    repositorio.salvar(
+        _job(
+            "morto",
+            lixeira=EnvioParaLixeira(
+                em=datetime(2026, 11, 2, tzinfo=UTC),
+                por_uid="adm",
+                por_email="adm@redetv.com",
+                motivo="duplicado",
+            ),
+        )
+    )
+    armazenamento.decupagens["morto"] = [_decupagem("p1", "m1")]
+
+    contagem = preencher(
+        repositorio,
+        LeituraDaDecupagem(
+            armazenamento, RepositorioDeCorrecoesEmMemoria(), CatalogoEmMemoria()
+        ),
+    )
+
+    assert contagem == {"gravados": 1, "iguais": 0, "falhou": 0}
+    job = repositorio.obter("morto")
+    assert job
+    assert job.pessoas_do_catalogo == ["p1"]
+    assert job.marcas_do_catalogo == ["m1"]
+
+
+def test_a_carga_pula_a_decupagem_que_nao_abre_e_segue() -> None:
+    repositorio = RepositorioEmMemoria()
+    armazenamento = ArmazenamentoFalso()
+    repositorio.salvar(_job("quebrado"))
+    armazenamento.decupagens["quebrado"] = [b"nao e json"]
+    repositorio.salvar(_job("bom"))
+    armazenamento.decupagens["bom"] = [_decupagem("p1", None)]
+
+    contagem = preencher(
+        repositorio,
+        LeituraDaDecupagem(
+            armazenamento, RepositorioDeCorrecoesEmMemoria(), CatalogoEmMemoria()
+        ),
+    )
+
+    assert contagem == {"gravados": 1, "iguais": 0, "falhou": 1}
 
 
 def test_a_reconciliacao_le_em_paginas_e_acha_o_job_sem_o_campo() -> None:
@@ -174,9 +224,9 @@ def test_a_reconciliacao_le_em_paginas_e_acha_o_job_sem_o_campo() -> None:
     def rodar() -> dict[str, int]:
         return preencher(
             repositorio,
-            armazenamento,
-            RepositorioDeCorrecoesEmMemoria(),
-            catalogo.obter,
+            LeituraDaDecupagem(
+                armazenamento, RepositorioDeCorrecoesEmMemoria(), catalogo
+            ),
             por_lote=2,
         )
 

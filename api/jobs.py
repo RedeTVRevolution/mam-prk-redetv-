@@ -1578,9 +1578,9 @@ def criar_rotas(
         return {"id": correcao.id, "versao_decupagem": versao_atual}
 
     def _atualizar_catalogo_do_job(job: Job) -> None:
-        """Regrava no Job quem aparece na Decupagem entregue; nunca levanta (#359)."""
+        """Regrava no Job quem aparece na Decupagem corrigida; nunca levanta (#359)."""
         atualizar_catalogo_do_job(
-            job, repositorio, armazenamento, correcoes, catalogo.obter
+            job, repositorio, LeituraDaDecupagem(armazenamento, correcoes, catalogo)
         )
 
     def _registrar_correcao(autor: Usuario, job: Job, correcao: Correcao) -> None:

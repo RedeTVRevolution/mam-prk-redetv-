@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from api.catalogo import PessoaDoCatalogo
 from api.catalogo_apagado import com_pessoas_fundidas
 from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
+from api.leitura_da_decupagem import LeituraDaDecupagem
 
 if TYPE_CHECKING:
     from api.jobs import Job, RepositorioDeJobs
@@ -83,13 +84,11 @@ def entregue_com_fundidas(
 def atualizar_catalogo_do_job(
     job: "Job",
     repositorio: "RepositorioDeJobs",
-    decupagens: LeitorDeDecupagem,
-    correcoes: RepositorioDeCorrecoes,
-    pessoas: Callable[[str], PessoaDoCatalogo | None],
+    leitura: LeituraDaDecupagem,
 ) -> None:
-    """Relê a Decupagem entregue e regrava os campos do Job; nunca levanta."""
+    """Relê a Decupagem corrigida e regrava os campos do Job; nunca levanta."""
     try:
-        entregue = entregue_com_fundidas(job.id, decupagens, correcoes, pessoas)
+        entregue = leitura.corrigida(job.id)
     except Exception:
         log.exception("decupagem de %s não lida para o catálogo do Job", job.id)
         return
