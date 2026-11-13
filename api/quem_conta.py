@@ -45,8 +45,9 @@ class Cortes:
     por_purga: Mapping[str, datetime]  # o corte da purga mais recente do nome
 
     def tem_corte(self, nome: str) -> bool:
-        """Há purga que corta o nome: só então o `criado_em` do Job decide."""
-        return nome in self.por_purga
+        """O `criado_em` do Job decide: há purga que corta o nome e ele não está na lixeira
+        (na lixeira, não conta de qualquer jeito e o Job não precisa ser lido)."""
+        return nome in self.por_purga and nome not in self.fora
 
     def conta(self, nome: str, criado_em: datetime | None) -> bool:
         """O texto da marca conta num Job criado em `criado_em` (Job ausente: `None`, conta

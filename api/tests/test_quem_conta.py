@@ -299,6 +299,22 @@ def test_marca_na_lixeira_nao_conta_pelo_nome_e_pelo_apelido() -> None:
     assert not cortes.tem_corte("nike")
 
 
+def test_nome_na_lixeira_com_purga_antiga_nao_pede_o_job() -> None:
+    marcas, purgas = CatalogoDeMarcasEmMemoria(), PurgasDeMarcaEmMemoria()
+    _purgada(marcas, purgas, "Nike", [], _dias(1))
+    recriada = marcas.acrescentar("Nike", [])
+    marcas.definir_lixeira(recriada.id, ENVIO)
+    quem = QuemConta(None, marcas, purgas)
+
+    na_lixeira = quem.cortes({"nike"})
+    so_purga = quem.cortes({"nike"}, so_a_purga=True)
+
+    assert not na_lixeira.tem_corte("nike")
+    assert not na_lixeira.conta("nike", _dias(9))
+    assert so_purga.tem_corte("nike")
+    assert so_purga.conta("nike", _dias(9))
+
+
 def test_so_com_a_purga_a_lixeira_nao_conta() -> None:
     marcas, purgas = CatalogoDeMarcasEmMemoria(), PurgasDeMarcaEmMemoria()
     nike = marcas.acrescentar("Nike", [])
