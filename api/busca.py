@@ -50,6 +50,7 @@ from api.jobs import (
     Job,
     RepositorioDeJobs,
 )
+from api.lixeira_na_leitura import pessoas_que_contam
 from api.numero import com_as_formas, mesma_palavra, singular
 
 log = logging.getLogger(__name__)
@@ -499,7 +500,7 @@ class Busca:
             """Só na thread da busca: o dicionário de Jobs não é escrito por mais de uma."""
             achados = next((a for q, a in prontas if q == c), None)
             if achados is None:
-                achados = do_indice(c)
+                achados = sem_excluidas(c, do_indice(c))
             carregar_jobs(r.job_id for r in achados)
             return [r for r in achados if job(r.job_id)]
 
@@ -518,8 +519,28 @@ class Busca:
             carregar_nomes([id])
             return nomes.get(id or "") or None
 
+        # A lixeira do catálogo vale na leitura (#583): só conta quem existe no catálogo, fora
+        # da lixeira. O estado é lido em lote, uma vez por id, e vale para toda a busca.
+        contam: set[str] = set()
+        decididos: set[str] = set()
+
+        def decidir(ids: Iterable[str | None]) -> None:
+            faltam = {i for i in ids if i and i not in decididos}
+            if faltam:
+                decididos.update(faltam)
+                contam.update(pessoas_que_contam(self._catalogo, faltam))
+
+        def sem_excluidas(c: Consulta, achados: list[Registro]) -> list[Registro]:
+            """Tira de `pessoas` e `dono` quem não conta e confere o registro de novo contra
+            os filtros de pessoa e dono da consulta (cláusula e tela): fica só se ainda casa.
+            O texto do registro não muda."""
+            decidir(p for r in achados for p in (*r.pessoas, r.dono))
+            limpos = [_sem_quem_nao_conta(r, contam) for r in achados]
+            return [r for r in limpos if _ainda_casa(r, c.filtros)]
+
+        decidir(entendida.pessoas)
         carregar_nomes(entendida.pessoas)
-        clausulas = self._clausulas(entendida, nome)
+        clausulas = self._clausulas(entendida, nome, contam)
         t_entender = _agora() - inicio
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
@@ -536,9 +557,17 @@ class Busca:
             max_workers=max(1, min(TETO_DE_CONSULTAS_AO_INDICE, len(planas)))
         )
         try:
-            entregues = iter(list(pool.map(do_indice, planas)))
+            achados_do_indice = list(pool.map(do_indice, planas))
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
+        # Depois do cache e antes da fusão (RRF), do corte do ranking e dos vídeos.
+        decidir(p for a in achados_do_indice for r in a for p in (*r.pessoas, r.dono))
+        entregues = iter(
+            [
+                sem_excluidas(q, a)
+                for q, a in zip(planas, achados_do_indice, strict=True)
+            ]
+        )
         t_indice = _agora() - inicio
         brutos = [[next(entregues) for _ in qs] for qs in por_clausula]
         prontas.extend(zip(planas, (l for da in brutos for l in da), strict=True))
@@ -647,7 +676,7 @@ class Busca:
 
             try:
                 prontas.extend(
-                    (q, a)
+                    (q, sem_excluidas(q, a))
                     for q, a in zip(pedidas, pool.map(adiantada, pedidas), strict=True)
                     if a is not None
                 )
@@ -859,11 +888,14 @@ class Busca:
         self,
         e: ConsultaEntendida,
         nome: Callable[[str | None], str | None],
+        contam: Collection[str],
     ) -> list[_Clausula]:
         base = _base(e)
         clausulas: list[_Clausula] = []
         for pessoa in e.pessoas:
-            clausulas.extend(_clausulas_da_pessoa(pessoa, e, base, nome))
+            clausulas.extend(
+                _clausulas_da_pessoa(pessoa, e, base, nome, pessoa in contam)
+            )
         if livre := _texto_da_busca(e):
             tipos: list[TipoDeRegistro | None] = []
             por_evidencia: tuple[tuple[EvidenciaDaBusca, TipoDeRegistro], ...] = (
@@ -1002,6 +1034,21 @@ def _casa(r: Registro, a: Ajustes) -> bool:
         (a.pessoa is None or a.pessoa in r.pessoas or a.pessoa == r.dono)
         and (a.marca is None or r.marca == a.marca)
         and (a.tipo is None or r.tipo == a.tipo)
+    )
+
+
+def _sem_quem_nao_conta(r: Registro, contam: Collection[str]) -> Registro:
+    return replace(
+        r,
+        pessoas=[p for p in r.pessoas if p in contam],
+        dono=r.dono if r.dono in contam else None,
+    )
+
+
+def _ainda_casa(r: Registro, f: Filtros) -> bool:
+    """Os filtros de pessoa e dono, que a exclusão pode ter deixado sem casar."""
+    return (f.pessoa is None or f.pessoa in r.pessoas) and (
+        f.dono is None or f.dono == r.dono
     )
 
 
@@ -1147,11 +1194,14 @@ def _clausulas_da_pessoa(
     e: ConsultaEntendida,
     base: Filtros,
     nome: Callable[[str | None], str | None],
+    conta: bool,
 ) -> list[_Clausula]:
+    """A pessoa que não conta (lixeira do catálogo, #583) não gera a cláusula de aparição;
+    o nome dela segue achado pelo texto."""
     quem = nome(pessoa)
     clausulas: list[_Clausula] = []
     evidencias = _evidencias(e)
-    if "imagem" in evidencias and quem:
+    if "imagem" in evidencias and quem and conta:
         # O índice não aceita cláusula só de filtros: os planos dela vão pelo significado.
         clausulas.append(
             _Clausula(
