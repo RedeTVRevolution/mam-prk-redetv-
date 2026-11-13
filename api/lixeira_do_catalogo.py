@@ -219,7 +219,9 @@ def criar_rotas_da_lixeira_do_catalogo(
     def insercoes_do_relatorio(achada: MarcaDoCatalogo) -> int:
         if relatorio_de_marcas is None:
             return 0
-        so = SoMarcasQueContam(relatorio_de_marcas, marcas, purgas_de_marca, repositorio)
+        so = SoMarcasQueContam(
+            relatorio_de_marcas, marcas, purgas_de_marca, repositorio
+        )
         nomes = set(nomes_de_busca_da_marca(achada))
         return ou_503(lambda: so.insercoes_dos_nomes(nomes))
 
