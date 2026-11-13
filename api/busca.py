@@ -539,6 +539,8 @@ class Busca:
         # da lixeira. O estado é lido em lote, uma vez por id, e vale para toda a busca.
         contam: set[str] = set()
         decididos: set[str] = set()
+        # A marca na lixeira (#594): uma leitura por busca, depois da versão.
+        sem_marca = nomes_de_marca_na_lixeira(self._marcas)
 
         # Uma mudança na lixeira no meio da busca mistura dois estados do catálogo nesta 1ª
         # página (consulta decidida antes do índice, registros depois); a `versao` do início
@@ -556,9 +558,6 @@ class Busca:
             decidir(p for r in achados for p in (*r.pessoas, r.dono))
             limpos = [_sem_quem_nao_conta(r, contam, sem_marca) for r in achados]
             return [r for r in limpos if _ainda_casa(r, c.filtros)]
-
-        # A marca na lixeira (#594) é lida uma vez por busca, depois da versão.
-        sem_marca = nomes_de_marca_na_lixeira(self._marcas)
 
         decidir(entendida.pessoas)
         carregar_nomes(entendida.pessoas)
