@@ -496,10 +496,19 @@ class SoMarcasQueContam:
         ate: date | None,
         tipo: str | None,
     ) -> list[InsercoesDaMarca]:
+        return self._somas(programa, desde, ate, tipo, cortes_das_purgas(self._purgas))
+
+    def _somas(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+        cortes: dict[str, datetime],
+    ) -> list[InsercoesDaMarca]:
         somas = self._consulta.somas(programa, desde, ate, tipo)
         fora = nomes_de_marca_na_lixeira(self._marcas)
         somas = [s for s in somas if normalizar(s.marca) not in fora]
-        cortes = cortes_das_purgas(self._purgas)
         cortadas = [s for s in somas if normalizar(s.marca) in cortes]
         if not cortadas:
             return somas
@@ -537,9 +546,10 @@ class SoMarcasQueContam:
     ) -> "list[InsercaoNoRelatorio]":
         if normalizar(marca) in nomes_de_marca_na_lixeira(self._marcas):
             return []
-        if normalizar(marca) in cortes_das_purgas(self._purgas):
+        cortes = cortes_das_purgas(self._purgas)
+        if normalizar(marca) in cortes:
             # O corte é por vídeo: a lista sai das somas já cortadas, não do SQL da marca.
-            somas = self.somas(programa, desde, ate, tipo)
+            somas = self._somas(programa, desde, ate, tipo, cortes)
             return lista_em_python(somas, marca, depois, limite)
         return self._consulta.lista_da_marca(
             marca, programa, desde, ate, tipo, depois, limite
