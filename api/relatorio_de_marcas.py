@@ -521,8 +521,10 @@ class SoMarcasQueContam:
         )
 
     def _depois_do_corte(self, somas: list[InsercoesDaMarca]) -> list[InsercoesDaMarca]:
-        cortes = self._cortes({normalizar(s.marca) for s in somas})
-        cortadas = [s for s in somas if normalizar(s.marca) in cortes]
+        # `normalizar` uma vez por marca distinta, não por linha de soma.
+        nome = {m: normalizar(m) for m in {s.marca for s in somas}}
+        cortes = self._cortes(set(nome.values()))
+        cortadas = [s for s in somas if nome[s.marca] in cortes]
         if not cortadas:
             return somas
         criados = {
@@ -532,7 +534,7 @@ class SoMarcasQueContam:
         return [
             s
             for s in somas
-            if (corte := cortes.get(normalizar(s.marca))) is None
+            if (corte := cortes.get(nome[s.marca])) is None
             or conta_depois_do_corte(criados.get(s.job_id), corte)
         ]
 

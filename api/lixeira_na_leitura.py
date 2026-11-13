@@ -164,16 +164,6 @@ class PurgasDeMarcaFirestore:
         return [PurgaDeMarca(**(d.to_dict() or {})) for d in self._colecao.stream()]
 
 
-def cortes_das_purgas(purgas: Iterable[PurgaDeMarca]) -> dict[str, datetime]:
-    """Por nome normalizado, a purga mais recente: só vale a de cima, porque ela cobre
-    tudo o que as anteriores já cortavam."""
-    cortes: dict[str, datetime] = {}
-    for p in purgas:
-        for n in p.nomes:
-            cortes[n] = max(p.em, cortes.get(n, p.em))
-    return cortes
-
-
 def lido[T](ler: Callable[[], T]) -> T:
     """Uma leitura do Firestore que falha vira 503 (`ServicoIndisponivel`), não 500."""
     try:
@@ -190,8 +180,14 @@ def cortes_validos(
     recriada sim, porque o id é outro."""
     achados = [p for p in purgas if nomes & set(p.nomes)]
     ids = {p.marca_id for p in achados if p.marca_id}
-    vivas = lido(lambda: marcas.obter_varios(ids)) if ids else {}
-    return cortes_das_purgas(p for p in achados if p.marca_id not in vivas)
+    vivas = lido(lambda: marcas.obter_varios(ids))
+    # Por nome, só vale a purga mais recente: ela cobre tudo o que as anteriores cortavam.
+    cortes: dict[str, datetime] = {}
+    for p in achados:
+        if p.marca_id not in vivas:
+            for n in p.nomes:
+                cortes[n] = max(p.em, cortes.get(n, p.em))
+    return cortes
 
 
 def conta_depois_do_corte(criado_em: datetime | None, corte: datetime) -> bool:

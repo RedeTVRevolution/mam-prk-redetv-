@@ -237,13 +237,12 @@ def criar_rotas_da_lixeira_do_catalogo(
         )
 
     def impacto_da_marca(achada: MarcaDoCatalogo) -> ImpactoDaMarca:
-        id = achada.id
         return ImpactoDaMarca(
             ocorrencias_que_perdem_o_vinculo=sum(
                 1
-                for d in entregues(FiltroDeJobs(marca_do_catalogo=id))
+                for d in entregues(FiltroDeJobs(marca_do_catalogo=achada.id))
                 for c in d.get("comerciais") or []
-                if c.get("catalogo_id") == id
+                if c.get("catalogo_id") == achada.id
             ),
             insercoes_que_saem_do_relatorio=insercoes_do_relatorio(achada),
         )
