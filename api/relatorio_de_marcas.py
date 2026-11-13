@@ -492,7 +492,7 @@ class SoMarcasQueContam:
         self._jobs = jobs
 
     def _cortes(self, nomes: set[str]) -> dict[str, datetime]:
-        return cortes_validos(self._purgas, self._marcas, nomes)
+        return cortes_validos(lido(self._purgas.todas), self._marcas, nomes)
 
     def somas(
         self,

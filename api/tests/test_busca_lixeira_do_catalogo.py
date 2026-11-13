@@ -784,3 +784,36 @@ def test_falha_na_leitura_do_job_com_marca_purgada_e_503_nao_job_ausente(
 
     with pytest.raises(ServicoIndisponivel):
         busca.buscar("vestido")
+
+
+def test_pela_api_a_marca_purgada_so_tira_o_video_anterior_a_purga_do_filtro() -> None:
+    c = Cenario("memoria")
+    _com_video_antigo_e_novo(c)
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("adm", ["administrador"])
+    cliente = TestClient(
+        criar_app(
+            VerificadorFalso(
+                {
+                    "admin": Usuario(
+                        uid="adm", email="a@redetv.com", login_em=agora_utc()
+                    )
+                }
+            ),
+            c.m.jobs,
+            ArmazenamentoFalso(),
+            papeis=papeis,
+            catalogo=c.m.catalogo,
+            indice=c.m.indice,
+            auditoria=RepositorioDeAuditoriaEmMemoria(),
+            marcas=c.marcas,
+            purgas_de_marca=c.purgas,
+        )
+    )
+    r = cliente.get(
+        "/v1/busca",
+        params={"q": "vestido", "marca": "Nike"},
+        headers={"Authorization": "Bearer admin"},
+    )
+    assert r.status_code == 200
+    assert [v["job_id"] for v in r.json()["videos"]] == ["novo"]

@@ -560,8 +560,9 @@ class Busca:
                 decididos.update(faltam)
                 contam.update(pessoas_que_contam(self._catalogo, faltam))
 
-        # A marca purgada (#599) corta por candidato, pelo `criado_em` do Job dele: o corte de
-        # cada nome é lido uma vez por busca.
+        # A marca purgada (#599) corta por candidato, pelo `criado_em` do Job dele: o registro
+        # das purgas é lido uma vez por busca, junto do estado da lixeira.
+        purgadas = lido(self._purgas.todas)
         cortes: dict[str, datetime] = {}
         marcas_vistas: set[str] = set()
 
@@ -571,7 +572,7 @@ class Busca:
             novas = {normalizar(r.marca) for r in achados if r.marca} - marcas_vistas
             if novas:
                 marcas_vistas.update(novas)
-                cortes.update(cortes_validos(self._purgas, self._marcas, novas))
+                cortes.update(cortes_validos(purgadas, self._marcas, novas))
             carregar_jobs(
                 r.job_id for r in achados if r.marca and normalizar(r.marca) in cortes
             )

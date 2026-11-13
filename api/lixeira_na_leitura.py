@@ -183,12 +183,12 @@ def lido[T](ler: Callable[[], T]) -> T:
 
 
 def cortes_validos(
-    purgas: PurgasDeMarca, marcas: CatalogoDeMarcas, nomes: set[str]
+    purgas: Iterable[PurgaDeMarca], marcas: CatalogoDeMarcas, nomes: set[str]
 ) -> dict[str, datetime]:
     """O corte de cada nome de `nomes` com registro de purga que vale (#595, #599): o da
     marca que ainda existe no catálogo não vale (a purga não terminou), o da homônima
     recriada sim, porque o id é outro."""
-    achados = [p for p in lido(purgas.todas) if nomes & set(p.nomes)]
+    achados = [p for p in purgas if nomes & set(p.nomes)]
     ids = {p.marca_id for p in achados if p.marca_id}
     vivas = lido(lambda: marcas.obter_varios(ids)) if ids else {}
     return cortes_das_purgas(p for p in achados if p.marca_id not in vivas)

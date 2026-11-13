@@ -539,7 +539,7 @@ def criar_app(
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
     # Avança a cada envio, restauração, purga e fusão do catálogo (#591).
     versao_da_lixeira = versao_da_lixeira or VersaoDaLixeiraEmMemoria()
-    # O registro de cada marca purgada: o relatório corta por ele (#595).
+    # O registro de cada marca purgada: o relatório e a busca cortam por ele (#595, #599).
     registro_das_purgas = purgas_de_marca or PurgasDeMarcaEmMemoria()
     repositorio_de_programas = programas or ProgramasEmMemoria()
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
@@ -648,6 +648,7 @@ def criar_app(
                 listas=listas_da_busca,
                 versao_da_lixeira=versao_da_lixeira,
                 marcas=catalogo_de_marcas,
+                purgas=registro_das_purgas,
             ),
             relogio,
             busca_por_minuto,
