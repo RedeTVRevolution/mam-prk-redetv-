@@ -1,10 +1,11 @@
 """Conferência da limpeza do Artifact Registry (#456): simula as regras KEEP e DELETE, só lendo.
 
-`make conferir-limpeza-de-imagens` lista as versões dos repositórios `mam` e `mam-gpu`, as imagens
-que o Cloud Run usa agora e aplica as regras do Terraform (output `limpeza_de_imagens`): mostra o
-que seria apagado e o que fica. Sai com 1 se a limpeza apagaria uma versão em uso ou a da volta
+`make conferir-limpeza-de-imagens` lista as versões dos dois repositórios (o comum e o de GPU), as
+imagens que o Cloud Run usa agora e aplica as regras do Terraform (output `limpeza_de_imagens`):
+mostra o que seria apagado e o que fica. Sai com 1 se a limpeza apagaria uma versão em uso ou a da volta
 (a tag `volta`, posta pelo scripts/deploy-dev.sh no build que o testar-jobs-gpu.sh restauraria),
-e com 2 se não consegue conferir (sem o output, ou nenhuma imagem em uso achada no Cloud Run).
+e com 2 se não consegue conferir (sem o output, idade mínima fora do formato de mapa ou nenhuma
+imagem em uso achada no Cloud Run).
 Nada aqui escreve na nuvem: só `gcloud ... list/describe` e `terraform output`.
 """
 
@@ -26,7 +27,7 @@ class Regras:
     """As regras do Terraform: N últimas por imagem, cache e tags guardados, idade mínima."""
 
     manter_ultimas: int
-    idade_minima_s: Mapping[str, int]  # por repositório (`mam`, `mam-gpu`), em segundos
+    idade_minima_s: Mapping[str, int]  # por repositório (o nome curto, sem host nem projeto), em segundos
     pacotes_do_cache: tuple[str, ...]
     tags_protegidas: tuple[str, ...]
     tag_da_volta: str
@@ -34,10 +35,11 @@ class Regras:
     @classmethod
     def do_terraform(cls, saida: dict[str, Any]) -> "Regras":
         idade = saida["idade_minima_s"]
-        if not isinstance(
-            idade, dict
-        ):  # output antigo, um número só, vale para os dois repositórios
-            idade = {"mam": idade, "mam-gpu": idade}
+        if not isinstance(idade, dict):
+            raise ValueError(
+                "o output idade_minima_s precisa ser um mapa por repositório: "
+                "rode o Terraform atualizado (apply) e confira de novo"
+            )
         return cls(
             manter_ultimas=int(saida["manter_ultimas"]),
             idade_minima_s={r: int(i) for r, i in idade.items()},
@@ -47,7 +49,7 @@ class Regras:
         )
 
     def idade_de(self, repositorio: str) -> int:
-        """A idade mínima do repositório, dado pelo caminho completo (`host/projeto/mam-gpu`)."""
+        """A idade mínima do repositório, dado pelo caminho completo (`host/projeto/nome`)."""
         return self.idade_minima_s[repositorio.rsplit("/", 1)[-1]]
 
 
@@ -251,7 +253,11 @@ def main(
             "depois do deploy que liga a limpeza (#456). Rode o deploy-dev e confira em seguida."
         )
         return 2
-    regras = Regras.do_terraform(saida["limpeza_de_imagens"]["value"])
+    try:
+        regras = Regras.do_terraform(saida["limpeza_de_imagens"]["value"])
+    except ValueError as erro:
+        print(f"ERRO: {erro}.")
+        return 2
     repositorios = [saida["repositorio"]["value"], saida["repositorio_gpu"]["value"]]
     versoes: list[Versao] = []
     recursos: list[dict[str, Any]] = []
