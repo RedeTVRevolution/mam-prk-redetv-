@@ -39,6 +39,7 @@ from api.papeis import RepositorioDePapeisEmMemoria
 from api.relatorio_de_marcas import ConsultaBigQuery as MarcasBigQuery
 from api.relatorio_de_marcas import ConsultaComCache as MarcasComCache
 from api.relatorio_de_marcas import ConsultaEmMemoria as MarcasEmMemoria
+from api.relatorios import posicao_do_cursor
 from api.tempo_de_tela import (
     ConsultaBigQuery,
     ConsultaDeMomentos,
@@ -774,6 +775,11 @@ def test_totais_posicoes_e_paginacao_das_marcas_saem_depois_da_exclusao() -> Non
 
     assert _nomes_das_marcas(primeira.json()) == ["NESTLE"]
     assert _nomes_das_marcas(segunda.json()) == ["Natura"]
+    # A posição numérica (o cursor é a posição em base64) conta só as marcas que ficaram:
+    # com a Ambev e o apelido dela fora, a próxima página começa na posição 1, não na 3.
+    assert posicao_do_cursor(primeira.headers["X-Proximo-Cursor"]) == 1
+    ate_o_fim = cliente.get(ROTA_DAS_MARCAS, params={"limite": 2}, headers=ADMIN)
+    assert "X-Proximo-Cursor" not in ate_o_fim.headers  # só duas posições existem
     assert "X-Proximo-Cursor" not in segunda.headers
     assert primeira.json()["total"]["marcas"] == 2
 

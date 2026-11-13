@@ -1067,7 +1067,9 @@ class CatalogoDeMarcasFirestore:
         return [m for m in self._lidas() if m.lixeira is None]
 
     def na_lixeira(self) -> list[MarcaDoCatalogo]:
-        return [m for m in self._lidas() if m.lixeira is not None]
+        # No servidor: roda a cada relatório e busca, não pode ler o catálogo inteiro.
+        consulta = self._colecao.where(filter=FieldFilter("lixeira", "!=", None))
+        return [self._marca(d.id, d.to_dict() or {}) for d in consulta.stream()]
 
     def _gravar(self, marca: MarcaDoCatalogo) -> MarcaDoCatalogo:
         _documento(self._colecao, marca.id).set(
