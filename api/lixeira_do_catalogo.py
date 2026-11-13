@@ -26,7 +26,7 @@ from api.catalogo import (
 from api.catalogo_apagado import so_o_rosto
 from api.correcoes import RepositorioDeCorrecoes
 from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
-from api.leitura_da_decupagem import decupagens_entregues
+from api.leitura_da_decupagem import decupagens_corrigidas
 from api.lixeira import (
     PRAZO_DA_PURGA,
     Envio,
@@ -170,7 +170,9 @@ def criar_rotas_da_lixeira_do_catalogo(
         descartar_pessoas()
 
     def entregues(filtro: FiltroDeJobs) -> Iterator[dict[str, Any]]:
-        return decupagens_entregues(repositorio, correcoes, decupagens, pessoas, filtro)
+        return decupagens_corrigidas(
+            repositorio, correcoes, decupagens, pessoas, filtro
+        )
 
     def impacto_da_pessoa(id: str, fotos_dela: int) -> ImpactoDaPessoa:
         aparicoes = sum(

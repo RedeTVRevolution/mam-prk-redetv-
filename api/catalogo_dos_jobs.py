@@ -65,11 +65,11 @@ def atualizar_catalogo_do_job(
 ) -> None:
     """Relê a Decupagem corrigida e regrava os campos do Job; nunca levanta."""
     try:
-        entregue = leitura.corrigida(job.id)
+        corrigida = leitura.corrigida(job.id)
     except Exception:
         log.exception("decupagem de %s não lida para o catálogo do Job", job.id)
         return
-    gravar_catalogo_do_job(repositorio, job.id, entregue)
+    gravar_catalogo_do_job(repositorio, job.id, corrigida)
 
 
 def passar_pessoa_nos_jobs(

@@ -32,9 +32,8 @@ from api.indexacao import (
 )
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import CopiaNoBigQuery, EstadoDaCopia, Job, RepositorioDeJobs, agora_utc
-from api.leitura_da_decupagem import MarcasEmLote, PessoasEmLote
+from api.leitura_da_decupagem import PessoasEmLote
 from api.nuvem import (
-    CatalogoDeMarcasFirestore,
     CatalogoFirestore,
     DecupagensStorage,
     ProgramasFirestore,
@@ -59,7 +58,6 @@ def copiar(
     relogio: Callable[[], datetime] = agora_utc,
     pessoas: PessoasEmLote | None = None,
     *,
-    marcas: MarcasEmLote | None = None,
     indice: IndiceDaBusca,
     programas: RepositorioDeProgramas | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
@@ -90,7 +88,7 @@ def copiar(
         )
         estado: EstadoDaCopia = "copiado"
         try:
-            decupagem = decupagem_do_job(job, decupagens, correcoes, pessoas, marcas)
+            decupagem = decupagem_do_job(job, decupagens, correcoes, pessoas)
             if pendente is None:
                 raise RuntimeError("estado pendente da cópia não gravado")
             ultima_copia = pendente.copia_bigquery or CopiaNoBigQuery(
@@ -146,7 +144,6 @@ def copiar(
                 relogio=relogio,
                 copia=copia,
                 pessoas=pessoas,
-                marcas=marcas,
                 programas=programas,
                 tipos_de_objeto=tipos_de_objeto,
                 sinal=sinal,
@@ -162,7 +159,6 @@ def copiar_jobs(
     copia: CopiaDosMomentos,
     pessoas: PessoasEmLote | None = None,
     *,
-    marcas: MarcasEmLote | None = None,
     indice: IndiceDaBusca,
     programas: RepositorioDeProgramas | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
@@ -191,7 +187,6 @@ def copiar_jobs(
             correcoes,
             copia,
             pessoas=pessoas,
-            marcas=marcas,
             indice=indice,
             programas=programas,
             tipos_de_objeto=tipos_de_objeto,
@@ -218,7 +213,6 @@ def main(argv: list[str]) -> int:
         RepositorioDeCorrecoesFirestore(firestore_),
         copia,
         pessoas=CatalogoFirestore(firestore_),
-        marcas=CatalogoDeMarcasFirestore(firestore_),
         programas=ProgramasFirestore(firestore_),
         tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
         sinal=sinal_do_ambiente(os.environ),

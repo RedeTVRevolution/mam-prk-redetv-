@@ -40,9 +40,8 @@ from api.jobs import (
     RepositorioDeJobs,
     agora_utc,
 )
-from api.leitura_da_decupagem import LeituraDaDecupagem, MarcasEmLote, PessoasEmLote
+from api.leitura_da_decupagem import LeituraDaDecupagem, PessoasEmLote
 from api.nuvem import (
-    CatalogoDeMarcasFirestore,
     CatalogoFirestore,
     DecupagensStorage,
     ProgramasFirestore,
@@ -147,11 +146,10 @@ def decupagem_do_job(
     decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pessoas: PessoasEmLote | None = None,
-    marcas: MarcasEmLote | None = None,
 ) -> Decupagem:
     """A Decupagem corrigida (Correções em vigor, fusão e renomeação; sem o efeito da
     lixeira do catálogo), no esquema do modelo. Sem `pessoas`, a fusão não se resolve."""
-    leitura = LeituraDaDecupagem(decupagens, correcoes, pessoas, marcas)
+    leitura = LeituraDaDecupagem(decupagens, correcoes, pessoas)
     return Decupagem.model_validate(_so_o_esquema(Decupagem, leitura.corrigida(job.id)))
 
 
@@ -171,7 +169,6 @@ def _uma_rodada(
     sinal: SinalDoPrograma | None,
     tipos_de_objeto: TiposDeObjeto | None,
     pessoas: PessoasEmLote | None,
-    marcas: MarcasEmLote | None = None,
 ) -> _Resultado:
     """Uma passada pelo índice e pela cópia com o `job` lido agora. Não grava o estado final
     da indexação: quem fecha a rodada o grava. Nunca levanta por falha do índice ou da cópia."""
@@ -193,7 +190,7 @@ def _uma_rodada(
     estado: EstadoDaIndexacao = "falhou"
     estado_da_copia: EstadoDaCopia = "falhou"
     try:
-        decupagem = decupagem_do_job(job, decupagens, correcoes, pessoas, marcas)
+        decupagem = decupagem_do_job(job, decupagens, correcoes, pessoas)
     except Exception:
         log.exception("decupagem de %s não lida para indexar", job.id)
     else:
@@ -279,7 +276,6 @@ def reindexar(
     pessoas: PessoasEmLote | None = None,
     programas: RepositorioDeProgramas | None = None,
     so_se_pedida: bool = False,
-    marcas: MarcasEmLote | None = None,
 ) -> Indexacao | None:
     """Indexa o vídeo (e a cópia do BigQuery) até alcançar a `versao_pedida` e devolve o
     estado da indexação (#419).
@@ -320,7 +316,6 @@ def reindexar(
             sinal,
             tipos_de_objeto,
             pessoas,
-            marcas,
         )
         # Sem fechar, a vez fica presa até `PRAZO_DA_RODADA` e a tela em "Finalizando".
         fechou, fechado = _tentar_duas_vezes(
@@ -400,7 +395,6 @@ def reindexar_jobs(
     pessoas: PessoasEmLote | None = None,
     programas: RepositorioDeProgramas | None = None,
     so_se_pedida: bool = False,
-    marcas: MarcasEmLote | None = None,
 ) -> dict[str, str]:
     """Reindexa os Jobs de `ids`, ou todos os concluídos; devolve o estado de cada um.
 
@@ -439,7 +433,6 @@ def reindexar_jobs(
             sinal=sinal,
             tipos_de_objeto=tipos_de_objeto,
             pessoas=pessoas,
-            marcas=marcas,
             programas=programas,
             so_se_pedida=so_se_pedida,
         )
@@ -476,7 +469,6 @@ def main(argv: list[str]) -> int:
         sinal=sinal,
         tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
         pessoas=CatalogoFirestore(firestore_),
-        marcas=CatalogoDeMarcasFirestore(firestore_),
         programas=ProgramasFirestore(firestore_),
         # Disparado pelo Workflows/API (JOB_ID, sem argv) só indexa o que se pediu; o
         # `make reindexar` sempre indexa.

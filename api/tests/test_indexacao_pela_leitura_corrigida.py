@@ -74,7 +74,7 @@ def _ids_no_bigquery(mundo: Mundo) -> set[str]:
     return {p.id for x in mundo.copia.por_job["j1"] for p in x.pessoas}
 
 
-def _reindexar(mundo: Mundo, pessoas: Any, marcas: Any) -> None:
+def _reindexar(mundo: Mundo, pessoas: Any) -> None:
     job = mundo.jobs.obter("j1")
     assert job
     reindexar(
@@ -86,17 +86,16 @@ def _reindexar(mundo: Mundo, pessoas: Any, marcas: Any) -> None:
         copia=mundo.copia,
         tipos_de_objeto=mundo.tipos,
         pessoas=pessoas,
-        marcas=marcas,
     )
 
 
 def test_pessoa_e_marca_na_lixeira_mantem_os_vinculos_no_indice_no_bigquery_e_no_job() -> (
     None
 ):
-    pessoas, marcas = _catalogos()
+    pessoas, _ = _catalogos()
     mundo = Mundo(copia=CopiaEmMemoria(), modelo=_modelo_com_marca())
 
-    _reindexar(mundo, pessoas, marcas)
+    _reindexar(mundo, pessoas)
 
     job = mundo.jobs.obter("j1")
     assert job and job.indexacao and job.indexacao.estado == "indexado"
@@ -107,17 +106,17 @@ def test_pessoa_e_marca_na_lixeira_mantem_os_vinculos_no_indice_no_bigquery_e_no
 
 
 def test_a_indexacao_le_o_catalogo_em_lote() -> None:
-    pessoas, marcas = _catalogos()
+    pessoas, _ = _catalogos()
     mundo = Mundo(modelo=_modelo_com_marca())
 
-    _reindexar(mundo, pessoas, marcas)
+    _reindexar(mundo, pessoas)
 
     assert pessoas.lotes == 1
     assert pessoas.individuais == 0
 
 
 def test_a_copia_usa_a_leitura_corrigida_com_os_catalogos_em_lote() -> None:
-    pessoas, marcas = _catalogos()
+    pessoas, _ = _catalogos()
     mundo = Mundo(copia=CopiaEmMemoria(), modelo=_modelo_com_marca())
     job = mundo.jobs.obter("j1")
     assert job
@@ -129,7 +128,6 @@ def test_a_copia_usa_a_leitura_corrigida_com_os_catalogos_em_lote() -> None:
         mundo.correcoes,
         mundo.copia,
         pessoas=pessoas,
-        marcas=marcas,
         indice=mundo.indice,
     )
 
@@ -139,7 +137,7 @@ def test_a_copia_usa_a_leitura_corrigida_com_os_catalogos_em_lote() -> None:
 
 
 def test_copiar_jobs_e_reindexar_jobs_aceitam_os_catalogos() -> None:
-    pessoas, marcas = _catalogos()
+    pessoas, _ = _catalogos()
     mundo = Mundo(copia=CopiaEmMemoria(), modelo=_modelo_com_marca())
 
     assert copiar_jobs(
@@ -149,7 +147,6 @@ def test_copiar_jobs_e_reindexar_jobs_aceitam_os_catalogos() -> None:
         mundo.correcoes,
         mundo.copia,
         pessoas=pessoas,
-        marcas=marcas,
         indice=mundo.indice,
     ) == {"j1": "copiado"}
     assert reindexar_jobs(
@@ -160,5 +157,4 @@ def test_copiar_jobs_e_reindexar_jobs_aceitam_os_catalogos() -> None:
         mundo.indice,
         copia=mundo.copia,
         pessoas=pessoas,
-        marcas=marcas,
     ) == {"j1": "indexado"}

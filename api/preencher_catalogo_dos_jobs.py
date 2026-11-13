@@ -47,12 +47,12 @@ def preencher(
             if job.estado != "concluido":
                 continue
             try:
-                entregue = leitura.corrigida(job.id)
+                corrigida = leitura.corrigida(job.id)
             except Exception:
                 log.exception("decupagem de %s não lida", job.id)
                 contagem["falhou"] += 1
                 continue
-            if not gravar_se_mudou(repositorio, job.id, entregue):
+            if not gravar_se_mudou(repositorio, job.id, corrigida):
                 contagem["iguais"] += 1
                 continue
             contagem["gravados"] += 1

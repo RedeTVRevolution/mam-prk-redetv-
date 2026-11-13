@@ -157,7 +157,7 @@ def decupagens_dos_jobs(
         yield job, corrigida
 
 
-def decupagens_entregues(
+def decupagens_corrigidas(
     repositorio: "RepositorioDeJobs",
     correcoes: RepositorioDeCorrecoes,
     decupagens: AbreDecupagem,

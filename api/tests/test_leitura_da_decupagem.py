@@ -19,8 +19,8 @@ from api.correcoes import Correcao, RepositorioDeCorrecoesEmMemoria, versao_do_m
 from api.jobs import FiltroDeJobs, RepositorioEmMemoria
 from api.leitura_da_decupagem import (
     LeituraDaDecupagem,
+    decupagens_corrigidas,
     decupagens_dos_jobs,
-    decupagens_entregues,
 )
 from api.marcas import CatalogoDeMarcasEmMemoria, MarcaDoCatalogo
 
@@ -415,7 +415,7 @@ def test_iteradores_dao_a_corrigida_dos_concluidos_e_pulam_a_que_nao_abre(
 
     assert [(j.id, _nome(d), _vinculo(d)) for j, d in lidas] == [("j1", "Ana B", b.id)]
     assert "j2" in caplog.text
-    so_decupagens = list(decupagens_entregues(jobs, corr, decupagens, catalogo))
+    so_decupagens = list(decupagens_corrigidas(jobs, corr, decupagens, catalogo))
     assert [_nome(d) for d in so_decupagens] == ["Ana B"]
     filtradas = decupagens_dos_jobs(
         jobs, corr, decupagens, catalogo, FiltroDeJobs(pessoa_do_catalogo="x")
