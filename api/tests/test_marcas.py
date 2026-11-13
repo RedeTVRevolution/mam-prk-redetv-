@@ -1,8 +1,7 @@
 """Catálogo de marcas (#150): o dublê e a carga inicial."""
 
-from typing import Any
-
 from datetime import UTC, datetime
+from typing import Any
 
 from api.catalogo import EnvioParaLixeira
 from api.marcas import CatalogoDeMarcasEmMemoria, carregar_marcas
