@@ -282,6 +282,8 @@ export interface ImpactoDaPessoa {
 
 export interface ImpactoDaMarca {
   ocorrencias_que_perdem_o_vinculo: number
+  /** O que o relatório de marcas deixa de contar, pelo nome e pelos apelidos. */
+  insercoes_que_saem_do_relatorio: number
 }
 
 export interface ImpactoPorTipo {

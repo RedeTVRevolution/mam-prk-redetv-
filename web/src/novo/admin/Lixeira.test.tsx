@@ -234,3 +234,48 @@ test('uma lixeira de centenas de itens põe no DOM só as linhas à vista', asyn
   expect(linhas).toBeLessThan(150)
   expect(screen.getByText('400 itens')).toBeTruthy()
 })
+
+test('o parágrafo de abertura cita a busca e os relatórios', async () => {
+  await abrir()
+  const texto = (await screen.findByText(/Pessoa e marca na lixeira saem da busca e dos relatórios/)).textContent ?? ''
+  expect(texto).toContain('voltam na hora se forem restauradas')
+  expect(texto).toContain('só os vídeos enviados depois dela voltam a contar')
+})
+
+test('a confirmação de restauração de marca e de pessoa cita a busca e os relatórios', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(within(await linhaDe('Marca Z')).getByRole('button', { name: /^Restaurar/ }))
+  expect(await screen.findByText('Restaurar Marca Z? Volta à busca e aos relatórios na hora.')).toBeTruthy()
+  await usuario.click(screen.getByRole('button', { name: 'Cancelar' }))
+
+  await usuario.click(within(await linhaDe('Sabrina')).getByRole('button', { name: /^Restaurar/ }))
+  expect(await screen.findByText('Restaurar Sabrina S.? Volta à busca e aos relatórios na hora; as fotos de rosto apagadas não voltam.')).toBeTruthy()
+  await usuario.click(screen.getByRole('button', { name: 'Cancelar' }))
+
+  await usuario.click(within(await linhaDe('TV Fama')).getByRole('button', { name: /^Restaurar/ }))
+  expect(await screen.findByText('Restaurar TV Fama 21/10/2026.mp4? Volta tudo como estava.')).toBeTruthy()
+})
+
+test('o diálogo de purga da marca mostra a contagem do relatório e o corte da purga', async () => {
+  servidor.use(
+    http.get('/v1/admin/lixeira/marcas/:id/impacto', () =>
+      HttpResponse.json({ ocorrencias_que_perdem_o_vinculo: 2, insercoes_que_saem_do_relatorio: 1 }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(within(await linhaDe('Marca Z')).getByRole('button', { name: /^Purgar agora/ }))
+  const dialogo = await screen.findByRole('dialog')
+  expect(await within(dialogo).findByText(/1 inserção comercial, pelo nome e pelos apelidos, não conta no relatório de marcas/)).toBeTruthy()
+  expect(within(dialogo).getByText(/2 ocorrências nas decupagens mantêm o texto da marca e perdem o vínculo/)).toBeTruthy()
+  expect(within(dialogo).getByText(/A marca já está fora da busca e dos relatórios; os vídeos anteriores à purga não voltam a contar, só os enviados depois/)).toBeTruthy()
+})
+
+test('o diálogo de purga da pessoa cita a busca e os relatórios', async () => {
+  const usuario = userEvent.setup()
+  await abrir()
+  await usuario.click(within(await linhaDe('Sabrina')).getByRole('button', { name: /^Purgar agora/ }))
+  const dialogo = await screen.findByRole('dialog')
+  expect(within(dialogo).getByText(/A pessoa já está fora da busca e dos relatórios e não volta a eles/)).toBeTruthy()
+})
