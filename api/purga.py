@@ -44,7 +44,7 @@ from api.lixeira import (
     login_recente_ou_403,
 )
 from api.lixeira_do_catalogo import purgar_catalogo_vencido
-from api.lixeira_na_leitura import VersaoDaLixeiraFirestore
+from api.lixeira_na_leitura import PurgasDeMarcaFirestore, VersaoDaLixeiraFirestore
 from api.nuvem import (
     COLECAO_DA_AUDITORIA,
     ArmazenamentoStorage,
@@ -251,6 +251,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
             CatalogoDeMarcasFirestore(cliente),
             RepositorioDeAuditoriaFirestore(banco_de_seguranca),
             agora_utc(),
+            PurgasDeMarcaFirestore(cliente),
             VersaoDaLixeiraFirestore(cliente).avancar,
         ),
         agora_utc(),

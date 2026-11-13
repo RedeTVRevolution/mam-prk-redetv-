@@ -35,6 +35,7 @@ from api.lixeira import (
     item_da_lixeira,
     login_recente_ou_403,
 )
+from api.lixeira_na_leitura import PurgasDeMarca
 from api.marcas import CatalogoDeMarcas, MarcaInexistente
 from api.texto_como_dado import Linha
 
@@ -127,28 +128,41 @@ def purgar_catalogo_vencido(
     marcas: CatalogoDeMarcas,
     auditoria: RepositorioDeAuditoria,
     agora: datetime,
+    purgas_de_marca: PurgasDeMarca,
     ao_mudar: Callable[[], None] = lambda: None,
 ) -> int:
     """Purga as pessoas e marcas na lixeira há `PRAZO_DA_PURGA` ou mais; devolve quantas.
-    Cada uma grava o registro antes de sair; a que falha fica e a próxima execução tenta.
+    Cada uma grava o registro antes de sair (e a marca, o da purga, #595); a que falha fica
+    e a próxima execução tenta.
     `ao_mudar` avança a versão da lixeira (#591) antes e depois de cada purga: se o avanço
     falha, o item continua na lixeira e a próxima varredura tenta de novo."""
     purgadas = 0
-    itens: list[tuple[Literal["pessoa", "marca"], str, str, EnvioParaLixeira]] = [
-        ("pessoa", p.id, p.nome, p.lixeira) for p in pessoas.na_lixeira() if p.lixeira
-    ] + [("marca", m.id, m.nome, m.lixeira) for m in marcas.na_lixeira() if m.lixeira]
-    for tipo, id, nome, envio in itens:
+    itens: list[tuple[Literal["pessoa", "marca"], Any, EnvioParaLixeira]] = [
+        ("pessoa", p, p.lixeira) for p in pessoas.na_lixeira() if p.lixeira
+    ] + [("marca", m, m.lixeira) for m in marcas.na_lixeira() if m.lixeira]
+    for tipo, item, envio in itens:
         if agora - envio.em < PRAZO_DA_PURGA:
             continue
         try:
             ao_mudar()  # antes: se falha, nada muda
             auditoria.acrescentar(
-                _registro(tipo, "item.purgado", id, nome, envio.motivo, {}, agora, None)
+                _registro(
+                    tipo,
+                    "item.purgado",
+                    item.id,
+                    item.nome,
+                    envio.motivo,
+                    {},
+                    agora,
+                    None,
+                )
             )
-            (pessoas if tipo == "pessoa" else marcas).apagar(id)
+            if tipo == "marca":
+                purgas_de_marca.gravar(item, agora)
+            (pessoas if tipo == "pessoa" else marcas).apagar(item.id)
             ao_mudar()  # depois: fecha a janela de uma 1ª página entre o avanço e a mudança
         except Exception:
-            log.exception("a purga de %s %s falhou", tipo, id)
+            log.exception("a purga de %s %s falhou", tipo, item.id)
             continue
         purgadas += 1
     return purgadas
@@ -164,6 +178,7 @@ def criar_rotas_da_lixeira_do_catalogo(
     auditoria: RepositorioDeAuditoria,
     relogio: Callable[[], datetime],
     login_recente: timedelta,
+    purgas_de_marca: PurgasDeMarca,
     descartar_pessoas: Callable[[], None] = lambda: None,
     ao_mudar: Callable[[], None] = lambda: None,
 ) -> APIRouter:
@@ -394,6 +409,8 @@ def criar_rotas_da_lixeira_do_catalogo(
             impacto.model_dump(),
             autor,
         )
+        if tipo == "marca":
+            purgas_de_marca.gravar(achada, relogio())  # antes de apagar: se falha, fica
         try:
             (pessoas if tipo == "pessoa" else marcas).apagar(achada.id)
         except (PessoaInexistente, MarcaInexistente):

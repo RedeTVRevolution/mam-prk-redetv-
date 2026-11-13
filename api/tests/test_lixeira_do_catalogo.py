@@ -11,6 +11,7 @@ from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, Rosto
 from api.jobs import RepositorioEmMemoria
 from api.lixeira_do_catalogo import FotosEmMemoria, purgar_catalogo_vencido
+from api.lixeira_na_leitura import PurgasDeMarcaEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
 from api.papeis import RepositorioDePapeisEmMemoria
@@ -270,10 +271,18 @@ def test_purga_automatica_aos_30_dias() -> None:
     mundo.enviar("marcas", mundo.marca.id)
 
     antes = purgar_catalogo_vencido(
-        mundo.catalogo, mundo.marcas, mundo.auditoria, BASE + timedelta(days=29)
+        mundo.catalogo,
+        mundo.marcas,
+        mundo.auditoria,
+        BASE + timedelta(days=29),
+        PurgasDeMarcaEmMemoria(),
     )
     depois = purgar_catalogo_vencido(
-        mundo.catalogo, mundo.marcas, mundo.auditoria, BASE + timedelta(days=30)
+        mundo.catalogo,
+        mundo.marcas,
+        mundo.auditoria,
+        BASE + timedelta(days=30),
+        PurgasDeMarcaEmMemoria(),
     )
 
     assert (antes, depois) == (0, 2)

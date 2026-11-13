@@ -16,15 +16,19 @@ purgar a mesma pessoa não devolve um valor já visto, o que a impressão das pe
 lixeira não garantiria. A busca a usa para recusar o cursor velho.
 """
 
+import uuid
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any, Protocol
 
 from google.cloud import firestore
+from pydantic import BaseModel
 
 from api.catalogo import Catalogo, PessoaDoCatalogo
-from api.marcas import CatalogoDeMarcas, nomes_de_busca_da_marca
+from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 
 COLECAO_DO_ESTADO_DA_LIXEIRA = "estado_da_lixeira"
+COLECAO_DAS_PURGAS_DE_MARCA = "purgas_de_marca"
 DOCUMENTO_DA_VERSAO = "catalogo"
 
 
@@ -96,3 +100,68 @@ class VersaoDaLixeiraFirestore:
 
     def avancar(self) -> None:
         self._documento.set({"versao": firestore.Increment(1)}, merge=True)
+
+
+class PurgaDeMarca(BaseModel):
+    """O que a purga de uma marca deixa (#595): o relatório de marcas corta por `em` as
+    ocorrências de `nomes` (nome e apelidos normalizados) em vídeos de Jobs criados antes."""
+
+    nome: str
+    apelidos: list[str]
+    nomes: list[str]
+    em: datetime
+
+
+class PurgasDeMarca(Protocol):
+    def gravar(self, marca: MarcaDoCatalogo, em: datetime) -> None:
+        """Grava o registro; a purga chama antes de apagar a marca."""
+        ...
+
+    def todas(self) -> list[PurgaDeMarca]: ...
+
+
+def _registro_da_purga(marca: MarcaDoCatalogo, em: datetime) -> PurgaDeMarca:
+    return PurgaDeMarca(
+        nome=marca.nome,
+        apelidos=marca.apelidos,
+        nomes=nomes_de_busca_da_marca(marca),
+        em=em,
+    )
+
+
+class PurgasDeMarcaEmMemoria:
+    def __init__(self) -> None:
+        self._purgas: list[PurgaDeMarca] = []
+
+    def gravar(self, marca: MarcaDoCatalogo, em: datetime) -> None:
+        self._purgas.append(_registro_da_purga(marca, em))
+
+    def todas(self) -> list[PurgaDeMarca]:
+        return list(self._purgas)
+
+
+class PurgasDeMarcaFirestore:
+    """Um documento por purga; as instâncias leem a coleção inteira (poucos registros)."""
+
+    def __init__(
+        self, cliente: Any, colecao: str = COLECAO_DAS_PURGAS_DE_MARCA
+    ) -> None:
+        self._colecao = cliente.collection(colecao)
+
+    def gravar(self, marca: MarcaDoCatalogo, em: datetime) -> None:
+        self._colecao.document(uuid.uuid4().hex).set(
+            _registro_da_purga(marca, em).model_dump()
+        )
+
+    def todas(self) -> list[PurgaDeMarca]:
+        return [PurgaDeMarca(**(d.to_dict() or {})) for d in self._colecao.stream()]
+
+
+def cortes_das_purgas(purgas: PurgasDeMarca) -> dict[str, datetime]:
+    """Por nome normalizado, a purga mais recente: só vale a de cima, porque ela cobre
+    tudo o que as anteriores já cortavam."""
+    cortes: dict[str, datetime] = {}
+    for p in purgas.todas():
+        for n in p.nomes:
+            cortes[n] = max(p.em, cortes.get(n, p.em))
+    return cortes

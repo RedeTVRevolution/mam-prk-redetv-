@@ -26,7 +26,11 @@ from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _pa
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.jobs import RepositorioDeJobs
-from api.lixeira_na_leitura import nomes_de_marca_na_lixeira
+from api.lixeira_na_leitura import (
+    PurgasDeMarca,
+    cortes_das_purgas,
+    nomes_de_marca_na_lixeira,
+)
 from api.marcas import CatalogoDeMarcas
 from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
 from api.relatorios import (
@@ -465,11 +469,25 @@ class ConsultaComCache:
 class SoMarcasQueContam:
     """A lixeira do catálogo vale na hora (#593): tira das somas, antes do ranking, dos
     totais, das posições e da paginação, o texto que bate com o nome ou apelido de uma marca
-    na lixeira, com o catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda."""
+    na lixeira, com o catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda.
 
-    def __init__(self, consulta: ConsultaDeInsercoes, marcas: CatalogoDeMarcas) -> None:
+    A marca purgada (#595) deixa um registro: as ocorrências do nome em vídeos de Jobs
+    criados até o instante da purga ficam fora, as dos criados depois contam. A data vem de
+    `Job.criado_em` no Firestore (não muda com o reprocessamento nem com a recópia), lida em
+    lote, uma vez por vídeo, só para as somas que batem com um registro; Job ausente conta
+    como anterior; falha de leitura é erro (503), não "Job ausente"."""
+
+    def __init__(
+        self,
+        consulta: ConsultaDeInsercoes,
+        marcas: CatalogoDeMarcas,
+        purgas: PurgasDeMarca,
+        jobs: RepositorioDeJobs,
+    ) -> None:
         self._consulta = consulta
         self._marcas = marcas
+        self._purgas = purgas
+        self._jobs = jobs
 
     def somas(
         self,
@@ -480,7 +498,21 @@ class SoMarcasQueContam:
     ) -> list[InsercoesDaMarca]:
         somas = self._consulta.somas(programa, desde, ate, tipo)
         fora = nomes_de_marca_na_lixeira(self._marcas)
-        return [s for s in somas if normalizar(s.marca) not in fora]
+        somas = [s for s in somas if normalizar(s.marca) not in fora]
+        cortes = cortes_das_purgas(self._purgas)
+        cortadas = [s for s in somas if normalizar(s.marca) in cortes]
+        if not cortadas:
+            return somas
+        criados = {
+            j.id: j.criado_em
+            for j in self._jobs.obter_varios({s.job_id for s in cortadas})
+        }
+        return [
+            s
+            for s in somas
+            if (corte := cortes.get(normalizar(s.marca))) is None
+            or (s.job_id in criados and criados[s.job_id] > corte)
+        ]
 
     def ranking(
         self,
@@ -505,6 +537,10 @@ class SoMarcasQueContam:
     ) -> "list[InsercaoNoRelatorio]":
         if normalizar(marca) in nomes_de_marca_na_lixeira(self._marcas):
             return []
+        if normalizar(marca) in cortes_das_purgas(self._purgas):
+            # O corte é por vídeo: a lista sai das somas já cortadas, não do SQL da marca.
+            somas = self.somas(programa, desde, ate, tipo)
+            return lista_em_python(somas, marca, depois, limite)
         return self._consulta.lista_da_marca(
             marca, programa, desde, ate, tipo, depois, limite
         )
@@ -633,12 +669,13 @@ def criar_rotas_das_marcas(
     consulta: ConsultaDeInsercoes | None,
     repositorio: RepositorioDeJobs,
     catalogo: CatalogoDeMarcas,
+    purgas: PurgasDeMarca,
     relogio: Callable[[], datetime] = agora_em_sao_paulo,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
     no_periodo = dependencia_do_periodo(relogio)
     if consulta is not None:
-        consulta = SoMarcasQueContam(consulta, catalogo)
+        consulta = SoMarcasQueContam(consulta, catalogo, purgas, repositorio)
 
     def _confere(
         programa: str | None, desde: date | None, ate: date | None, tipo: str | None

@@ -5,7 +5,7 @@ do BigQuery e a versão do estado da lixeira."""
 import os
 import uuid
 from collections.abc import Iterable
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from typing import Any
 
@@ -28,6 +28,9 @@ from api.copia_bigquery import CopiaEmMemoria, LinhaDoMomento, PessoaDoMomento
 from api.jobs import RepositorioEmMemoria, agora_utc
 from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.lixeira_na_leitura import (
+    PurgasDeMarca,
+    PurgasDeMarcaEmMemoria,
+    PurgasDeMarcaFirestore,
     VersaoDaLixeira,
     VersaoDaLixeiraEmMemoria,
     VersaoDaLixeiraFirestore,
@@ -48,6 +51,7 @@ from api.tempo_de_tela import (
 from api.tempo_de_tela import ConsultaComCache as ComCache
 from api.tests.sem_periodo_padrao import ClienteSemPeriodoPadrao
 from api.tests.test_auth import VerificadorFalso
+from api.tests.test_busca import job as _job
 from api.tests.test_jobs import ArmazenamentoFalso
 from api.tests.test_relatorio_de_marcas import CONFIG as CONFIG_DAS_MARCAS
 from api.tests.test_relatorio_de_marcas import Transporte as TransporteDasMarcas
@@ -238,7 +242,7 @@ class Mundo:
                     )
                 }
             ),
-            RepositorioEmMemoria(),
+            extras.pop("repositorio", None) or RepositorioEmMemoria(),
             ArmazenamentoFalso(),
             papeis=papeis,
             catalogo=extras.pop("catalogo", self.catalogo),
@@ -499,6 +503,7 @@ def test_a_versao_avanca_a_cada_envio_restauracao_purga_e_fusao_e_nunca_repete()
         CatalogoDeMarcasEmMemoria(),
         RepositorioDeAuditoriaEmMemoria(),
         agora_utc(),
+        PurgasDeMarcaEmMemoria(),
         versao.avancar,
     )
     assert purgas == 1  # a purga automática
@@ -588,6 +593,7 @@ def test_a_purga_automatica_nao_apaga_se_o_avanco_da_versao_falha_e_tenta_de_nov
             CatalogoDeMarcasEmMemoria(),
             RepositorioDeAuditoriaEmMemoria(),
             agora_utc(),
+            PurgasDeMarcaEmMemoria(),
             versao.avancar,
         )
 
@@ -867,9 +873,275 @@ def test_com_a_consulta_real_o_curador_envia_restaura_e_purga_a_marca_sem_escrev
         f"{LIXEIRA}/marcas/{m.ambev.id}/purgar", json={"nome": "Ambev"}, headers=ADMIN
     )
     assert purgada.status_code == 200
-    assert _nomes_das_marcas(_marcas(cliente)) == todas  # purgada, não está na lixeira
+    # Purgada, não está mais na lixeira; os Jobs não existem aqui, então contam como
+    # anteriores à purga (#595) e as ocorrências da Ambev e do apelido seguem fora.
+    assert _nomes_das_marcas(_marcas(cliente)) == ["NESTLE"]
 
     assert len(transporte.corpos) == 1  # o cache guardou a soma sem exclusão
     escritas = ("INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "DROP")
     for corpo in transporte.corpos:
         assert not any(w in corpo["query"].upper().split() for w in escritas)
+
+
+# --- a purga da marca deixa registro e corta pela criação do Job no relatório (#595) -----
+
+CORTE = datetime(2026, 10, 10, tzinfo=UTC)
+ANTES, DEPOIS = CORTE - timedelta(days=1), CORTE + timedelta(days=1)
+
+
+@pytest.fixture(
+    params=["memoria", pytest.param("firestore", marks=sem_emulador)],
+)
+def purgas(request: pytest.FixtureRequest) -> PurgasDeMarca:
+    if request.param == "memoria":
+        return PurgasDeMarcaEmMemoria()
+    return PurgasDeMarcaFirestore(
+        _cliente_do_firestore(), colecao=f"purgas-de-marca-{uuid.uuid4().hex}"
+    )
+
+
+def test_registro_da_purga_guarda_nome_apelidos_e_data(purgas: PurgasDeMarca) -> None:
+    assert purgas.todas() == []
+    ambev = CatalogoDeMarcasEmMemoria().acrescentar("Ambev", ["AB InBev"])
+
+    purgas.gravar(ambev, CORTE)
+
+    (registro,) = purgas.todas()
+    assert (registro.nome, registro.apelidos, registro.em) == (
+        "Ambev",
+        ["AB InBev"],
+        CORTE,
+    )
+    assert registro.nomes == ["ab inbev", "ambev"]  # o texto que o relatório compara
+
+
+@sem_emulador
+def test_firestore_outra_instancia_le_o_registro_gravado() -> None:
+    colecao = f"purgas-de-marca-{uuid.uuid4().hex}"
+    uma = PurgasDeMarcaFirestore(_cliente_do_firestore(), colecao=colecao)
+    outra = PurgasDeMarcaFirestore(_cliente_do_firestore(), colecao=colecao)
+
+    uma.gravar(CatalogoDeMarcasEmMemoria().acrescentar("Natura", []), CORTE)
+
+    assert [r.nome for r in outra.todas()] == ["Natura"]
+
+
+class JobsEspiao(RepositorioEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.lotes: list[list[str]] = []
+        self.falha = False
+
+    def obter_varios(self, job_ids: Any) -> Any:
+        if self.falha:
+            raise RuntimeError("Firestore fora")
+        self.lotes.append(list(job_ids))
+        return super().obter_varios(self.lotes[-1])
+
+
+def _job_criado_em(id: str, quando: datetime) -> Any:
+    return _job(id, criado_em=quando, atualizado_em=quando)
+
+
+class MundoDaPurga(MundoDasMarcas):
+    """O de `MundoDasMarcas`, com o Job de j1 criado antes do corte e o de j2 depois, e
+    a purga da Ambev (apelido "AB InBev") registrada em `CORTE`."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.jobs = JobsEspiao()
+        self.purgas: PurgasDeMarca = PurgasDeMarcaEmMemoria()
+        self.jobs.salvar(_job_criado_em("j1", ANTES))
+        self.jobs.salvar(_job_criado_em("j2", DEPOIS))
+        self.purgas.gravar(self.ambev, CORTE)
+        self.marcas.apagar(self.ambev.id)
+
+    def instancia(self, consulta: Any = None, **extras: Any) -> TestClient:
+        extras.setdefault("repositorio", self.jobs)
+        extras.setdefault("purgas_de_marca", self.purgas)
+        return super().instancia(consulta, **extras)
+
+
+def test_marca_purgada_nao_conta_no_job_criado_antes_e_conta_no_criado_depois() -> None:
+    corpo = _marcas(MundoDaPurga().instancia())
+
+    # j1 (antes): "AB INBEV" fora; j2 (depois): "Ambev" fica. As outras não mudam.
+    assert _nomes_das_marcas(corpo) == ["Ambev", "NESTLE", "Natura"]
+    assert corpo["total"]["insercoes"] == 3
+
+
+def test_lista_de_insercoes_da_marca_purgada_tambem_respeita_o_corte() -> None:
+    cliente = MundoDaPurga().instancia()
+
+    resposta = cliente.get(
+        "/v1/relatorios/marcas/insercoes", params={"marca": "AB INBEV"}, headers=ADMIN
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.json() == []
+
+
+def test_recopiar_o_video_antigo_nao_ressuscita_a_marca() -> None:
+    m = MundoDaPurga()
+    # A recópia grava de novo as linhas de j1 (a data do BigQuery muda, o Job não).
+    m.copia.gravar("j1", [_comercial("j1", "Jornal", DIA, "AB INBEV", "intervalo")])
+
+    assert "AB INBEV" not in _nomes_das_marcas(_marcas(m.instancia()))
+
+
+def test_marca_recriada_no_catalogo_conta_so_nos_videos_novos() -> None:
+    m = MundoDaPurga()
+    m.marcas.acrescentar("Ambev", [])  # a carga recria depois da purga
+    m.jobs.salvar(_job_criado_em("j3", DEPOIS))
+    m.copia.gravar("j3", [_comercial("j3", "Jornal", DIA, "Ambev", "intervalo")])
+
+    corpo = _marcas(m.instancia())
+
+    por_marca = {x["marca"]: x["insercoes"] for x in corpo["marcas"]}
+    assert por_marca["Ambev"] == 2  # j2 e j3
+    assert "AB INBEV" not in por_marca  # j1 é anterior
+
+
+def test_job_ausente_conta_como_anterior_a_purga() -> None:
+    m = MundoDaPurga()
+    m.jobs._jobs.pop("j2")
+
+    assert "Ambev" not in _nomes_das_marcas(_marcas(m.instancia()))
+
+
+def test_job_criado_no_instante_da_purga_conta_como_anterior() -> None:
+    m = MundoDaPurga()
+    m.jobs.salvar(_job_criado_em("j2", CORTE))
+
+    assert "Ambev" not in _nomes_das_marcas(_marcas(m.instancia()))
+
+
+def test_o_relatorio_le_em_lote_so_os_jobs_da_marca_purgada_sem_repetir_id() -> None:
+    m = MundoDaPurga()
+    m.copia.gravar(
+        "j1",
+        [
+            _comercial("j1", "Jornal", DIA, "AB INBEV", "intervalo"),
+            _comercial("j1", "Jornal", DIA, "AB INBEV", "merchan_apresentador"),
+            _comercial("j1", "Jornal", DIA, "NESTLE", "intervalo"),
+        ],
+    )
+
+    _marcas(m.instancia())
+
+    assert len(m.jobs.lotes) == 1
+    assert sorted(m.jobs.lotes[0]) == ["j1", "j2"]  # só as somas de Ambev e AB InBev
+
+
+def test_sem_registro_de_purga_o_relatorio_nao_le_job_nenhum() -> None:
+    m = MundoDasMarcas()
+    jobs = JobsEspiao()
+
+    _marcas(m.instancia(repositorio=jobs, purgas_de_marca=PurgasDeMarcaEmMemoria()))
+
+    assert jobs.lotes == []
+
+
+def test_falha_na_leitura_do_job_vira_503_nao_job_ausente() -> None:
+    m = MundoDaPurga()
+    cliente = m.instancia()
+    m.jobs.falha = True
+
+    resposta = cliente.get(ROTA_DAS_MARCAS, params={"limite": 10}, headers=ADMIN)
+
+    assert resposta.status_code == 503
+
+
+class PurgasQueFalham(PurgasDeMarcaEmMemoria):
+    falha = False
+
+    def gravar(self, marca: Any, em: datetime) -> None:
+        if self.falha:
+            raise RuntimeError("Firestore fora")
+        super().gravar(marca, em)
+
+
+def test_purga_manual_grava_o_registro_antes_de_apagar_e_troca_a_versao() -> None:
+    m = MundoDasMarcas()
+    purgas = PurgasQueFalham()
+    versao = VersaoDaLixeiraEmMemoria()
+    cliente = m.instancia(purgas_de_marca=purgas, versao_da_lixeira=versao)
+    m.marcas.definir_lixeira(m.nestle.id, ENVIO)
+    antes = versao.atual()
+
+    resposta = cliente.post(
+        f"{LIXEIRA}/marcas/{m.nestle.id}/purgar", json={"nome": "Nestlé"}, headers=ADMIN
+    )
+
+    assert resposta.status_code == 200
+    (registro,) = purgas.todas()
+    assert registro.nome == "Nestlé"
+    assert versao.atual() > antes
+
+
+def test_purga_manual_nao_apaga_a_marca_se_o_registro_falha() -> None:
+    m = MundoDasMarcas()
+    purgas = PurgasQueFalham()
+    cliente = m.instancia(purgas_de_marca=purgas)
+    m.marcas.definir_lixeira(m.nestle.id, ENVIO)
+    purgas.falha = True
+
+    with pytest.raises(RuntimeError):
+        cliente.post(
+            f"{LIXEIRA}/marcas/{m.nestle.id}/purgar",
+            json={"nome": "Nestlé"},
+            headers=ADMIN,
+        )
+
+    assert m.marcas.obter(m.nestle.id) is not None
+
+
+def test_purga_automatica_grava_o_registro_e_se_falha_a_marca_fica_para_amanha() -> (
+    None
+):
+    marcas = CatalogoDeMarcasEmMemoria()
+    acme = marcas.acrescentar("Acme", ["Acme SA"])
+    marcas.definir_lixeira(
+        acme.id, ENVIO.model_copy(update={"em": agora_utc() - timedelta(days=31)})
+    )
+    purgas = PurgasQueFalham()
+    versao = VersaoDaLixeiraEmMemoria()
+
+    def varrer() -> int:
+        return purgar_catalogo_vencido(
+            CatalogoEmMemoria(),
+            marcas,
+            RepositorioDeAuditoriaEmMemoria(),
+            agora_utc(),
+            purgas,
+            versao.avancar,
+        )
+
+    purgas.falha = True
+    assert varrer() == 0
+    assert marcas.obter(acme.id) is not None  # a gravação falhou: não apagou
+
+    purgas.falha = False
+    assert varrer() == 1
+    assert marcas.obter(acme.id) is None
+    (registro,) = purgas.todas()
+    assert registro.apelidos == ["Acme SA"]
+
+
+@sem_emulador
+def test_com_a_consulta_real_e_o_registro_no_firestore_o_corte_vale_no_ranking() -> (
+    None
+):
+    m = MundoDaPurga()
+    purgas = PurgasDeMarcaFirestore(
+        _cliente_do_firestore(), colecao=f"purgas-de-marca-{uuid.uuid4().hex}"
+    )
+    purgas.gravar(m.ambev, CORTE)
+    consulta = MarcasComCache(
+        MarcasBigQuery(CONFIG_DAS_MARCAS, TransporteDasMarcas(_somas_do_bq())),
+        CacheCurto(),
+    )
+
+    cliente = m.instancia(consulta, purgas_de_marca=purgas)
+
+    assert _nomes_das_marcas(_marcas(cliente)) == ["Ambev", "NESTLE"]
