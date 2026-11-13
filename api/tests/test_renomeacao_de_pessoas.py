@@ -220,7 +220,7 @@ def test_reindexar_depois_da_renomeacao_nao_poe_o_nome_no_indice() -> None:
         mundo.armazenamento,
         RepositorioDeCorrecoesEmMemoria(),
         mundo.indice,
-        pessoas=mundo.catalogo.obter,
+        pessoas=mundo.catalogo,
     )
 
     assert not any("Sabrina" in t for t in mundo.indice.donos("j1"))
