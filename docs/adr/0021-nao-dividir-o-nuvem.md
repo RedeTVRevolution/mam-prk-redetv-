@@ -8,4 +8,4 @@ O `api/nuvem.py` reúne os adapters do Google Cloud (Storage, Firestore, BigQuer
 - 12 monkeypatches nos testes apontam para `"api.nuvem.…"` por string, e quebrariam sem erro de importação;
 - o analisador de `api/tests/test_imagens_gpu.py` lê cada módulo como `api/<modulo>.py` para montar o fecho de imports das imagens de GPU, então pressupõe módulos planos.
 
-Extrair do `nuvem.py` um módulo plano e isolado continua permitido quando há ganho medido, como o Storage dos Jobs, que tira o `nuvem.py` do fecho do `objetos-gpu` (de cerca de 50 módulos para cerca de 12). O módulo novo entra nas listas de GPU do Dockerfile que precisarem dele.
+Extrair do `nuvem.py` um módulo plano e isolado continua permitido quando há ganho medido, como o de clientes de nuvem (sessão autenticada e transporte REST). O módulo novo entra nas listas de GPU do Dockerfile que precisarem dele. O Storage dos Jobs foi medido e ficou de fora: o Storage de objetos depende da contagem de itens (Correções) e da contagem de arquivos (lixeira, que importa Jobs), e o fecho do `objetos-gpu` cairia só de cerca de 50 para cerca de 40 módulos.
