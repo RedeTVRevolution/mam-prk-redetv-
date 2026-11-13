@@ -23,7 +23,8 @@ from api.catalogo_apagado import com_pessoas_fundidas
 from api.comparador import normalizar
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
-from api.lixeira_do_catalogo import LeituraDeDecupagens, decupagens_dos_jobs
+from api.leitura_da_decupagem import decupagens_dos_jobs
+from api.lixeira_do_catalogo import LeituraDeDecupagens
 from api.texto_como_dado import Linha
 
 
@@ -102,6 +103,7 @@ def criar_rotas_da_renomeacao(
             repositorio,
             correcoes,
             decupagens,
+            pessoas,
             FiltroDeJobs(pessoa_do_catalogo=pessoa.id),
         ):
             entregue = com_pessoas_fundidas(entregue, pessoas.obter)

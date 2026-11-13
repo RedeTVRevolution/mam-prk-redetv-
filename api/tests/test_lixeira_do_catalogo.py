@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
-from api.catalogo import CatalogoEmMemoria, Rosto
+from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, Rosto
 from api.jobs import RepositorioEmMemoria
 from api.lixeira_do_catalogo import FotosEmMemoria, purgar_catalogo_vencido
 from api.main import criar_app
@@ -161,6 +161,24 @@ def test_o_impacto_conta_as_aparicoes_que_perdem_o_nome_e_as_fotos() -> None:
     assert impacto["aparicoes_que_perdem_o_nome"] == 2
     assert impacto["fotos_apagadas"] == 3
     assert impacto["restaurar_devolve_as_fotos"] is False
+
+
+def test_o_impacto_de_b_conta_as_aparicoes_de_a_fundida_nela() -> None:
+    mundo = Mundo()
+    b = mundo.catalogo.acrescentar("Ana Souza Lima", "apresentadora", [])
+    # A (ana) foi fundida em B: o Catálogo do Job de j1 já lista B, a Decupagem ainda diz A.
+    mundo.catalogo.definir_fusao(
+        mundo.ana.id,
+        FusaoDaPessoa(
+            destino_id=b.id, em=BASE, por_uid="u1", por_email="a@r.com", motivo="x"
+        ),
+    )
+    mundo.jobs.salvar(_job("j1", pessoas_do_catalogo=[b.id]))
+
+    impacto = mundo.cliente.get(f"{LIXEIRA}/pessoas/{b.id}/impacto", headers=CURADOR)
+
+    # j1 só tem o rosto como fonte (2 aparições); j2 não lista B.
+    assert impacto.json()["aparicoes_que_perdem_o_nome"] == 2
 
 
 def test_curador_manda_para_a_lixeira_mas_nao_restaura_nem_purga() -> None:
