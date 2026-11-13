@@ -1,9 +1,12 @@
 """A leitura das Decupagens da carga de marcas (#150), com dublês."""
 
 import json
+import logging
 from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 from api.carregar_marcas import decupagens_dos_jobs
 from api.marcas import CatalogoDeMarcasEmMemoria, carregar_marcas
@@ -34,6 +37,24 @@ def _modelo(*marcas: str) -> bytes:
             "pautas": [],
         }
     ).encode()
+
+
+def test_a_decupagem_que_nao_abre_e_pulada_com_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    jobs = [SimpleNamespace(id="sem-arquivo", estado="concluido")]
+    # o log vem da leitura corrigida do módulo; o `configurar` do log estruturado troca os
+    # handlers da raiz, então ligo o do caplog direto
+    logger = logging.getLogger("api.leitura_da_decupagem")
+    logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level("WARNING"):
+            lidas = list(decupagens_dos_jobs(jobs, _Decupagens({}), _SemCorrecoes()))
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    assert lidas == []
+    assert "sem-arquivo" in caplog.text
 
 
 def test_le_so_jobs_concluidos_e_pula_a_decupagem_que_nao_abre() -> None:

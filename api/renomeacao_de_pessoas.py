@@ -19,7 +19,6 @@ from pydantic import BaseModel, field_validator
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, PessoaDoCatalogo, RenomeacaoDaPessoa
-from api.catalogo_apagado import com_pessoas_fundidas
 from api.comparador import normalizar
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
@@ -99,17 +98,16 @@ def criar_rotas_da_renomeacao(
         ids: list[str] = []
         momentos = 0
         nome = normalizar(pessoa.nome)
-        for job, entregue in decupagens_dos_jobs(
+        for job, corrigida in decupagens_dos_jobs(
             repositorio,
             correcoes,
             decupagens,
             pessoas,
             FiltroDeJobs(pessoa_do_catalogo=pessoa.id),
         ):
-            entregue = com_pessoas_fundidas(entregue, pessoas.obter)
             nelas = [
                 p
-                for p in entregue.get("pessoas") or []
+                for p in corrigida.get("pessoas") or []
                 if isinstance(p, dict)
                 and p.get("catalogo_id") == pessoa.id
                 and normalizar(str(p.get("nome"))) == nome

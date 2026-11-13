@@ -1,8 +1,10 @@
 """Renomear uma pessoa em todos os vídeos de uma vez (#263)."""
 
 import json
+import logging
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
@@ -130,6 +132,33 @@ def test_a_previa_abre_so_as_decupagens_da_pessoa() -> None:
 
     assert resposta.json()["videos"] == 2
     assert sorted(abertas) == ["j1", "j2"]
+
+
+def test_a_previa_deixa_a_fusao_para_a_leitura_e_pula_a_que_nao_abre(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mundo = Mundo()
+    mundo.jobs.salvar(_job("j4", pessoas_do_catalogo=[mundo.sabrina.id]))  # sem arquivo
+    lidas: list[str] = []
+    obter = mundo.catalogo.obter
+
+    def obter_contado(id: str) -> Any:
+        lidas.append(id)
+        return obter(id)
+
+    mundo.catalogo.obter = obter_contado  # type: ignore[method-assign]
+    logger = logging.getLogger("api.leitura_da_decupagem")
+    logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level("WARNING"):
+            resposta = mundo.renomear(previa=True)
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    assert (resposta.json()["videos"], resposta.json()["momentos_afetados"]) == (2, 2)
+    assert "j4" in caplog.text
+    # só a rota lê a pessoa (`viva`); a prévia não resolve fusão por conta própria
+    assert lidas == [mundo.sabrina.id]
 
 
 def test_a_previa_conta_videos_e_momentos_sem_mudar_nada() -> None:
