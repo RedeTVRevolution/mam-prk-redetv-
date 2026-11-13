@@ -42,8 +42,11 @@ class CatalogoDeMarcas(Protocol):
         """As marcas que existem entre os `ids`, numa leitura em lote."""
         ...
 
-    def achar(self, nome: str) -> list[MarcaDoCatalogo]:
-        """As marcas cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
+    def achar(
+        self, nome: str, *, com_lixeira: bool = False
+    ) -> list[MarcaDoCatalogo]:
+        """As marcas cujo nome ou apelido é `nome`, sem maiúsculas nem acentos; as da
+        lixeira só com `com_lixeira` (a carga não pode recriá-las, #596)."""
         ...
 
     def todas(self) -> list[MarcaDoCatalogo]:
@@ -82,9 +85,12 @@ class CatalogoDeMarcasEmMemoria:
     def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
         return {i: self._marcas[i] for i in dict.fromkeys(ids) if i in self._marcas}
 
-    def achar(self, nome: str) -> list[MarcaDoCatalogo]:
+    def achar(
+        self, nome: str, *, com_lixeira: bool = False
+    ) -> list[MarcaDoCatalogo]:
         chave = normalizar(nome)
-        return [m for m in self.todas() if chave in nomes_de_busca_da_marca(m)]
+        marcas = self._marcas.values() if com_lixeira else self.todas()
+        return [m for m in marcas if chave in nomes_de_busca_da_marca(m)]
 
     def todas(self) -> list[MarcaDoCatalogo]:
         return [m for m in self._marcas.values() if m.lixeira is None]
@@ -136,11 +142,13 @@ def carregar_marcas(
     catalogo: CatalogoDeMarcas, decupagens: Iterable[Mapping[str, Any]]
 ) -> int:
     """Acrescenta ao catálogo as marcas dos comerciais que ainda não estão nele (pelo
-    nome ou apelido, sem acento nem maiúscula). Idempotente; devolve quantas entraram."""
+    nome ou apelido, sem acento nem maiúscula), inclusive entre as da lixeira: marca
+    na lixeira não é recriada, só depois da purga (#596). Idempotente; devolve quantas
+    entraram."""
     entraram = 0
     for decupagem in decupagens:
         for marca in marcas_dos_comerciais(decupagem):
-            if catalogo.achar(marca):
+            if catalogo.achar(marca, com_lixeira=True):
                 continue
             catalogo.acrescentar(marca, [])
             entraram += 1

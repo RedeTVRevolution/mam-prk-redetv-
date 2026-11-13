@@ -1053,12 +1053,14 @@ class CatalogoDeMarcasFirestore:
             for d in _lidos_em_lote(self._cliente, self._colecao, ids)
         }
 
-    def achar(self, nome: str) -> list[MarcaDoCatalogo]:
+    def achar(
+        self, nome: str, *, com_lixeira: bool = False
+    ) -> list[MarcaDoCatalogo]:
         consulta = self._colecao.where(
             filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
         )
         achadas = [self._marca(d.id, d.to_dict() or {}) for d in consulta.stream()]
-        return [m for m in achadas if m.lixeira is None]
+        return [m for m in achadas if com_lixeira or m.lixeira is None]
 
     def _lidas(self) -> list[MarcaDoCatalogo]:
         return [self._marca(d.id, d.to_dict() or {}) for d in self._colecao.stream()]

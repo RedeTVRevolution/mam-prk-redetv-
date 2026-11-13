@@ -1357,6 +1357,20 @@ class TestCatalogoFirestore:
         with pytest.raises(PessoaInexistente):
             catalogo.definir_fusao("inexistente", fusao)
 
+    def test_achar_com_lixeira_e_a_carga_nao_recria_a_marca_na_lixeira(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        m = marcas.acrescentar("Banco Verde", ["BV"])
+        marcas.definir_lixeira(m.id, _envio_para_lixeira())
+
+        assert marcas.achar("bv") == []
+        assert [x.id for x in marcas.achar("bv", com_lixeira=True)] == [m.id]
+        decupagens = [{"comerciais": [{"marca": "BV"}, {"marca": "Banco Verde"}]}]
+        assert carregar_marcas(marcas, decupagens) == 0
+        marcas.apagar(m.id)
+        assert carregar_marcas(marcas, decupagens) == 1
+        assert [x.nome for x in marcas.todas()] == ["BV"]
+
     def test_nome_novo_fica_a_revisar_com_o_autor(
         self, catalogo: CatalogoFirestore
     ) -> None:
