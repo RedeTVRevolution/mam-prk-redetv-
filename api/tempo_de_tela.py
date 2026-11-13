@@ -12,7 +12,7 @@ instância.
 
 import json
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Annotated, Any, Literal, Protocol
@@ -148,11 +148,14 @@ class ConsultaEmMemoria:
 
 
 def ranking_em_python(
-    somas: list[PessoaNoVideo], depois: int, limite: int
+    somas: list[PessoaNoVideo],
+    depois: int,
+    limite: int,
+    nomes: Mapping[str, str] | None = None,
 ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-    """O ranking e os totais do período, a partir das somas; a página vai de `depois`
-    a `limite + 1` itens (o que passa do limite diz que há mais)."""
-    pessoas = relatorio(somas)
+    """O ranking e os totais do período, a partir das somas, na ordem de `relatorio`; a
+    página vai de `depois` a `limite + 1` itens (o que passa do limite diz que há mais)."""
+    pessoas = relatorio(somas, nomes)
     total = TotalDoTempoDeTela(
         pessoas=len(pessoas),
         tempo_de_tela_ms=sum(p.tempo_de_tela_ms for p in pessoas),
@@ -161,7 +164,6 @@ def ranking_em_python(
         mencoes_na_fala=sum(p.mencoes_na_fala for p in pessoas),
         mencoes_no_texto=sum(p.mencoes_no_texto for p in pessoas),
     )
-    pessoas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.pessoa_id))
     pagina = pessoas[depois : depois + limite + 1]
     return [
         PessoaResumida(**p.model_dump(exclude={"por_video"})) for p in pagina
@@ -323,18 +325,22 @@ class ConsultaComCache:
 class SoComQuemConta:
     """A lixeira do catálogo vale na hora (#591): tira das somas, antes do ranking, dos
     totais, das posições e da paginação, a pessoa que não conta (`QuemConta`), com o
-    catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda."""
+    catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda. O nome de cada
+    pessoa que conta é o atual do catálogo, o do destino no fim da cadeia se foi fundida
+    (#613), e desempata o ranking antes de cortar a página."""
 
     def __init__(self, consulta: ConsultaDeMomentos, catalogo: Catalogo) -> None:
         self._consulta = consulta
         self._catalogo = catalogo
 
-    def somas(
+    def somas_e_nomes(
         self, programa: str | None, desde: date | None, ate: date | None
-    ) -> list[PessoaNoVideo]:
+    ) -> tuple[list[PessoaNoVideo], dict[str, str]]:
+        """As somas de quem conta e o nome atual de cada um, numa leitura do catálogo."""
         somas = self._consulta.somas(programa, desde, ate)
-        contam = QuemConta(self._catalogo).contam({s.pessoa_id for s in somas})
-        return [s for s in somas if s.pessoa_id in contam]
+        destinos = QuemConta(self._catalogo).pessoas({s.pessoa_id for s in somas})
+        nomes = {i: d.pessoa.nome for i, d in destinos.items() if d.pessoa and d.conta}
+        return [s for s in somas if s.pessoa_id in nomes], nomes
 
     def ranking(
         self,
@@ -344,7 +350,8 @@ class SoComQuemConta:
         depois: int,
         limite: int,
     ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        return ranking_em_python(self.somas(programa, desde, ate), depois, limite)
+        somas, nomes = self.somas_e_nomes(programa, desde, ate)
+        return ranking_em_python(somas, depois, limite, nomes)
 
     def videos_da_pessoa(
         self,
@@ -419,12 +426,15 @@ class RelatorioDeTempoDeTela(BaseModel):
     pessoas: list[PessoaNoRelatorio]
 
 
-def relatorio(somas: list[PessoaNoVideo]) -> list[PessoaNoRelatorio]:
-    """Uma linha por pessoa, do maior tempo de tela para o menor.
+def relatorio(
+    somas: list[PessoaNoVideo], nomes: Mapping[str, str] | None = None
+) -> list[PessoaNoRelatorio]:
+    """Uma linha por pessoa, do maior tempo de tela para o menor e, no empate, pelo nome
+    e pelo id.
 
-    A pessoa é o id do catálogo; o nome é o que mais aparece nas linhas dela (um vídeo
-    copiado antes de uma correção de grafia não parte a pessoa em duas). A rota troca
-    esse nome pelo do catálogo (`com_nomes_do_catalogo`, #417).
+    A pessoa é o id do catálogo. O nome vem de `nomes` (o atual do catálogo, #417 e #613,
+    que tem de trazer toda pessoa das somas); sem o mapa, é o que mais aparece nas linhas
+    dela (um vídeo copiado antes de uma correção de grafia não parte a pessoa em duas).
     """
     por_pessoa: dict[str, list[PessoaNoVideo]] = defaultdict(list)
     for s in somas:
@@ -434,7 +444,11 @@ def relatorio(somas: list[PessoaNoVideo]) -> list[PessoaNoRelatorio]:
         contagem: Counter[str] = Counter()
         for s in dela:
             contagem.update(s.nomes)
-        nome = min(contagem, key=lambda n: (-contagem[n], n))
+        nome = (
+            nomes[pessoa_id]
+            if nomes is not None
+            else min(contagem, key=lambda n: (-contagem[n], n))
+        )
         videos = [
             VideoDaPessoa(
                 job_id=s.job_id,
@@ -480,24 +494,6 @@ def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
     )
 
 
-def com_nomes_do_catalogo[P: PessoaResumida](
-    pessoas: list[P], catalogo: Catalogo | None
-) -> list[P]:
-    """O nome de cada pessoa vem do catálogo, numa leitura em lote (#417): a cópia no
-    BigQuery não guarda o nome, então renomear no catálogo vale na hora. Quem o catálogo
-    não conhece fica com o que a cópia trouxe. Devolve cópias: o ranking guardado no cache
-    não muda."""
-    if catalogo is None or not pessoas:
-        return pessoas
-    do_catalogo = catalogo.obter_varios(p.pessoa_id for p in pessoas)
-    return [
-        p.model_copy(update={"nome": do_catalogo[p.pessoa_id].nome})
-        if p.pessoa_id in do_catalogo
-        else p
-        for p in pessoas
-    ]
-
-
 def criar_rotas_do_tempo_de_tela(
     consulta: ConsultaDeMomentos | None,
     repositorio: RepositorioDeJobs,
@@ -534,14 +530,11 @@ def criar_rotas_do_tempo_de_tela(
                 lambda: fonte.ranking(programa, desde, ate, depois, limite)
             )
             pagina, cabecalhos = recorta(lidas, depois, limite)
-            pagina = com_nomes_do_catalogo(pagina, catalogo)
             corpo = RankingDoTempoDeTela(
                 programa=programa, desde=desde, ate=ate, total=total, pessoas=pagina
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
-        pessoas = ou_503(lambda: relatorio(fonte.somas(programa, desde, ate)))
-        pessoas = com_nomes_do_catalogo(pessoas, catalogo)
-        pessoas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.nome, p.pessoa_id))
+        pessoas = ou_503(lambda: relatorio(*fonte.somas_e_nomes(programa, desde, ate)))
         if formato == "csv":
             return resposta_em_csv(em_csv(pessoas), "tempo-de-tela.csv")
         poe_o_nome_dos_videos((v for p in pessoas for v in p.por_video), repositorio)
