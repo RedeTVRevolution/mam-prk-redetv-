@@ -536,10 +536,9 @@ class Busca:
         contam: set[str] = set()
         decididos: set[str] = set()
 
-        # As pessoas da consulta são decididas antes da leitura do índice e as dos registros
-        # depois, então uma mudança na lixeira no meio da busca mistura dois estados do
-        # catálogo nesta 1ª página; a `versao` lida lá no início vai na lista e faz a página
-        # seguinte ser recusada (o cliente recomeça do topo).
+        # Uma mudança na lixeira no meio da busca mistura dois estados do catálogo nesta 1ª
+        # página (consulta decidida antes do índice, registros depois); a `versao` do início
+        # faz a página seguinte ser recusada.
         def decidir(ids: Iterable[str | None]) -> None:
             faltam = {i for i in ids if i and i not in decididos}
             if faltam:
