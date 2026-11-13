@@ -228,7 +228,7 @@ def test_cada_repositorio_tem_a_sua_idade() -> None:
 def test_idade_minima_que_nao_e_um_mapa_falha_com_mensagem_clara() -> None:
     novo: dict[str, Any] = SAIDA_DO_TERRAFORM["limpeza_de_imagens"]["value"]  # type: ignore[index]
     antigo = {**novo, "idade_minima_s": 14 * 86400}
-    with pytest.raises(ValueError, match="mapa por repositório.*Terraform atualizado"):
+    with pytest.raises(TypeError, match="mapa por repositório.*Terraform atualizado"):
         Regras.do_terraform(antigo)
 
 

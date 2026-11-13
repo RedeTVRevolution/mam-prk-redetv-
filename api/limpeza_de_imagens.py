@@ -27,7 +27,7 @@ class Regras:
     """As regras do Terraform: N últimas por imagem, cache e tags guardados, idade mínima."""
 
     manter_ultimas: int
-    idade_minima_s: Mapping[str, int]  # por repositório (o nome curto, sem host nem projeto), em segundos
+    idade_minima_s: Mapping[str, int]  # por repositório (nome curto), em segundos
     pacotes_do_cache: tuple[str, ...]
     tags_protegidas: tuple[str, ...]
     tag_da_volta: str
@@ -36,7 +36,7 @@ class Regras:
     def do_terraform(cls, saida: dict[str, Any]) -> "Regras":
         idade = saida["idade_minima_s"]
         if not isinstance(idade, dict):
-            raise ValueError(
+            raise TypeError(
                 "o output idade_minima_s precisa ser um mapa por repositório: "
                 "rode o Terraform atualizado (apply) e confira de novo"
             )
@@ -255,7 +255,7 @@ def main(
         return 2
     try:
         regras = Regras.do_terraform(saida["limpeza_de_imagens"]["value"])
-    except ValueError as erro:
+    except TypeError as erro:
         print(f"ERRO: {erro}.")
         return 2
     repositorios = [saida["repositorio"]["value"], saida["repositorio_gpu"]["value"]]
