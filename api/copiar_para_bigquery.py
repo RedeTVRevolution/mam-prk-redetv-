@@ -16,7 +16,6 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.bancos import cliente_do_firestore
-from api.catalogo import PessoaDoCatalogo
 from api.ciclo_de_vida import fechar_a_rodada, tomar_a_rodada
 from api.copia_bigquery import (
     CopiaDosMomentos,
@@ -33,7 +32,9 @@ from api.indexacao import (
 )
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import CopiaNoBigQuery, EstadoDaCopia, Job, RepositorioDeJobs, agora_utc
+from api.leitura_da_decupagem import MarcasEmLote, PessoasEmLote
 from api.nuvem import (
+    CatalogoDeMarcasFirestore,
     CatalogoFirestore,
     DecupagensStorage,
     ProgramasFirestore,
@@ -56,8 +57,9 @@ def copiar(
     correcoes: RepositorioDeCorrecoes,
     copia: CopiaDosMomentos,
     relogio: Callable[[], datetime] = agora_utc,
-    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
+    pessoas: PessoasEmLote | None = None,
     *,
+    marcas: MarcasEmLote | None = None,
     indice: IndiceDaBusca,
     programas: RepositorioDeProgramas | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
@@ -88,7 +90,7 @@ def copiar(
         )
         estado: EstadoDaCopia = "copiado"
         try:
-            decupagem = decupagem_do_job(job, decupagens, correcoes, pessoas)
+            decupagem = decupagem_do_job(job, decupagens, correcoes, pessoas, marcas)
             if pendente is None:
                 raise RuntimeError("estado pendente da cópia não gravado")
             ultima_copia = pendente.copia_bigquery or CopiaNoBigQuery(
@@ -144,6 +146,7 @@ def copiar(
                 relogio=relogio,
                 copia=copia,
                 pessoas=pessoas,
+                marcas=marcas,
                 programas=programas,
                 tipos_de_objeto=tipos_de_objeto,
                 sinal=sinal,
@@ -157,8 +160,9 @@ def copiar_jobs(
     decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
     copia: CopiaDosMomentos,
-    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
+    pessoas: PessoasEmLote | None = None,
     *,
+    marcas: MarcasEmLote | None = None,
     indice: IndiceDaBusca,
     programas: RepositorioDeProgramas | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
@@ -187,6 +191,7 @@ def copiar_jobs(
             correcoes,
             copia,
             pessoas=pessoas,
+            marcas=marcas,
             indice=indice,
             programas=programas,
             tipos_de_objeto=tipos_de_objeto,
@@ -212,7 +217,8 @@ def main(argv: list[str]) -> int:
         ),
         RepositorioDeCorrecoesFirestore(firestore_),
         copia,
-        pessoas=CatalogoFirestore(firestore_).obter,
+        pessoas=CatalogoFirestore(firestore_),
+        marcas=CatalogoDeMarcasFirestore(firestore_),
         programas=ProgramasFirestore(firestore_),
         tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
         sinal=sinal_do_ambiente(os.environ),
