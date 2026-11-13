@@ -46,6 +46,7 @@ from api.catalogo import (
     visivel,
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
+from api.clientes_de_nuvem import sessao_autenticada
 from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
@@ -719,10 +720,7 @@ class ContasIdentityPlatform:
 
     def _http(self) -> Any:
         if self._sessao is None:
-            credenciais, _ = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-            self._sessao = google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
+            self._sessao = sessao_autenticada()
         return self._sessao
 
     def _chamar(self, metodo: str, sufixo: str, **argumentos: Any) -> Any:
@@ -1382,11 +1380,7 @@ class DisparoPeloWorkflows:
 
     def _sessao_autenticada(self) -> Any:
         if self._sessao is None:
-            credenciais, _ = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-            sessao: Any = google.auth.transport.requests.AuthorizedSession
-            self._sessao = sessao(credenciais)
+            self._sessao = sessao_autenticada()
         return self._sessao
 
     def iniciar(self, job_id: str, etapa: NomeDaEtapa) -> None:
@@ -1414,11 +1408,7 @@ class DisparoDaIndexacaoNoCloudRun:
 
     def _sessao_autenticada(self) -> Any:
         if self._sessao is None:
-            credenciais, _ = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-            sessao: Any = google.auth.transport.requests.AuthorizedSession
-            self._sessao = sessao(credenciais)
+            self._sessao = sessao_autenticada()
         return self._sessao
 
     def iniciar(self, job_id: str) -> None:

@@ -95,6 +95,7 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \
@@ -178,6 +179,7 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \
@@ -293,6 +295,7 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \

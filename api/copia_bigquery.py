@@ -13,9 +13,7 @@ from datetime import date, datetime
 from time import monotonic, sleep
 from typing import Any, Protocol
 
-import google.auth
-import google.auth.transport.requests
-
+from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import Decupagem
 from api.indice_da_busca import registros_da_decupagem
 
@@ -340,10 +338,7 @@ def parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
 
 def transporte_http(projeto: str) -> Transporte:
     """O transporte real: REST com as credenciais padrão (ADC) de quem roda."""
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/bigquery"]
-    )
-    sessao = google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
+    sessao = sessao_autenticada("https://www.googleapis.com/auth/bigquery")
 
     def chamar(corpo: dict[str, Any]) -> dict[str, Any]:
         url = f"{URL_BASE}/projects/{projeto}/queries"
