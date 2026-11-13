@@ -44,7 +44,7 @@ from api.jobs import (
     ServicoIndisponivel,
     palavras_do_nome,
 )
-from api.marcas import MarcaInexistente, carregar_marcas
+from api.marcas import MarcaDoCatalogo, MarcaInexistente, carregar_marcas
 from api.nuvem import (
     TENTATIVAS_SOB_DISPUTA,
     ArmazenamentoStorage,
@@ -1407,6 +1407,38 @@ class TestCatalogoDeMarcasFirestore:
             marcas.apagar(m.id)
         with pytest.raises(MarcaInexistente):
             marcas.definir_lixeira(m.id, envio)
+
+    def test_na_lixeira_traz_so_as_marcas_com_lixeira_inclusive_a_gravada_com_null(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        nunca = marcas.acrescentar("Nunca", [])
+        voltou = marcas.acrescentar("Voltou", [])
+        fora = marcas.acrescentar("Fora", [])
+        marcas.definir_lixeira(voltou.id, _envio_para_lixeira())
+        marcas.definir_lixeira(voltou.id, None)  # grava `lixeira: null`
+        marcas.definir_lixeira(fora.id, _envio_para_lixeira())
+
+        assert [m.id for m in marcas.na_lixeira()] == [fora.id]
+        assert {m.id for m in marcas.todas()} == {nunca.id, voltou.id}
+
+    def test_na_lixeira_le_so_os_documentos_filtrados(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        for i in range(3):
+            marcas.acrescentar(f"M{i}", [])
+        m = marcas.acrescentar("Na lixeira", [])
+        marcas.definir_lixeira(m.id, _envio_para_lixeira())
+        lidos: list[str] = []
+        original = marcas._marca
+
+        def espia(id: str, dados: dict[str, Any]) -> MarcaDoCatalogo:
+            lidos.append(id)
+            return original(id, dados)
+
+        marcas._marca = espia  # type: ignore[method-assign]
+
+        assert [x.id for x in marcas.na_lixeira()] == [m.id]
+        assert lidos == [m.id]  # as outras três nem chegam ao Python
 
     def test_achar_com_lixeira_e_a_carga_nao_recria_a_marca_na_lixeira(
         self, marcas: CatalogoDeMarcasFirestore

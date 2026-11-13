@@ -36,6 +36,10 @@ from api.lixeira_na_leitura import (
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
 from api.papeis import RepositorioDePapeisEmMemoria
+from api.relatorio_de_marcas import ConsultaBigQuery as MarcasBigQuery
+from api.relatorio_de_marcas import ConsultaComCache as MarcasComCache
+from api.relatorio_de_marcas import ConsultaEmMemoria as MarcasEmMemoria
+from api.relatorios import posicao_do_cursor
 from api.tempo_de_tela import (
     ConsultaBigQuery,
     ConsultaDeMomentos,
@@ -45,6 +49,9 @@ from api.tempo_de_tela import ConsultaComCache as ComCache
 from api.tests.sem_periodo_padrao import ClienteSemPeriodoPadrao
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
+from api.tests.test_relatorio_de_marcas import CONFIG as CONFIG_DAS_MARCAS
+from api.tests.test_relatorio_de_marcas import Transporte as TransporteDasMarcas
+from api.tests.test_relatorio_de_marcas import _linha as _comercial
 from api.tests.test_tempo_de_tela import CONFIG, Transporte, _linha_do_bq
 
 ADMIN = {"Authorization": "Bearer admin"}
@@ -654,3 +661,215 @@ def test_se_o_avanco_falha_a_marca_nao_vai_para_a_lixeira() -> None:
         )
 
     assert marcas.obter(marca.id).lixeira is None  # type: ignore[union-attr]
+
+
+# --- a marca na lixeira sai do relatório de marcas (#593) --------------------------------
+
+ROTA_DAS_MARCAS = "/v1/relatorios/marcas"
+TODAS_AS_MARCAS = ["AB INBEV", "Ambev", "NESTLE", "Natura"]
+
+
+class MundoDasMarcas:
+    """Marcas na cópia: Ambev (apelido "AB InBev") 2 inserções em 2 vídeos, Nestlé e Natura
+    1 cada, no vídeo j1. A cópia traz a grafia de cada uma sem acento e em maiúsculas."""
+
+    def __init__(self) -> None:
+        self.mundo = Mundo()
+        self.marcas = CatalogoDeMarcasEmMemoria()
+        self.ambev = self.marcas.acrescentar("Ambev", ["AB InBev"])
+        self.nestle = self.marcas.acrescentar("Nestlé", [])
+        self.natura = self.marcas.acrescentar("Natura", [])
+        self.copia = CopiaEmMemoria()
+        self.copia.gravar(
+            "j1",
+            [
+                _comercial("j1", "Jornal", DIA, "AB INBEV", "intervalo"),
+                _comercial("j1", "Jornal", DIA, "NESTLE", "intervalo"),
+                _comercial("j1", "Jornal", DIA, "Natura", "intervalo"),
+            ],
+        )
+        self.copia.gravar(
+            "j2", [_comercial("j2", "Jornal", DIA, "Ambev", "merchan_apresentador")]
+        )
+
+    def instancia(self, consulta: Any = None, **extras: Any) -> TestClient:
+        return self.mundo.instancia(
+            marcas=self.marcas,
+            relatorio_de_marcas=consulta
+            or MarcasComCache(MarcasEmMemoria(self.copia), CacheCurto()),
+            **extras,
+        )
+
+
+def _marcas(cliente: TestClient, **params: Any) -> dict[str, Any]:
+    resposta = cliente.get(
+        ROTA_DAS_MARCAS, params={"limite": 10, **params}, headers=ADMIN
+    )
+    assert resposta.status_code == 200
+    corpo: dict[str, Any] = resposta.json()
+    return corpo
+
+
+def _nomes_das_marcas(corpo: dict[str, Any]) -> list[str]:
+    return [m["marca"] for m in corpo["marcas"]]
+
+
+def test_marca_na_lixeira_some_pelo_nome_e_pelo_apelido_e_volta_com_o_cache_quente() -> (
+    None
+):
+    m = MundoDasMarcas()
+    cliente = m.instancia()
+    assert _nomes_das_marcas(_marcas(cliente)) == TODAS_AS_MARCAS  # esquenta o cache
+
+    m.marcas.definir_lixeira(m.ambev.id, ENVIO)
+    depois = _marcas(cliente)
+
+    assert _nomes_das_marcas(depois) == ["NESTLE", "Natura"]  # apelido e maiúscula
+    assert depois["total"] == {
+        "marcas": 2,
+        "insercoes": 2,
+        "tempo_ms": 2_000,
+        "videos": 1,
+    }
+    completo = cliente.get(ROTA_DAS_MARCAS, headers=ADMIN).json()
+    assert [x["marca"] for x in completo["marcas"]] == ["NESTLE", "Natura"]
+    csv_ = cliente.get(ROTA_DAS_MARCAS, params={"formato": "csv"}, headers=ADMIN).text
+    assert "Ambev" not in csv_ and "INBEV" not in csv_ and "NESTLE" in csv_
+    lista = cliente.get(
+        f"{ROTA_DAS_MARCAS}/insercoes", params={"marca": "Ambev"}, headers=ADMIN
+    )
+    assert lista.json() == []
+
+    m.marcas.definir_lixeira(m.ambev.id, None)
+    de_volta = _marcas(cliente)
+    assert _nomes_das_marcas(de_volta) == TODAS_AS_MARCAS
+    assert de_volta["total"]["insercoes"] == 4
+    lista = cliente.get(
+        f"{ROTA_DAS_MARCAS}/insercoes", params={"marca": "Ambev"}, headers=ADMIN
+    )
+    assert len(lista.json()) == 1
+
+
+def test_nome_com_acento_na_lixeira_tira_a_grafia_sem_acento() -> None:
+    m = MundoDasMarcas()
+    cliente = m.instancia()
+    _marcas(cliente)
+
+    m.marcas.definir_lixeira(m.nestle.id, ENVIO)
+
+    assert "NESTLE" not in _nomes_das_marcas(_marcas(cliente))
+
+
+def test_totais_posicoes_e_paginacao_das_marcas_saem_depois_da_exclusao() -> None:
+    m = MundoDasMarcas()
+    cliente = m.instancia()
+    _marcas(cliente)
+    m.marcas.definir_lixeira(m.ambev.id, ENVIO)  # as duas primeiras do ranking
+
+    primeira = cliente.get(ROTA_DAS_MARCAS, params={"limite": 1}, headers=ADMIN)
+    segunda = cliente.get(
+        ROTA_DAS_MARCAS,
+        params={"limite": 1, "cursor": primeira.headers["X-Proximo-Cursor"]},
+        headers=ADMIN,
+    )
+
+    assert _nomes_das_marcas(primeira.json()) == ["NESTLE"]
+    assert _nomes_das_marcas(segunda.json()) == ["Natura"]
+    # A posição numérica (o cursor é a posição em base64) conta só as marcas que ficaram:
+    # com a Ambev e o apelido dela fora, a próxima página começa na posição 1, não na 3.
+    assert posicao_do_cursor(primeira.headers["X-Proximo-Cursor"]) == 1
+    ate_o_fim = cliente.get(ROTA_DAS_MARCAS, params={"limite": 2}, headers=ADMIN)
+    assert "X-Proximo-Cursor" not in ate_o_fim.headers  # só duas posições existem
+    assert "X-Proximo-Cursor" not in segunda.headers
+    assert primeira.json()["total"]["marcas"] == 2
+
+
+def test_video_novo_com_a_marca_na_lixeira_nao_a_faz_contar() -> None:
+    m = MundoDasMarcas()
+    cliente = m.instancia()
+    m.marcas.definir_lixeira(m.ambev.id, ENVIO)
+    _marcas(cliente)
+
+    m.copia.gravar("j3", [_comercial("j3", "Jornal", DIA, "Ambev", "intervalo")])
+
+    assert _nomes_das_marcas(_marcas(m.instancia())) == ["NESTLE", "Natura"]
+    assert _nomes_das_marcas(_marcas(cliente)) == ["NESTLE", "Natura"]
+
+
+def test_marca_purgada_deixa_de_estar_na_lixeira_e_volta_a_contar() -> None:
+    m = MundoDasMarcas()
+    cliente = m.instancia()
+    m.marcas.definir_lixeira(m.nestle.id, ENVIO)
+    assert "NESTLE" not in _nomes_das_marcas(_marcas(cliente))
+
+    m.marcas.apagar(m.nestle.id)
+
+    assert "NESTLE" in _nomes_das_marcas(_marcas(cliente))
+
+
+def test_o_filtro_das_marcas_vale_com_duas_instancias_e_sem_o_cache() -> None:
+    m = MundoDasMarcas()
+    uma, outra = m.instancia(), m.instancia()
+    _marcas(uma), _marcas(outra)
+
+    m.marcas.definir_lixeira(m.natura.id, ENVIO)
+
+    assert "Natura" not in _nomes_das_marcas(_marcas(uma))
+    assert "Natura" not in _nomes_das_marcas(_marcas(outra))
+    assert "Natura" not in _nomes_das_marcas(
+        _marcas(m.instancia(MarcasEmMemoria(m.copia)))
+    )
+
+
+def _somas_do_bq() -> dict[str, Any]:
+    def linha(marca: str, job: str) -> dict[str, Any]:
+        intervalos = '[{"inicio_ms":0,"fim_ms":1000}]'
+        valores = (marca, "intervalo", job, "1", "1000", intervalos)
+        return {"f": [{"v": v} for v in valores]}
+
+    return {
+        "jobComplete": True,
+        "rows": [linha("AB INBEV", "j1"), linha("Ambev", "j2"), linha("NESTLE", "j1")],
+    }
+
+
+def test_com_a_consulta_real_o_curador_envia_restaura_e_purga_a_marca_sem_escrever_no_bigquery() -> (
+    None
+):
+    m = MundoDasMarcas()
+    transporte = TransporteDasMarcas(_somas_do_bq())
+    versao = VersaoDaLixeiraEmMemoria()
+    cliente = m.instancia(
+        MarcasComCache(MarcasBigQuery(CONFIG_DAS_MARCAS, transporte), CacheCurto()),
+        versao_da_lixeira=versao,
+    )
+    todas = ["AB INBEV", "Ambev", "NESTLE"]
+    assert _nomes_das_marcas(_marcas(cliente)) == todas
+    inicial = versao.atual()
+
+    enviada = cliente.post(
+        f"{LIXEIRA}/marcas/{m.ambev.id}", json={"motivo": "teste"}, headers=ADMIN
+    )
+    assert enviada.status_code == 201
+    depois_do_envio = versao.atual()
+    assert depois_do_envio > inicial  # enviar troca a versão
+    enviado = _marcas(cliente)
+    assert _nomes_das_marcas(enviado) == ["NESTLE"]
+    assert enviado["total"]["insercoes"] == 1
+
+    restaurada = cliente.post(f"{LIXEIRA}/marcas/{m.ambev.id}/restaurar", headers=ADMIN)
+    assert restaurada.status_code == 200
+    assert versao.atual() > depois_do_envio  # restaurar também
+    assert _nomes_das_marcas(_marcas(cliente)) == todas
+
+    cliente.post(f"{LIXEIRA}/marcas/{m.ambev.id}", json={"motivo": "x"}, headers=ADMIN)
+    purgada = cliente.post(
+        f"{LIXEIRA}/marcas/{m.ambev.id}/purgar", json={"nome": "Ambev"}, headers=ADMIN
+    )
+    assert purgada.status_code == 200
+    assert _nomes_das_marcas(_marcas(cliente)) == todas  # purgada, não está na lixeira
+
+    assert len(transporte.corpos) == 1  # o cache guardou a soma sem exclusão
+    escritas = ("INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "DROP")
+    for corpo in transporte.corpos:
+        assert not any(w in corpo["query"].upper().split() for w in escritas)

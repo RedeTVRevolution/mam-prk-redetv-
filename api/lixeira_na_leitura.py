@@ -6,6 +6,10 @@ atual do catálogo. **Um id de pessoa conta** se existe no catálogo, está fora
 se foi fundido, o destino final da cadeia conta. A conferência é positiva, uma leitura em
 lote do catálogo sobre os ids encontrados (a pessoa purgada não aparece em lista nenhuma).
 
+A **marca** na lixeira (#593) é o contrário: conta tudo, menos o texto que bate com o nome
+ou um apelido (`nomes_de_busca_da_marca`) de uma marca na lixeira; a marca purgada já não
+está lá e volta a contar.
+
 A **versão** é um marcador durável no Firestore, lido por todas as instâncias e avançado a
 cada envio, restauração, purga (manual e automática) e fusão. Só cresce, então enviar e
 purgar a mesma pessoa não devolve um valor já visto, o que a impressão das pessoas na
@@ -18,6 +22,7 @@ from typing import Any, Protocol
 from google.cloud import firestore
 
 from api.catalogo import Catalogo, PessoaDoCatalogo
+from api.marcas import CatalogoDeMarcas, nomes_de_busca_da_marca
 
 COLECAO_DO_ESTADO_DA_LIXEIRA = "estado_da_lixeira"
 DOCUMENTO_DA_VERSAO = "catalogo"
@@ -50,6 +55,11 @@ def pessoas_que_contam(catalogo: Catalogo, ids: Iterable[str]) -> set[str]:
                 vistos[pedido].add(pessoa.fundida.destino_id)
                 ponta[pedido] = pessoa.fundida.destino_id
     return contam
+
+
+def nomes_de_marca_na_lixeira(marcas: CatalogoDeMarcas) -> set[str]:
+    """Nome e apelidos, normalizados, das marcas na lixeira: o texto que não conta."""
+    return {n for m in marcas.na_lixeira() for n in nomes_de_busca_da_marca(m)}
 
 
 class VersaoDaLixeira(Protocol):

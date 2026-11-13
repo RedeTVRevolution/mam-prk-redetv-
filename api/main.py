@@ -782,7 +782,9 @@ def criar_app(
         )
     )
     v1.include_router(
-        criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs, relogio)
+        criar_rotas_das_marcas(
+            relatorio_de_marcas, repositorio_de_jobs, catalogo_de_marcas, relogio
+        )
     )
     # Vale para toda rota com `{job_id}`: o vídeo na lixeira some para quem não é Administrador.
     app.include_router(
