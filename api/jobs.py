@@ -1687,6 +1687,8 @@ def criar_rotas(
             raise HTTPException(404, "Correção não encontrada") from None
         except NaoCandidato:
             raise HTTPException(422, "O item não é candidato desta correção") from None
+        except ItemInexistente:
+            raise HTTPException(422, "Item inexistente") from None
         except TemposInvalidos:
             raise HTTPException(422, "Tempos além da duração do vídeo") from None
         except (NaoNaFila, CorrecaoJaExiste):
