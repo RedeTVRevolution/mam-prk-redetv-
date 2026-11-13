@@ -37,12 +37,6 @@ from api.auth import (
 )
 from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, EnvioParaLixeira
-from api.catalogo_apagado import (
-    com_pessoas_fundidas,
-    ids_do_catalogo,
-    lido_em_lote,
-    sem_catalogo_apagado,
-)
 from api.catalogo_dos_jobs import atualizar_catalogo_do_job
 from api.ciclo_de_vida import (
     PRAZO_DO_REPROCESSAMENTO,
@@ -77,7 +71,6 @@ from api.correcoes import (
     com_o_estado_na_busca,
     corrigir,
     decidir,
-    decupagem_entregue,
     descartar,
     desfazer,
     fila,
@@ -94,6 +87,7 @@ from api.idempotencia import (
     RepositorioDeIdempotenciaEmMemoria,
     impressao_do_corpo,
 )
+from api.leitura_da_decupagem import LeituraDaDecupagem
 from api.marcas import CatalogoDeMarcas
 from api.papeis import (
     DocumentoDePapeis,
@@ -1475,24 +1469,11 @@ def criar_rotas(
     def _ler_correcoes(job_id: str) -> list[Correcao]:
         return correcoes.listar(job_id)
 
+    leitura = LeituraDaDecupagem(armazenamento, correcoes, catalogo, marcas)
+
     def _entregue(job: Job) -> dict[str, Any]:
-        """A Decupagem entregue, com as Correções aplicadas."""
-        modelo, versao_atual = _ler_modelo(job.id)
-        entregue = decupagem_entregue(modelo, versao_atual, _ler_correcoes(job.id))
-        # Pessoas e marcas distintas da Decupagem, numa leitura em lote cada.
-        pessoa = lido_em_lote(
-            ids_do_catalogo(entregue, "pessoas"), catalogo.obter_varios, catalogo.obter
-        )
-        marca = lido_em_lote(
-            ids_do_catalogo(entregue, "comerciais"), marcas.obter_varios, marcas.obter
-        )
-        entregue = com_pessoas_fundidas(entregue, pessoa)
-        entregue = sem_catalogo_apagado(
-            entregue,
-            lambda id: (p := pessoa(id)) is not None and p.lixeira is None,
-            lambda id: (m := marca(id)) is not None and m.lixeira is None,
-        )
-        return entregue
+        """A Decupagem entregue (#584): as Correções, a fusão e o efeito da lixeira."""
+        return leitura.entregue(job.id)
 
     @rotas.get("/{job_id}/decupagem")
     def decupagem(

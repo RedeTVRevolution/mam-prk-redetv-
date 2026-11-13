@@ -229,8 +229,14 @@ Correção de Editor, num tipo que exige aprovação, que espera a decisão de u
 **Juntar e dividir pautas**:
 Tipos de Correção (`pauta.juntar`, valor `{ids, titulo}`; `pauta.dividir`, valor `{em_ms, titulos}`) que mudam a estrutura das pautas, podem exigir aprovação como os outros tipos e reindexam o vídeo. Juntar vale só para pautas que se seguem; dividir, para um corte dentro da pauta. No reprocessar, cada uma é reconciliada com as pautas novas do modelo: se o modelo já fez o mesmo, com os mesmos títulos, a correção está atendida; se fez o mesmo com outros títulos, só os títulos mudam; se não, é reaplicada.
 
+**Decupagem corrigida**:
+A Decupagem do Job lida pelo módulo `api/leitura_da_decupagem.py` (#582): o modelo com as Correções em vigor e a fusão e a renomeação de pessoas do catálogo resolvidas. Mantém o `catalogo_id` de quem está na lixeira do catálogo (ou foi purgado), e por isso é a leitura da indexação, do índice, do BigQuery, do Catálogo do Job, do impacto da lixeira, das prévias da fusão e da renomeação e da carga de marcas. Catálogo de pessoas ou de marcas não fornecido: aquela espécie não é resolvida.
+
+**Decupagem entregue**:
+A Decupagem corrigida mais o efeito da lixeira do catálogo e da purga (ADR 0010, 0012): a pessoa cujo nome só o rosto sustentava volta a "não identificado"; a pessoa e a marca na lixeira ou que não existem mais no catálogo perdem o `catalogo_id`, e a marca mantém o texto. A diferença para a corrigida é só essa: a entregue não leva o vínculo de quem está na lixeira. É o que a tela e o download em JSON mostram.
+
 **Catálogo do Job**:
-Os campos `pessoas_do_catalogo` e `marcas_do_catalogo` do Job: os `catalogo_id` que aparecem na Decupagem entregue (Correções aplicadas, pessoas fundidas resolvidas) (#359). São gravados ao indexar, a cada Correção que muda a Decupagem entregue e na fusão de pessoas, e é por eles (`array_contains`) que o impacto de mandar uma pessoa ou marca para a lixeira, restaurá-la ou purgá-la acha só os vídeos dela, sem abrir todas as decupagens. Job anterior ao campo só entra no impacto depois de `make preencher-catalogo-dos-jobs`, que preenche os dois campos de todos os Jobs concluídos e pode repetir sem mudar nada.
+Os campos `pessoas_do_catalogo` e `marcas_do_catalogo` do Job: os `catalogo_id` que aparecem na Decupagem corrigida (Correções aplicadas, pessoas fundidas resolvidas) (#359). São gravados ao indexar, a cada Correção que muda a Decupagem entregue e na fusão de pessoas, e é por eles (`array_contains`) que o impacto de mandar uma pessoa ou marca para a lixeira, restaurá-la ou purgá-la acha só os vídeos dela, sem abrir todas as decupagens. Job anterior ao campo só entra no impacto depois de `make preencher-catalogo-dos-jobs`, que preenche os dois campos de todos os Jobs concluídos e pode repetir sem mudar nada.
 
 **Correção não reaplicada**:
 Juntar ou dividir pautas para a qual o reprocessar não achou pauta correspondente. Não se perde: aparece na fila (`/fila`) com `candidatos` vazios, e só pode ser descartada.
