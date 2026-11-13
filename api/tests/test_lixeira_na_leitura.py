@@ -1239,7 +1239,7 @@ def test_registro_sem_id_de_marca_continua_valendo() -> None:
     assert "AB INBEV" not in _nomes_das_marcas(_marcas(cliente))
 
 
-def test_job_ausente_conta_como_anterior_a_purga() -> None:
+def test_conta_depois_do_corte_trata_job_ausente_como_anterior() -> None:
     from api.lixeira_na_leitura import conta_depois_do_corte
 
     corte = datetime(2026, 1, 2, tzinfo=UTC)

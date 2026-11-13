@@ -778,9 +778,9 @@ def test_falha_na_leitura_do_job_com_marca_purgada_e_503_nao_job_ausente(
     busca = cenario.busca()
 
     def cai(ids: Any) -> Any:
-        raise ServiceUnavailable("firestore fora")
+        raise ServiceUnavailable("firestore fora")  # type: ignore[no-untyped-call]
 
-    cenario.m.jobs.obter_varios = cai  # type: ignore[method-assign]
+    cenario.m.jobs.obter_varios = cai  # type: ignore[method-assign,assignment]
 
     with pytest.raises(ServicoIndisponivel):
         busca.buscar("vestido")
