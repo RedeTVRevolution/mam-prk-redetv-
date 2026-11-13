@@ -17,16 +17,15 @@ lixeira não garantiria. A busca a usa para recusar o cursor velho.
 """
 
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, Protocol
 
-from google.api_core.exceptions import GoogleAPIError
 from google.cloud import firestore
 from pydantic import BaseModel
 
 from api.catalogo import Catalogo, PessoaDoCatalogo
-from api.jobs import ServicoIndisponivel
+from api.erros import lido
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 
 COLECAO_DO_ESTADO_DA_LIXEIRA = "estado_da_lixeira"
@@ -162,14 +161,6 @@ class PurgasDeMarcaFirestore:
 
     def todas(self) -> list[PurgaDeMarca]:
         return [PurgaDeMarca(**(d.to_dict() or {})) for d in self._colecao.stream()]
-
-
-def lido[T](ler: Callable[[], T]) -> T:
-    """Uma leitura do Firestore que falha vira 503 (`ServicoIndisponivel`), não 500."""
-    try:
-        return ler()
-    except GoogleAPIError as e:
-        raise ServicoIndisponivel(str(e)) from e
 
 
 def cortes_validos(

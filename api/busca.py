@@ -34,6 +34,7 @@ from api.entendimento_da_consulta import (
     entender,
     termo_da_foto,
 )
+from api.erros import lido
 from api.gemini import ErroHttp, Transporte
 from api.indice_da_busca import (
     Consulta,
@@ -57,7 +58,6 @@ from api.lixeira_na_leitura import (
     VersaoDaLixeiraEmMemoria,
     conta_depois_do_corte,
     cortes_validos,
-    lido,
     nomes_de_marca_na_lixeira,
     pessoas_que_contam,
 )
