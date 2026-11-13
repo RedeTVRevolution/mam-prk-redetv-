@@ -116,6 +116,7 @@ COPY api/__init__.py \
      api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
      api/numero.py \
@@ -125,6 +126,7 @@ COPY api/__init__.py \
      api/pessoas.py \
      api/programas.py \
      api/progresso_das_janelas.py \
+     api/quem_conta.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \
@@ -200,6 +202,7 @@ COPY api/__init__.py \
      api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
      api/mudanca_da_tela.py \
@@ -212,6 +215,7 @@ COPY api/__init__.py \
      api/programas.py \
      api/progresso_das_janelas.py \
      api/quadros.py \
+     api/quem_conta.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \
@@ -315,6 +319,7 @@ COPY api/__init__.py \
      api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
      api/numero.py \
@@ -325,6 +330,7 @@ COPY api/__init__.py \
      api/pessoas.py \
      api/programas.py \
      api/progresso_das_janelas.py \
+     api/quem_conta.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \

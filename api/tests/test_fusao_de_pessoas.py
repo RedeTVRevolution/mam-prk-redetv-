@@ -150,6 +150,44 @@ def test_a_decupagem_mostra_o_destino_sem_reescrever_o_gravado() -> None:
     assert gravada["pessoas"][0]["catalogo_id"] == mundo.duplicada.id
 
 
+def _entregue_apos(mundo: Mundo, fontes: list[str]) -> dict[str, Any]:
+    """A Decupagem entregue de j1, com a origem gravada com estas fontes de nome."""
+    decupagem = json.loads(mundo.armazenamento.decupagens["j1"][0])
+    decupagem["pessoas"][0]["fontes_do_nome"] = fontes
+    mundo.armazenamento.decupagens["j1"] = [json.dumps(decupagem).encode()]
+    resposta = mundo.cliente.get("/v1/jobs/j1/decupagem", headers=CURADOR)
+    assert resposta.status_code == 200, resposta.text
+    return resposta.json()["pessoas"][0]  # type: ignore[no-any-return]
+
+
+def _destino_purgado(mundo: Mundo) -> None:
+    mundo.fundir()
+    mundo.catalogo.apagar(mundo.sabrina.id)
+
+
+def _ciclo(mundo: Mundo) -> None:
+    mundo.fundir()
+    fusao = mundo.catalogo.obter(mundo.duplicada.id).fundida  # type: ignore[union-attr]
+    assert fusao is not None
+    mundo.catalogo.definir_fusao(
+        mundo.sabrina.id, fusao.model_copy(update={"destino_id": mundo.duplicada.id})
+    )
+
+
+@pytest.mark.parametrize("sabotar", [_destino_purgado, _ciclo])
+def test_destino_purgado_ou_ciclo_na_entregue_a_origem_perde_o_vinculo(
+    sabotar: Any,
+) -> None:
+    mundo = Mundo()
+    sabotar(mundo)
+
+    so_rosto = _entregue_apos(mundo, ["rosto", "referencia"])
+    com_gc = _entregue_apos(mundo, ["gc"])
+
+    assert (so_rosto["nome"], "catalogo_id" in so_rosto) == ("não identificado", False)
+    assert (com_gc["nome"], "catalogo_id" in com_gc) == ("Sabrina S.", False)
+
+
 def test_as_fotos_da_origem_somem_e_as_do_destino_ficam() -> None:
     mundo = Mundo()
 

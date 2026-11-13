@@ -375,8 +375,9 @@ def test_destino_da_fusao_fora_do_lote_e_lido_uma_vez() -> None:
         _modelo(_pessoa("pes01", "A", a.id), _pessoa("pes02", "A2", a.id)), catalogo
     )
     leitura.entregue("j1")
-    assert len(catalogo.lotes) == 1 and catalogo.lotes[0] == [a.id]
-    assert catalogo.individuais == [b.id]
+    # Um lote por elo da cadeia, cada id uma vez; nada em leitura avulsa.
+    assert catalogo.lotes == [[a.id], [b.id]]
+    assert catalogo.individuais == []
 
 
 # --- Iteradores sobre os Jobs --------------------------------------------------------

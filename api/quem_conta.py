@@ -12,8 +12,9 @@ Só a biblioteca padrão, o catálogo e `api.erros`: o módulo de Jobs não entr
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
-from api.catalogo import Catalogo, PessoaDoCatalogo
+from api.catalogo import PessoaDoCatalogo
 from api.erros import lido
 from api.lixeira_na_leitura import (
     PurgaDeMarca,
@@ -21,6 +22,12 @@ from api.lixeira_na_leitura import (
     conta_depois_do_corte,
 )
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
+
+
+class PessoasEmLote(Protocol):
+    """Do catálogo de pessoas, só o que o Quem conta lê: um lote por vez."""
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]: ...
 
 
 @dataclass(frozen=True)
@@ -61,7 +68,7 @@ class Cortes:
 class QuemConta:
     def __init__(
         self,
-        pessoas: Catalogo | None = None,
+        pessoas: PessoasEmLote | None = None,
         marcas: CatalogoDeMarcas | None = None,
         purgas: PurgasDeMarca | None = None,
     ) -> None:

@@ -40,7 +40,7 @@ from api.jobs import (
     RepositorioDeJobs,
     agora_utc,
 )
-from api.leitura_da_decupagem import LeituraDaDecupagem, PessoasEmLote
+from api.leitura_da_decupagem import LeituraDaDecupagem
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -51,6 +51,7 @@ from api.nuvem import (
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
 from api.programas import RepositorioDeProgramas, terminar_o_pendente
+from api.quem_conta import PessoasEmLote
 from api.sinais import Registrar, imprimir, registro_da_falha_de_etapa
 from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
 from api.tipos_de_objeto import TiposDeObjeto
