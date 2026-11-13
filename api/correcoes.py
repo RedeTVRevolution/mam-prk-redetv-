@@ -2336,11 +2336,11 @@ def decidir(
     )
 
 
-def decupagem_entregue(
+def decupagem_com_correcoes(
     modelo: dict[str, Any], versao: str, correcoes: list[Correcao]
 ) -> dict[str, Any]:
-    """A decupagem que o Editor vê: o modelo com as correções aplicadas, e a
-    versão do JSON do modelo em que elas se apoiam."""
+    """O modelo com as Correções em vigor aplicadas e a versão do JSON do modelo em que
+    elas se apoiam. A leitura de quem consome é `LeituraDaDecupagem`, que a chama."""
     entregue = aplicar(modelo, versao, correcoes)
     entregue["versao_decupagem"] = versao
     _com_tipo_canonico(modelo, entregue)

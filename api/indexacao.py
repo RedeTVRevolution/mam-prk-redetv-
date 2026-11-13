@@ -9,7 +9,6 @@ demanda (`make reindexar`); uma execução por vez, a que toma a vez, indexa at�
 (`indexacao`); uma falha dela só fica ali e nunca muda o `estado` do Job.
 """
 
-import json
 import logging
 import os
 import sys
@@ -26,12 +25,10 @@ from pydantic import BaseModel
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.bancos import cliente_do_firestore
-from api.catalogo import PessoaDoCatalogo
-from api.catalogo_apagado import com_pessoas_fundidas
 from api.catalogo_dos_jobs import gravar_catalogo_do_job
 from api.ciclo_de_vida import fechar_a_rodada, tomar_a_rodada
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_decupagem
-from api.correcoes import RepositorioDeCorrecoes, decupagem_entregue, versao_do_modelo
+from api.correcoes import RepositorioDeCorrecoes
 from api.decupagem import Decupagem
 from api.indice_da_busca import IndiceDaBusca, registros_da_decupagem
 from api.jobs import (
@@ -43,6 +40,7 @@ from api.jobs import (
     RepositorioDeJobs,
     agora_utc,
 )
+from api.leitura_da_decupagem import LeituraDaDecupagem, PessoasEmLote
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -147,17 +145,12 @@ def decupagem_do_job(
     job: Job,
     decupagens: LeitorDeDecupagem,
     correcoes: RepositorioDeCorrecoes,
-    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
+    pessoas: PessoasEmLote | None = None,
 ) -> Decupagem:
-    """A Decupagem entregue (com as Correções em vigor), no esquema do modelo. Com
-    `pessoas`, o catálogo manda no nome e no id de quem foi fundido ou renomeado (#209, #263)."""
-    conteudo = b"".join(decupagens.abrir_decupagem(job.id))
-    entregue = decupagem_entregue(
-        json.loads(conteudo), versao_do_modelo(conteudo), correcoes.listar(job.id)
-    )
-    if pessoas is not None:
-        entregue = com_pessoas_fundidas(entregue, pessoas)
-    return Decupagem.model_validate(_so_o_esquema(Decupagem, entregue))
+    """A Decupagem corrigida (Correções em vigor, fusão e renomeação; sem o efeito da
+    lixeira do catálogo), no esquema do modelo. Sem `pessoas`, a fusão não se resolve."""
+    leitura = LeituraDaDecupagem(decupagens, correcoes, pessoas)
+    return Decupagem.model_validate(_so_o_esquema(Decupagem, leitura.corrigida(job.id)))
 
 
 class _Resultado(NamedTuple):
@@ -175,7 +168,7 @@ def _uma_rodada(
     copia: CopiaDosMomentos | None,
     sinal: SinalDoPrograma | None,
     tipos_de_objeto: TiposDeObjeto | None,
-    pessoas: Callable[[str], PessoaDoCatalogo | None] | None,
+    pessoas: PessoasEmLote | None,
 ) -> _Resultado:
     """Uma passada pelo índice e pela cópia com o `job` lido agora. Não grava o estado final
     da indexação: quem fecha a rodada o grava. Nunca levanta por falha do índice ou da cópia."""
@@ -280,7 +273,7 @@ def reindexar(
     copia: CopiaDosMomentos | None = None,
     sinal: SinalDoPrograma | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
-    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
+    pessoas: PessoasEmLote | None = None,
     programas: RepositorioDeProgramas | None = None,
     so_se_pedida: bool = False,
 ) -> Indexacao | None:
@@ -399,7 +392,7 @@ def reindexar_jobs(
     copia: CopiaDosMomentos | None = None,
     sinal: SinalDoPrograma | None = None,
     tipos_de_objeto: TiposDeObjeto | None = None,
-    pessoas: Callable[[str], PessoaDoCatalogo | None] | None = None,
+    pessoas: PessoasEmLote | None = None,
     programas: RepositorioDeProgramas | None = None,
     so_se_pedida: bool = False,
 ) -> dict[str, str]:
@@ -475,7 +468,7 @@ def main(argv: list[str]) -> int:
         copia_do_ambiente(os.environ),
         sinal=sinal,
         tipos_de_objeto=TiposDeObjetoFirestore(firestore_),
-        pessoas=CatalogoFirestore(firestore_).obter,
+        pessoas=CatalogoFirestore(firestore_),
         programas=ProgramasFirestore(firestore_),
         # Disparado pelo Workflows/API (JOB_ID, sem argv) só indexa o que se pediu; o
         # `make reindexar` sempre indexa.

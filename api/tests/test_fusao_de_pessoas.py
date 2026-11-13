@@ -1,8 +1,10 @@
 """Fundir duas pessoas do catálogo (#209)."""
 
 import json
+import logging
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
@@ -281,9 +283,43 @@ def test_fundir_de_novo_conta_tambem_quem_ja_foi_fundido_na_origem() -> None:
     resposta = mundo.fundir(origem=mundo.sabrina.id, destino=terceira.id)
 
     assert resposta.status_code == 200, resposta.text
-    assert resposta.json()["videos"] == 2
+    assert (resposta.json()["videos"], resposta.json()["aparicoes"]) == (2, 4)
     lida = mundo.cliente.get("/v1/jobs/j1/decupagem", headers=CURADOR).json()
     assert lida["pessoas"][0]["catalogo_id"] == terceira.id
+
+
+def test_a_previa_deixa_a_fusao_para_a_leitura_e_pula_a_que_nao_abre(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mundo = Mundo()
+    mundo.jobs.salvar(
+        _job("j3", pessoas_do_catalogo=[mundo.duplicada.id])
+    )  # sem arquivo
+    lidas: list[str] = []
+    obter = mundo.catalogo.obter
+
+    def obter_contado(id: str) -> Any:
+        lidas.append(id)
+        return obter(id)
+
+    mundo.catalogo.obter = obter_contado  # type: ignore[method-assign]
+    logger = logging.getLogger("api.leitura_da_decupagem")
+    logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level("WARNING"):
+            resposta = mundo.cliente.get(
+                f"/v1/catalogo/pessoas/{mundo.duplicada.id}/fundir/impacto",
+                params={"destino_id": mundo.sabrina.id},
+                headers=CURADOR,
+            )
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    assert resposta.status_code == 200, resposta.text
+    assert (resposta.json()["videos"], resposta.json()["aparicoes"]) == (2, 4)
+    assert "j3" in caplog.text
+    # só a validação da rota lê a origem e o destino: a prévia não resolve fusão por conta própria
+    assert sorted(lidas) == sorted([mundo.duplicada.id, mundo.sabrina.id])
 
 
 def test_pessoa_fundida_nao_vai_para_a_lixeira() -> None:

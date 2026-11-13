@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from api.correcoes import decupagem_entregue, versao_do_modelo
+from api.correcoes import decupagem_com_correcoes, versao_do_modelo
 from api.decupagem import Decupagem
 from api.indexacao import _so_o_esquema
 from api.tests.test_correcoes import Mundo
@@ -36,7 +36,7 @@ def _inventario(nome: str, **mais: Any) -> dict[str, Any]:
 
 def _entregue(modelo: dict[str, Any]) -> dict[str, Any]:
     versao = versao_do_modelo(json.dumps(modelo).encode())
-    return decupagem_entregue(modelo, versao, [])
+    return decupagem_com_correcoes(modelo, versao, [])
 
 
 @pytest.mark.parametrize("esquema", ["1.2", "1.3", "1.4"])

@@ -84,7 +84,7 @@ class DisparoNaHora:
             *self.argumentos,
             relogio=self.relogio,
             copia=self.copia,
-            pessoas=self.catalogo.obter,
+            pessoas=self.catalogo,
             programas=self.programas,
             so_se_pedida=True,
         )

@@ -6,7 +6,6 @@ na leitura das Decupagens, o nome que só o rosto sustentava; a marca perde o v�
 catálogo e mantém o texto. A saída do modelo não é tocada (ADR 0010).
 """
 
-import json
 import logging
 import uuid
 from collections.abc import Callable, Iterator
@@ -25,12 +24,9 @@ from api.catalogo import (
     prefixo_das_fotos,
 )
 from api.catalogo_apagado import so_o_rosto
-from api.correcoes import (
-    RepositorioDeCorrecoes,
-    decupagem_entregue,
-    versao_do_modelo,
-)
-from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs, _confere_permissao
+from api.correcoes import RepositorioDeCorrecoes
+from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
+from api.leitura_da_decupagem import decupagens_corrigidas
 from api.lixeira import (
     PRAZO_DA_PURGA,
     Envio,
@@ -153,43 +149,6 @@ def purgar_catalogo_vencido(
     return purgadas
 
 
-def decupagens_dos_jobs(
-    repositorio: RepositorioDeJobs,
-    correcoes: RepositorioDeCorrecoes,
-    decupagens: LeituraDeDecupagens,
-    filtro: FiltroDeJobs | None = None,
-) -> Iterator[tuple[Job, dict[str, Any]]]:
-    """Cada vídeo concluído fora da lixeira (e que casa com `filtro`) com a Decupagem
-    entregue; a que não lê é pulada."""
-    for job in repositorio.consultar(filtro or FiltroDeJobs()).jobs:
-        if job.estado != "concluido":
-            continue
-        try:
-            conteudo = b"".join(decupagens.abrir_decupagem(job.id))
-            entregue = decupagem_entregue(
-                json.loads(conteudo),
-                versao_do_modelo(conteudo),
-                correcoes.listar(job.id),
-            )
-        except Exception:  # noqa: BLE001 - uma Decupagem ruim não trava o impacto
-            log.warning("decupagem de %s não lida; fora do impacto", job.id)
-            continue
-        yield job, entregue
-
-
-def decupagens_entregues(
-    repositorio: RepositorioDeJobs,
-    correcoes: RepositorioDeCorrecoes,
-    decupagens: LeituraDeDecupagens,
-    filtro: FiltroDeJobs | None = None,
-) -> Iterator[dict[str, Any]]:
-    """A Decupagem entregue de cada vídeo concluído fora da lixeira; a que não lê é pulada."""
-    for _job, entregue in decupagens_dos_jobs(
-        repositorio, correcoes, decupagens, filtro
-    ):
-        yield entregue
-
-
 def criar_rotas_da_lixeira_do_catalogo(
     pessoas: Catalogo,
     marcas: CatalogoDeMarcas,
@@ -211,7 +170,9 @@ def criar_rotas_da_lixeira_do_catalogo(
         descartar_pessoas()
 
     def entregues(filtro: FiltroDeJobs) -> Iterator[dict[str, Any]]:
-        return decupagens_entregues(repositorio, correcoes, decupagens, filtro)
+        return decupagens_corrigidas(
+            repositorio, correcoes, decupagens, pessoas, filtro
+        )
 
     def impacto_da_pessoa(id: str, fotos_dela: int) -> ImpactoDaPessoa:
         aparicoes = sum(
