@@ -18,7 +18,7 @@ from api.chaves import (
     VerificadorDeChaveDeApi,
     emitir_chave,
 )
-from api.copia_bigquery import _parametro
+from api.copia_bigquery import parametro
 from api.jobs import Estado, Job, RepositorioEmMemoria, agora_utc
 from api.main import criar_app
 from api.painel import escolhe_o_grupo, inicio_do_grupo
@@ -488,8 +488,8 @@ def test_consulta_do_bigquery_filtra_com_parametros_e_converte_as_linhas() -> No
     assert "`proj.ds.por_usuario`" in pedido["query"]
     assert "DROP" not in pedido["query"]
     assert pedido["queryParameters"] == [
-        _parametro("desde", "2026-11-01", "DATE"),
-        _parametro("usuario", "bia'; DROP TABLE x"),
+        parametro("desde", "2026-11-01", "DATE"),
+        parametro("usuario", "bia'; DROP TABLE x"),
     ]
 
 
@@ -793,7 +793,7 @@ def test_uso_no_bigquery_traz_as_colunas_das_duas_tabelas() -> None:
     assert "quem_id = @quem_id" in primeiro["query"]
     assert "`proj.ds.por_programa`" in segundo["query"]
     assert "DROP" not in segundo["query"]
-    assert segundo["queryParameters"] == [_parametro("programa", "Hoje'; DROP TABLE x")]
+    assert segundo["queryParameters"] == [parametro("programa", "Hoje'; DROP TABLE x")]
 
 
 def test_correcoes_e_chamadas_no_bigquery_trazem_as_colunas_das_duas_tabelas() -> None:
@@ -834,13 +834,13 @@ def test_correcoes_e_chamadas_no_bigquery_trazem_as_colunas_das_duas_tabelas() -
     assert "`proj.ds.correcoes`" in primeiro["query"]
     assert "DROP" not in primeiro["query"]
     assert primeiro["queryParameters"] == [
-        _parametro("programa", "Hoje'; DROP TABLE x"),
-        _parametro("quem_id", "bia"),
+        parametro("programa", "Hoje'; DROP TABLE x"),
+        parametro("quem_id", "bia"),
     ]
     assert "`proj.ds.chamadas`" in segundo["query"]
     assert segundo["queryParameters"] == [
-        _parametro("desde", "2026-11-01", "DATE"),
-        _parametro("quem_id", "cms"),
+        parametro("desde", "2026-11-01", "DATE"),
+        parametro("quem_id", "cms"),
     ]
 
 

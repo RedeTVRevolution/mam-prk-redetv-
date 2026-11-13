@@ -27,7 +27,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
-from api.copia_bigquery import Transporte, _parametro, transporte_http
+from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.eventos_de_uso import Quem
 from api.jobs import Job
 from api.qualidade_do_painel import SAO_PAULO
@@ -238,7 +238,7 @@ class FaturamentoBigQuery:
         onde_do_job = ["TRUE"]
         onde_do_custo_sem_dono = ["TRUE"]
         if filtro.desde is not None:
-            parametros.append(_parametro("desde", filtro.desde.isoformat(), "DATE"))
+            parametros.append(parametro("desde", filtro.desde.isoformat(), "DATE"))
             # A partição é a da ingestão (`_PARTITIONTIME`, a hora da exportação), não a do
             # instante do uso: o filtro é conservador, pois a exportação nunca antecede o uso
             # e o dia de SP começa às 03:00Z. O `ate` não limita a partição (o uso do último
@@ -249,16 +249,16 @@ class FaturamentoBigQuery:
             onde_do_job.append(f"j.criado_em >= TIMESTAMP(@desde, {fuso})")
             onde_do_custo_sem_dono.append("l.dia >= @desde")
         if filtro.ate is not None:
-            parametros.append(_parametro("ate", filtro.ate.isoformat(), "DATE"))
+            parametros.append(parametro("ate", filtro.ate.isoformat(), "DATE"))
             onde_do_job.append(
                 f"j.criado_em < TIMESTAMP(DATE_ADD(@ate, INTERVAL 1 DAY), {fuso})"
             )
             onde_do_custo_sem_dono.append("l.dia <= @ate")
         if filtro.programa is not None:
-            parametros.append(_parametro("programa", filtro.programa, "STRING"))
+            parametros.append(parametro("programa", filtro.programa, "STRING"))
             onde_do_job.append("j.programa = @programa")
         if filtro.usuario is not None:
-            parametros.append(_parametro("usuario", filtro.usuario, "STRING"))
+            parametros.append(parametro("usuario", filtro.usuario, "STRING"))
             onde_do_job.append("j.quem_id = @usuario")
         jobs = f"`{c.projeto}.{c.dataset_dos_jobs}.{c.tabela_dos_jobs}`"
         mes = "FORMAT_DATE('%Y-%m', {})"

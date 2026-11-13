@@ -34,7 +34,7 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, _parametro, transporte_http
+from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.correcoes import RepositorioDeCorrecoes
 from api.itens_da_decupagem import (
     ItensDaDecupagem,
@@ -334,7 +334,7 @@ THEN DELETE
                 "location": c.regiao,
                 "timeoutMs": 120_000,
                 "queryParameters": [
-                    _parametro(
+                    parametro(
                         "linhas",
                         json.dumps([_json_da_linha(x) for x in linhas]),
                     ),

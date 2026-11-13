@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from api.cache_curto import CacheCurto
 from api.comparador import normalizar
-from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _parametro
+from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, parametro
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.jobs import RepositorioDeJobs
@@ -43,7 +43,6 @@ from api.relatorios import (
     consultar_no_bigquery,
     linhas_da_copia,
     ou_503,
-    parametros_da_pagina,
     poe_o_nome_dos_videos,
     posicao_do_cursor,
     recorta,
@@ -87,31 +86,6 @@ class ConsultaDeInsercoes(Protocol):
     ) -> list[InsercoesDaMarca]:
         """As inserções com marca, somadas; `desde` e `ate` são datas de exibição,
         inclusive."""
-
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-        """Até `limite + 1` marcas a partir da posição `depois`, do maior tempo para o
-        menor (o nome desempata), e os totais do período."""
-
-    def lista_da_marca(
-        self,
-        marca: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        depois: int,
-        limite: int,
-    ) -> "list[InsercaoNoRelatorio]":
-        """Até `limite + 1` inserções da marca a partir da posição `depois`, na ordem do
-        relatório."""
 
 
 def somar(insercoes: list[Insercao]) -> list[InsercoesDaMarca]:
@@ -164,35 +138,12 @@ class ConsultaEmMemoria:
     ) -> list[InsercoesDaMarca]:
         return somar(self.insercoes(programa, desde, ate, tipo))
 
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-        return ranking_em_python(self.somas(programa, desde, ate, tipo), depois, limite)
-
-    def lista_da_marca(
-        self,
-        marca: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        depois: int,
-        limite: int,
-    ) -> "list[InsercaoNoRelatorio]":
-        somas = self.somas(programa, desde, ate, tipo)
-        return lista_em_python(somas, marca, depois, limite)
-
 
 def ranking_em_python(
     somas: list[InsercoesDaMarca], depois: int, limite: int
 ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-    """O que `RANKING_EM_SQL` faz no BigQuery (o dublê e a referência)."""
+    """O ranking e os totais do período, a partir das somas; a página vai de `depois`
+    a `limite + 1` itens (o que passa do limite diz que há mais)."""
     marcas = relatorio(somas)
     total = TotalDasMarcas(
         marcas=len(marcas),
@@ -207,7 +158,8 @@ def ranking_em_python(
 def lista_em_python(
     somas: list[InsercoesDaMarca], marca: str, depois: int, limite: int
 ) -> "list[InsercaoNoRelatorio]":
-    """O que `LISTA_DA_MARCA_EM_SQL` faz no BigQuery (o dublê e a referência)."""
+    """As inserções de uma marca, na ordem do relatório, a partir das somas; a página vai
+    de `depois` a `limite + 1` itens."""
     dela = [s for s in somas if s.marca == marca]
     lista = relatorio(dela)[0].lista if dela else []
     return lista[depois : depois + limite + 1]
@@ -227,52 +179,6 @@ SOMA_EM_SQL = f"""SELECT marca, tipo, job_id, COUNT(*), SUM(fim_ms - inicio_ms),
   {INTERVALOS_EM_JSON}
 FROM base
 GROUP BY marca, tipo, job_id"""
-
-# A página do ranking (o relatório com `limite`): por marca, os números e a posição na
-# ordem do tempo (o nome desempata), com uma linha por tipo de inserção; os totais do
-# período vêm em cada linha. Sem os intervalos: só a página volta.
-RANKING_EM_SQL = """, por_video AS (
-  SELECT marca, tipo, job_id, COUNT(*) AS insercoes, SUM(fim_ms - inicio_ms) AS tempo_ms
-  FROM base
-  GROUP BY marca, tipo, job_id
-),
-por_marca AS (
-  SELECT marca, SUM(insercoes) AS insercoes, SUM(tempo_ms) AS tempo_ms,
-    COUNT(DISTINCT job_id) AS videos
-  FROM por_video
-  GROUP BY marca
-),
-por_tipo AS (
-  SELECT marca, tipo, SUM(insercoes) AS insercoes, SUM(tempo_ms) AS tempo_ms,
-    COUNT(*) AS videos
-  FROM por_video
-  GROUP BY marca, tipo
-),
-ranking AS (
-  SELECT marca, insercoes, tempo_ms, videos,
-    ROW_NUMBER() OVER (ORDER BY tempo_ms DESC, marca) AS posicao,
-    COUNT(*) OVER () AS total_marcas, SUM(insercoes) OVER () AS total_insercoes,
-    SUM(tempo_ms) OVER () AS total_tempo
-  FROM por_marca
-)
-SELECT r.marca, r.insercoes, r.tempo_ms, r.videos,
-  t.tipo, t.insercoes AS insercoes_do_tipo, t.tempo_ms AS tempo_do_tipo,
-  t.videos AS videos_do_tipo,
-  r.total_marcas, r.total_insercoes, r.total_tempo,
-  (SELECT COUNT(DISTINCT job_id) FROM por_video) AS total_videos
-FROM ranking AS r
-JOIN por_tipo AS t ON t.marca = r.marca
-WHERE r.posicao > @posicao_de AND r.posicao <= @posicao_ate
-ORDER BY r.posicao, t.tipo"""
-
-# As inserções de uma marca (a base já vem só com ela), na ordem do relatório, só a página.
-LISTA_DA_MARCA_EM_SQL = """SELECT job_id, tipo, inicio_ms, fim_ms FROM (
-  SELECT job_id, tipo, inicio_ms, fim_ms,
-    ROW_NUMBER() OVER (ORDER BY job_id, inicio_ms, fim_ms, tipo) AS posicao
-  FROM base
-) AS lista
-WHERE posicao > @posicao_de AND posicao <= @posicao_ate
-ORDER BY posicao"""
 
 
 def insercoes_da_marca(v: Sequence[Any]) -> InsercoesDaMarca:
@@ -296,27 +202,23 @@ class ConsultaBigQuery:
         self._config = config
         self._transporte = transporte
 
-    def _consultar(
+    def somas(
         self,
         programa: str | None,
         desde: date | None,
         ate: date | None,
         tipo: str | None,
-        depois_da_base: str,
-        condicoes: Sequence[str] = (),
-        parametros: Sequence[dict[str, Any]] = (),
-    ) -> list[list[Any]]:
+    ) -> list[InsercoesDaMarca]:
         # Marca ou tipo vazio também fica de fora, como no dublê.
         condicoes = [
             "NULLIF(t.marca, '') IS NOT NULL",
             "NULLIF(t.tipo_de_insercao, '') IS NOT NULL",
-            *condicoes,
         ]
-        parametros = list(parametros)
+        parametros = []
         if tipo is not None:
             condicoes.append("t.tipo_de_insercao = @tipo_de_insercao")
-            parametros.append(_parametro("tipo_de_insercao", tipo))
-        return consultar_no_bigquery(
+            parametros.append(parametro("tipo_de_insercao", tipo))
+        linhas = consultar_no_bigquery(
             self._config,
             self._transporte,
             colunas=(
@@ -328,97 +230,9 @@ class ConsultaBigQuery:
             ate=ate,
             condicoes=condicoes,
             parametros=parametros,
-            depois_da_base=depois_da_base,
+            depois_da_base=SOMA_EM_SQL,
         )
-
-    def somas(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-    ) -> list[InsercoesDaMarca]:
-        linhas = self._consultar(programa, desde, ate, tipo, SOMA_EM_SQL)
         return [insercoes_da_marca(v) for v in linhas]
-
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-        linhas = self._consultar(
-            programa,
-            desde,
-            ate,
-            tipo,
-            RANKING_EM_SQL,
-            parametros=parametros_da_pagina(depois, limite),
-        )
-        return pagina_do_ranking(linhas)
-
-    def lista_da_marca(
-        self,
-        marca: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        depois: int,
-        limite: int,
-    ) -> "list[InsercaoNoRelatorio]":
-        linhas = self._consultar(
-            programa,
-            desde,
-            ate,
-            tipo,
-            LISTA_DA_MARCA_EM_SQL,
-            condicoes=["t.marca = @marca"],
-            parametros=[
-                _parametro("marca", marca),
-                *parametros_da_pagina(depois, limite),
-            ],
-        )
-        return [
-            InsercaoNoRelatorio(
-                job_id=v[0], tipo=v[1], inicio_ms=int(v[2]), fim_ms=int(v[3])
-            )
-            for v in linhas
-        ]
-
-
-def pagina_do_ranking(
-    linhas: Sequence[Sequence[Any]],
-) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-    """As linhas do `RANKING_EM_SQL` (uma por marca e tipo, na ordem das marcas), na ordem
-    das colunas do SELECT. Página vazia (um cursor além do fim) traz os totais zerados."""
-    marcas: dict[str, MarcaResumida] = {}
-    for v in linhas:
-        marca = marcas.setdefault(
-            v[0],
-            MarcaResumida(
-                marca=v[0],
-                insercoes=int(v[1]),
-                tempo_ms=int(v[2]),
-                videos=int(v[3]),
-                por_tipo=[],
-            ),
-        )
-        marca.por_tipo.append(
-            TotalPorTipo(
-                tipo=v[4], insercoes=int(v[5]), tempo_ms=int(v[6]), videos=int(v[7])
-            )
-        )
-    for m in marcas.values():
-        ordem = _ordem_dos_tipos({t.tipo for t in m.por_tipo})
-        m.por_tipo.sort(key=lambda t: ordem.index(t.tipo))
-    totais = [int(t) for t in linhas[0][8:12]] if linhas else [0] * 4
-    return list(marcas.values()), TotalDasMarcas(
-        **dict(zip(TotalDasMarcas.model_fields, totais, strict=True))
-    )
 
 
 class ConsultaComCache:
@@ -559,15 +373,8 @@ class SoMarcasQueContam:
         depois: int,
         limite: int,
     ) -> "list[InsercaoNoRelatorio]":
-        if normalizar(marca) in nomes_de_marca_na_lixeira(self._marcas):
-            return []
-        if self._cortes({normalizar(marca)}):
-            # O corte é por vídeo: a lista sai das somas já cortadas, não do SQL da marca.
-            somas = self.somas(programa, desde, ate, tipo)
-            return lista_em_python(somas, marca, depois, limite)
-        return self._consulta.lista_da_marca(
-            marca, programa, desde, ate, tipo, depois, limite
-        )
+        somas = self.somas(programa, desde, ate, tipo)
+        return lista_em_python(somas, marca, depois, limite)
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
@@ -698,15 +505,18 @@ def criar_rotas_das_marcas(
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
     no_periodo = dependencia_do_periodo(relogio)
-    if consulta is not None:
-        consulta = SoMarcasQueContam(consulta, catalogo, purgas, repositorio)
+    com_lixeira = (
+        SoMarcasQueContam(consulta, catalogo, purgas, repositorio)
+        if consulta is not None
+        else None
+    )
 
     def _confere(
         programa: str | None, desde: date | None, ate: date | None, tipo: str | None
-    ) -> ConsultaDeInsercoes:
+    ) -> SoMarcasQueContam:
         if tipo is not None and tipo not in TIPOS_DE_INSERCAO:
             raise HTTPException(422, f"Tipo de inserção desconhecido: {tipo}")
-        return confere_o_pedido(consulta, desde, ate)
+        return confere_o_pedido(com_lixeira, desde, ate)
 
     @rotas.get("/marcas", response_model=RelatorioDeMarcas | RankingDeMarcas)
     def marcas(

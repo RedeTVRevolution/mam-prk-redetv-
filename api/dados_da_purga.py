@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 
-from api.copia_bigquery import ConfigDoBigQuery, Transporte, _parametro, transporte_http
+from api.copia_bigquery import ConfigDoBigQuery, Transporte, parametro, transporte_http
 from api.nuvem import COLECAO_DA_REVISAO, TiposDeObjetoFirestore
 from api.texto_como_dado import id_conferido
 
@@ -20,7 +20,7 @@ def executar(
             "useLegacySql": False,
             "location": config.regiao,
             "timeoutMs": 120_000,
-            "queryParameters": [_parametro("job_id", job_id)],
+            "queryParameters": [parametro("job_id", job_id)],
         }
     )
     if not resposta.get("jobComplete") or resposta.get("errors"):

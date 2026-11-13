@@ -29,22 +29,16 @@ from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
     NOMES_EM_JSON,
-    RANKING_EM_SQL,
     SOMA_EM_SQL,
     UNIAO_EM_SQL,
-    VIDEOS_DA_PESSOA_EM_SQL,
     ConsultaBigQuery,
     ConsultaDeMomentos,
     ConsultaEmMemoria,
     MomentoDaPessoa,
     PessoaNoRelatorio,
     PessoaNoVideo,
-    pagina_do_ranking,
     pessoa_no_video,
-    ranking_em_python,
     somar,
-    video_da_pessoa,
-    videos_em_python,
 )
 from api.tempo_de_tela import ConsultaComCache as ComCache
 from api.tempo_de_tela import relatorio as relatorio_das_somas
@@ -705,77 +699,6 @@ def test_os_videos_de_uma_pessoa_vem_paginados_e_com_o_nome() -> None:
     assert sem_bigquery.status_code == 503
 
 
-def test_o_ranking_e_os_videos_em_sql_dao_o_mesmo_que_em_python() -> None:
-    # Os SQLs da página rodam num SQLite (com o JSON dos nomes trocado, como na soma) e
-    # passam pela mesma leitura da consulta real; a referência é a versão em Python.
-    def no_sqlite(sql: str, tabela: str) -> str:
-        return f"WITH base AS (SELECT * FROM {tabela})\n" + sql.replace(
-            NOMES_EM_JSON,
-            "json_group_array(json_object('nome', nome, 'linhas', linhas))",
-        )
-
-    sorteio = random.Random(14)
-    for _ in range(100):
-        momentos = [
-            MomentoDaPessoa(
-                job_id=sorteio.choice(["j1", "j2", "j3"]),
-                pessoa_id=(pessoa := sorteio.choice(["c1", "c2", "c3", "c4"])),
-                nome=sorteio.choice([pessoa, pessoa + "x", ""]),
-                tipo=sorteio.choice(["aparicao", "aparicao", "mencao_na_fala"]),
-                inicio_ms=(inicio := sorteio.randrange(0, 50)),
-                fim_ms=inicio + sorteio.randrange(0, 15),
-            )
-            for _ in range(sorteio.randrange(1, 30))
-        ]
-        banco = _sqlite_com(momentos)
-        banco.execute("ALTER TABLE base RENAME TO linhas")
-        depois, limite = sorteio.randrange(0, 4), sorteio.randrange(1, 4)
-        pagina = {"posicao_de": depois, "posicao_ate": depois + limite + 1}
-
-        do_sql = pagina_do_ranking(
-            banco.execute(no_sqlite(RANKING_EM_SQL, "linhas"), pagina).fetchall()
-        )
-        em_python = ranking_em_python(somar(momentos), depois, limite)
-        if do_sql[0]:
-            assert do_sql == em_python
-        else:  # página vazia: os totais vêm zerados
-            assert em_python[0] == []
-
-        pessoa = sorteio.choice(["c1", "c2"])
-        # A condição `p.id = @pessoa_id` da base, aqui como uma visão (sem parâmetro).
-        banco.execute(
-            f"CREATE TEMP VIEW dela AS SELECT * FROM linhas WHERE pessoa_id = '{pessoa}'"
-        )
-        videos = [
-            video_da_pessoa(v)
-            for v in banco.execute(no_sqlite(VIDEOS_DA_PESSOA_EM_SQL, "dela"), pagina)
-        ]
-        assert videos == videos_em_python(somar(momentos), pessoa, depois, limite)
-
-
-def test_bigquery_pede_a_pagina_e_a_pessoa_como_parametros() -> None:
-    transporte = Transporte({"jobComplete": True})
-    consulta = ConsultaBigQuery(CONFIG, transporte)
-
-    assert consulta.ranking(None, None, None, 50, 25) == ranking_em_python([], 0, 1)
-    assert consulta.videos_da_pessoa("c1", None, None, None, 0, 25) == []
-
-    def parametros(corpo: dict[str, Any]) -> dict[str, str]:
-        return {
-            p["name"]: p["parameterValue"]["value"] for p in corpo["queryParameters"]
-        }
-
-    ranking, videos = transporte.corpos
-    assert parametros(ranking) == {"posicao_de": "50", "posicao_ate": "76"}
-    assert "ROW_NUMBER()" in ranking["query"]
-    assert parametros(videos) == {
-        "pessoa_id": "c1",
-        "posicao_de": "0",
-        "posicao_ate": "26",
-    }
-    assert "p.id = @pessoa_id" in videos["query"]
-
-
 def test_o_nome_do_relatorio_vem_do_catalogo_inclusive_depois_de_renomear() -> None:
     catalogo = CatalogoEmMemoria()
     ana = catalogo.acrescentar("Ana Souza", "apresentadora", [])
@@ -843,3 +766,32 @@ def test_o_nome_do_catalogo_nao_suja_o_ranking_guardado_no_cache() -> None:
     assert nome() == "Ana"
     catalogo.corrigir(ana.id, nome="Ana Maria", apelidos=[])
     assert nome() == "Ana Maria"
+
+
+class SoSomas:
+    """Uma fonte nova das somas: implementa só `somas`, como o Protocol exige."""
+
+    def __init__(self, copia: CopiaEmMemoria) -> None:
+        self._em_memoria = ConsultaEmMemoria(copia)
+
+    def somas(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        return self._em_memoria.somas(programa, desde, ate)
+
+
+def test_uma_fonte_so_com_somas_serve_ao_ranking_e_aos_videos_da_pessoa() -> None:
+    copia = _varias_pessoas()
+    catalogo = _catalogo_da_copia(ConsultaEmMemoria(copia))
+    nova = _cliente(consulta=SoSomas(copia), catalogo=catalogo)
+    velha = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
+
+    casos: list[tuple[str, dict[str, Any]]] = [
+        (ROTA, {"limite": 2}),
+        (ROTA, {}),
+        (f"{ROTA}/videos", {"pessoa_id": "c1"}),
+    ]
+    for url, params in casos:
+        resposta = nova.get(url, params=params, headers=AUTORIZACAO)
+        assert resposta.status_code == 200
+        assert resposta.text == velha.get(url, params=params, headers=AUTORIZACAO).text

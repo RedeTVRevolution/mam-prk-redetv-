@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Protocol
 
-from api.copia_bigquery import Transporte, _parametro, transporte_http
+from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.relatorios import linhas_da_consulta
 
 
@@ -256,10 +256,10 @@ class ResumosBigQuery:
         for nome, dia, comparacao in (("desde", desde, ">="), ("ate", ate, "<=")):
             if dia is not None:
                 onde.append(f"dia {comparacao} @{nome}")
-                parametros.append(_parametro(nome, dia.isoformat(), "DATE"))
+                parametros.append(parametro(nome, dia.isoformat(), "DATE"))
         if usuario is not None:
             onde.append("quem_id = @usuario")
-            parametros.append(_parametro("usuario", usuario))
+            parametros.append(parametro("usuario", usuario))
         linhas = self._consultar(
             "SELECT CAST(dia AS STRING), quem_id, acessos, ativo,"
             " FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%SZ', ultimo_acesso)\n"
@@ -292,11 +292,11 @@ class ResumosBigQuery:
         for nome, dia, comparacao in (("desde", desde, ">="), ("ate", ate, "<=")):
             if dia is not None:
                 onde.append(f"dia {comparacao} @{nome}")
-                parametros.append(_parametro(nome, dia.isoformat(), "DATE"))
+                parametros.append(parametro(nome, dia.isoformat(), "DATE"))
         for coluna, valor in filtros:
             if valor is not None:
                 onde.append(f"{coluna} = @{coluna}")
-                parametros.append(_parametro(coluna, valor))
+                parametros.append(parametro(coluna, valor))
         return onde, parametros
 
     def correcoes(
