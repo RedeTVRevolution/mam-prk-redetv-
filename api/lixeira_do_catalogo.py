@@ -127,9 +127,11 @@ def purgar_catalogo_vencido(
     marcas: CatalogoDeMarcas,
     auditoria: RepositorioDeAuditoria,
     agora: datetime,
+    ao_mudar: Callable[[], None] = lambda: None,
 ) -> int:
     """Purga as pessoas e marcas na lixeira há `PRAZO_DA_PURGA` ou mais; devolve quantas.
-    Cada uma grava o registro antes de sair; a que falha fica e a próxima execução tenta."""
+    Cada uma grava o registro antes de sair; a que falha fica e a próxima execução tenta.
+    `ao_mudar` avança a versão da lixeira (#591) a cada purga."""
     purgadas = 0
     itens: list[tuple[Literal["pessoa", "marca"], str, str, EnvioParaLixeira]] = [
         ("pessoa", p.id, p.nome, p.lixeira) for p in pessoas.na_lixeira() if p.lixeira
@@ -142,6 +144,7 @@ def purgar_catalogo_vencido(
                 _registro(tipo, "item.purgado", id, nome, envio.motivo, {}, agora, None)
             )
             (pessoas if tipo == "pessoa" else marcas).apagar(id)
+            ao_mudar()
         except Exception:
             log.exception("a purga de %s %s falhou", tipo, id)
             continue
@@ -160,14 +163,21 @@ def criar_rotas_da_lixeira_do_catalogo(
     relogio: Callable[[], datetime],
     login_recente: timedelta,
     descartar_pessoas: Callable[[], None] = lambda: None,
+    ao_mudar: Callable[[], None] = lambda: None,
 ) -> APIRouter:
     """`descartar_pessoas` descarta a cópia curta das pessoas (#364): quem entra na
-    lixeira ou sai dela muda o autocompletar e a grafia aproximada da busca na hora."""
+    lixeira ou sai dela muda o autocompletar e a grafia aproximada da busca na hora.
+    `ao_mudar` avança a versão da lixeira (#591) a cada envio, restauração e purga."""
     rotas = APIRouter(prefix="/admin/lixeira")
 
     def lixeira_da_pessoa(id: str, envio: EnvioParaLixeira | None) -> None:
         pessoas.definir_lixeira(id, envio)
         descartar_pessoas()
+        ao_mudar()
+
+    def lixeira_da_marca(id: str, envio: EnvioParaLixeira | None) -> None:
+        marcas.definir_lixeira(id, envio)
+        ao_mudar()
 
     def entregues(filtro: FiltroDeJobs) -> Iterator[dict[str, Any]]:
         return decupagens_corrigidas(
@@ -289,7 +299,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             raise HTTPException(409, "A marca já está na lixeira")
         impacto = impacto_da_marca(achada.id)
         envio = envio_de(autor, pedido.motivo)
-        marcas.definir_lixeira(achada.id, envio)
+        lixeira_da_marca(achada.id, envio)
         try:
             registrar(
                 "marca",
@@ -300,7 +310,7 @@ def criar_rotas_da_lixeira_do_catalogo(
                 autor,
             )
         except Exception:
-            marcas.definir_lixeira(achada.id, None)
+            lixeira_da_marca(achada.id, None)
             raise
         return item_da_lixeira("marca", achada.id, achada.nome, envio, relogio())
 
@@ -336,7 +346,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         if achada.lixeira is None:
             raise HTTPException(409, "A marca não está na lixeira")
         impacto = impacto_da_marca(achada.id)
-        marcas.definir_lixeira(achada.id, None)
+        lixeira_da_marca(achada.id, None)
         try:
             registrar(
                 "marca",
@@ -347,7 +357,7 @@ def criar_rotas_da_lixeira_do_catalogo(
                 autor,
             )
         except Exception:
-            marcas.definir_lixeira(achada.id, achada.lixeira)
+            lixeira_da_marca(achada.id, achada.lixeira)
             raise
         return Restaurado(id=achada.id, nome=achada.nome)
 
@@ -380,6 +390,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             (pessoas if tipo == "pessoa" else marcas).apagar(achada.id)
         except (PessoaInexistente, MarcaInexistente):
             raise HTTPException(409, "O item já saiu da lixeira") from None
+        ao_mudar()
         return Restaurado(id=achada.id, nome=achada.nome)
 
     @rotas.post("/pessoas/{id_da_pessoa}/purgar")

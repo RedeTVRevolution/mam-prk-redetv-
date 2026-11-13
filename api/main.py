@@ -112,6 +112,11 @@ from api.lixeira_do_catalogo import (
     FotosEmMemoria,
     criar_rotas_da_lixeira_do_catalogo,
 )
+from api.lixeira_na_leitura import (
+    VersaoDaLixeira,
+    VersaoDaLixeiraEmMemoria,
+    VersaoDaLixeiraFirestore,
+)
 from api.log_estruturado import configurar as configurar_o_log
 from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
@@ -391,6 +396,7 @@ def criar_app(
     eventos: Eventos | None = None,
     pasta_web: Path = PASTA_WEB,
     apagar_dados_da_purga: Callable[[str], None] | None = None,
+    versao_da_lixeira: VersaoDaLixeira | None = None,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV", dependencies=[Depends(conferir_ids_e_consultas)])
 
@@ -527,6 +533,8 @@ def criar_app(
     tipos_dos_objetos = tipos_de_objeto or TiposDeObjetoEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
+    # Avança a cada envio, restauração, purga e fusão do catálogo (#591).
+    versao_da_lixeira = versao_da_lixeira or VersaoDaLixeiraEmMemoria()
     repositorio_de_programas = programas or ProgramasEmMemoria()
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
@@ -570,6 +578,11 @@ def criar_app(
     def _rotas_das_pessoas(descartar: Callable[[], None]) -> APIRouter:
         """Fundir (#209) e renomear em todos os vídeos (#263), sob `/catalogo`."""
         rotas = APIRouter()
+
+        def ao_fundir() -> None:
+            descartar()
+            versao_da_lixeira.avancar()
+
         rotas.include_router(
             criar_rotas_da_fusao(
                 catalogo_de_pessoas,
@@ -579,7 +592,7 @@ def criar_app(
                 fotos_de_referencia or FotosEmMemoria(),
                 repositorio_de_auditoria,
                 relogio,
-                descartar,
+                ao_fundir,
             )
         )
         rotas.include_router(
@@ -720,6 +733,7 @@ def criar_app(
             relogio,
             login_recente,
             copia_das_pessoas.descartar,
+            versao_da_lixeira.avancar,
         )
     )
     v1.include_router(
@@ -764,7 +778,7 @@ def criar_app(
     )
     v1.include_router(
         criar_rotas_do_tempo_de_tela(
-            tempo_de_tela, repositorio_de_jobs, relogio, catalogo_de_pessoas
+            tempo_de_tela, repositorio_de_jobs, relogio, catalogo
         )
     )
     v1.include_router(
@@ -871,6 +885,7 @@ if _projeto:
         ),
         catalogo=CatalogoFirestore(cliente_do_firestore(_projeto)),
         marcas=CatalogoDeMarcasFirestore(cliente_do_firestore(_projeto)),
+        versao_da_lixeira=VersaoDaLixeiraFirestore(cliente_do_firestore(_projeto)),
         programas=ProgramasFirestore(cliente_do_firestore(_projeto)),
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
