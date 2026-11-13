@@ -1155,7 +1155,7 @@ def test_falha_real_do_firestore_na_leitura_do_job_vira_503() -> None:
     m = MundoDaPurga()
     cliente = m.instancia()
     m.jobs.falha = True
-    m.jobs.erro = ServiceUnavailable("Firestore fora")
+    m.jobs.erro = ServiceUnavailable("Firestore fora")  # type: ignore[no-untyped-call]
 
     resposta = cliente.get(ROTA_DAS_MARCAS, params={"limite": 10}, headers=ADMIN)
 
@@ -1164,7 +1164,7 @@ def test_falha_real_do_firestore_na_leitura_do_job_vira_503() -> None:
 
 class PurgasQueLeemMal(PurgasDeMarcaEmMemoria):
     def todas(self) -> Any:
-        raise ServiceUnavailable("Firestore fora")
+        raise ServiceUnavailable("Firestore fora")  # type: ignore[no-untyped-call]
 
 
 def test_falha_real_do_firestore_na_leitura_dos_registros_vira_503() -> None:
@@ -1181,7 +1181,7 @@ class MarcasQueLeemMal(CatalogoDeMarcasEmMemoria):
 
     def obter_varios(self, ids: Any) -> Any:
         if self.falha:
-            raise ServiceUnavailable("Firestore fora")
+            raise ServiceUnavailable("Firestore fora")  # type: ignore[no-untyped-call]
         return super().obter_varios(ids)
 
 
