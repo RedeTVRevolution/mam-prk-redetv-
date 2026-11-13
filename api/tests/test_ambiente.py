@@ -19,12 +19,10 @@ def test_ausente_ou_vazia_e_falta_no_ambiente(ambiente: dict[str, str]) -> None:
 
 def test_o_modulo_importa_so_a_biblioteca_padrao() -> None:
     arvore = ast.parse((Path(__file__).parents[1] / "ambiente.py").read_text())
-    raizes = {
-        (n.module or "").split(".")[0]
-        if isinstance(n, ast.ImportFrom)
-        else a.name.split(".")[0]
-        for n in ast.walk(arvore)
-        if isinstance(n, ast.Import | ast.ImportFrom)
-        for a in (n.names if isinstance(n, ast.Import) else [n])
-    }
+    raizes: set[str] = set()
+    for no in ast.walk(arvore):
+        if isinstance(no, ast.Import):
+            raizes |= {a.name.split(".")[0] for a in no.names}
+        elif isinstance(no, ast.ImportFrom):
+            raizes.add((no.module or "").split(".")[0])
     assert raizes <= sys.stdlib_module_names
