@@ -50,7 +50,11 @@ from api.jobs import (
     Job,
     RepositorioDeJobs,
 )
-from api.lixeira_na_leitura import pessoas_que_contam
+from api.lixeira_na_leitura import (
+    VersaoDaLixeira,
+    VersaoDaLixeiraEmMemoria,
+    pessoas_que_contam,
+)
 from api.numero import com_as_formas, mesma_palavra, singular
 
 log = logging.getLogger(__name__)
@@ -263,6 +267,9 @@ class ListaDaBusca(BaseModel):
     facetas: Facetas
     termos: list[str]
     videos: list[VideoGuardado]
+    # A versão da lixeira do catálogo lida antes da 1ª decisão (#598); `None` é o formato
+    # antigo, de antes dela: a página seguinte o recusa.
+    versao_da_lixeira: int | None = None
 
     def para_documento(self) -> dict[str, Any]:
         """A lista num campo de bytes: o Firestore não indexa item por item, e o
@@ -391,7 +398,9 @@ class Busca:
         copia_do_catalogo: CopiaCurta[PessoaDoCatalogo] | None = None,
         listas: ListasDaBusca | None = None,
         cache_de_candidatos: CacheCurto | None = None,
+        versao_da_lixeira: VersaoDaLixeira | None = None,
     ) -> None:
+        self._versao = versao_da_lixeira or VersaoDaLixeiraEmMemoria()
         self._listas = listas or ListasDaBuscaEmMemoria()
         self._candidatos = cache_de_candidatos or CacheCurto(
             validade=VALIDADE_DOS_CANDIDATOS_S, maximo=MAXIMO_DE_CANDIDATOS
@@ -451,6 +460,9 @@ class Busca:
             return self._pagina_seguinte(
                 cursor, limite, dono, impressao, sistema, cancelado
             )
+        # Lida antes de qualquer decisão sobre quem conta e gravada na lista: uma mudança na
+        # lixeira do catálogo no meio da busca faz a página seguinte ser recusada (#598).
+        versao = self._versao.atual()
         if imagem is not None:
             _conferir(cancelado)
             texto = termo_da_foto = self._termo_da_foto(imagem)
@@ -524,9 +536,10 @@ class Busca:
         contam: set[str] = set()
         decididos: set[str] = set()
 
-        # ponytail: as pessoas da consulta são decididas antes da leitura do índice e as dos
-        # registros depois; uma mudança na lixeira no meio da busca mistura dois estados do
-        # catálogo. A correção é ler a versão antes da 1ª decisão e gravá-la na lista (#598).
+        # As pessoas da consulta são decididas antes da leitura do índice e as dos registros
+        # depois, então uma mudança na lixeira no meio da busca mistura dois estados do
+        # catálogo nesta 1ª página; a `versao` lida lá no início vai na lista e faz a página
+        # seguinte ser recusada (o cliente recomeça do topo).
         def decidir(ids: Iterable[str | None]) -> None:
             faltam = {i for i in ids if i and i not in decididos}
             if faltam:
@@ -724,7 +737,7 @@ class Busca:
         )
         if len(todos) > limite:
             resultado._proximo_cursor = self._guardar(
-                resultado, todos, termos, dono, impressao, limite
+                resultado, todos, termos, dono, impressao, limite, versao
             )
         return resultado
 
@@ -748,6 +761,7 @@ class Busca:
         dono: str,
         impressao: str,
         limite: int,
+        versao: int,
     ) -> str | None:
         """Grava a lista inteira e devolve o cursor da 2ª página."""
         agora = self._relogio()
@@ -761,6 +775,7 @@ class Busca:
             plano_b=resultado.plano_b,
             facetas=resultado.facetas,
             termos=termos,
+            versao_da_lixeira=versao,
             videos=[
                 VideoGuardado(
                     job_id=v.job_id,
@@ -820,6 +835,9 @@ class Busca:
             or lista.dono != dono
             or lista.impressao != impressao
             or not 0 < inicio < len(lista.videos)
+            # A lixeira do catálogo mudou (ou a lista é do formato sem versão): a lista
+            # guarda quem contava então (#598).
+            or lista.versao_da_lixeira != self._versao.atual()
         ):
             raise CursorInvalido
         fim = inicio + limite

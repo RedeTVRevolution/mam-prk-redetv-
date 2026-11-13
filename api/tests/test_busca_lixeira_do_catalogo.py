@@ -5,6 +5,9 @@ Cada cenário roda com o dublê em memória do índice e com o adapter real (`Ag
 este sobre um servidor de índice simulado que entende o filtro JSON do `batchSearch`.
 """
 
+import json
+import zlib
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -13,10 +16,11 @@ from fastapi.testclient import TestClient
 from api.agent_retrieval import AgentRetrieval, _dados
 from api.auditoria import RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
-from api.busca import Ajustes, Busca, RankingEmOrdem
+from api.busca import Ajustes, Busca, ListasDaBuscaEmMemoria, RankingEmOrdem
 from api.catalogo import CopiaCurta, EnvioParaLixeira
 from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
-from api.jobs import agora_utc
+from api.jobs import CursorInvalido, agora_utc
+from api.lixeira_na_leitura import VersaoDaLixeiraEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_agent_retrieval import SEM_INDICES
@@ -90,8 +94,14 @@ class Cenario:
         self.ana = self.m.catalogo.acrescentar("Ana", "", []).id
         self.bia = self.m.catalogo.acrescentar("Bia", "", []).id
         self._indice = indice
+        # Como no servidor, o marcador avança a cada mudança do catálogo (#591).
+        self.versao = VersaoDaLixeiraEmMemoria()
 
-    def busca(self, copia: CopiaCurta[Any] | None = None) -> Busca:
+    def busca(
+        self,
+        copia: CopiaCurta[Any] | None = None,
+        listas: ListasDaBuscaEmMemoria | None = None,
+    ) -> Busca:
         indice: Any = (
             self.m.indice
             if self._indice == "memoria"
@@ -106,6 +116,8 @@ class Cenario:
             armazenamento=self.m.armazenamento,
             relogio=lambda: BASE,
             copia_do_catalogo=copia,
+            listas=listas,
+            versao_da_lixeira=self.versao,
         )
 
     def plano(self, job_id: str, descricao: str, *pessoas: str) -> None:
@@ -125,9 +137,15 @@ class Cenario:
 
     def lixeira(self, id: str) -> None:
         self.m.catalogo.definir_lixeira(id, ENVIO)
+        self.versao.avancar()
 
     def restaurar(self, id: str) -> None:
         self.m.catalogo.definir_lixeira(id, None)
+        self.versao.avancar()
+
+    def purgar(self, id: str) -> None:
+        self.m.catalogo.apagar(id)
+        self.versao.avancar()
 
 
 @pytest.fixture(params=["memoria", "adaptador"])
@@ -368,3 +386,198 @@ def test_enviar_restaurar_e_purgar_mudam_a_busca_na_hora_sem_escrever_no_indice(
     assert na_faceta() == [c.bia]
 
     assert indice.escritas[gravou:] == []
+
+
+# --- a busca já aberta (#598): o cursor velho é recusado ---------------------------------
+
+
+def _quatro_planos(c: Cenario) -> None:
+    for i in range(1, 5):
+        c.plano(f"j{i}", "estúdio de tv", c.ana, c.bia)
+
+
+def _abrir(busca: Busca) -> str:
+    cursor = busca.buscar("estúdio", limite=2, dono="u1")._proximo_cursor
+    assert cursor is not None
+    return cursor
+
+
+def _segunda(busca: Busca, cursor: str) -> Any:
+    return busca.buscar("estúdio", limite=2, dono="u1", cursor=cursor)
+
+
+def test_cursor_sem_mudanca_na_lixeira_continua_valendo(cenario: Cenario) -> None:
+    _quatro_planos(cenario)
+    busca = cenario.busca()
+    cursor = _abrir(busca)
+
+    assert len(_segunda(busca, cursor).videos) == 2
+
+
+def test_cursor_aberto_antes_do_envio_e_recusado(cenario: Cenario) -> None:
+    _quatro_planos(cenario)
+    busca = cenario.busca()
+    cursor = _abrir(busca)
+
+    cenario.lixeira(cenario.ana)
+
+    with pytest.raises(CursorInvalido):
+        _segunda(busca, cursor)
+
+
+def test_cursor_aberto_antes_da_restauracao_e_recusado(cenario: Cenario) -> None:
+    _quatro_planos(cenario)
+    cenario.lixeira(cenario.ana)
+    busca = cenario.busca()
+    cursor = _abrir(busca)
+
+    cenario.restaurar(cenario.ana)
+
+    with pytest.raises(CursorInvalido):
+        _segunda(busca, cursor)
+
+
+def test_cursor_aberto_antes_do_envio_e_da_purga_e_recusado_com_duas_instancias(
+    cenario: Cenario,
+) -> None:
+    _quatro_planos(cenario)
+    busca = cenario.busca(listas=ListasDaBuscaEmMemoria())
+    outra = cenario.busca(listas=ListasDaBuscaEmMemoria())  # caches e listas próprios
+    cursor = _abrir(busca)
+
+    cenario.lixeira(cenario.ana)
+    cenario.purgar(cenario.ana)
+
+    with pytest.raises(CursorInvalido):
+        _segunda(busca, cursor)
+    # A instância que não recebeu a mudança também lê o marcador do catálogo.
+    nova = _abrir(outra)
+    assert len(_segunda(outra, nova).videos) == 2
+
+
+def test_lista_no_formato_antigo_sem_versao_e_recusada(cenario: Cenario) -> None:
+    _quatro_planos(cenario)
+    listas = ListasDaBuscaEmMemoria()
+    busca = cenario.busca(listas=listas)
+    cursor = _abrir(busca)
+    documento = listas.documentos[cursor.partition(".")[0]]
+    conteudo = json.loads(zlib.decompress(documento["conteudo"]))
+    assert "versao_da_lixeira" in conteudo
+    del conteudo["versao_da_lixeira"]
+    documento["conteudo"] = zlib.compress(json.dumps(conteudo).encode())
+
+    with pytest.raises(CursorInvalido):
+        _segunda(busca, cursor)
+
+
+class IndiceQueMudaNaLeitura(IndiceEspia):
+    """Na primeira leitura, outra instância muda a lixeira do catálogo."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ao_ler: Callable[[], None] | None = None
+
+    def buscar(self, consulta: Consulta) -> list[Registro]:
+        if self.ao_ler is not None:
+            mudar, self.ao_ler = self.ao_ler, None
+            mudar()
+        return super().buscar(consulta)
+
+
+def test_mudanca_durante_a_leitura_do_indice_recusa_a_pagina_seguinte(
+    cenario: Cenario,
+) -> None:
+    indice = IndiceQueMudaNaLeitura()
+    cenario.m.indice = indice
+    _quatro_planos(cenario)
+    busca = cenario.busca()
+    indice.ao_ler = lambda: cenario.lixeira(cenario.ana)
+
+    cursor = _abrir(busca)  # a 1ª página mistura os dois estados do catálogo
+
+    with pytest.raises(CursorInvalido):
+        _segunda(busca, cursor)
+
+
+# --- a lixeira do vídeo nunca devolve trecho ---------------------------------------------
+
+
+def test_video_na_lixeira_do_video_nunca_aparece_pelo_texto_nem_nas_paginas(
+    cenario: Cenario,
+) -> None:
+    _quatro_planos(cenario)
+    cenario.m.com(
+        job("j5"),
+        Registro(
+            id="j5:fala:0",
+            tipo="fala",
+            job_id="j5",
+            inicio_ms=0,
+            fim_ms=2_000,
+            programa="TV Fama",
+            texto="bom dia da Ana",
+        ),
+    )
+    busca = cenario.busca()
+    assert "j5" in _jobs(busca.buscar("bom dia", dono="u1"))
+
+    cenario.m.jobs.salvar(job("j5", lixeira=ENVIO))
+    assert "j5" not in _jobs(busca.buscar("bom dia", dono="u1"))
+
+    primeira = busca.buscar("estúdio", limite=2, dono="u1")
+    cursor = primeira._proximo_cursor
+    assert cursor is not None
+    # Um vídeo ainda não entregue vai para a lixeira: a página seguinte relê o Job.
+    alvo = next(j for j in ("j1", "j2", "j3", "j4") if j not in _jobs(primeira))
+    cenario.m.jobs.salvar(job(alvo, lixeira=ENVIO))
+    segunda = _segunda(busca, cursor)
+
+    assert alvo not in _jobs(segunda)
+    assert "j5" not in _jobs(primeira) + _jobs(segunda)
+
+
+def test_pela_api_a_busca_aberta_numa_instancia_da_422_apos_envio_e_purga_noutra() -> (
+    None
+):
+    c = Cenario("memoria")
+    _quatro_planos(c)
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("adm", ["administrador"])
+    admin = {"Authorization": "Bearer admin"}
+
+    def instancia() -> TestClient:
+        # Listas, caches e cópias próprios; o catálogo e o marcador são os mesmos.
+        return TestClient(
+            criar_app(
+                VerificadorFalso(
+                    {
+                        "admin": Usuario(
+                            uid="adm", email="a@redetv.com", login_em=agora_utc()
+                        )
+                    }
+                ),
+                c.m.jobs,
+                ArmazenamentoFalso(),
+                papeis=papeis,
+                catalogo=c.m.catalogo,
+                indice=c.m.indice,
+                auditoria=RepositorioDeAuditoriaEmMemoria(),
+                versao_da_lixeira=c.versao,
+            )
+        )
+
+    a, b = instancia(), instancia()
+    primeira = a.get("/v1/busca", params={"q": "estúdio", "limite": 2}, headers=admin)
+    cursor = primeira.headers["X-Proximo-Cursor"]
+
+    base = f"/v1/admin/lixeira/pessoas/{c.ana}"
+    assert b.post(base, json={"motivo": "x"}, headers=admin).status_code == 201
+    purga = b.post(f"{base}/purgar", json={"nome": "Ana"}, headers=admin)
+    assert purga.status_code == 200
+
+    velha = a.get("/v1/busca", params={"q": "estúdio", "cursor": cursor}, headers=admin)
+    assert velha.status_code == 422
+    # A busca nova, sem cursor, já sai com a exclusão.
+    nova = a.get("/v1/busca", params={"q": "estúdio", "limite": 2}, headers=admin)
+    assert nova.status_code == 200
+    assert [v["valor"] for v in nova.json()["facetas"]["pessoa"]] == [c.bia]

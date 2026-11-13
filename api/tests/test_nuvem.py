@@ -28,6 +28,8 @@ from api.busca import (
     Entendida,
     Facetas,
     ListaDaBusca,
+    ListasDaBusca,
+    ListasDaBuscaEmMemoria,
     MomentoGuardado,
     VideoGuardado,
 )
@@ -1969,6 +1971,56 @@ def test_a_lista_da_busca_volta_igual_e_id_desconhecido_da_none() -> None:
     lido = listas.ler(id)
     assert lido is not None and ListaDaBusca.do_documento(lido) == lista
     assert listas.ler("nao0existe") is None
+
+
+@pytest.mark.parametrize(
+    "armazenamento",
+    [
+        "memoria",
+        pytest.param(
+            "firestore",
+            marks=pytest.mark.skipif(
+                not EMULADOR_FIRESTORE, reason="sem emulador do Firestore"
+            ),
+        ),
+    ],
+)
+def test_a_lista_guarda_a_versao_da_lixeira_e_a_sem_versao_volta_como_none(
+    armazenamento: str,
+) -> None:
+    """O contrato do #598: o armazenamento em memória e o Firestore devolvem a versão
+    gravada; a lista do formato antigo (sem o campo) volta sem versão."""
+    listas: ListasDaBusca = (
+        ListasDaBuscaEmMemoria()
+        if armazenamento == "memoria"
+        else ListasDaBuscaFirestore(
+            firestore.Client(project="teste", credentials=_anonima()),
+            f"listas-{uuid.uuid4().hex}",
+        )
+    )
+
+    def lista(**mais: Any) -> ListaDaBusca:
+        return ListaDaBusca(
+            dono="u1",
+            impressao="ab" * 32,
+            criado_em=BASE,
+            expira_em=BASE + timedelta(minutes=15),
+            entendida=Entendida(
+                evidencias=["fala"], programa=None, desde=None, ate=None
+            ),
+            sem_aparicoes=[],
+            plano_b=False,
+            facetas=Facetas(),
+            termos=["vestido"],
+            videos=[],
+            **mais,
+        )
+
+    com = listas.ler(listas.gravar(lista(versao_da_lixeira=7).para_documento()))
+    sem = listas.ler(listas.gravar(lista().para_documento()))
+
+    assert com is not None and ListaDaBusca.do_documento(com).versao_da_lixeira == 7
+    assert sem is not None and ListaDaBusca.do_documento(sem).versao_da_lixeira is None
 
 
 class _ColecaoQueNaoDeveSerTocada:
