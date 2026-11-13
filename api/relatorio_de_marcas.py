@@ -503,7 +503,24 @@ class SoMarcasQueContam:
     ) -> list[InsercoesDaMarca]:
         somas = self._consulta.somas(programa, desde, ate, tipo)
         fora = nomes_de_marca_na_lixeira(self._marcas)
-        somas = [s for s in somas if normalizar(s.marca) not in fora]
+        return self._depois_do_corte(
+            [s for s in somas if normalizar(s.marca) not in fora]
+        )
+
+    def insercoes_dos_nomes(self, nomes: set[str]) -> int:
+        """Quantas inserções de todo o histórico, com o texto em `nomes` (normalizados),
+        o relatório contaria se a marca não estivesse na lixeira (#597): as somas sem a
+        exclusão da lixeira, só com o corte das purgas. Cada inserção é uma linha da cópia,
+        com ou sem vínculo no catálogo, então conta uma vez."""
+        somas = self._consulta.somas(None, None, None, None)
+        return sum(
+            s.insercoes
+            for s in self._depois_do_corte(
+                [s for s in somas if normalizar(s.marca) in nomes]
+            )
+        )
+
+    def _depois_do_corte(self, somas: list[InsercoesDaMarca]) -> list[InsercoesDaMarca]:
         cortes = self._cortes({normalizar(s.marca) for s in somas})
         cortadas = [s for s in somas if normalizar(s.marca) in cortes]
         if not cortadas:

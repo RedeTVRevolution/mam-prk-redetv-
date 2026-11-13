@@ -36,7 +36,14 @@ from api.lixeira import (
     login_recente_ou_403,
 )
 from api.lixeira_na_leitura import PurgasDeMarca
-from api.marcas import CatalogoDeMarcas, MarcaInexistente
+from api.marcas import (
+    CatalogoDeMarcas,
+    MarcaDoCatalogo,
+    MarcaInexistente,
+    nomes_de_busca_da_marca,
+)
+from api.relatorio_de_marcas import ConsultaDeInsercoes, SoMarcasQueContam
+from api.relatorios import ou_503
 from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
@@ -76,6 +83,9 @@ class ImpactoDaPessoa(BaseModel):
 
 class ImpactoDaMarca(BaseModel):
     ocorrencias_que_perdem_o_vinculo: int
+    # O que o relatório de marcas deixa de contar, pelo nome e pelos apelidos (#597); sem
+    # relatório configurado, 0. A busca entra só no texto da tela, sem número.
+    insercoes_que_saem_do_relatorio: int = 0
 
 
 def _exige_apagar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
@@ -179,6 +189,7 @@ def criar_rotas_da_lixeira_do_catalogo(
     relogio: Callable[[], datetime],
     login_recente: timedelta,
     purgas_de_marca: PurgasDeMarca,
+    relatorio_de_marcas: ConsultaDeInsercoes | None,
     descartar_pessoas: Callable[[], None] = lambda: None,
     ao_mudar: Callable[[], None] = lambda: None,
 ) -> APIRouter:
@@ -205,6 +216,13 @@ def criar_rotas_da_lixeira_do_catalogo(
             repositorio, correcoes, decupagens, pessoas, filtro
         )
 
+    def insercoes_do_relatorio(achada: MarcaDoCatalogo) -> int:
+        if relatorio_de_marcas is None:
+            return 0
+        so = SoMarcasQueContam(relatorio_de_marcas, marcas, purgas_de_marca, repositorio)
+        nomes = set(nomes_de_busca_da_marca(achada))
+        return ou_503(lambda: so.insercoes_dos_nomes(nomes))
+
     def impacto_da_pessoa(id: str, fotos_dela: int) -> ImpactoDaPessoa:
         aparicoes = sum(
             len(p.get("na_imagem") or [])
@@ -216,14 +234,16 @@ def criar_rotas_da_lixeira_do_catalogo(
             aparicoes_que_perdem_o_nome=aparicoes, fotos_apagadas=fotos_dela
         )
 
-    def impacto_da_marca(id: str) -> ImpactoDaMarca:
+    def impacto_da_marca(achada: MarcaDoCatalogo) -> ImpactoDaMarca:
+        id = achada.id
         return ImpactoDaMarca(
             ocorrencias_que_perdem_o_vinculo=sum(
                 1
                 for d in entregues(FiltroDeJobs(marca_do_catalogo=id))
                 for c in d.get("comerciais") or []
                 if c.get("catalogo_id") == id
-            )
+            ),
+            insercoes_que_saem_do_relatorio=insercoes_do_relatorio(achada),
         )
 
     def pessoa(id: str) -> Any:
@@ -271,7 +291,7 @@ def criar_rotas_da_lixeira_do_catalogo(
     def impacto_marca(
         id_da_marca: str, _autor: Annotated[Usuario, Depends(_exige_apagar)]
     ) -> ImpactoDaMarca:
-        return impacto_da_marca(marca(id_da_marca).id)
+        return impacto_da_marca(marca(id_da_marca))
 
     @rotas.post("/pessoas/{id_da_pessoa}", status_code=201)
     def enviar_pessoa(
@@ -319,7 +339,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         achada = marca(id_da_marca)
         if achada.lixeira is not None:
             raise HTTPException(409, "A marca já está na lixeira")
-        impacto = impacto_da_marca(achada.id)
+        impacto = impacto_da_marca(achada)
         envio = envio_de(autor, pedido.motivo)
         lixeira_da_marca(achada.id, envio)
         try:
@@ -367,7 +387,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         achada = marca(id_da_marca)
         if achada.lixeira is None:
             raise HTTPException(409, "A marca não está na lixeira")
-        impacto = impacto_da_marca(achada.id)
+        impacto = impacto_da_marca(achada)
         lixeira_da_marca(achada.id, None)
         try:
             registrar(
@@ -397,7 +417,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         impacto = (
             impacto_da_pessoa(achada.id, 0)
             if tipo == "pessoa"
-            else impacto_da_marca(achada.id)
+            else impacto_da_marca(achada)
         )
         ao_mudar()  # antes do registro e da purga: se falha, nada muda
         # O registro vem antes: se falha, nada é apagado.

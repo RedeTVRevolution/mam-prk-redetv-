@@ -742,6 +742,7 @@ def criar_app(
             relogio,
             login_recente,
             registro_das_purgas,
+            relatorio_de_marcas,
             copia_das_pessoas.descartar,
             versao_da_lixeira.avancar,
         )
