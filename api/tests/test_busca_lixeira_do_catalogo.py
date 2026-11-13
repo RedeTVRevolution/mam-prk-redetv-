@@ -32,14 +32,11 @@ def _passa(dados: dict[str, Any], filtro: dict[str, Any] | None) -> bool:
     for condicao in (filtro or {"$and": []})["$and"]:
         ((campo, teste),) = condicao.items()
         ((operador, valor),) = teste.items()
+        assert operador in ("$eq", "$in"), operador  # o que os cenários usam
         atual = dados.get(campo)
         if operador == "$eq" and atual != valor:
             return False
         if operador == "$in" and not any(v in (atual or []) for v in valor):
-            return False
-        if operador == "$gte" and not (atual is not None and atual >= valor):
-            return False
-        if operador == "$lte" and not (atual is not None and atual <= valor):
             return False
     return True
 
@@ -299,7 +296,7 @@ def test_video_novo_processado_com_a_pessoa_na_lixeira_nao_a_traz_de_volta(
 # --- pela API, sem escrever no índice ----------------------------------------------------
 
 
-class IndiceQueConta(IndiceEspia):
+class IndiceQueAnotaEscritas(IndiceEspia):
     """O índice em memória, anotando toda escrita."""
 
     def __init__(self) -> None:
@@ -329,7 +326,7 @@ def test_enviar_restaurar_e_purgar_mudam_a_busca_na_hora_sem_escrever_no_indice(
     None
 ):
     c = Cenario("memoria")
-    indice = IndiceQueConta()
+    indice = IndiceQueAnotaEscritas()
     c.m.indice = indice
     c.plano("j1", "estúdio de tv", c.ana, c.bia)
     gravou = len(indice.escritas)

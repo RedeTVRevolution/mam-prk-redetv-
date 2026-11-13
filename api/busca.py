@@ -560,7 +560,8 @@ class Busca:
             achados_do_indice = list(pool.map(do_indice, planas))
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
-        # Depois do cache e antes da fusão (RRF), do corte do ranking e dos vídeos.
+        # Depois do cache e antes da fusão (RRF), do corte do ranking e dos vídeos. Em lote
+        # de propósito: uma leitura do catálogo para todas as consultas, não uma por consulta.
         decidir(p for a in achados_do_indice for r in a for p in (*r.pessoas, r.dono))
         entregues = iter(
             [
