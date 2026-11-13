@@ -2023,6 +2023,50 @@ def test_a_lista_guarda_a_versao_da_lixeira_e_a_sem_versao_volta_como_none(
     assert sem is not None and ListaDaBusca.do_documento(sem).versao_da_lixeira is None
 
 
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+def test_lista_legada_sem_o_campo_no_firestore_volta_sem_versao_e_a_pagina_e_recusada() -> (
+    None
+):
+    import json
+    import zlib
+
+    from api.busca import Busca, RankingEmOrdem
+    from api.tests.test_busca import BASE as BASE_DA_BUSCA
+    from api.tests.test_busca import mundo_de_videos
+
+    listas = ListasDaBuscaFirestore(
+        firestore.Client(project="teste", credentials=_anonima()),
+        f"listas-{uuid.uuid4().hex}",
+    )
+    m = mundo_de_videos(5)
+    busca = Busca(
+        transporte=m.transporte,
+        catalogo=m.catalogo,
+        indice=m.indice,
+        ranking=RankingEmOrdem(),
+        repositorio=m.jobs,
+        armazenamento=m.armazenamento,
+        relogio=lambda: BASE_DA_BUSCA,
+        listas=listas,
+    )
+    cursor = busca.buscar("vestido", limite=2, dono="u1")._proximo_cursor
+    assert cursor is not None
+    documento = listas.ler(cursor.partition(".")[0])
+    assert documento is not None
+    conteudo = json.loads(zlib.decompress(documento["conteudo"]))
+    assert conteudo["versao_da_lixeira"] == 0
+    del conteudo["versao_da_lixeira"]  # o formato de antes do #598
+    documento["conteudo"] = zlib.compress(json.dumps(conteudo).encode())
+    legada = listas.gravar(documento)
+
+    lido = listas.ler(legada)
+    assert (
+        lido is not None and ListaDaBusca.do_documento(lido).versao_da_lixeira is None
+    )
+    with pytest.raises(CursorInvalido):
+        busca.buscar("vestido", limite=2, dono="u1", cursor=f"{legada}.2")
+
+
 class _ColecaoQueNaoDeveSerTocada:
     def document(self, *_a: Any) -> Any:
         raise AssertionError("o id ruim chegou ao Firestore")
