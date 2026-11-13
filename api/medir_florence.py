@@ -27,12 +27,9 @@ import google.auth
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.comparador import normalizar
-from api.comparar_objetos import (
-    DisparadorDoCloudRun,
-    FaltaNoAmbiente,
-    exigir_do_ambiente,
-)
+from api.comparar_objetos import DisparadorDoCloudRun
 from api.decupagem import Decupagem, ObjetoDoInventario
 from api.florence import ObjetosDaDecupagem
 from api.gemini import SessaoHttp, Transporte, TransporteVertex

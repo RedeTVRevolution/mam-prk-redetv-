@@ -36,9 +36,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auth import ChamadorAutenticado, Usuario
 from api.bancos import cliente_do_firestore
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import (
     CORRIGIVEIS,
     Correcao,

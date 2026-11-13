@@ -20,10 +20,10 @@ from pydantic import BaseModel, ConfigDict
 
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
 from api.bancos import cliente_da_colecao, cliente_do_firestore
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import RepositorioDeCorrecoes
 from api.dados_da_purga import dados_do_ambiente
 from api.indice_da_busca import IndiceDaBusca

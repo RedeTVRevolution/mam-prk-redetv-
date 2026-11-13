@@ -20,6 +20,7 @@ from typing import Annotated, Protocol, cast, get_args
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.bancos import cliente_do_firestore
@@ -29,7 +30,6 @@ from api.ciclo_de_vida import (
     corrigir_estado,
     desfazer_correcao,
 )
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.decupagem import Decupagem
 from api.jobs import (
     Job,

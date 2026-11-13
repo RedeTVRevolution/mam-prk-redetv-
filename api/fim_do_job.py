@@ -23,8 +23,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from api import log_estruturado
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.eventos_de_uso import Eventos
 from api.eventos_do_job import (
     PublicadorDeEventos,

@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
+from api.ambiente import FaltaNoAmbiente
 from api.comparar_objetos import (
     DisparadorDoCloudRun,
-    FaltaNoAmbiente,
     Preco,
     comparar,
     destino_do_florence,

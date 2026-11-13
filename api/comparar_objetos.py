@@ -27,6 +27,7 @@ import google.auth
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.decupagem import Decupagem
 from api.florence import ObjetosDaDecupagem
 from api.gemini import SessaoHttp, Transporte, TransporteVertex
@@ -35,10 +36,6 @@ from api.nuvem import ObjetosStorage
 
 PRECO_DA_GPU_POR_HORA = 1.05
 ESPERA_DO_JOB_S = 30.0
-
-
-class FaltaNoAmbiente(Exception):
-    pass
 
 
 @dataclass(frozen=True)
@@ -280,12 +277,6 @@ class DisparadorDoCloudRun:
             raise RuntimeError(
                 f"O Job do Florence-2 falhou: {operacao['error'].get('message', '')}"
             )
-
-
-def exigir_do_ambiente(ambiente: Mapping[str, str], nome: str) -> str:
-    if not ambiente.get(nome):
-        raise FaltaNoAmbiente(f"{nome} não está no ambiente")
-    return ambiente[nome]
 
 
 def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int:

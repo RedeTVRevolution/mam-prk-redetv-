@@ -23,10 +23,10 @@ from typing import Protocol
 
 from google.cloud.storage import Client as ClienteStorage
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RepositorioDeAuditoria
 from api.bancos import cliente_da_colecao, cliente_do_firestore
 from api.ciclo_de_vida import NaoReprocessavel
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.jobs import (
     FiltroDeJobs,
     Job,
