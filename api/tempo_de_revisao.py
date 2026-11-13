@@ -10,8 +10,8 @@ import sys
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.nuvem import RepositorioDeRevisaoFirestore
 from api.revisao import RepositorioDeRevisao, relatorio_em_csv
 
