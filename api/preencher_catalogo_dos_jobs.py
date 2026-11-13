@@ -1,7 +1,8 @@
 """Carga dos Jobs antigos (#359): `make preencher-catalogo-dos-jobs`.
 
 Calcula `pessoas_do_catalogo` e `marcas_do_catalogo` de todos os Jobs concluídos (os da
-lixeira também) a partir da Decupagem entregue. É uma passada única de linha de comando,
+lixeira também) a partir da Decupagem corrigida (a leitura que mantém o vínculo de quem está na lixeira
+do catálogo). É uma passada única de linha de comando,
 que lê os Jobs em páginas (`POR_LOTE`) e só grava o que mudou: repetir não muda nada.
 Também reconcilia o Job que ficou sem o campo porque a gravação do #359 falhou
 (`make recalcular-pessoas-dos-jobs`, #478).
@@ -10,19 +11,13 @@ Também reconcilia o Job que ficou sem o campo porque a gravação do #359 falho
 import logging
 import os
 import sys
-from collections.abc import Callable
 
 from google.cloud.storage import Client as ClienteStorage
 
 from api.bancos import cliente_do_firestore
-from api.catalogo import PessoaDoCatalogo
-from api.catalogo_dos_jobs import (
-    LeitorDeDecupagem,
-    entregue_com_fundidas,
-    gravar_se_mudou,
-)
-from api.correcoes import RepositorioDeCorrecoes
+from api.catalogo_dos_jobs import gravar_se_mudou
 from api.jobs import FiltroDeJobs, RepositorioDeJobs
+from api.leitura_da_decupagem import LeituraDaDecupagem
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -37,9 +32,7 @@ POR_LOTE = 500
 
 def preencher(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
-    correcoes: RepositorioDeCorrecoes,
-    pessoas: Callable[[str], PessoaDoCatalogo | None],
+    leitura: LeituraDaDecupagem,
     por_lote: int = POR_LOTE,
 ) -> dict[str, int]:
     """Devolve quantos Jobs `gravados`, `iguais` (ou que saíram de `concluido` no meio) e
@@ -54,7 +47,7 @@ def preencher(
             if job.estado != "concluido":
                 continue
             try:
-                entregue = entregue_com_fundidas(job.id, decupagens, correcoes, pessoas)
+                entregue = leitura.corrigida(job.id)
             except Exception:
                 log.exception("decupagem de %s não lida", job.id)
                 contagem["falhou"] += 1
@@ -74,13 +67,15 @@ def main() -> int:
     firestore_ = cliente_do_firestore(projeto)
     contagem = preencher(
         RepositorioFirestore(firestore_),
-        DecupagensStorage(
-            ClienteStorage(project=projeto),
-            os.environ["BUCKET_ACEITOS"],
-            os.environ["BUCKET_DECUPAGENS"],
+        LeituraDaDecupagem(
+            DecupagensStorage(
+                ClienteStorage(project=projeto),
+                os.environ["BUCKET_ACEITOS"],
+                os.environ["BUCKET_DECUPAGENS"],
+            ),
+            RepositorioDeCorrecoesFirestore(firestore_),
+            CatalogoFirestore(firestore_),
         ),
-        RepositorioDeCorrecoesFirestore(firestore_),
-        CatalogoFirestore(firestore_).obter,
     )
     for nome, quantos in contagem.items():
         print(f"{nome}: {quantos}")
