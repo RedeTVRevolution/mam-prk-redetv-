@@ -19,21 +19,20 @@ from google.cloud import firestore
 
 from api.catalogo import Catalogo, PessoaDoCatalogo
 
-# Uma cadeia de fusões (A→B→C) tem poucos elos; o teto só corta um ciclo gravado errado,
-# e quem não chega a um destino que conta fica de fora.
-SALTOS_MAXIMOS_DA_FUSAO = 10
-
 COLECAO_DO_ESTADO_DA_LIXEIRA = "estado_da_lixeira"
 DOCUMENTO_DA_VERSAO = "catalogo"
 
 
 def pessoas_que_contam(catalogo: Catalogo, ids: Iterable[str]) -> set[str]:
     """Os `ids` que contam, em uma leitura em lote por elo da cadeia de fusões.
-    (`catalogo_apagado.destino_final` anda a mesma cadeia, mas lê uma pessoa por vez.)"""
+    (`catalogo_apagado.destino_final` anda a mesma cadeia, mas lê uma pessoa por vez.)
+    A cadeia vale de qualquer tamanho; só um id que se repete (ciclo gravado errado)
+    a corta, e então o pedido não conta."""
     ponta = {i: i for i in ids}  # o id pedido -> onde a cadeia está agora
+    vistos = {i: {i} for i in ponta}
     lidas: dict[str, PessoaDoCatalogo | None] = {}
     contam: set[str] = set()
-    for _ in range(SALTOS_MAXIMOS_DA_FUSAO + 1):
+    while ponta:
         novos = {p for p in ponta.values() if p not in lidas}
         if novos:
             lidas.update(dict.fromkeys(novos))
@@ -45,10 +44,11 @@ def pessoas_que_contam(catalogo: Catalogo, ids: Iterable[str]) -> set[str]:
             elif pessoa.fundida is None:
                 contam.add(pedido)
                 del ponta[pedido]
+            elif pessoa.fundida.destino_id in vistos[pedido]:
+                del ponta[pedido]
             else:
+                vistos[pedido].add(pessoa.fundida.destino_id)
                 ponta[pedido] = pessoa.fundida.destino_id
-        if not ponta:
-            break
     return contam
 
 

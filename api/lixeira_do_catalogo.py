@@ -131,7 +131,8 @@ def purgar_catalogo_vencido(
 ) -> int:
     """Purga as pessoas e marcas na lixeira há `PRAZO_DA_PURGA` ou mais; devolve quantas.
     Cada uma grava o registro antes de sair; a que falha fica e a próxima execução tenta.
-    `ao_mudar` avança a versão da lixeira (#591) a cada purga."""
+    `ao_mudar` avança a versão da lixeira (#591) antes e depois de cada purga: se o avanço
+    falha, o item continua na lixeira e a próxima varredura tenta de novo."""
     purgadas = 0
     itens: list[tuple[Literal["pessoa", "marca"], str, str, EnvioParaLixeira]] = [
         ("pessoa", p.id, p.nome, p.lixeira) for p in pessoas.na_lixeira() if p.lixeira
@@ -140,11 +141,12 @@ def purgar_catalogo_vencido(
         if agora - envio.em < PRAZO_DA_PURGA:
             continue
         try:
+            ao_mudar()  # antes: se falha, nada muda
             auditoria.acrescentar(
                 _registro(tipo, "item.purgado", id, nome, envio.motivo, {}, agora, None)
             )
             (pessoas if tipo == "pessoa" else marcas).apagar(id)
-            ao_mudar()
+            ao_mudar()  # depois: fecha a janela de uma 1ª página entre o avanço e a mudança
         except Exception:
             log.exception("a purga de %s %s falhou", tipo, id)
             continue
@@ -167,15 +169,19 @@ def criar_rotas_da_lixeira_do_catalogo(
 ) -> APIRouter:
     """`descartar_pessoas` descarta a cópia curta das pessoas (#364): quem entra na
     lixeira ou sai dela muda o autocompletar e a grafia aproximada da busca na hora.
-    `ao_mudar` avança a versão da lixeira (#591) a cada envio, restauração e purga."""
+    `ao_mudar` avança a versão da lixeira (#591) antes e depois de cada envio, restauração
+    e purga: antes, para que uma falha dele deixe o catálogo como estava; depois, para
+    fechar a janela de uma 1ª página lida entre o avanço e a mudança."""
     rotas = APIRouter(prefix="/admin/lixeira")
 
     def lixeira_da_pessoa(id: str, envio: EnvioParaLixeira | None) -> None:
+        ao_mudar()
         pessoas.definir_lixeira(id, envio)
         descartar_pessoas()
         ao_mudar()
 
     def lixeira_da_marca(id: str, envio: EnvioParaLixeira | None) -> None:
+        ao_mudar()
         marcas.definir_lixeira(id, envio)
         ao_mudar()
 
@@ -265,6 +271,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             # Purgada, ela levaria o apontamento: a leitura deixaria de mostrar o destino.
             raise HTTPException(422, "Esta pessoa foi fundida em outra: apague a outra")
         impacto = impacto_da_pessoa(achada.id, len(achada.rostos))
+        ao_mudar()  # antes das fotos: apagá-las não se desfaz
         # Rosto é dado sensível: as fotos saem já, sem esperar a purga, e não voltam.
         # Pela pasta da pessoa também: as fotos da web trocadas antes ficaram lá.
         for rosto in achada.rostos:
@@ -377,6 +384,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             if tipo == "pessoa"
             else impacto_da_marca(achada.id)
         )
+        ao_mudar()  # antes do registro e da purga: se falha, nada muda
         # O registro vem antes: se falha, nada é apagado.
         registrar(
             tipo,

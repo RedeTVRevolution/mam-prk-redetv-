@@ -28,7 +28,6 @@ from api.copia_bigquery import CopiaEmMemoria, LinhaDoMomento, PessoaDoMomento
 from api.jobs import RepositorioEmMemoria, agora_utc
 from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.lixeira_na_leitura import (
-    SALTOS_MAXIMOS_DA_FUSAO,
     VersaoDaLixeira,
     VersaoDaLixeiraEmMemoria,
     VersaoDaLixeiraFirestore,
@@ -121,16 +120,43 @@ def test_ciclo_de_fusao_gravado_errado_nao_prende_e_nao_conta() -> None:
     assert pessoas_que_contam(catalogo, [a.id, b.id]) == set()
 
 
-def test_cadeia_mais_longa_que_o_teto_nao_conta() -> None:
+def test_cadeia_valida_de_qualquer_tamanho_conta() -> None:
     catalogo = CatalogoEmMemoria()
-    elos = [
-        catalogo.acrescentar(f"P{i}", "", [])
-        for i in range(SALTOS_MAXIMOS_DA_FUSAO + 3)
-    ]
+    elos = [catalogo.acrescentar(f"P{i}", "", []) for i in range(13)]  # 12 fusões
     for de, para in pairwise(elos):
         catalogo.definir_fusao(de.id, _fusao(para))
 
-    assert pessoas_que_contam(catalogo, [elos[0].id, elos[-3].id]) == {elos[-3].id}
+    assert pessoas_que_contam(catalogo, [elos[0].id]) == {elos[0].id}
+
+    catalogo.definir_lixeira(elos[-1].id, ENVIO)
+    assert pessoas_que_contam(catalogo, [elos[0].id]) == set()
+
+
+def test_ciclo_mais_longo_que_o_pedido_nao_trava_nem_conta() -> None:
+    catalogo = CatalogoEmMemoria()
+    a, b, c, d = (catalogo.acrescentar(n, "", []) for n in "ABCD")
+    catalogo.definir_fusao(a.id, _fusao(b))  # A→B→C→D→B
+    catalogo.definir_fusao(b.id, _fusao(c))
+    catalogo.definir_fusao(c.id, _fusao(d))
+    catalogo.definir_fusao(d.id, _fusao(b))
+
+    assert pessoas_que_contam(catalogo, [a.id, b.id, c.id, d.id]) == set()
+
+
+def test_o_filtro_vale_mesmo_quando_o_criar_app_nao_recebe_o_catalogo() -> None:
+    mundo = Mundo()
+    papeis = RepositorioDePapeisEmMemoria()
+    papeis.salvar("adm", ["administrador"])
+    cliente = ClienteSemPeriodoPadrao(
+        criar_app(
+            VerificadorFalso({"admin": Usuario(uid="adm", email="a@redetv.com")}),
+            RepositorioEmMemoria(),
+            papeis=papeis,
+            tempo_de_tela=ConsultaEmMemoria(mundo.copia),  # sem `catalogo`
+        )
+    )
+
+    assert _ranking(cliente)["pessoas"] == []  # ninguém existe no catálogo vazio
 
 
 class CatalogoEspiao:
@@ -209,7 +235,7 @@ class Mundo:
             ArmazenamentoFalso(),
             papeis=papeis,
             catalogo=extras.pop("catalogo", self.catalogo),
-            marcas=CatalogoDeMarcasEmMemoria(),
+            marcas=extras.pop("marcas", CatalogoDeMarcasEmMemoria()),
             tempo_de_tela=consulta
             or ComCache(ConsultaEmMemoria(self.copia), CacheCurto()),
             auditoria=RepositorioDeAuditoriaEmMemoria(),
@@ -425,7 +451,9 @@ def test_com_a_consulta_real_o_curador_envia_restaura_e_purga_sem_escrever_no_bi
     escritas = ("INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "DROP")
     for corpo in transporte.corpos:
         assert not any(w in corpo["query"].upper().split() for w in escritas)
-    assert versao.atual() == 4  # envio, restauração, envio e purga
+    assert (
+        versao.atual() == 10
+    )  # envio 3 (inclui antes das fotos), restaurar 2, envio 3, purga 2
 
 
 # --- a versão do estado da lixeira ------------------------------------------------------
@@ -518,3 +546,111 @@ def test_firestore_duas_instancias_enxergam_o_mesmo_marcador() -> None:
     outra.avancar()
 
     assert uma.atual() == outra.atual() == 2
+
+
+# --- a versão não se perde quando o avanço falha (#591) ---------------------------------
+
+
+class VersaoQueFalha(VersaoDaLixeiraEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.falha = False
+        self.vistos: list[bool] = []
+        self.observar: Any = lambda: False
+
+    def avancar(self) -> None:
+        if self.falha:
+            raise RuntimeError("Firestore fora")
+        self.vistos.append(self.observar())
+        super().avancar()
+
+
+def test_a_purga_automatica_nao_apaga_se_o_avanco_da_versao_falha_e_tenta_de_novo() -> (
+    None
+):
+    mundo = Mundo()
+    mundo.catalogo.definir_lixeira(
+        mundo.cris.id, ENVIO.model_copy(update={"em": agora_utc() - timedelta(days=31)})
+    )
+    versao = VersaoQueFalha()
+    versao.falha = True
+
+    def varrer() -> int:
+        return purgar_catalogo_vencido(
+            mundo.catalogo,
+            CatalogoDeMarcasEmMemoria(),
+            RepositorioDeAuditoriaEmMemoria(),
+            agora_utc(),
+            versao.avancar,
+        )
+
+    assert varrer() == 0
+    assert mundo.catalogo.obter(mundo.cris.id) is not None  # nada mudou
+
+    versao.falha = False
+    assert varrer() == 1
+    assert mundo.catalogo.obter(mundo.cris.id) is None
+    assert versao.atual() == 2  # antes e depois da mudança
+
+
+def test_a_versao_avanca_antes_e_depois_da_mudanca_no_catalogo() -> None:
+    mundo = Mundo()
+    versao = VersaoQueFalha()
+    versao.observar = lambda: mundo.catalogo.obter(mundo.cris.id).lixeira is not None  # type: ignore[union-attr]
+    cliente = mundo.instancia(versao_da_lixeira=versao)
+
+    cliente.post(
+        f"{LIXEIRA}/pessoas/{mundo.cris.id}", json={"motivo": "x"}, headers=ADMIN
+    )
+
+    assert versao.vistos == [
+        False,
+        False,
+        True,
+    ]  # antes das fotos, antes da mudança, depois
+
+
+@pytest.mark.parametrize("acao", ["enviar", "restaurar", "purgar", "fundir"])
+def test_se_o_avanco_falha_a_acao_do_curador_nao_muda_o_catalogo(acao: str) -> None:
+    mundo = Mundo()
+    versao = VersaoQueFalha()
+    cliente = mundo.instancia(versao_da_lixeira=versao)
+    pessoa = f"{LIXEIRA}/pessoas/{mundo.cris.id}"
+    if acao in ("restaurar", "purgar"):
+        mundo.catalogo.definir_lixeira(mundo.cris.id, ENVIO)
+    versao.falha = True
+
+    with pytest.raises(RuntimeError):
+        if acao == "enviar":
+            cliente.post(pessoa, json={"motivo": "x"}, headers=ADMIN)
+        elif acao == "restaurar":
+            cliente.post(f"{pessoa}/restaurar", headers=ADMIN)
+        elif acao == "purgar":
+            cliente.post(f"{pessoa}/purgar", json={"nome": "Cris"}, headers=ADMIN)
+        else:
+            cliente.post(
+                f"/v1/catalogo/pessoas/{mundo.cris.id}/fundir",
+                json={"destino_id": mundo.ana.id, "motivo": "x"},
+                headers=ADMIN,
+            )
+
+    cris = mundo.catalogo.obter(mundo.cris.id)
+    assert cris is not None
+    assert (cris.lixeira is not None) == (acao in ("restaurar", "purgar"))
+    assert cris.fundida is None
+
+
+def test_se_o_avanco_falha_a_marca_nao_vai_para_a_lixeira() -> None:
+    mundo = Mundo()
+    marcas = CatalogoDeMarcasEmMemoria()
+    marca = marcas.acrescentar("Acme", [])
+    versao = VersaoQueFalha()
+    cliente = mundo.instancia(versao_da_lixeira=versao, marcas=marcas)
+    versao.falha = True
+
+    with pytest.raises(RuntimeError):
+        cliente.post(
+            f"{LIXEIRA}/marcas/{marca.id}", json={"motivo": "x"}, headers=ADMIN
+        )
+
+    assert marcas.obter(marca.id).lixeira is None  # type: ignore[union-attr]

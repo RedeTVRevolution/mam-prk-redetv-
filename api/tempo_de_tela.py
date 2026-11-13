@@ -686,12 +686,12 @@ def com_nomes_do_catalogo[P: PessoaResumida](
 def criar_rotas_do_tempo_de_tela(
     consulta: ConsultaDeMomentos | None,
     repositorio: RepositorioDeJobs,
+    catalogo: Catalogo,
     relogio: Callable[[], datetime] = agora_em_sao_paulo,
-    catalogo: Catalogo | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
     no_periodo = dependencia_do_periodo(relogio)
-    if consulta is not None and catalogo is not None:
+    if consulta is not None:
         consulta = SoComQuemConta(consulta, catalogo)
 
     @rotas.get(

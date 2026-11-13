@@ -778,7 +778,7 @@ def criar_app(
     )
     v1.include_router(
         criar_rotas_do_tempo_de_tela(
-            tempo_de_tela, repositorio_de_jobs, relogio, catalogo
+            tempo_de_tela, repositorio_de_jobs, catalogo_de_pessoas, relogio
         )
     )
     v1.include_router(
