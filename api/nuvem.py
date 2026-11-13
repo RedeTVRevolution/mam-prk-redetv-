@@ -1053,9 +1053,7 @@ class CatalogoDeMarcasFirestore:
             for d in _lidos_em_lote(self._cliente, self._colecao, ids)
         }
 
-    def achar(
-        self, nome: str, *, com_lixeira: bool = False
-    ) -> list[MarcaDoCatalogo]:
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[MarcaDoCatalogo]:
         consulta = self._colecao.where(
             filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
         )

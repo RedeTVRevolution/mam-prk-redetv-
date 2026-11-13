@@ -42,9 +42,7 @@ class CatalogoDeMarcas(Protocol):
         """As marcas que existem entre os `ids`, numa leitura em lote."""
         ...
 
-    def achar(
-        self, nome: str, *, com_lixeira: bool = False
-    ) -> list[MarcaDoCatalogo]:
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[MarcaDoCatalogo]:
         """As marcas cujo nome ou apelido é `nome`, sem maiúsculas nem acentos; as da
         lixeira só com `com_lixeira` (a carga não pode recriá-las, #596)."""
         ...
@@ -85,9 +83,7 @@ class CatalogoDeMarcasEmMemoria:
     def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
         return {i: self._marcas[i] for i in dict.fromkeys(ids) if i in self._marcas}
 
-    def achar(
-        self, nome: str, *, com_lixeira: bool = False
-    ) -> list[MarcaDoCatalogo]:
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[MarcaDoCatalogo]:
         chave = normalizar(nome)
         marcas = self._marcas.values() if com_lixeira else self.todas()
         return [m for m in marcas if chave in nomes_de_busca_da_marca(m)]
