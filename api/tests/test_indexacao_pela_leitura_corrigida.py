@@ -134,6 +134,7 @@ def test_a_copia_usa_a_leitura_corrigida_com_os_catalogos_em_lote() -> None:
     )
 
     assert SABRINA in _ids_no_bigquery(mundo)
+    assert pessoas.lotes >= 1
     assert pessoas.individuais == 0
 
 
