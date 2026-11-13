@@ -28,7 +28,8 @@ DOCUMENTO_DA_VERSAO = "catalogo"
 
 
 def pessoas_que_contam(catalogo: Catalogo, ids: Iterable[str]) -> set[str]:
-    """Os `ids` que contam, em uma leitura em lote por elo da cadeia de fusões."""
+    """Os `ids` que contam, em uma leitura em lote por elo da cadeia de fusões.
+    (`catalogo_apagado.destino_final` anda a mesma cadeia, mas lê uma pessoa por vez.)"""
     ponta = {i: i for i in ids}  # o id pedido -> onde a cadeia está agora
     lidas: dict[str, PessoaDoCatalogo | None] = {}
     contam: set[str] = set()
