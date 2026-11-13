@@ -111,6 +111,7 @@ COPY api/__init__.py \
      api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \
+     api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
      api/log_estruturado.py \
@@ -192,6 +193,7 @@ COPY api/__init__.py \
      api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \
+     api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
      api/log_estruturado.py \
@@ -304,6 +306,7 @@ COPY api/__init__.py \
      api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \
+     api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
      api/log_estruturado.py \
