@@ -27,14 +27,10 @@ from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.erros import lido
 from api.jobs import RepositorioDeJobs
-from api.lixeira_na_leitura import (
-    PurgasDeMarca,
-    conta_depois_do_corte,
-    cortes_validos,
-    nomes_de_marca_na_lixeira,
-)
+from api.lixeira_na_leitura import PurgasDeMarca
 from api.marcas import CatalogoDeMarcas
 from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
+from api.quem_conta import QuemConta
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
@@ -305,9 +301,6 @@ class SoMarcasQueContam:
         self._purgas = purgas
         self._jobs = jobs
 
-    def _cortes(self, nomes: set[str]) -> dict[str, datetime]:
-        return cortes_validos(lido(self._purgas.todas), self._marcas, nomes)
-
     def somas(
         self,
         programa: str | None,
@@ -315,11 +308,7 @@ class SoMarcasQueContam:
         ate: date | None,
         tipo: str | None,
     ) -> list[InsercoesDaMarca]:
-        somas = self._consulta.somas(programa, desde, ate, tipo)
-        fora = nomes_de_marca_na_lixeira(self._marcas)
-        return self._depois_do_corte(
-            [s for s in somas if normalizar(s.marca) not in fora]
-        )
+        return self._que_contam(self._consulta.somas(programa, desde, ate, tipo))
 
     def insercoes_dos_nomes(self, nomes: set[str]) -> int:
         """Quantas inserções de todo o histórico, com o texto em `nomes` (normalizados),
@@ -329,28 +318,31 @@ class SoMarcasQueContam:
         somas = self._consulta.somas(None, None, None, None)
         return sum(
             s.insercoes
-            for s in self._depois_do_corte(
-                [s for s in somas if normalizar(s.marca) in nomes]
+            for s in self._que_contam(
+                [s for s in somas if normalizar(s.marca) in nomes], so_a_purga=True
             )
         )
 
-    def _depois_do_corte(self, somas: list[InsercoesDaMarca]) -> list[InsercoesDaMarca]:
-        # `normalizar` uma vez por marca distinta, não por linha de soma.
+    def _que_contam(
+        self, somas: list[InsercoesDaMarca], *, so_a_purga: bool = False
+    ) -> list[InsercoesDaMarca]:
+        # Um Quem conta por operação; `normalizar` uma vez por marca distinta, não por linha.
         nome = {m: normalizar(m) for m in {s.marca for s in somas}}
-        cortes = self._cortes(set(nome.values()))
-        cortadas = [s for s in somas if nome[s.marca] in cortes]
-        if not cortadas:
-            return somas
-        criados = {
-            j.id: j.criado_em
-            for j in lido(lambda: self._jobs.obter_varios({s.job_id for s in cortadas}))
-        }
-        return [
-            s
-            for s in somas
-            if (corte := cortes.get(nome[s.marca])) is None
-            or conta_depois_do_corte(criados.get(s.job_id), corte)
-        ]
+        cortes = QuemConta(marcas=self._marcas, purgas=self._purgas).cortes(
+            set(nome.values()), so_a_purga=so_a_purga
+        )
+        cortadas = [s for s in somas if cortes.tem_corte(nome[s.marca])]
+        criados = (
+            {
+                j.id: j.criado_em
+                for j in lido(
+                    lambda: self._jobs.obter_varios({s.job_id for s in cortadas})
+                )
+            }
+            if cortadas
+            else {}
+        )
+        return [s for s in somas if cortes.conta(nome[s.marca], criados.get(s.job_id))]
 
     def ranking(
         self,
