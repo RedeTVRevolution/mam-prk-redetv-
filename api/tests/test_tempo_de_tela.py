@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.cache_curto import CacheCurto
-from api.catalogo import CatalogoEmMemoria
+from api.catalogo import CatalogoEmMemoria, PessoaDoCatalogo
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -392,6 +392,21 @@ def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
     assert len(somas) == 4
 
 
+def _catalogo_da_copia(consulta: Any) -> CatalogoEmMemoria:
+    """O catálogo com cada pessoa que a cópia por trás da consulta traz, com o nome da
+    cópia: o relatório só conta quem existe no catálogo (#591)."""
+    while not hasattr(consulta, "_copia"):
+        consulta = consulta._consulta
+    catalogo = CatalogoEmMemoria()
+    for linhas in consulta._copia.por_job.values():
+        for linha in linhas:
+            for p in linha.pessoas:
+                catalogo._pessoas.setdefault(
+                    p.id, PessoaDoCatalogo(id=p.id, nome=p.nome or p.id, papel="")
+                )
+    return catalogo
+
+
 def _cliente(
     papel: str = "consulta",
     consulta: ConsultaDeMomentos | None = None,
@@ -419,7 +434,7 @@ def _cliente(
         jobs,
         papeis=papeis,
         tempo_de_tela=consulta,
-        catalogo=catalogo,
+        catalogo=catalogo or (_catalogo_da_copia(consulta) if consulta else None),
         relogio=relogio or agora_utc,
     )
     # Com relógio, o teste é do período padrão: o cliente comum não pede o histórico inteiro.

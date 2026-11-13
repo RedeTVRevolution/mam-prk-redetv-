@@ -5,7 +5,7 @@ import { useId, useRef, useState } from 'react'
 import { LoginRecenteExigido, SessaoExpirada, codigoDoErro, type ItemDaLixeira, type TipoDeItem } from '../../api.ts'
 import { falhaDaAcao, type Falha } from '../../falhaDaAcao.ts'
 import { dataDeExibicao } from '../../jobs.ts'
-import { frasesDoImpacto, purgaEm, rotuloDoTipo } from '../../lixeira.ts'
+import { ABERTURA_DA_LIXEIRA, efeitoDaPurga, efeitoDaRestauracao, frasesDoImpacto, purgaEm, rotuloDoTipo } from '../../lixeira.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
@@ -83,7 +83,7 @@ function PurgarAgora({ item, aoFechar, aoPurgar, aoEntrarDeNovo }: { item: ItemD
     <Dialog open onOpenChange={(aberto) => !aberto && !purgando && aoFechar()}>
       <DialogContent mostrarFechar={!purgando} className="sm:max-w-md">
         <DialogTitle>{`Purgar ${item.nome}`}</DialogTitle>
-        <DialogDescription>A purga apaga de vez e não tem volta.</DialogDescription>
+        <DialogDescription>{`A purga apaga de vez e não tem volta. ${efeitoDaPurga(tipo)}`.trim()}</DialogDescription>
         <form
           className="grid gap-3"
           onSubmit={(e) => {
@@ -205,7 +205,7 @@ export default function Lixeira({ aoEntrarDeNovo }: { aoEntrarDeNovo: () => void
           </select>
         )}
       </TopoDaAba>
-      <p className="max-w-3xl text-muted-foreground">O que vai para a lixeira some do acervo e da busca. Restaurar devolve tudo como estava; a purga apaga de vez.</p>
+      <p className="max-w-3xl text-muted-foreground">{ABERTURA_DA_LIXEIRA}</p>
       <Aviso>{aviso}</Aviso>
       {falha && <Erro mensagem={falha.mensagem} codigo={falha.codigo} />}
       {carga.isPending && <Carregando rotulo="Carregando a lixeira" />}
@@ -286,7 +286,7 @@ export default function Lixeira({ aoEntrarDeNovo }: { aoEntrarDeNovo: () => void
                   <tr className="bg-selected" onKeyDown={(e) => e.key === 'Escape' && setRestaurando(null)}>
                     <td colSpan={colunas} className={CELULA}>
                       <div className="flex flex-wrap items-center gap-2 py-1">
-                        <span>{`Restaurar ${item.nome}? Volta tudo como estava.`}</span>
+                        <span>{`Restaurar ${item.nome}? ${efeitoDaRestauracao(item.tipo)}`}</span>
                         <Button type="button" size="sm" autoFocus aria-label="Confirmar restauração" onClick={() => void restaurar(item)}>
                           Restaurar
                         </Button>

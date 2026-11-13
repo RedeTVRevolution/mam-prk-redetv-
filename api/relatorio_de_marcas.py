@@ -21,10 +21,19 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from api.cache_curto import CacheCurto
+from api.comparador import normalizar
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, _parametro
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.jobs import RepositorioDeJobs
+from api.lixeira_na_leitura import (
+    PurgasDeMarca,
+    conta_depois_do_corte,
+    cortes_validos,
+    lido,
+    nomes_de_marca_na_lixeira,
+)
+from api.marcas import CatalogoDeMarcas
 from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
 from api.relatorios import (
     LIMITE_DA_PAGINA,
@@ -413,8 +422,9 @@ def pagina_do_ranking(
 
 
 class ConsultaComCache:
-    """A soma por filtro, calculada uma vez e lembrada (#453): o ranking inteiro, a página, a
-    lista de uma marca e o CSV saem dela, sem consultar o BigQuery de novo."""
+    """A soma por filtro, calculada uma vez e lembrada (#453): o ranking, a página, a lista
+    de uma marca e o CSV saem dela, sem consultar o BigQuery de novo. Só a soma sem exclusão
+    fica guardada; a lixeira do catálogo age depois (`SoMarcasQueContam`)."""
 
     def __init__(self, consulta: ConsultaDeInsercoes, cache: CacheCurto) -> None:
         self._consulta = consulta
@@ -432,21 +442,6 @@ class ConsultaComCache:
             lambda: self._consulta.somas(programa, desde, ate, tipo),
         )
 
-    def _ranking_inteiro(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-        def calcular() -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-            somas = self.somas(programa, desde, ate, tipo)
-            return ranking_em_python(somas, 0, len(somas))
-
-        return self._cache.obter(
-            ("marcas-ranking", programa, desde, ate, tipo), calcular
-        )
-
     def ranking(
         self,
         programa: str | None,
@@ -456,8 +451,8 @@ class ConsultaComCache:
         depois: int,
         limite: int,
     ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-        todas, total = self._ranking_inteiro(programa, desde, ate, tipo)
-        return todas[depois : depois + limite + 1], total
+        # O ranking não é guardado pronto: sai das somas, onde a exclusão já agiu.
+        return ranking_em_python(self.somas(programa, desde, ate, tipo), depois, limite)
 
     def lista_da_marca(
         self,
@@ -471,6 +466,108 @@ class ConsultaComCache:
     ) -> "list[InsercaoNoRelatorio]":
         somas = self.somas(programa, desde, ate, tipo)
         return lista_em_python(somas, marca, depois, limite)
+
+
+class SoMarcasQueContam:
+    """A lixeira do catálogo vale na hora (#593): tira das somas, antes do ranking, dos
+    totais, das posições e da paginação, o texto que bate com o nome ou apelido de uma marca
+    na lixeira, com o catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda.
+
+    A marca purgada (#595) deixa um registro: as ocorrências do nome em vídeos de Jobs
+    criados até o instante da purga ficam fora, as dos criados depois contam. A data vem de
+    `Job.criado_em` no Firestore (não muda com o reprocessamento nem com a recópia), lida em
+    lote, uma vez por vídeo, só para as somas que batem com um registro; Job ausente conta
+    como anterior; falha de leitura é erro (503), não "Job ausente"."""
+
+    def __init__(
+        self,
+        consulta: ConsultaDeInsercoes,
+        marcas: CatalogoDeMarcas,
+        purgas: PurgasDeMarca,
+        jobs: RepositorioDeJobs,
+    ) -> None:
+        self._consulta = consulta
+        self._marcas = marcas
+        self._purgas = purgas
+        self._jobs = jobs
+
+    def _cortes(self, nomes: set[str]) -> dict[str, datetime]:
+        return cortes_validos(lido(self._purgas.todas), self._marcas, nomes)
+
+    def somas(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+    ) -> list[InsercoesDaMarca]:
+        somas = self._consulta.somas(programa, desde, ate, tipo)
+        fora = nomes_de_marca_na_lixeira(self._marcas)
+        return self._depois_do_corte(
+            [s for s in somas if normalizar(s.marca) not in fora]
+        )
+
+    def insercoes_dos_nomes(self, nomes: set[str]) -> int:
+        """Quantas inserções de todo o histórico, com o texto em `nomes` (normalizados),
+        o relatório contaria se a marca não estivesse na lixeira (#597): as somas sem a
+        exclusão da lixeira, só com o corte das purgas. Cada inserção é uma linha da cópia,
+        com ou sem vínculo no catálogo, então conta uma vez."""
+        somas = self._consulta.somas(None, None, None, None)
+        return sum(
+            s.insercoes
+            for s in self._depois_do_corte(
+                [s for s in somas if normalizar(s.marca) in nomes]
+            )
+        )
+
+    def _depois_do_corte(self, somas: list[InsercoesDaMarca]) -> list[InsercoesDaMarca]:
+        # `normalizar` uma vez por marca distinta, não por linha de soma.
+        nome = {m: normalizar(m) for m in {s.marca for s in somas}}
+        cortes = self._cortes(set(nome.values()))
+        cortadas = [s for s in somas if nome[s.marca] in cortes]
+        if not cortadas:
+            return somas
+        criados = {
+            j.id: j.criado_em
+            for j in lido(lambda: self._jobs.obter_varios({s.job_id for s in cortadas}))
+        }
+        return [
+            s
+            for s in somas
+            if (corte := cortes.get(nome[s.marca])) is None
+            or conta_depois_do_corte(criados.get(s.job_id), corte)
+        ]
+
+    def ranking(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+        depois: int,
+        limite: int,
+    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
+        return ranking_em_python(self.somas(programa, desde, ate, tipo), depois, limite)
+
+    def lista_da_marca(
+        self,
+        marca: str,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+        depois: int,
+        limite: int,
+    ) -> "list[InsercaoNoRelatorio]":
+        if normalizar(marca) in nomes_de_marca_na_lixeira(self._marcas):
+            return []
+        if self._cortes({normalizar(marca)}):
+            # O corte é por vídeo: a lista sai das somas já cortadas, não do SQL da marca.
+            somas = self.somas(programa, desde, ate, tipo)
+            return lista_em_python(somas, marca, depois, limite)
+        return self._consulta.lista_da_marca(
+            marca, programa, desde, ate, tipo, depois, limite
+        )
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
@@ -595,10 +692,14 @@ def em_csv(marcas: list[MarcaNoRelatorio]) -> str:
 def criar_rotas_das_marcas(
     consulta: ConsultaDeInsercoes | None,
     repositorio: RepositorioDeJobs,
+    catalogo: CatalogoDeMarcas,
+    purgas: PurgasDeMarca,
     relogio: Callable[[], datetime] = agora_em_sao_paulo,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
     no_periodo = dependencia_do_periodo(relogio)
+    if consulta is not None:
+        consulta = SoMarcasQueContam(consulta, catalogo, purgas, repositorio)
 
     def _confere(
         programa: str | None, desde: date | None, ate: date | None, tipo: str | None

@@ -1,7 +1,9 @@
 """Catálogo de marcas (#150): o dublê e a carga inicial."""
 
+from datetime import UTC, datetime
 from typing import Any
 
+from api.catalogo import EnvioParaLixeira
 from api.marcas import CatalogoDeMarcasEmMemoria, carregar_marcas
 
 
@@ -57,3 +59,26 @@ def test_a_carga_respeita_o_que_ja_esta_no_catalogo_por_apelido() -> None:
     catalogo.acrescentar("Banco Verde", ["BV"])
 
     assert carregar_marcas(catalogo, [_decupagem("BV")]) == 0
+
+
+def test_a_carga_nao_recria_marca_na_lixeira_e_recria_depois_da_purga() -> None:
+    catalogo = CatalogoDeMarcasEmMemoria()
+    banco = catalogo.acrescentar("Banco Verde", ["BV"])
+    envio = EnvioParaLixeira(
+        em=datetime(2026, 11, 1, tzinfo=UTC),
+        por_uid="u1",
+        por_email="c@redetv.com",
+        motivo="duplicada",
+    )
+    catalogo.definir_lixeira(banco.id, envio)
+
+    # pelo nome e pelo apelido
+    assert carregar_marcas(catalogo, [_decupagem("banco VERDE", "bv")]) == 0
+    assert catalogo.todas() == []
+    assert catalogo.achar("bv") == []
+    assert [m.id for m in catalogo.achar("bv", com_lixeira=True)] == [banco.id]
+
+    catalogo.apagar(banco.id)
+
+    assert carregar_marcas(catalogo, [_decupagem("Banco Verde")]) == 1
+    assert [m.nome for m in catalogo.todas()] == ["Banco Verde"]

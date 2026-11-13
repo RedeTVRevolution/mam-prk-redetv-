@@ -46,7 +46,26 @@ function daPessoa(i: ImpactoDaPessoa): string {
 }
 
 function daMarca(i: ImpactoDaMarca): string {
-  return `${contar(i.ocorrencias_que_perdem_o_vinculo, 'ocorrência', 'ocorrências')} nas decupagens mantêm o texto da marca e perdem o vínculo.`
+  const n = i.insercoes_que_saem_do_relatorio
+  return `${contar(i.ocorrencias_que_perdem_o_vinculo, 'ocorrência', 'ocorrências')} nas decupagens mantêm o texto da marca e perdem o vínculo. ${contar(n, 'inserção comercial', 'inserções comerciais')}, pelo nome e pelos apelidos, não ${n === 1 ? 'conta' : 'contam'} no relatório de marcas.`
+}
+
+/** Na abertura da tela: o que a lixeira e a purga fazem na busca e nos relatórios. */
+export const ABERTURA_DA_LIXEIRA =
+  'O vídeo na lixeira some do acervo e da busca. Pessoa e marca na lixeira saem da busca e dos relatórios na hora e voltam na hora se forem restauradas. A purga apaga de vez; nos relatórios de uma marca purgada, só os vídeos enviados depois dela voltam a contar.'
+
+/** O que a confirmação de restauração promete. */
+export function efeitoDaRestauracao(tipo: string): string {
+  if (tipo === 'marca') return 'Volta à busca e aos relatórios na hora.'
+  if (tipo === 'pessoa') return 'Volta à busca e aos relatórios na hora; as fotos de rosto apagadas não voltam.'
+  return 'Volta tudo como estava.'
+}
+
+/** O que o diálogo de purga avisa, além de "não tem volta"; vazio para o vídeo. */
+export function efeitoDaPurga(tipo: string): string {
+  if (tipo === 'marca') return 'A marca já está fora da busca e dos relatórios; os vídeos anteriores à purga não voltam a contar, só os enviados depois.'
+  if (tipo === 'pessoa') return 'A pessoa já está fora da busca e dos relatórios e não volta a eles.'
+  return ''
 }
 
 /** O impacto de qualquer tipo, em uma frase. */

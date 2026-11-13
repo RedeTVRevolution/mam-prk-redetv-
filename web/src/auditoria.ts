@@ -165,6 +165,7 @@ function impacto(d: Record<string, unknown>): string[] {
     [d.aparicoes_que_perdem_o_nome, 'aparição perde o nome', 'aparições perdem o nome'],
     [d.fotos_apagadas, 'foto apagada', 'fotos apagadas'],
     [d.ocorrencias_que_perdem_o_vinculo, 'ocorrência perde o vínculo', 'ocorrências perdem o vínculo'],
+    [d.insercoes_que_saem_do_relatorio, 'inserção sai do relatório de marcas', 'inserções saem do relatório de marcas'],
   ]
   const frases = partes.flatMap(([n, s, p]) => (numero(n) === null ? [] : [contar(numero(n)!, s, p)]))
   const linhas = frases.length ? [`${frases.join(', ')}.`] : []

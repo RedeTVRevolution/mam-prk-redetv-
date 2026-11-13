@@ -142,6 +142,7 @@ def criar_rotas_da_fusao(
         origem, destino = origem_e_destino(id_da_pessoa, pedido.destino_id)
         videos, aparicoes = contar(origem.id)
         quando = relogio()
+        ao_fundir()  # antes da mudança: se falha, nada muda (e de novo depois, no fim)
         ja_tem = set(nomes_de_busca(destino))
         novos: list[str] = []
         for nome in [origem.nome, *origem.apelidos]:

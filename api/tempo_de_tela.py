@@ -32,6 +32,7 @@ from api.copia_bigquery import (
 )
 from api.csv_seguro import csv_em_texto
 from api.jobs import RepositorioDeJobs
+from api.lixeira_na_leitura import pessoas_que_contam
 from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
 from api.relatorios import (
     LIMITE_DA_PAGINA,
@@ -463,8 +464,9 @@ def video_da_pessoa(v: Sequence[Any]) -> "VideoDaPessoa":
 
 
 class ConsultaComCache:
-    """A soma por filtro, calculada uma vez e lembrada (#453): o ranking inteiro, a página, a
-    pessoa expandida e o CSV saem dela, sem consultar o BigQuery de novo."""
+    """A soma por filtro, calculada uma vez e lembrada (#453): o ranking, a página, a
+    pessoa expandida e o CSV saem dela, sem consultar o BigQuery de novo. Só a soma sem
+    exclusão fica guardada; a lixeira do catálogo age depois (`SoComQuemConta`)."""
 
     def __init__(self, consulta: ConsultaDeMomentos, cache: CacheCurto) -> None:
         self._consulta = consulta
@@ -478,17 +480,6 @@ class ConsultaComCache:
             lambda: self._consulta.somas(programa, desde, ate),
         )
 
-    def _ranking_inteiro(
-        self, programa: str | None, desde: date | None, ate: date | None
-    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        def calcular() -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-            somas = self.somas(programa, desde, ate)
-            return ranking_em_python(somas, 0, len(somas))
-
-        return self._cache.obter(
-            ("tempo-de-tela-ranking", programa, desde, ate), calcular
-        )
-
     def ranking(
         self,
         programa: str | None,
@@ -497,8 +488,8 @@ class ConsultaComCache:
         depois: int,
         limite: int,
     ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        todas, total = self._ranking_inteiro(programa, desde, ate)
-        return todas[depois : depois + limite + 1], total
+        # O ranking não é guardado pronto: sai das somas, onde a exclusão já agiu.
+        return ranking_em_python(self.somas(programa, desde, ate), depois, limite)
 
     def videos_da_pessoa(
         self,
@@ -511,6 +502,48 @@ class ConsultaComCache:
     ) -> "list[VideoDaPessoa]":
         somas = self.somas(programa, desde, ate)
         return videos_em_python(somas, pessoa_id, depois, limite)
+
+
+class SoComQuemConta:
+    """A lixeira do catálogo vale na hora (#591): tira das somas, antes do ranking, dos
+    totais, das posições e da paginação, a pessoa que não conta (`pessoas_que_contam`), com o
+    catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda."""
+
+    def __init__(self, consulta: ConsultaDeMomentos, catalogo: Catalogo) -> None:
+        self._consulta = consulta
+        self._catalogo = catalogo
+
+    def somas(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        somas = self._consulta.somas(programa, desde, ate)
+        contam = pessoas_que_contam(self._catalogo, {s.pessoa_id for s in somas})
+        return [s for s in somas if s.pessoa_id in contam]
+
+    def ranking(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        depois: int,
+        limite: int,
+    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
+        return ranking_em_python(self.somas(programa, desde, ate), depois, limite)
+
+    def videos_da_pessoa(
+        self,
+        pessoa_id: str,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        depois: int,
+        limite: int,
+    ) -> "list[VideoDaPessoa]":
+        if not pessoas_que_contam(self._catalogo, [pessoa_id]):
+            return []
+        return self._consulta.videos_da_pessoa(
+            pessoa_id, programa, desde, ate, depois, limite
+        )
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
@@ -653,11 +686,13 @@ def com_nomes_do_catalogo[P: PessoaResumida](
 def criar_rotas_do_tempo_de_tela(
     consulta: ConsultaDeMomentos | None,
     repositorio: RepositorioDeJobs,
+    catalogo: Catalogo,
     relogio: Callable[[], datetime] = agora_em_sao_paulo,
-    catalogo: Catalogo | None = None,
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
     no_periodo = dependencia_do_periodo(relogio)
+    if consulta is not None:
+        consulta = SoComQuemConta(consulta, catalogo)
 
     @rotas.get(
         "/tempo-de-tela",

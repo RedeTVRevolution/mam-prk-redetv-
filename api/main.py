@@ -112,6 +112,14 @@ from api.lixeira_do_catalogo import (
     FotosEmMemoria,
     criar_rotas_da_lixeira_do_catalogo,
 )
+from api.lixeira_na_leitura import (
+    PurgasDeMarca,
+    PurgasDeMarcaEmMemoria,
+    PurgasDeMarcaFirestore,
+    VersaoDaLixeira,
+    VersaoDaLixeiraEmMemoria,
+    VersaoDaLixeiraFirestore,
+)
 from api.log_estruturado import configurar as configurar_o_log
 from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
@@ -391,6 +399,8 @@ def criar_app(
     eventos: Eventos | None = None,
     pasta_web: Path = PASTA_WEB,
     apagar_dados_da_purga: Callable[[str], None] | None = None,
+    versao_da_lixeira: VersaoDaLixeira | None = None,
+    purgas_de_marca: PurgasDeMarca | None = None,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV", dependencies=[Depends(conferir_ids_e_consultas)])
 
@@ -527,6 +537,10 @@ def criar_app(
     tipos_dos_objetos = tipos_de_objeto or TiposDeObjetoEmMemoria()
     catalogo_de_pessoas = catalogo or CatalogoEmMemoria()
     catalogo_de_marcas = marcas or CatalogoDeMarcasEmMemoria()
+    # Avança a cada envio, restauração, purga e fusão do catálogo (#591).
+    versao_da_lixeira = versao_da_lixeira or VersaoDaLixeiraEmMemoria()
+    # O registro de cada marca purgada: o relatório e a busca cortam por ele (#595, #599).
+    registro_das_purgas = purgas_de_marca or PurgasDeMarcaEmMemoria()
     repositorio_de_programas = programas or ProgramasEmMemoria()
     repositorio_de_auditoria = auditoria or RepositorioDeAuditoriaEmMemoria()
     repositorio_da_revisao = revisao or RepositorioDeRevisaoEmMemoria()
@@ -570,6 +584,11 @@ def criar_app(
     def _rotas_das_pessoas(descartar: Callable[[], None]) -> APIRouter:
         """Fundir (#209) e renomear em todos os vídeos (#263), sob `/catalogo`."""
         rotas = APIRouter()
+
+        def ao_fundir() -> None:
+            descartar()
+            versao_da_lixeira.avancar()
+
         rotas.include_router(
             criar_rotas_da_fusao(
                 catalogo_de_pessoas,
@@ -579,7 +598,7 @@ def criar_app(
                 fotos_de_referencia or FotosEmMemoria(),
                 repositorio_de_auditoria,
                 relogio,
-                descartar,
+                ao_fundir,
             )
         )
         rotas.include_router(
@@ -627,6 +646,9 @@ def criar_app(
                 relogio=relogio,
                 copia_do_catalogo=copia_das_pessoas,
                 listas=listas_da_busca,
+                versao_da_lixeira=versao_da_lixeira,
+                marcas=catalogo_de_marcas,
+                purgas=registro_das_purgas,
             ),
             relogio,
             busca_por_minuto,
@@ -719,7 +741,10 @@ def criar_app(
             repositorio_de_auditoria,
             relogio,
             login_recente,
+            registro_das_purgas,
+            relatorio_de_marcas,
             copia_das_pessoas.descartar,
+            versao_da_lixeira.avancar,
         )
     )
     v1.include_router(
@@ -764,11 +789,17 @@ def criar_app(
     )
     v1.include_router(
         criar_rotas_do_tempo_de_tela(
-            tempo_de_tela, repositorio_de_jobs, relogio, catalogo_de_pessoas
+            tempo_de_tela, repositorio_de_jobs, catalogo_de_pessoas, relogio
         )
     )
     v1.include_router(
-        criar_rotas_das_marcas(relatorio_de_marcas, repositorio_de_jobs, relogio)
+        criar_rotas_das_marcas(
+            relatorio_de_marcas,
+            repositorio_de_jobs,
+            catalogo_de_marcas,
+            registro_das_purgas,
+            relogio,
+        )
     )
     # Vale para toda rota com `{job_id}`: o vídeo na lixeira some para quem não é Administrador.
     app.include_router(
@@ -871,6 +902,8 @@ if _projeto:
         ),
         catalogo=CatalogoFirestore(cliente_do_firestore(_projeto)),
         marcas=CatalogoDeMarcasFirestore(cliente_do_firestore(_projeto)),
+        versao_da_lixeira=VersaoDaLixeiraFirestore(cliente_do_firestore(_projeto)),
+        purgas_de_marca=PurgasDeMarcaFirestore(cliente_do_firestore(_projeto)),
         programas=ProgramasFirestore(cliente_do_firestore(_projeto)),
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]

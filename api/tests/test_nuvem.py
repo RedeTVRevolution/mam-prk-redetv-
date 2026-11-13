@@ -28,6 +28,8 @@ from api.busca import (
     Entendida,
     Facetas,
     ListaDaBusca,
+    ListasDaBusca,
+    ListasDaBuscaEmMemoria,
     MomentoGuardado,
     VideoGuardado,
 )
@@ -44,7 +46,7 @@ from api.jobs import (
     ServicoIndisponivel,
     palavras_do_nome,
 )
-from api.marcas import MarcaInexistente, carregar_marcas
+from api.marcas import MarcaDoCatalogo, MarcaInexistente, carregar_marcas
 from api.nuvem import (
     TENTATIVAS_SOB_DISPUTA,
     ArmazenamentoStorage,
@@ -1408,6 +1410,52 @@ class TestCatalogoDeMarcasFirestore:
         with pytest.raises(MarcaInexistente):
             marcas.definir_lixeira(m.id, envio)
 
+    def test_na_lixeira_traz_so_as_marcas_com_lixeira_inclusive_a_gravada_com_null(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        nunca = marcas.acrescentar("Nunca", [])
+        voltou = marcas.acrescentar("Voltou", [])
+        fora = marcas.acrescentar("Fora", [])
+        marcas.definir_lixeira(voltou.id, _envio_para_lixeira())
+        marcas.definir_lixeira(voltou.id, None)  # grava `lixeira: null`
+        marcas.definir_lixeira(fora.id, _envio_para_lixeira())
+
+        assert [m.id for m in marcas.na_lixeira()] == [fora.id]
+        assert {m.id for m in marcas.todas()} == {nunca.id, voltou.id}
+
+    def test_na_lixeira_le_so_os_documentos_filtrados(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        for i in range(3):
+            marcas.acrescentar(f"M{i}", [])
+        m = marcas.acrescentar("Na lixeira", [])
+        marcas.definir_lixeira(m.id, _envio_para_lixeira())
+        lidos: list[str] = []
+        original = marcas._marca
+
+        def espia(id: str, dados: dict[str, Any]) -> MarcaDoCatalogo:
+            lidos.append(id)
+            return original(id, dados)
+
+        marcas._marca = espia  # type: ignore[method-assign]
+
+        assert [x.id for x in marcas.na_lixeira()] == [m.id]
+        assert lidos == [m.id]  # as outras três nem chegam ao Python
+
+    def test_achar_com_lixeira_e_a_carga_nao_recria_a_marca_na_lixeira(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        m = marcas.acrescentar("Banco Verde", ["BV"])
+        marcas.definir_lixeira(m.id, _envio_para_lixeira())
+
+        assert marcas.achar("bv") == []
+        assert [x.id for x in marcas.achar("bv", com_lixeira=True)] == [m.id]
+        decupagens = [{"comerciais": [{"marca": "BV"}, {"marca": "Banco Verde"}]}]
+        assert carregar_marcas(marcas, decupagens) == 0
+        marcas.apagar(m.id)
+        assert carregar_marcas(marcas, [{"comerciais": [{"marca": "BV"}]}]) == 1
+        assert [x.nome for x in marcas.todas()] == ["BV"]
+
     def test_nome_novo_fica_a_revisar_com_o_autor(
         self, marcas: CatalogoDeMarcasFirestore
     ) -> None:
@@ -1923,6 +1971,100 @@ def test_a_lista_da_busca_volta_igual_e_id_desconhecido_da_none() -> None:
     lido = listas.ler(id)
     assert lido is not None and ListaDaBusca.do_documento(lido) == lista
     assert listas.ler("nao0existe") is None
+
+
+@pytest.mark.parametrize(
+    "armazenamento",
+    [
+        "memoria",
+        pytest.param(
+            "firestore",
+            marks=pytest.mark.skipif(
+                not EMULADOR_FIRESTORE, reason="sem emulador do Firestore"
+            ),
+        ),
+    ],
+)
+def test_a_lista_guarda_a_versao_da_lixeira_e_a_sem_versao_volta_como_none(
+    armazenamento: str,
+) -> None:
+    """O contrato do #598: o armazenamento em memória e o Firestore devolvem a versão
+    gravada; a lista do formato antigo (sem o campo) volta sem versão."""
+    listas: ListasDaBusca = (
+        ListasDaBuscaEmMemoria()
+        if armazenamento == "memoria"
+        else ListasDaBuscaFirestore(
+            firestore.Client(project="teste", credentials=_anonima()),
+            f"listas-{uuid.uuid4().hex}",
+        )
+    )
+
+    def lista(**mais: Any) -> ListaDaBusca:
+        return ListaDaBusca(
+            dono="u1",
+            impressao="ab" * 32,
+            criado_em=BASE,
+            expira_em=BASE + timedelta(minutes=15),
+            entendida=Entendida(
+                evidencias=["fala"], programa=None, desde=None, ate=None
+            ),
+            sem_aparicoes=[],
+            plano_b=False,
+            facetas=Facetas(),
+            termos=["vestido"],
+            videos=[],
+            **mais,
+        )
+
+    com = listas.ler(listas.gravar(lista(versao_da_lixeira=7).para_documento()))
+    sem = listas.ler(listas.gravar(lista().para_documento()))
+
+    assert com is not None and ListaDaBusca.do_documento(com).versao_da_lixeira == 7
+    assert sem is not None and ListaDaBusca.do_documento(sem).versao_da_lixeira is None
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+def test_lista_legada_sem_o_campo_no_firestore_volta_sem_versao_e_a_pagina_e_recusada() -> (
+    None
+):
+    import json
+    import zlib
+
+    from api.busca import Busca, RankingEmOrdem
+    from api.tests.test_busca import BASE as BASE_DA_BUSCA
+    from api.tests.test_busca import mundo_de_videos
+
+    listas = ListasDaBuscaFirestore(
+        firestore.Client(project="teste", credentials=_anonima()),
+        f"listas-{uuid.uuid4().hex}",
+    )
+    m = mundo_de_videos(5)
+    busca = Busca(
+        transporte=m.transporte,
+        catalogo=m.catalogo,
+        indice=m.indice,
+        ranking=RankingEmOrdem(),
+        repositorio=m.jobs,
+        armazenamento=m.armazenamento,
+        relogio=lambda: BASE_DA_BUSCA,
+        listas=listas,
+    )
+    cursor = busca.buscar("vestido", limite=2, dono="u1")._proximo_cursor
+    assert cursor is not None
+    documento = listas.ler(cursor.partition(".")[0])
+    assert documento is not None
+    conteudo = json.loads(zlib.decompress(documento["conteudo"]))
+    assert conteudo["versao_da_lixeira"] == 0
+    del conteudo["versao_da_lixeira"]  # o formato de antes do #598
+    documento["conteudo"] = zlib.compress(json.dumps(conteudo).encode())
+    legada = listas.gravar(documento)
+
+    lido = listas.ler(legada)
+    assert (
+        lido is not None and ListaDaBusca.do_documento(lido).versao_da_lixeira is None
+    )
+    with pytest.raises(CursorInvalido):
+        busca.buscar("vestido", limite=2, dono="u1", cursor=f"{legada}.2")
 
 
 class _ColecaoQueNaoDeveSerTocada:

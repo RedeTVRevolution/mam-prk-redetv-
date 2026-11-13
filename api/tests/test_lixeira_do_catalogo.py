@@ -9,11 +9,14 @@ from fastapi.testclient import TestClient
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, Rosto
+from api.copia_bigquery import CopiaEmMemoria, LinhaDoMomento
 from api.jobs import RepositorioEmMemoria
 from api.lixeira_do_catalogo import FotosEmMemoria, purgar_catalogo_vencido
+from api.lixeira_na_leitura import PurgasDeMarcaEmMemoria
 from api.main import criar_app
-from api.marcas import CatalogoDeMarcasEmMemoria
+from api.marcas import CatalogoDeMarcasEmMemoria, MarcaDoCatalogo
 from api.papeis import RepositorioDePapeisEmMemoria
+from api.relatorio_de_marcas import ConsultaDeInsercoes, ConsultaEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 from api.tests.test_lixeira import BASE, _job
@@ -44,7 +47,11 @@ def _pessoa(catalogo_id: str, fontes: list[str]) -> dict[str, Any]:
 
 
 class Mundo:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        relatorio: ConsultaDeInsercoes | None = None,
+        purgas: PurgasDeMarcaEmMemoria | None = None,
+    ) -> None:
         self.catalogo = CatalogoEmMemoria()
         self.marcas = CatalogoDeMarcasEmMemoria()
         self.ana = self.catalogo.acrescentar("Ana Souza", "apresentadora", [])
@@ -104,6 +111,8 @@ class Mundo:
                 auditoria=self.auditoria,
                 catalogo=self.catalogo,
                 marcas=self.marcas,
+                relatorio_de_marcas=relatorio,
+                purgas_de_marca=purgas,
                 fotos_de_referencia=self.fotos,
                 relogio=lambda: self.agora,
             )
@@ -210,6 +219,87 @@ def test_marca_na_lixeira_perde_o_vinculo_e_mantem_o_texto() -> None:
     assert mundo.marcas.achar("acme") == []
 
 
+def _relatorio(textos: dict[str, list[str]]) -> ConsultaEmMemoria:
+    """Uma inserção comercial por texto, em cada vídeo: o que o relatório de marcas lê."""
+    copia = CopiaEmMemoria()
+    for job, marcas in textos.items():
+        copia.gravar(
+            job,
+            [
+                LinhaDoMomento(
+                    job_id=job,
+                    programa="Jornal",
+                    data_de_exibicao=None,
+                    tipo="comercial",
+                    inicio_ms=i * 10,
+                    fim_ms=i * 10 + 5,
+                    marca=m,
+                    tipo_de_insercao="intervalo",
+                )
+                for i, m in enumerate(marcas)
+            ],
+        )
+    return ConsultaEmMemoria(copia)
+
+
+def _impacto_da_marca(mundo: Mundo) -> dict[str, Any]:
+    resposta = mundo.cliente.get(
+        f"{LIXEIRA}/marcas/{mundo.marca.id}/impacto", headers=CURADOR
+    )
+    assert resposta.status_code == 200
+    impacto: dict[str, Any] = resposta.json()
+    return impacto
+
+
+def test_o_impacto_da_marca_conta_as_insercoes_do_relatorio_pelo_nome_e_pelo_apelido() -> (
+    None
+):
+    mundo = Mundo(
+        _relatorio(
+            {
+                "j1": ["Acme", "Outra"],  # j1 tem o vínculo e o nome: conta uma vez
+                "j2": ["ACME  Ltda", "Acme"],  # o apelido e o nome, sem o vínculo
+                "j3": ["Acmé"],  # só o texto, em vídeo sem vínculo nenhum
+            }
+        )
+    )
+    mundo.marca.apelidos.append("Acme Ltda")
+
+    impacto = _impacto_da_marca(mundo)
+
+    assert impacto["insercoes_que_saem_do_relatorio"] == 4
+    assert impacto["ocorrencias_que_perdem_o_vinculo"] == 2  # o sentido de antes
+
+
+def test_a_contagem_nova_vale_na_lixeira_e_sem_relatorio_configurado() -> None:
+    mundo = Mundo(_relatorio({"j1": ["Acme"]}))
+    mundo.enviar("marcas", mundo.marca.id)
+
+    # O relatório já não conta a marca; a contagem do que saiu, sim.
+    assert _impacto_da_marca(mundo)["insercoes_que_saem_do_relatorio"] == 1
+    assert _impacto_da_marca(Mundo())["insercoes_que_saem_do_relatorio"] == 0
+
+
+def test_a_contagem_nova_respeita_o_corte_da_purga_da_homonima() -> None:
+    purgas = PurgasDeMarcaEmMemoria()
+    purgas.gravar(MarcaDoCatalogo(id="antiga", nome="Acme"), BASE + timedelta(days=5))
+    mundo = Mundo(_relatorio({"j1": ["Acme"], "j2": ["Acme"], "j3": ["Acme"]}), purgas)
+    # j1 e j2 são anteriores à purga e já não contam; j3, criado depois, conta.
+    mundo.jobs.salvar(_job("j3", criado_em=BASE + timedelta(days=6)))
+
+    assert _impacto_da_marca(mundo)["insercoes_que_saem_do_relatorio"] == 1
+
+
+def test_a_auditoria_grava_a_contagem_nova_no_envio_e_na_restauracao() -> None:
+    mundo = Mundo(_relatorio({"j1": ["Acme"], "j2": ["Acme"]}))
+
+    mundo.enviar("marcas", mundo.marca.id)
+    mundo.cliente.post(f"{LIXEIRA}/marcas/{mundo.marca.id}/restaurar", headers=ADMIN)
+
+    marcas = [r.detalhes for r in mundo.registros() if r.alvo_tipo == "marca"]
+    assert [d["insercoes_que_saem_do_relatorio"] for d in marcas] == [2, 2]
+
+
 def test_a_lista_traz_os_tres_tipos_e_cada_acao_grava_auditoria() -> None:
     mundo = Mundo()
     mundo.enviar("pessoas", mundo.ana.id)
@@ -270,10 +360,18 @@ def test_purga_automatica_aos_30_dias() -> None:
     mundo.enviar("marcas", mundo.marca.id)
 
     antes = purgar_catalogo_vencido(
-        mundo.catalogo, mundo.marcas, mundo.auditoria, BASE + timedelta(days=29)
+        mundo.catalogo,
+        mundo.marcas,
+        mundo.auditoria,
+        BASE + timedelta(days=29),
+        PurgasDeMarcaEmMemoria(),
     )
     depois = purgar_catalogo_vencido(
-        mundo.catalogo, mundo.marcas, mundo.auditoria, BASE + timedelta(days=30)
+        mundo.catalogo,
+        mundo.marcas,
+        mundo.auditoria,
+        BASE + timedelta(days=30),
+        PurgasDeMarcaEmMemoria(),
     )
 
     assert (antes, depois) == (0, 2)
