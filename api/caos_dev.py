@@ -86,6 +86,8 @@ def enviar_clipe(api: ApiNoAr, sistema: str, clipe: Path) -> Relatorio:
         enviado.status_code in (200, 201),
         str(enviado.status_code),
     )
+    if enviado.status_code not in (200, 201):
+        return relatorio
     estado = ""
     limite = time.monotonic() + ESPERA_MAXIMA_S
     while time.monotonic() < limite:
