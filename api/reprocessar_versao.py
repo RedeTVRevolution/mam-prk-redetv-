@@ -19,7 +19,6 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
 
 from google.cloud.storage import Client as ClienteStorage
 
@@ -34,6 +33,7 @@ from api.jobs import (
     ServicoIndisponivel,
     agora_utc,
 )
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     COLECAO_DA_AUDITORIA,
     DecupagensStorage,
@@ -58,10 +58,6 @@ TAMANHO_DA_PAGINA = 500
 __all__ = ["escolher", "main", "reprocessar_versao", "versao_da_decupagem"]
 
 
-class LeitorDeDecupagem(Protocol):
-    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
-
-
 @dataclass(frozen=True)
 class Candidato:
     job_id: str
@@ -70,7 +66,7 @@ class Candidato:
     duracao_s: float | None
 
 
-def versao_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> str | None:
+def versao_da_decupagem(decupagens: AbreDecupagem, job_id: str) -> str | None:
     """A `versao_pipeline` gravada, `ANTERIOR` se não há o campo, `None` se não leu."""
     try:
         dados = json.loads(b"".join(decupagens.abrir_decupagem(job_id)))
@@ -101,7 +97,7 @@ def _concluidos(
 
 def escolher(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     de: str | None,
     limite: int | None,
     tamanho_da_pagina: int = TAMANHO_DA_PAGINA,
@@ -133,7 +129,7 @@ def _dolar(valor: float) -> str:
 
 def reprocessar_versao(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     auditoria: RepositorioDeAuditoria,
     disparo: DisparoDoWorkflow,
     janelas: JanelasDoJob | None,
@@ -206,7 +202,8 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        cliente = ClienteStorage(project=projeto)
+        decupagens = DecupagensStorage.do_ambiente(ambiente, cliente)
         regiao = exigir_do_ambiente(ambiente, "WORKFLOW_REGIAO")
         workflow = exigir_do_ambiente(ambiente, "WORKFLOW_VALIDACAO")
         de = argumentos[0] if argumentos and argumentos[0] else None
@@ -219,10 +216,9 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
         print(f"erro: {e}", file=sys.stderr)
         return 2
     banco = cliente_do_firestore(projeto, ambiente)
-    cliente = ClienteStorage(project=projeto)
     reprocessar_versao(
         RepositorioFirestore(banco),
-        DecupagensStorage(cliente, aceitos, decupagens),
+        decupagens,
         RepositorioDeAuditoriaFirestore(
             cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
         ),

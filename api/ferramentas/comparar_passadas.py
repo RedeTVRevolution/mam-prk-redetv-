@@ -323,6 +323,8 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
         decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        cliente = ClienteStorage(project=projeto)
+        leitor = DecupagensStorage.do_ambiente(ambiente, cliente)
         precos = precos_do_ambiente(exigir_do_ambiente(ambiente, "PRECOS_DOS_MODELOS"))
         tabela = exigir_do_ambiente(ambiente, "DATA_DA_TABELA_DE_PRECOS")
         modelo_do_job = ambiente.get("MODELO_DO_JOB") or MODELO
@@ -330,14 +332,13 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    cliente = ClienteStorage(project=projeto)
     try:
         relatorio = comparar(
             jobs,
             passada_id=passada_id,
             modelo=modelo,
             repositorio=RepositorioFirestore(cliente_do_firestore(projeto)),
-            ler_decupagem=DecupagensStorage(cliente, aceitos, decupagens).ler_decupagem,
+            ler_decupagem=leitor.ler_decupagem,
             passadas=PassadasStorage(cliente, aceitos, decupagens),
             custo_do_job_por_id=lambda j: custo_do_job(
                 tokens.get(j), modelo_do_job, precos.get(modelo_do_job)

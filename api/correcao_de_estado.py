@@ -13,9 +13,9 @@ import getpass
 import os
 import sys
 import uuid
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Annotated, Protocol, cast, get_args
+from typing import Annotated, cast, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -39,17 +39,14 @@ from api.jobs import (
     _confere_permissao,
     agora_utc,
 )
+from api.leitura_da_decupagem import AbreDecupagem
 from api.texto_como_dado import Texto
 
 SISTEMA = "corrigir-estado"
 MOTIVO_MAXIMO = 500
 
 
-class LeitorDeDecupagem(Protocol):
-    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
-
-
-def tem_decupagem_completa(leitor: LeitorDeDecupagem, job_id: str) -> bool:
+def tem_decupagem_completa(leitor: AbreDecupagem, job_id: str) -> bool:
     """A decupagem guardada existe e passa pelo esquema inteiro."""
     try:
         Decupagem.model_validate_json(b"".join(leitor.abrir_decupagem(job_id)))
@@ -61,7 +58,7 @@ def tem_decupagem_completa(leitor: LeitorDeDecupagem, job_id: str) -> bool:
 def corrigir_estado_com_rastro(
     repositorio: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
-    leitor: LeitorDeDecupagem,
+    leitor: AbreDecupagem,
     job_id: str,
     destino: DestinoDaCorrecao,
     motivo: str,
@@ -120,7 +117,7 @@ def _exige_corrigir_estado(request: Request, chamador: ChamadorAutenticado) -> U
 def criar_rotas_da_correcao_de_estado(
     repositorio: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
-    leitor: LeitorDeDecupagem,
+    leitor: AbreDecupagem,
     relogio: Callable[[], datetime],
 ) -> APIRouter:
     rotas = APIRouter(prefix="/admin/jobs")
@@ -155,7 +152,7 @@ def main(
     argumentos: list[str],
     repositorio: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
-    leitor: LeitorDeDecupagem,
+    leitor: AbreDecupagem,
     *,
     relogio: Callable[[], datetime] = agora_utc,
     quem: str | None = None,
@@ -193,7 +190,6 @@ def main(
 
 
 def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
-    from google.cloud.storage import Client as ClienteStorage
 
     from api.bancos import cliente_da_colecao
     from api.nuvem import (
@@ -205,8 +201,7 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
 
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
-        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        decupagens = DecupagensStorage.do_ambiente(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -217,7 +212,7 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
         RepositorioDeAuditoriaFirestore(
             cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
         ),
-        DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        decupagens,
     )
 
 

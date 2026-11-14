@@ -22,7 +22,6 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
@@ -37,6 +36,7 @@ from api.correcoes import (
 from api.erros import ServicoIndisponivel
 from api.identidade import identidade_do_nome
 from api.jobs import RepositorioDeJobs
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
@@ -44,7 +44,6 @@ from api.nuvem import (
 )
 from api.pareamento import Item, Tipo
 from api.regras_das_correcoes import estado_das
-from api.reprocessar_versao import LeitorDeDecupagem
 from api.texto import normalizar
 
 log = logging.getLogger(__name__)
@@ -387,7 +386,7 @@ def casos_das_correcoes(
 
 def exportar(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pasta: Path,
     escrever: Callable[[str], None] = print,
@@ -428,8 +427,7 @@ def exportar(
 def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int:
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
-        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        decupagens = DecupagensStorage.do_ambiente(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -437,7 +435,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     banco = cliente_do_firestore(projeto)
     exportar(
         RepositorioFirestore(banco),
-        DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        decupagens,
         RepositorioDeCorrecoesFirestore(banco),
         pasta,
     )
