@@ -25,7 +25,7 @@ from google.cloud.storage import Client as ClienteStorage
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RepositorioDeAuditoria
 from api.bancos import cliente_da_colecao, cliente_do_firestore
-from api.ciclo_de_vida import NaoReprocessavel
+from api.ciclo_de_vida import PRAZO_DO_REPROCESSAMENTO, NaoReprocessavel
 from api.jobs import (
     FiltroDeJobs,
     Job,
@@ -101,8 +101,13 @@ def escolher(
     de: str | None,
     limite: int | None,
     tamanho_da_pagina: int = TAMANHO_DA_PAGINA,
+    *,
+    agora: datetime,
 ) -> list[Candidato]:
     """Os Jobs concluídos de versão anterior, do mais antigo ao mais novo, até `limite`.
+
+    Job com 7 dias ou mais (`>=`, como em `reprocessar`) fica fora antes de ler a versão e antes
+    de contar o `limite`: a prévia só soma o que a confirmação aceitaria.
 
     A versão vem do Job (#494). Só o Job sem o campo (anterior a `make gravar-versao-nos-jobs`)
     abre a decupagem, e continua na lista como versão desconhecida se ela não for lida.
@@ -112,6 +117,8 @@ def escolher(
     )
     escolhidos: list[Candidato] = []
     for job in concluidos:
+        if agora - job.criado_em >= PRAZO_DO_REPROCESSAMENTO:
+            continue
         if limite is not None and len(escolhidos) >= limite:
             break
         versao = job.versao_pipeline or versao_da_decupagem(decupagens, job.id)
@@ -144,7 +151,7 @@ def reprocessar_versao(
     dormir: Callable[[float], None] = time.sleep,
     escrever: Callable[[str], None] = print,
 ) -> None:
-    escolhidos = escolher(repositorio, decupagens, de, limite)
+    escolhidos = escolher(repositorio, decupagens, de, limite, agora=relogio())
     horas = sum(c.duracao_s or 0 for c in escolhidos) / 3600
     sem_duracao = sum(1 for c in escolhidos if c.duracao_s is None)
     custo = "n/d" if custo_por_hora is None else _dolar(horas * custo_por_hora)
