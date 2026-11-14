@@ -4,7 +4,7 @@ import csv
 import io
 import random
 import sqlite3
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -161,13 +161,13 @@ def _copia() -> CopiaEmMemoria:
 
 
 def _jobs(consulta: ConsultaEmMemoria) -> set[str]:
-    return {m.job_id for m in consulta.momentos(None, None, None)}
+    return {m.job_id for m in consulta.momentos((), None, None)}
 
 
 def test_a_consulta_em_memoria_so_traz_os_tipos_do_relatorio() -> None:
     consulta = ConsultaEmMemoria(_copia())
 
-    momentos = consulta.momentos(None, None, None)
+    momentos = consulta.momentos((), None, None)
 
     assert {m.tipo for m in momentos} == {"aparicao", "mencao_na_fala"}
     assert _jobs(consulta) == {"j1", "j2", "j3", "j4"}
@@ -176,14 +176,12 @@ def test_a_consulta_em_memoria_so_traz_os_tipos_do_relatorio() -> None:
 def test_a_consulta_filtra_por_programa_e_por_periodo_inclusive() -> None:
     consulta = ConsultaEmMemoria(_copia())
 
-    assert {m.job_id for m in consulta.momentos("Fama", None, None)} == {"j2"}
+    assert {m.job_id for m in consulta.momentos(("Fama",), None, None)} == {"j2"}
     assert {
-        m.job_id for m in consulta.momentos(None, date(2026, 10, 15), date(2026, 11, 1))
+        m.job_id for m in consulta.momentos((), date(2026, 10, 15), date(2026, 11, 1))
     } == {"j2", "j3"}
     # Sem data de exibição não cabe num período pedido.
-    assert "j4" not in {
-        m.job_id for m in consulta.momentos(None, date(2020, 1, 1), None)
-    }
+    assert "j4" not in {m.job_id for m in consulta.momentos((), date(2020, 1, 1), None)}
 
 
 class Transporte:
@@ -227,7 +225,7 @@ def test_bigquery_pede_a_soma_so_dos_tipos_do_relatorio_com_os_filtros_como_para
     )
 
     somas = ConsultaBigQuery(CONFIG, transporte).somas(
-        "Jornal", date(2026, 10, 1), date(2026, 10, 31)
+        ("Jornal",), date(2026, 10, 1), date(2026, 10, 31)
     )
 
     assert somas == [
@@ -242,11 +240,11 @@ def test_bigquery_pede_a_soma_so_dos_tipos_do_relatorio_com_os_filtros_como_para
     assert "GROUP BY" in consulta  # a soma é do BigQuery
     assert corpo["location"] == "regiao"
     parametros = {
-        p["name"]: (p["parameterType"]["type"], p["parameterValue"]["value"])
+        p["name"]: (p["parameterType"]["type"], p["parameterValue"].get("value"))
         for p in corpo["queryParameters"]
     }
     assert parametros == {
-        "programa": ("STRING", "Jornal"),
+        "programas": ("ARRAY", None),
         "desde": ("DATE", "2026-10-01"),
         "ate": ("DATE", "2026-10-31"),
     }
@@ -256,7 +254,7 @@ def test_bigquery_pede_a_soma_so_dos_tipos_do_relatorio_com_os_filtros_como_para
 def test_bigquery_sem_filtros_nao_leva_parametros_e_sem_linhas_devolve_vazio() -> None:
     transporte = Transporte({"jobComplete": True})
 
-    assert ConsultaBigQuery(CONFIG, transporte).somas(None, None, None) == []
+    assert ConsultaBigQuery(CONFIG, transporte).somas((), None, None) == []
     assert transporte.corpos[0]["queryParameters"] == []
 
 
@@ -265,7 +263,7 @@ def test_bigquery_resposta_incompleta_falha_alto() -> None:
 
     with pytest.raises(RuntimeError):
         ConsultaBigQuery(CONFIG, Transporte({"jobComplete": False})).somas(
-            None, None, None
+            (), None, None
         )
 
 
@@ -377,7 +375,7 @@ def test_a_uniao_em_sql_cola_o_que_se_toca_e_une_o_que_se_sobrepoe() -> None:
 
 
 def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
-    somas = ConsultaEmMemoria(_copia()).somas(None, None, None)
+    somas = ConsultaEmMemoria(_copia()).somas((), None, None)
 
     por_par = {(s.job_id, s.pessoa_id): s for s in somas}
     assert por_par[("j1", "c1")] == PessoaNoVideo(
@@ -443,7 +441,7 @@ def test_rota_devolve_a_tabela_com_os_videos_de_cada_pessoa() -> None:
 
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert corpo["programa"] == "Jornal"
+    assert corpo["programas"] == ["Jornal"]
     (sabrina,) = corpo["pessoas"]
     assert sabrina["pessoa_id"] == "c1"
     assert sabrina["tempo_de_tela_ms"] == 2_000  # j1 e j4 (sem data) com 1 s cada
@@ -536,7 +534,7 @@ def test_programa_vazio_e_todos_os_programas() -> None:
     vazio = cliente.get(ROTA, params={"programa": ""}, headers=AUTORIZACAO).json()
     todos = cliente.get(ROTA, headers=AUTORIZACAO).json()
 
-    assert vazio["programa"] is None
+    assert vazio["programas"] == []
     assert vazio["pessoas"] == todos["pessoas"] != []
 
 
@@ -604,7 +602,7 @@ def test_sem_limite_a_resposta_e_a_de_antes() -> None:
     assert resposta.status_code == 200  # sem `limite`, o cursor não conta
     assert "X-Proximo-Cursor" not in resposta.headers
     corpo = resposta.json()
-    assert set(corpo) == {"programa", "desde", "ate", "pessoas"}
+    assert set(corpo) == {"programas", "desde", "ate", "pessoas"}
     assert all("por_video" in p for p in corpo["pessoas"])
     # A ordem de sempre: tempo, nome, id.
     assert [p["pessoa_id"] for p in corpo["pessoas"]] == ["c1", "c2", "c3", "c4"]
@@ -883,9 +881,9 @@ class SoSomas:
         self._em_memoria = ConsultaEmMemoria(copia)
 
     def somas(
-        self, programa: str | None, desde: date | None, ate: date | None
+        self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
-        return self._em_memoria.somas(programa, desde, ate)
+        return self._em_memoria.somas(programas, desde, ate)
 
 
 def test_uma_fonte_so_com_somas_serve_ao_ranking_e_aos_videos_da_pessoa() -> None:

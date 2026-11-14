@@ -36,6 +36,7 @@ from api.quem_conta import QuemConta
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
+    ProgramaDoPedido,
     confere_o_pedido,
     config_e_transporte_do_ambiente,
     consultar_no_bigquery,
@@ -44,6 +45,7 @@ from api.relatorios import (
     ou_503,
     poe_o_nome_dos_videos,
     posicao_do_cursor,
+    programas_do_pedido,
     recorta,
     resposta_em_csv,
 )
@@ -86,7 +88,7 @@ class PessoaNoVideo:
 
 class ConsultaDeMomentos(Protocol):
     def somas(
-        self, programa: str | None, desde: date | None, ate: date | None
+        self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
         """Uma soma por pessoa e vídeo; `desde` e `ate` são datas de exibição, inclusive."""
 
@@ -132,20 +134,20 @@ class ConsultaEmMemoria:
         self._copia = copia
 
     def momentos(
-        self, programa: str | None, desde: date | None, ate: date | None
+        self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[MomentoDaPessoa]:
         return [
             MomentoDaPessoa(x.job_id, p.id, p.nome, x.tipo, x.inicio_ms, x.fim_ms)
             for x in linhas_da_copia(
-                self._copia, TIPOS_DO_RELATORIO, programa, desde, ate
+                self._copia, TIPOS_DO_RELATORIO, programas, desde, ate
             )
             for p in x.pessoas
         ]
 
     def somas(
-        self, programa: str | None, desde: date | None, ate: date | None
+        self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
-        return somar(self.momentos(programa, desde, ate))
+        return somar(self.momentos(programas, desde, ate))
 
 
 def ranking_em_python(
@@ -262,7 +264,7 @@ class ConsultaBigQuery:
         self._transporte = transporte
 
     def somas(
-        self, programa: str | None, desde: date | None, ate: date | None
+        self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
         linhas = consultar_no_bigquery(
             self._config,
@@ -272,7 +274,7 @@ class ConsultaBigQuery:
                 "t.tipo, t.inicio_ms, t.fim_ms"
             ),
             tipos=TIPOS_DO_RELATORIO,
-            programa=programa,
+            programas=programas,
             desde=desde,
             ate=ate,
             unnest_das_pessoas=True,
@@ -292,11 +294,11 @@ class ConsultaComCache:
         self._cache = cache
 
     def somas(
-        self, programa: str | None, desde: date | None, ate: date | None
+        self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
         return self._cache.obter(
-            ("tempo-de-tela", programa, desde, ate),
-            lambda: self._consulta.somas(programa, desde, ate),
+            ("tempo-de-tela", programas, desde, ate),
+            lambda: self._consulta.somas(programas, desde, ate),
         )
 
 
@@ -319,36 +321,36 @@ class SoComQuemConta:
         self._jobs = jobs
 
     def _somas_dos_videos_fora_da_lixeira(
-        self, programa: str | None, desde: date | None, ate: date | None
+        self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
-        somas = self._consulta.somas(programa, desde, ate)
+        somas = self._consulta.somas(programas, desde, ate)
         na_lixeira = ids_dos_jobs_na_lixeira(self._jobs)
         return [s for s in somas if s.job_id not in na_lixeira]
 
     def somas_e_nomes(
-        self, programa: str | None, desde: date | None, ate: date | None
+        self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> tuple[list[PessoaNoVideo], dict[str, str]]:
         """As somas de quem conta e o nome atual de cada um, numa leitura do catálogo."""
-        somas = self._somas_dos_videos_fora_da_lixeira(programa, desde, ate)
+        somas = self._somas_dos_videos_fora_da_lixeira(programas, desde, ate)
         destinos = QuemConta(self._catalogo).pessoas({s.pessoa_id for s in somas})
         nomes = {i: d.pessoa.nome for i, d in destinos.items() if d.pessoa and d.conta}
         return [s for s in somas if s.pessoa_id in nomes], nomes
 
     def ranking(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         depois: int,
         limite: int,
     ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        somas, nomes = self.somas_e_nomes(programa, desde, ate)
+        somas, nomes = self.somas_e_nomes(programas, desde, ate)
         return ranking_em_python(somas, depois, limite, nomes)
 
     def videos_da_pessoa(
         self,
         pessoa_id: str,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         depois: int,
@@ -356,7 +358,7 @@ class SoComQuemConta:
     ) -> "list[VideoDaPessoa]":
         if not QuemConta(self._catalogo).contam([pessoa_id]):
             return []
-        somas = self._somas_dos_videos_fora_da_lixeira(programa, desde, ate)
+        somas = self._somas_dos_videos_fora_da_lixeira(programas, desde, ate)
         return videos_em_python(somas, pessoa_id, depois, limite)
 
 
@@ -404,7 +406,7 @@ class TotalDoTempoDeTela(BaseModel):
 class RankingDoTempoDeTela(BaseModel):
     """O relatório com `limite`: uma página das pessoas, sem os vídeos de cada uma."""
 
-    programa: str | None
+    programas: list[str]
     desde: date | None
     ate: date | None
     total: TotalDoTempoDeTela
@@ -412,7 +414,7 @@ class RankingDoTempoDeTela(BaseModel):
 
 
 class RelatorioDeTempoDeTela(BaseModel):
-    programa: str | None
+    programas: list[str]
     desde: date | None
     ate: date | None
     pessoas: list[PessoaNoRelatorio]
@@ -507,35 +509,38 @@ def criar_rotas_do_tempo_de_tela(
     def tempo_de_tela(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
-        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        programa: Annotated[list[ProgramaDoPedido] | None, Query()] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> Any:
-        """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa
-        (ou com `programa=` vazio), todos. Com `limite`, uma página do ranking (sem os
+        """`desde` e `ate` são datas de exibição, as duas inclusive; sem `programa` (ou só vazios), todos; `programa` se repete, um por programa marcado. Com `limite`, uma página do ranking (sem os
         vídeos, com os totais do período) e o cursor da próxima em `X-Proximo-Cursor`;
         os vídeos de uma pessoa ficam em `/tempo-de-tela/videos`. O CSV vem sempre
         inteiro."""
-        programa = programa or None
+        programas = programas_do_pedido(programa)
         desde, ate = periodo
         fonte = confere_o_pedido(com_lixeira, desde, ate)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
             lidas, total = ou_503(
-                lambda: fonte.ranking(programa, desde, ate, depois, limite)
+                lambda: fonte.ranking(programas, desde, ate, depois, limite)
             )
             pagina, cabecalhos = recorta(lidas, depois, limite)
             corpo = RankingDoTempoDeTela(
-                programa=programa, desde=desde, ate=ate, total=total, pessoas=pagina
+                programas=list(programas),
+                desde=desde,
+                ate=ate,
+                total=total,
+                pessoas=pagina,
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
-        pessoas = ou_503(lambda: relatorio(*fonte.somas_e_nomes(programa, desde, ate)))
+        pessoas = ou_503(lambda: relatorio(*fonte.somas_e_nomes(programas, desde, ate)))
         if formato == "csv":
             return resposta_em_csv(em_csv(pessoas), "tempo-de-tela.csv")
         poe_o_nome_dos_videos((v for p in pessoas for v in p.por_video), repositorio)
         return RelatorioDeTempoDeTela(
-            programa=programa, desde=desde, ate=ate, pessoas=pessoas
+            programas=list(programas), desde=desde, ate=ate, pessoas=pessoas
         )
 
     @rotas.get("/tempo-de-tela/videos", response_model=list[VideoDaPessoa])
@@ -543,19 +548,19 @@ def criar_rotas_do_tempo_de_tela(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
         pessoa_id: Annotated[str, LinhaDaConsulta(200, min_length=1)],
-        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        programa: Annotated[list[ProgramaDoPedido] | None, Query()] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
         """Os vídeos de uma pessoa no mesmo filtro do relatório, do maior tempo para o
         menor, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""
-        programa = programa or None
+        programas = programas_do_pedido(programa)
         desde, ate = periodo
         fonte = confere_o_pedido(com_lixeira, desde, ate)
         depois = posicao_do_cursor(cursor)
         lidos = ou_503(
             lambda: fonte.videos_da_pessoa(
-                pessoa_id, programa, desde, ate, depois, limite
+                pessoa_id, programas, desde, ate, depois, limite
             )
         )
         videos, cabecalhos = recorta(lidos, depois, limite)

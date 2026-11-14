@@ -37,7 +37,8 @@ export interface TotalDoTempoDeTela {
 
 /** Uma página do ranking (`limite` na API), sem os vídeos; `proximo` é o cursor da seguinte. */
 export interface PaginaDoTempoDeTela {
-  programa: string | null
+  /** Os programas marcados; vazio é tudo marcado. */
+  programas: string[]
   desde: string | null
   ate: string | null
   total: TotalDoTempoDeTela
@@ -56,14 +57,16 @@ export const POR_PAGINA_DO_RANKING = 50
 export const POR_PAGINA_DO_DETALHE = 25
 
 export interface RelatorioDeTempoDeTela {
-  programa: string | null
+  /** Os programas marcados; vazio é tudo marcado. */
+  programas: string[]
   desde: string | null
   ate: string | null
   pessoas: PessoaNoRelatorio[]
 }
 
 export interface FiltrosDoRelatorio {
-  programa: string
+  /** Os programas marcados; vazio é tudo marcado (nada vai ao endereço nem à API). */
+  programas: string[]
   de: string
   ate: string
 }
@@ -72,7 +75,7 @@ export interface FiltrosDoRelatorio {
 /** Os filtros da query do endereço; data malformada de um link editado à mão sai. */
 export function filtrosDoRelatorio(busca: string): FiltrosDoRelatorio {
   const p = new URLSearchParams(busca)
-  return { programa: p.get('programa') ?? '', ...periodoDoEndereco(p) }
+  return { programas: [...new Set(p.getAll('programa').filter(Boolean))], ...periodoDoEndereco(p) }
 }
 
 /** Os filtros próprios de um relatório: texto, ou lista (o nome se repete na query, um por valor); vazio não vai. */
@@ -89,7 +92,7 @@ function poeOsExtras(p: URLSearchParams, extras: Extras) {
 /** A query do endereço da tela (o período vai sempre, vazio inclusive, para não cair no padrão); `extras` são os filtros próprios de cada relatório. */
 export function filtrosParaEndereco(f: FiltrosDoRelatorio, extras: Extras = {}): string {
   const p = new URLSearchParams()
-  if (f.programa) p.set('programa', f.programa)
+  poeOsExtras(p, { programa: f.programas })
   poePeriodoNoEndereco(p, f)
   poeOsExtras(p, extras)
   return `?${p}`
@@ -102,7 +105,7 @@ export function parametrosDoRelatorio(
   extras: Extras = {},
 ): string {
   const p = new URLSearchParams()
-  if (f.programa) p.set('programa', f.programa)
+  poeOsExtras(p, { programa: f.programas })
   poePeriodoNaConsulta(p, f)
   poeOsExtras(p, extras)
   if (formato) p.set('formato', formato)
