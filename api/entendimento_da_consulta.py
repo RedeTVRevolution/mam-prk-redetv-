@@ -1,7 +1,6 @@
 """Prepara o texto da busca sem modelo e descreve a foto em um termo curto (#517)."""
 
 import re
-import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -12,11 +11,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from api.catalogo import Catalogo, PessoaDoCatalogo
 from api.gemini import MODO_STANDARD, Chamada, Transporte
 from api.texto import normalizar
+from api.texto_como_dado import sanear
 
 MODELO_DA_CONSULTA = "gemini-3.5-flash-lite"
 ETAPA_DA_FOTO = "descricao_da_foto"
 MAXIMO_DO_TERMO_DA_FOTO = 60
-MAXIMO_DE_CARACTERES = 300
 MAXIMO_DE_PESSOAS = 5
 MAXIMO_DA_FRASE = 120
 TEMPO_DA_CONSULTA_S = 10.0  # teto da descrição da foto
@@ -44,17 +43,6 @@ class ConsultaEntendida:
     programa: str | None = None
     exibido_desde: date | None = None
     exibido_ate: date | None = None
-
-
-def sanear(consulta: str, maximo: int = MAXIMO_DE_CARACTERES) -> str:
-    """NFKC, sem caracteres de controle nem `<` e `>` (que fechariam o delimitador), com
-    os espaços colapsados e no máximo `maximo` caracteres."""
-    texto = unicodedata.normalize("NFKC", consulta)
-    texto = "".join(
-        " " if unicodedata.category(c).startswith("C") else c for c in texto
-    )
-    texto = texto.replace("<", " ").replace(">", " ")
-    return " ".join(texto.split())[:maximo].strip()
 
 
 ASPAS = '"“”'

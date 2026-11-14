@@ -90,7 +90,7 @@ def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, A
     return podado
 
 
-def _registrar(
+def registrar(
     repositorio: RepositorioDeJobs,
     job_id: str,
     campo: str,
@@ -171,12 +171,10 @@ def _uma_rodada(
     da indexação: quem fecha a rodada o grava. Nunca levanta por falha do índice ou da cópia."""
     inicio = relogio()
     ultima_copia = job.copia_bigquery or CopiaNoBigQuery(estado="pendente", em=inicio)
-    _registrar(
-        repositorio, job.id, "indexacao", Indexacao(estado="pendente", em=inicio)
-    )
+    registrar(repositorio, job.id, "indexacao", Indexacao(estado="pendente", em=inicio))
     pendente = None
     if copia:
-        pendente = _registrar(
+        pendente = registrar(
             repositorio,
             job.id,
             "copia_bigquery",
@@ -246,7 +244,7 @@ def _uma_rodada(
                         log.exception("sinal por programa falhou para %s", job.id)
     fim = relogio()
     if copia:
-        _registrar(
+        registrar(
             repositorio,
             job.id,
             "copia_bigquery",
@@ -337,7 +335,7 @@ def reindexar(
     if programas is not None:
         # Sem a segunda tentativa, uma queda passageira deixaria o vídeo pendente (a tela
         # só o resolve com o `retomar`).
-        _duas_tentativas(
+        duas_tentativas(
             lambda: terminar_o_pendente(
                 programas, job.id, atual.programa, resultado.completo
             ),
@@ -356,7 +354,7 @@ def _tentar_duas_vezes[T](acao: Callable[[], T], falha: str) -> tuple[bool, T | 
     return False, None
 
 
-def _duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
+def duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
     """`acao()` com duas tentativas; `None` se as duas falham."""
     return _tentar_duas_vezes(acao, falha)[1]
 
