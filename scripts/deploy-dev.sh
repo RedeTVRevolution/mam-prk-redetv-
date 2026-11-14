@@ -102,6 +102,20 @@ marcar() { # <repo/imagem@digest> <tag>: põe a tag no digest, movendo-a se já 
 for imagem in "$TRANSCRICAO_GPU_ANTES" "$OCR_GPU_ANTES" "$OBJETOS_GPU_ANTES"; do
   [[ -z $imagem ]] || marcar "$imagem" "$TAG_DA_VOLTA"
 done
+# Aceite dos três esquemas do Gemini contra o Vertex (#617), como a mam-terraform: o CI usa
+# cassete e não vê um esquema recusado (400). Roda antes do build, para um esquema recusado não
+# ir ao ar: saída 1 (400) derruba o deploy. Saída 2 (sem prova: 403 de IAM ainda não propagado
+# no primeiro deploy, modelo indisponível...) só avisa, e 429 e 5xx são passageiros. A
+# mam-terraform ganha a predição no Terraform (papel_vertex.tf), do apply acima.
+aceite=0
+GCP_PROJECT_ID=$GCP_PROJECT_ID GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT \
+  uv run --locked python -m api.aceite_dos_esquemas || aceite=$?
+case $aceite in
+  0) ;;
+  2) echo "Aviso: o aceite dos esquemas não provou nada (acesso, modelo ou rede); o deploy segue." >&2 ;;
+  *) echo "Esquema recusado pelo Vertex: o deploy para aqui." >&2; exit "$aceite" ;;
+esac
+
 # O Cloud Build constrói, em paralelo e com cache, e envia as cinco imagens (cloudbuild.yaml), como a mam-build.
 gc builds submit . --region "$GCP_REGION" --suppress-logs \
   --service-account "$(tf output -raw conta_build)" \
@@ -149,11 +163,6 @@ for imagem in "$IMAGEM" "$IMAGEM_VALIDACAO" \
   "$IMAGEM_TRANSCRICAO_GPU" "$IMAGEM_OCR_GPU" "$IMAGEM_OBJETOS"; do
   marcar "$imagem" "$TAG_EM_USO"
 done
-
-# Aceite dos três esquemas do Gemini contra o Vertex (#617), como a mam-terraform: o CI usa
-# cassete e não vê um esquema recusado (400). Sai com erro se algum for recusado; 429 e 5xx
-# são passageiros. A mam-terraform ganha a predição no Terraform (papel_vertex.tf).
-uv run --locked python -m api.aceite_dos_esquemas
 
 # Teste dos Jobs com GPU (#238), só dos que mudaram: se não passar, o script volta os Jobs
 # para a imagem anterior e esta publicação falha, e o Workflows não manda vídeo para uma
