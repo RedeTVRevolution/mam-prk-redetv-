@@ -366,7 +366,7 @@ class TransporteVertex:
         return "".join(p.get("text", "") for p in partes)
 
 
-def _repetivel(status: int) -> bool:
+def repetivel(status: int) -> bool:
     return status == 429 or status >= 500
 
 
@@ -442,7 +442,7 @@ def gerar_validado[T](
         try:
             texto = transporte.gerar(chamada)
         except ErroHttp as e:
-            if not _repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
+            if not repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
                 raise AnaliseFalhou(str(e)) from e
             dormir(
                 espera_com_jitter(falhas_rede, BACKOFF_BASE_S, BACKOFF_TETO_S, sortear)

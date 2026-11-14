@@ -736,7 +736,8 @@ def test_a_chamada_nasce_em_flex() -> None:
 
 
 def test_so_a_busca_e_a_identificacao_pedem_standard() -> None:
-    """Toda chamada ao Gemini sai em Flex (#402, #471), menos estas duas (ADR 0004).
+    """Toda chamada ao Gemini sai em Flex (#402, #471), menos estas duas (ADR 0004) e o aceite dos
+    esquemas no deploy (#617), que não é carga do pipeline e não pode enfileirar.
 
     Procura o nome da constante e o texto do modo, em qualquer forma de escrever
     (`gemini.MODO_STANDARD`, `"standard"`), em todo `api/` fora dos testes.
@@ -752,6 +753,7 @@ def test_so_a_busca_e_a_identificacao_pedem_standard() -> None:
         )
     }
     assert pedem - {"gemini.py", "versao_pipeline.py"} == {
+        "aceite_dos_esquemas.py",
         "entendimento_da_consulta.py",
         "modelo_forte.py",
     }

@@ -11,6 +11,7 @@ from typing import Any
 
 import google.auth
 import google.auth.transport.requests
+from google.auth import impersonated_credentials
 
 ESCOPO_DA_NUVEM = "https://www.googleapis.com/auth/cloud-platform"
 
@@ -18,9 +19,18 @@ ESCOPO_DA_NUVEM = "https://www.googleapis.com/auth/cloud-platform"
 TransporteRest = Callable[[str, str, dict[str, Any] | None], tuple[int, dict[str, Any]]]
 
 
-def sessao_autenticada(escopo: str = ESCOPO_DA_NUVEM) -> Any:
-    """Uma `AuthorizedSession` nova, com as credenciais padrão (ADC) de quem roda."""
+def sessao_autenticada(
+    escopo: str = ESCOPO_DA_NUVEM, personificar: str | None = None
+) -> Any:
+    """Uma `AuthorizedSession` nova, com as credenciais padrão (ADC) de quem roda, ou da
+    conta de serviço `personificar`, se dada."""
     credenciais, _ = google.auth.default(scopes=[escopo])
+    if personificar:
+        credenciais = impersonated_credentials.Credentials(  # type: ignore[no-untyped-call]
+            source_credentials=credenciais,
+            target_principal=personificar,
+            target_scopes=[escopo],
+        )
     return google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
 
 

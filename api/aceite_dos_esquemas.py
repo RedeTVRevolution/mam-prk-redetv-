@@ -2,13 +2,15 @@
 
 O CI usa cassete e não fala com o Vertex, então um esquema que o serviço recusa (400) só
 aparecia num vídeo de verdade. Este módulo manda cada esquema, gerado do código que vai ao
-ar, numa chamada curta só de texto, e o `scripts/deploy-dev.sh` o chama depois do apply.
+ar, numa chamada curta só de texto, e o `scripts/deploy-dev.sh` o chama antes do build, para
+um esquema recusado não ir ao ar.
 Fica fora do `make verificar` e do CI: lá não há credenciais.
 
 Uso: `make aceitar-esquemas` ou `python -m api.aceite_dos_esquemas`. Ambiente: `GCP_PROJECT_ID`
 e, para falar como a mam-terraform, `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT`.
-Saída: 0 aceito (ou só 429/5xx, passageiros), 1 algum 400 (esquema recusado), 2 outro erro
-(sem prova: acesso, modelo, rede).
+Saída: 0 aceito (ou só 429/5xx, passageiros), 1 algum 400 (esquema recusado: derruba o
+deploy), 2 outro erro (sem prova: acesso ainda não propagado no primeiro deploy, modelo, rede:
+o deploy só avisa e segue).
 """
 
 import os
@@ -16,15 +18,18 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Literal
 
-import google.auth
-import google.auth.transport.requests
-from google.auth import impersonated_credentials
-
 from api import gemini
-from api.clientes_de_nuvem import ESCOPO_DA_NUVEM
+from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import esquema_do_modelo
-from api.gemini import Chamada, ErroHttp, Transporte, TransporteVertex
-from api.inventario import RespostaConvertida, RespostaVista, _esquema
+from api.gemini import (
+    MODO_STANDARD,
+    Chamada,
+    ErroHttp,
+    Transporte,
+    TransporteVertex,
+    repetivel,
+)
+from api.inventario import RespostaConvertida, RespostaVista, esquema_obrigatorio
 
 Veredito = Literal["aceito", "recusado", "passageiro", "sem_prova"]
 
@@ -39,8 +44,8 @@ class Resultado:
 def _esquemas() -> dict[str, dict[str, Any]]:
     return {
         "analise": esquema_do_modelo(),
-        "inventario_convertido": _esquema(RespostaConvertida),
-        "inventario_visto": _esquema(RespostaVista),
+        "inventario_convertido": esquema_obrigatorio(RespostaConvertida),
+        "inventario_visto": esquema_obrigatorio(RespostaVista),
     }
 
 
@@ -54,6 +59,9 @@ def aceitar(transporte: Transporte) -> list[Resultado]:
             esquema=esquema,
             rotulos={"etapa": "aceite_dos_esquemas"},
             texto="Diga ok.",
+            # Standard e prazo curto: o Flex pode enfileirar, e o deploy não espera por isso.
+            modo=MODO_STANDARD,
+            timeout_s=60,
         )
         try:
             transporte.gerar(chamada)
@@ -62,7 +70,7 @@ def aceitar(transporte: Transporte) -> list[Resultado]:
             # 429 e 5xx: falta de capacidade ou falha do serviço, nada a ver com o esquema.
             if e.status == 400:
                 veredito: Veredito = "recusado"
-            elif e.status == 429 or e.status >= 500:
+            elif repetivel(e.status):
                 veredito = "passageiro"
             else:
                 veredito = "sem_prova"
@@ -75,21 +83,13 @@ def codigo_de_saida(resultados: list[Resultado]) -> int:
     return 1 if "recusado" in vereditos else 2 if "sem_prova" in vereditos else 0
 
 
-def _sessao() -> Any:
-    credenciais, _ = google.auth.default(scopes=[ESCOPO_DA_NUVEM])
-    conta = os.environ.get("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT")
-    if conta:
-        credenciais = impersonated_credentials.Credentials(  # type: ignore[no-untyped-call]
-            source_credentials=credenciais,
-            target_principal=conta,
-            target_scopes=[ESCOPO_DA_NUVEM],
-        )
-    return google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
-
-
 def main() -> int:
     transporte = TransporteVertex(
-        os.environ["GCP_PROJECT_ID"], _sessao(), etapa="aceite_dos_esquemas"
+        os.environ["GCP_PROJECT_ID"],
+        sessao_autenticada(
+            personificar=os.environ.get("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT")
+        ),
+        etapa="aceite_dos_esquemas",
     )
     resultados = aceitar(transporte)
     for r in resultados:
