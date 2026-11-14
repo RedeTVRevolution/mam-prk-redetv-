@@ -99,7 +99,7 @@ class QuemConta:
             for pedido, onde in list(ponta.items()):
                 origem, pessoa = self._lidas[pedido], self._lidas[onde]
                 fundida = origem is not None and origem.fundida is not None
-                if pessoa is None or pessoa.lixeira or pessoa.fundida is None:
+                if pessoa is None or pessoa.fundida is None:
                     destinos[pedido] = Destino(pessoa, fundida, origem)
                 elif pessoa.fundida.destino_id in vistos[pedido]:
                     destinos[pedido] = Destino(None, True, origem)

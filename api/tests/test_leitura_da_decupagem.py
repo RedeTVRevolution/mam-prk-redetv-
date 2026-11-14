@@ -219,6 +219,18 @@ def test_renomeacao_troca_o_nome_antigo_pelo_atual() -> None:
     assert _nome(leitura.corrigida("j1")) == "Ana Souza Lima"
 
 
+def test_elo_na_lixeira_no_meio_da_cadeia_a_corrigida_vai_ao_ultimo_destino() -> None:
+    """A API não deixa chegar a esse estado; a corrigida segue a cadeia como antes (#612)."""
+    catalogo = CatalogoEmMemoria()
+    a, b, c = (catalogo.acrescentar(n, "p", []) for n in ("A", "B", "C"))
+    catalogo.definir_fusao(a.id, _fundida_em(a, b.id).fundida)
+    catalogo.definir_fusao(b.id, _fundida_em(b, c.id).fundida)
+    _lixeira(catalogo, b.id)
+    leitura = _leitura(_modelo(_pessoa("pes01", "A", a.id)), catalogo)
+    for lida in (leitura.corrigida("j1"), leitura.entregue("j1")):
+        assert (_nome(lida), _vinculo(lida)) == ("C", c.id)
+
+
 def test_destino_purgado_na_corrigida_a_renomeacao_da_origem_vale() -> None:
     """A corrigida não muda (#612): sem destino, vale a renomeação da própria origem."""
     catalogo = CatalogoEmMemoria()
