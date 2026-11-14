@@ -45,7 +45,7 @@ from api.versao_pipeline import VERSAO_PIPELINE
 
 PASTA_DO_RELATORIO = Path("regressao-da-versao")
 
-# O requisito de cada tipo de item: os nomes do `api/comparar_passadas.py` onde existem.
+# O requisito de cada tipo de item: os nomes do `api/comparacao_de_passadas.py` onde existem.
 REQUISITO_DO_TIPO: dict[str, str] = {
     "aparicao": "famosos",
     "mencao": "mencoes",
