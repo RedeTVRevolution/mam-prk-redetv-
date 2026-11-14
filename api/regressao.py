@@ -395,8 +395,9 @@ def exportar(
     arquivo. O caso de uma correção deste JSON que deixou de valer (desfeita,
     recusada) sai da pasta; o de uma correção de outro JSON fica como está."""
     gravados: list[Caso] = []
+    com_correcao = correcoes.jobs_com_correcao()
     for job in sorted(repositorio.listar(), key=lambda j: (j.criado_em, j.id)):
-        if job.estado != "concluido":
+        if job.estado != "concluido" or job.id not in com_correcao:
             continue
         feitas = correcoes.listar(job.id)
         if not feitas:

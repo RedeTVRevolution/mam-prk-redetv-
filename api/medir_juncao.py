@@ -46,10 +46,10 @@ def _sem_nome(d: Decupagem) -> int:
     return len(planejar(d)[0])
 
 
-def medir(arquivo: str, d: Decupagem) -> Medicao:
+def medir(arquivo: str, d: Decupagem, juntada: Decupagem | None = None) -> Medicao:
     candidatas, diretas, duvidosas = planejar(d)
     lote = duvidosas[:LIMITE_DE_PARES]
-    depois = juntar_sem_nome(d)
+    depois = juntar_sem_nome(d) if juntada is None else juntada
     return Medicao(
         arquivo=arquivo,
         pessoas_antes=len(d.pessoas),
@@ -65,13 +65,18 @@ def medir(arquivo: str, d: Decupagem) -> Medicao:
     )
 
 
-def amostra(decupagens: dict[str, Decupagem], n: int) -> list[dict[str, str]]:
+def amostra(
+    decupagens: dict[str, Decupagem],
+    n: int,
+    juntadas: dict[str, Decupagem] | None = None,
+) -> list[dict[str, str]]:
     """Até `n` grupos juntados, na ordem do hash do id do grupo (`arquivo:pessoa`), com
     o par de origens que o hash escolhe em cada um. Os mesmos grupos caem na amostra
     antes e depois de uma mudança."""
     achados: list[tuple[str, dict[str, str]]] = []
     for arquivo, d in decupagens.items():
-        for p in juntar_sem_nome(d).pessoas:
+        juntada = juntadas[arquivo] if juntadas else juntar_sem_nome(d)
+        for p in juntada.pessoas:
             if len(p.origens) < 2:
                 continue
             grupo = f"{arquivo}:{p.id}"
@@ -101,10 +106,15 @@ def main(argv: Sequence[str]) -> int:
     lidas = {
         Path(a).name: Decupagem.model_validate_json(Path(a).read_text()) for a in args
     }
+    juntadas = {arquivo: juntar_sem_nome(d) for arquivo, d in lidas.items()}
     for arquivo, d in lidas.items():
-        print(json.dumps(medir(arquivo, d).__dict__, ensure_ascii=False))
+        print(
+            json.dumps(
+                medir(arquivo, d, juntadas[arquivo]).__dict__, ensure_ascii=False
+            )
+        )
     if n:
-        for par in amostra(lidas, n):
+        for par in amostra(lidas, n, juntadas):
             print(json.dumps(par, ensure_ascii=False))
     return 0
 

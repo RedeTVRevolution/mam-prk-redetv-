@@ -155,15 +155,14 @@ def _ler(pasta: Path) -> dict[str, list[dict[str, Any]]]:
 def medir(pasta: Path, quantos: int = 100) -> dict[str, Any]:
     videos = _ler(pasta)
     todos = [v for lista in videos.values() for v in lista]
-    precisao = amostra_de_precisao(grupos_por_programa(videos), quantos)
+    grupos = grupos_por_programa(videos)
+    precisao = amostra_de_precisao(grupos, quantos)
     margem = margem_de_confianca(len(precisao))
     return {
         "videos": len(todos),
         "diagnostico": diagnostico(todos),
         "amostra_de_precisao": precisao,
-        "amostra_de_cobertura": amostra_de_cobertura(
-            grupos_por_programa(videos), quantos
-        ),
+        "amostra_de_cobertura": amostra_de_cobertura(grupos, quantos),
         "margem_com_essa_amostra_pontos": round(margem, 1)
         if math.isfinite(margem)
         else None,

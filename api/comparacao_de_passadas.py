@@ -6,6 +6,7 @@ A ferramenta de linha de comando (`make comparar-passadas`) está em
 """
 
 import math
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -159,15 +160,24 @@ def _um_para_um(
     """O `parear` deixa dois itens de A com o mesmo de B (duas pautas dentro de uma só):
     o primeiro fica com ele e os outros voltam para os sem par. Devolve os pares, os itens de
     A que perderam o par e o que sobrou de B."""
-    sobra_b = list(b)
+    livres = Counter(
+        b
+    )  # itens iguais são intercambiáveis; sai a primeira cópia de cada
     pares: list[Pareado] = []
     repetidos: list[Item] = []
+    usados: Counter[Item] = Counter()
     for p in pareados:
-        if p.modelo in sobra_b:
-            sobra_b.remove(p.modelo)
+        if livres[p.modelo] > usados[p.modelo]:
+            usados[p.modelo] += 1
             pares.append(p)
         else:
             repetidos.append(p.gabarito)
+    sobra_b: list[Item] = []
+    for item in b:
+        if usados[item]:
+            usados[item] -= 1
+        else:
+            sobra_b.append(item)
     return pares, repetidos, sobra_b
 
 
