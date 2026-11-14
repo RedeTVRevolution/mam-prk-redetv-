@@ -10,3 +10,11 @@ resource "google_project_iam_custom_role" "vertex_predicao" {
   permissions = ["aiplatform.endpoints.predict"]
   depends_on  = [google_project_service.apis]
 }
+
+# O aceite dos esquemas no deploy (#617, api/aceite_dos_esquemas.py) chama o Gemini como a
+# mam-terraform. Ela nasce no wizard, fora do Terraform; aqui só ganha a predição.
+resource "google_project_iam_member" "terraform_predicao_vertex" {
+  project = var.projeto
+  role    = google_project_iam_custom_role.vertex_predicao.id
+  member  = "serviceAccount:mam-terraform@${var.projeto}.iam.gserviceaccount.com"
+}

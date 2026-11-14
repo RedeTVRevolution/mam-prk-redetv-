@@ -1,4 +1,4 @@
-.PHONY: gravar-jobs-falsos medir-jobs-falsos apagar-jobs-falsos preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: gravar-jobs-falsos medir-jobs-falsos apagar-jobs-falsos preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi aceitar-esquemas cache-dos-quadros conferir-limpeza-de-imagens
 
 instalar:
 	uv sync --locked
@@ -125,6 +125,11 @@ gravar-cassetes: gravar-cassete-da-busca
 	set -a && . ./.env && set +a && \
 	BUCKET_CLIPES_OURO="$${BUCKET_CLIPES_OURO:-$$(terraform -chdir=infra output -raw bucket_clipes_ouro)}" \
 	uv run --locked python -m api.cassete
+
+# Aceite dos três esquemas do Gemini contra o Vertex (#617): chamadas curtas de texto, só 400
+# reprova. O deploy-dev já o chama; fora do `verificar` e do CI, que não têm credenciais.
+aceitar-esquemas:
+	set -a && . ./.env && set +a && uv run --locked python -m api.aceite_dos_esquemas
 
 # Nomes da busca (#117): vêm do Terraform (outputs busca_*), salvo se já vierem no ambiente.
 # BUSCA_INDICES_LIGADOS=false (o dev, por custo) faz a busca ir sem índice ANN e o
