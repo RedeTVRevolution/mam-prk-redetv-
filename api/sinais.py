@@ -88,13 +88,13 @@ def registro_do_erro_http(
     status: int, codigo: str, mensagem: str, modelo: str, etapa: str | None = None
 ) -> str:
     """Uma linha por resposta de erro do Vertex (#617): o que o serviço disse, com a mensagem
-    limitada. Nunca o pedido, a credencial nem o vídeo."""
+    como veio (o corte de 300 caracteres é na fonte, em `api/gemini.py`). Nunca o pedido, a credencial nem o vídeo."""
     registro: dict[str, object] = {
         "severity": "ERROR" if status < 500 and status != 429 else "WARNING",
         "evento": "erro_http_do_modelo",
         "status": status,
         "codigo": codigo,
-        "mensagem": mensagem[:300],
+        "mensagem": mensagem,
         "modelo": modelo,
     }
     if etapa:

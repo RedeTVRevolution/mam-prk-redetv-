@@ -17,8 +17,8 @@ from api.inventario import (
     INSTRUCAO_DO_OLHAR,
     RespostaConvertida,
     RespostaVista,
-    _esquema,
     converter_do_florence,
+    esquema_obrigatorio,
     unir_repetidos,
 )
 from api.taxonomia_de_objetos import TIPOS_CANONICOS
@@ -54,7 +54,7 @@ def test_os_esquemas_do_modelo_trazem_o_tipo_sem_enum_ao_lado_do_texto_livre() -
     assert "enum" not in analise["tipo_canonico"]
     assert "tipo" in analise  # o texto livre continua
     for modelo in (RespostaConvertida, RespostaVista):
-        esquema = _esquema(modelo)
+        esquema = esquema_obrigatorio(modelo)
         descrito = esquema["$defs"][
             "ObjetoConvertido" if modelo is RespostaConvertida else "ObjetoVisto"
         ]

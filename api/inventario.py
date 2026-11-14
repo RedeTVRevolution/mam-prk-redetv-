@@ -125,7 +125,7 @@ class RespostaVista(_Estrito):
     planos: list[VistosDoPlano]
 
 
-def _esquema(modelo: type[BaseModel]) -> dict[str, Any]:
+def esquema_obrigatorio(modelo: type[BaseModel]) -> dict[str, Any]:
     """Todo campo obrigatório (o vazio vem como null), para o modelo não pular nenhum."""
     esquema = modelo.model_json_schema()
     for definicao in [esquema, *esquema.get("$defs", {}).values()]:
@@ -332,7 +332,7 @@ def converter_do_florence(
     for q in bruto.quadros:
         por_plano.setdefault(q.plano, []).append(q)
     inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
-    esquema = _esquema(RespostaConvertida)
+    esquema = esquema_obrigatorio(RespostaConvertida)
     lotes = _lotes(
         [i for i in range(len(decupagem.planos)) if i in por_plano], planos_por_lote
     )
@@ -399,7 +399,7 @@ def olhar_com_gemini(
     """Motor `gemini`: o modelo olha os quadros-chave (resolução cheia, sem redução) e
     devolve o mesmo inventário, com as caixas. `quadro_de` lê o JPEG pelo caminho."""
     inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
-    esquema = _esquema(RespostaVista)
+    esquema = esquema_obrigatorio(RespostaVista)
     com_quadros = [i for i, p in enumerate(decupagem.planos) if p.quadros]
 
     def olhar(lote: list[int]) -> RespostaVista:

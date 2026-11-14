@@ -98,3 +98,24 @@ def test_pubsub_e_kms_usam_o_transporte_unico_com_escopo_e_timeout_deles(
         ("POST", f"{URL_DO_PUBSUB}/t:publish", 5),
         ("GET", f"{URL_DO_KMS}/chave", 30),
     ]
+
+
+def test_personificar_troca_as_credenciais_pela_da_conta_dada(
+    google: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    visto: dict[str, Any] = {}
+
+    def personificadas(**kwargs: Any) -> str:
+        visto.update(kwargs)
+        return "da conta"
+
+    monkeypatch.setattr(
+        "google.auth.impersonated_credentials.Credentials", personificadas
+    )
+
+    sessao_autenticada(personificar="conta@exemplo")
+
+    assert google["credenciais"] == "da conta"
+    assert visto["source_credentials"] == "credenciais"
+    assert visto["target_principal"] == "conta@exemplo"
+    assert visto["target_scopes"] == [ESCOPO_DA_NUVEM]

@@ -232,7 +232,7 @@ TipoCanonico = Annotated[
     str,
     Field(
         max_length=100,
-        description="O tipo da lista que melhor descreve o objeto, ao lado do nome "
+        description="O tipo, da lista da instrução, que melhor descreve o objeto, ao lado do nome "
         "livre; `outro` só quando nenhum servir.",
     ),
 ]

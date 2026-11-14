@@ -1,7 +1,7 @@
 """A lista fechada de tipos de objeto (#544), lida de `taxonomia_de_objetos.json`.
 
-Só lê o arquivo: não importa mais nada de `api/`, porque `decupagem.py` a usa para o enum do
-esquema e o `comparador.py` importa `decupagem.py`. O dicionário de nome livre para tipo e as
+Só lê o arquivo: não importa mais nada de `api/`, porque `decupagem.py` a usa para o texto das
+instruções (o esquema não leva o enum, #617) e o `comparador.py` importa `decupagem.py`. O dicionário de nome livre para tipo e as
 chaves de junção estão em `api/tipo_do_objeto.py`.
 """
 
@@ -21,8 +21,6 @@ def _ler() -> list[dict[str, Any]]:
 
 TAXONOMIA: list[dict[str, Any]] = _ler()
 TIPOS_CANONICOS: tuple[str, ...] = tuple(t["tipo"] for t in TAXONOMIA)
-# O que o modelo pode escolher: os tipos da lista e `outro`.
-OPCOES_DE_TIPO: list[str] = [*TIPOS_CANONICOS, OUTRO]
 CATEGORIA_DO_TIPO: dict[str, str] = {t["tipo"]: t["categoria"] for t in TAXONOMIA}
 SINONIMOS_DO_TIPO: dict[str, list[str]] = {
     t["tipo"]: list(t["sinonimos"]) for t in TAXONOMIA

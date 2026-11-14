@@ -695,7 +695,7 @@ export async function loop(c: Config): Promise<number> {
 }
 
 // Os tokens do claude e do gh só vão às vagas: o integrador roda git, instalação, make e bundle.
-// AFK_DONO é o login do dono do repositório, o único cujos comentários os prompts leem.
+// AFK_DONO é o login do dono do token do agente (afk-github-agente), o único cujos comentários os prompts leem.
 const repassa = ["FIRESTORE_EMULATOR_HOST", "STORAGE_EMULATOR_HOST", "AFK_DONO",
   "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
 const repassaDaVaga = ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"];

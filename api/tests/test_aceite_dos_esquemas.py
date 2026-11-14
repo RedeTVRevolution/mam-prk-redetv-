@@ -2,8 +2,8 @@
 
 from api.aceite_dos_esquemas import aceitar, codigo_de_saida
 from api.decupagem import esquema_do_modelo
-from api.gemini import Chamada, ErroHttp
-from api.inventario import RespostaConvertida, RespostaVista, _esquema
+from api.gemini import MODO_STANDARD, Chamada, ErroHttp
+from api.inventario import RespostaConvertida, RespostaVista, esquema_obrigatorio
 
 
 class Transporte:
@@ -26,8 +26,8 @@ def test_manda_os_tres_esquemas_do_codigo_com_texto_so() -> None:
 
     assert [c.esquema for c in t.chamadas] == [
         esquema_do_modelo(),
-        _esquema(RespostaConvertida),
-        _esquema(RespostaVista),
+        esquema_obrigatorio(RespostaConvertida),
+        esquema_obrigatorio(RespostaVista),
     ]
     assert all(c.video_uri == "" and not c.imagens for c in t.chamadas)
     assert [r.veredito for r in resultados] == ["aceito"] * 3
@@ -64,3 +64,11 @@ def test_recusa_vale_mais_que_falta_de_prova() -> None:
     resultados = aceitar(Transporte(ErroHttp(403), ErroHttp(400), "{}"))
 
     assert codigo_de_saida(resultados) == 1
+
+
+def test_chamadas_em_standard_e_com_prazo_curto_para_nao_segurar_o_deploy() -> None:
+    t = Transporte("{}", "{}", "{}")
+
+    aceitar(t)
+
+    assert all(c.modo == MODO_STANDARD and c.timeout_s == 60 for c in t.chamadas)

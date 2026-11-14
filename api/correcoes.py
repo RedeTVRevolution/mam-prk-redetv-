@@ -1663,12 +1663,20 @@ def _nome_entregue_do_alvo(
 ) -> str:
     # Pelo id, não pela posição: junção e `nao_e` tiram pessoas só da lista entregue.
     # A pessoa absorvida já não está nela (item inexistente, 422).
-    for original in _pessoas(modelo):
-        if identidade_da_pessoa(original) == alvo.ancora.identidade:
-            for pessoa in _pessoas(entregue):
-                if pessoa.get("id") == original.get("id"):
-                    return str(pessoa["nome"])
-            break
+    original = next(
+        (
+            o
+            for o in _pessoas(modelo)
+            if identidade_da_pessoa(o) == alvo.ancora.identidade
+        ),
+        None,
+    )
+    if original is not None:
+        pessoa = next(
+            (p for p in _pessoas(entregue) if p.get("id") == original.get("id")), None
+        )
+        if pessoa is not None:
+            return str(pessoa["nome"])
     raise ItemInexistente(alvo.ancora.identidade)
 
 

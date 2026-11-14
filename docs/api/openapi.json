@@ -5972,7 +5972,7 @@
             "type": "string",
             "maxLength": 100,
             "title": "Tipo Canonico",
-            "description": "O tipo da lista que melhor descreve o objeto, ao lado do nome livre; `outro` só quando nenhum servir.",
+            "description": "O tipo, da lista da instrução, que melhor descreve o objeto, ao lado do nome livre; `outro` só quando nenhum servir.",
             "default": "outro"
           }
         },
@@ -6070,7 +6070,7 @@
             "type": "string",
             "maxLength": 100,
             "title": "Tipo Canonico",
-            "description": "O tipo da lista que melhor descreve o objeto, ao lado do nome livre; `outro` só quando nenhum servir.",
+            "description": "O tipo, da lista da instrução, que melhor descreve o objeto, ao lado do nome livre; `outro` só quando nenhum servir.",
             "default": "outro"
           },
           "destaque": {
