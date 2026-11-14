@@ -69,3 +69,35 @@ def test_desfazer_troca_de_nome_com_a_pessoa_que_sumiu_da_decupagem_da_422() -> 
 
     assert (r.status_code, r.json()) == (422, {"detail": "Item inexistente"})
     assert [c.tipo for c in mundo.correcoes.listar("j1")] == ["pessoa.renomear"]
+
+
+def test_desfazer_de_outro_tipo_com_o_item_sumido_continua_gravando() -> None:
+    """Caracterização (#605): fora a troca de nome de pessoa, o desfazer com o item fora
+    da Decupagem entregue não dá erro: grava o desfazer com antes e depois vazios."""
+    mundo = _mundo()
+    cid = _corrigir(mundo, _atributos()).json()["id"]
+    mundo.avancar()
+    # Na mesma versão: o objeto some da Decupagem entregue.
+    nao_existe = mundo.corrigir(
+        tipo="objeto.nao_existe",
+        valor="nao_existe",
+        versao=_versao(_modelo()),
+        item_id="obj01",
+    )
+    assert nao_existe.status_code == 201
+    mundo.avancar()
+
+    r = TestClient(mundo.cliente.app, raise_server_exceptions=False).post(
+        f"/v1/jobs/j1/correcoes/{cid}/desfazer",
+        json={"motivo": "enganei-me"},
+        headers=EDITOR,
+    )
+
+    assert r.status_code == 201
+    registradas = mundo.correcoes.listar("j1")
+    assert [c.tipo for c in registradas] == [
+        "objeto.atributos",
+        "objeto.nao_existe",
+        "desfazer",
+    ]
+    assert (registradas[-1].antes, registradas[-1].depois) == ("", "")

@@ -15,7 +15,7 @@ from typing import Any, Literal
 from api.cache_curto import CacheCurto
 from api.chaves import Mac, MacSimulado
 from api.clientes_de_nuvem import TransporteRest, transporte_rest
-from api.jobs import ServicoIndisponivel
+from api.erros import ServicoIndisponivel
 
 URL_BASE = "https://cloudkms.googleapis.com/v1"
 # Quanto tempo a versão atual fica guardada: evita uma ida ao KMS por requisição.

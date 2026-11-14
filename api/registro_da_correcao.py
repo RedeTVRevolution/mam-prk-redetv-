@@ -7,11 +7,6 @@ e o catálogo são de melhor esforço: a falha deles vai ao log e não desfaz a 
 
 O que fica na rota (`api/jobs.py`): a conferência do Job concluído, a regra de aprovação, a
 autoria e o mapa das exceções para HTTP. Não importa `api.jobs` (que importa este módulo).
-
-ponytail: sem chave de idempotência. O web não repete o POST; repetir continua dando 409 (o id do
-registro é fixo por alvo, e o repositório não sobrescreve). Sem transação entre gravar, o evento e
-o Catálogo do Job: se o catálogo falhar, o Job fica velho até a próxima indexação ou até
-`make preencher-catalogo-dos-jobs`. Chave de idempotência e transação só se o web passar a repetir.
 """
 
 from collections.abc import Callable
@@ -146,6 +141,11 @@ class RegistroDaCorrecao:
         registro = regra(modelo, versao, self._correcoes.listar(job.id))
         return self._gravar(job, registro, autoria, se_ja_existe)
 
+    # ponytail: sem chave de idempotência. O web não repete o POST; repetir continua dando 409
+    # (o id do registro é fixo por alvo, e o repositório não sobrescreve). Sem transação entre
+    # gravar, o evento e o Catálogo do Job: se o catálogo falhar, o Job fica velho até a próxima
+    # indexação ou até `make preencher-catalogo-dos-jobs`. Chave de idempotência e transação só
+    # se o web passar a repetir.
     def _gravar(
         self,
         job: "Job",

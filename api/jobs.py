@@ -1086,7 +1086,11 @@ def _erros_das_correcoes() -> Iterator[None]:
     try:
         yield
     except tuple(_ERROS_DAS_CORRECOES) as erro:
-        codigo, mensagem = _ERROS_DAS_CORRECOES[type(erro)]
+        codigo, mensagem = next(
+            resposta
+            for classe, resposta in _ERROS_DAS_CORRECOES.items()
+            if isinstance(erro, classe)
+        )
         raise HTTPException(codigo, mensagem or str(erro)) from None
 
 

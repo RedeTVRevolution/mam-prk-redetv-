@@ -35,8 +35,9 @@ from api.correcoes import (
     tempos_de,
     versao_do_modelo,
 )
+from api.erros import ServicoIndisponivel
 from api.identidade import identidade_do_nome
-from api.jobs import RepositorioDeJobs, ServicoIndisponivel
+from api.jobs import RepositorioDeJobs
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,

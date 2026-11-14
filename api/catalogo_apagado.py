@@ -46,15 +46,15 @@ def so_o_rosto(fontes: list[str]) -> bool:
 
 def sem_catalogo_apagado(
     entregue: dict[str, Any],
-    pessoa_viva: Callable[[str], bool],
+    pessoa_viva: Callable[[dict[str, Any]], bool],
     marca_viva: Callable[[str], bool],
 ) -> dict[str, Any]:
     """A leitura da Decupagem com o que saiu do catálogo (lixeira ou purga): a pessoa
     cujo nome só o rosto sustentava volta a "não identificado"; as confirmadas por GC ou
     fala mantêm o nome; os dois perdem o `catalogo_id`, e a marca mantém o texto."""
     for pessoa in entregue.get("pessoas") or []:
-        id = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
-        if id is None or pessoa_viva(id):
+        tem_vinculo = isinstance(pessoa, dict) and pessoa.get(CATALOGO_ID) is not None
+        if not tem_vinculo or pessoa_viva(pessoa):
             continue
         pessoa.pop(CATALOGO_ID)
         if so_o_rosto(pessoa.get("fontes_do_nome") or []):

@@ -220,15 +220,33 @@ def test_renomeacao_troca_o_nome_antigo_pelo_atual() -> None:
 
 
 def test_elo_na_lixeira_no_meio_da_cadeia_a_corrigida_vai_ao_ultimo_destino() -> None:
-    """A API não deixa chegar a esse estado; a corrigida segue a cadeia como antes (#612)."""
+    """A API não deixa chegar a esse estado. A corrigida segue a cadeia como antes (#612); a
+    entregue tira o vínculo, porque a busca e o tempo de tela não contam essa pessoa."""
     catalogo = CatalogoEmMemoria()
     a, b, c = (catalogo.acrescentar(n, "p", []) for n in ("A", "B", "C"))
     catalogo.definir_fusao(a.id, _fundida_em(a, b.id).fundida)
     catalogo.definir_fusao(b.id, _fundida_em(b, c.id).fundida)
     _lixeira(catalogo, b.id)
     leitura = _leitura(_modelo(_pessoa("pes01", "A", a.id)), catalogo)
-    for lida in (leitura.corrigida("j1"), leitura.entregue("j1")):
-        assert (_nome(lida), _vinculo(lida)) == ("C", c.id)
+    corrigida, entregue = leitura.corrigida("j1"), leitura.entregue("j1")
+    assert (_nome(corrigida), _vinculo(corrigida)) == ("C", c.id)
+    assert (_nome(entregue), _vinculo(entregue)) == ("C", None)
+
+
+def test_entregue_tira_so_o_vinculo_de_quem_a_lixeira_corta_na_cadeia() -> None:
+    """A fundida em B (na lixeira), B fundida em C vivo: A não conta; D, fundida direto em C,
+    segue contando no mesmo vídeo (a decisão é do destino do id gravado, não do id trocado)."""
+    catalogo = CatalogoEmMemoria()
+    a, b, c, d = (catalogo.acrescentar(n, "p", []) for n in "ABCD")
+    catalogo.definir_fusao(a.id, _fundida_em(a, b.id).fundida)
+    catalogo.definir_fusao(b.id, _fundida_em(b, c.id).fundida)
+    catalogo.definir_fusao(d.id, _fundida_em(d, c.id).fundida)
+    _lixeira(catalogo, b.id)
+    modelo = _modelo(_pessoa("pes01", "A", a.id), _pessoa("pes02", "D", d.id))
+    leitura = _leitura(modelo, catalogo)
+    corrigida, entregue = leitura.corrigida("j1"), leitura.entregue("j1")
+    assert [_vinculo(corrigida, i) for i in ("pes01", "pes02")] == [c.id, c.id]
+    assert [_vinculo(entregue, i) for i in ("pes01", "pes02")] == [None, c.id]
 
 
 def test_destino_purgado_na_corrigida_a_renomeacao_da_origem_vale() -> None:

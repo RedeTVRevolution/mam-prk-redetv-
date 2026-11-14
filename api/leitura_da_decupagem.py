@@ -82,35 +82,43 @@ class LeituraDaDecupagem:
         return self._corrigida(job_id)[0]
 
     def entregue(self, job_id: str) -> dict[str, Any]:
-        corrigida, quem = self._corrigida(job_id)
-        pessoas = quem.contam(ids_do_catalogo(corrigida, "pessoas"))
+        corrigida, quem, sem_vinculo = self._corrigida(job_id)
         marcas = quem.marcas_vivas(ids_do_catalogo(corrigida, "comerciais"))
         return sem_catalogo_apagado(
-            corrigida, lambda id: id in pessoas, lambda id: id in marcas
+            corrigida, lambda p: id(p) not in sem_vinculo, lambda id: id in marcas
         )
 
-    def _corrigida(self, job_id: str) -> tuple[dict[str, Any], QuemConta]:
-        """A leitura corrigida e o Quem conta que a leu (a `entregue` o reaproveita)."""
+    def _corrigida(self, job_id: str) -> tuple[dict[str, Any], QuemConta, set[int]]:
+        """A leitura corrigida, o Quem conta que a leu e as pessoas (por `id()` do dicionário)
+        que não contam: a `entregue` os reaproveita."""
         lida = decupagem_com_correcoes(
             *ler_modelo(self._decupagens, job_id), self._correcoes.listar(job_id)
         )
         quem = QuemConta(self._pessoas, self._marcas)
+        sem_vinculo: set[int] = set()
         if self._pessoas is not None:
-            _com_destinos(lida, quem.pessoas(ids_do_catalogo(lida, "pessoas")))
-        return lida, quem
+            destinos = quem.pessoas(ids_do_catalogo(lida, "pessoas"))
+            sem_vinculo = _com_destinos(lida, destinos)
+        return lida, quem, sem_vinculo
 
 
-def _com_destinos(lida: dict[str, Any], destinos: Mapping[str, Destino]) -> None:
+def _com_destinos(lida: dict[str, Any], destinos: Mapping[str, Destino]) -> set[int]:
     """O destino no lugar da pessoa fundida (#209): `catalogo_id` e nome passam a ser os do
     destino; o gravado não muda. Também troca o nome que a pessoa teve antes de uma
     renomeação em todos os vídeos (#263) pelo atual; um nome que o editor corrigiu no vídeo
     para outro fica. Destino purgado ou ciclo: vale a renomeação da origem, como antes, e a `entregue` tira
-    o vínculo."""
+    o vínculo.
+
+    Devolve o `id()` de cada pessoa que não conta (`Destino.conta` do id gravado, não do
+    trocado): a `entregue` tira o vínculo dela, como a busca e o tempo de tela não a contam."""
+    sem_vinculo: set[int] = set()
     for pessoa in lida.get("pessoas") or []:
-        id = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
-        destino = destinos.get(id) if id is not None else None
+        gravado = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
+        destino = destinos.get(gravado) if gravado is not None else None
         if destino is None:
             continue
+        if not destino.conta:
+            sem_vinculo.add(id(pessoa))
         if destino.fundida and destino.pessoa is not None:
             pessoa.update(nome=destino.pessoa.nome, catalogo_id=destino.pessoa.id)
             continue
@@ -119,6 +127,7 @@ def _com_destinos(lida: dict[str, Any], destinos: Mapping[str, Destino]) -> None
             antigos = {normalizar(n) for n in origem.renomeacao.nomes_anteriores}
             if normalizar(str(pessoa.get("nome"))) in antigos:
                 pessoa["nome"] = origem.nome
+    return sem_vinculo
 
 
 def decupagens_dos_jobs(
