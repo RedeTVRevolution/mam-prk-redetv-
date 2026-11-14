@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
-import { leCurto, loop, specDe, type Config } from "./main.mts";
+import { envDaCaixa, leCurto, loop, specDe, type Config } from "./main.mts";
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 const tmp = mkdtempSync(join(tmpdir(), "afk-"));
@@ -658,4 +658,24 @@ test("duas vagas: os metadados de uma vaga viva sobrevivem à criação de outra
   const r = await roda(5, doisTickets(), ["estraga 1", "revisa 1", "depois_do_estraga 2", "marca 2", "revisa 2"], duas);
   assert.equal(ordenado(r.feitos()), "1 2");
   assert.ok(r.noPR("t1"));
+});
+
+test("envDaCaixa: o integrador não recebe os tokens do claude e do gh; a vaga recebe (#575)", () => {
+  const e = { CLAUDE_CODE_OAUTH_TOKEN: "c", GH_TOKEN: "g", AFK_DONO: "dono", GIT_AUTHOR_NAME: "n" };
+  const vaga = envDaCaixa(e, "vaga", 1);
+  assert.equal(vaga.CLAUDE_CODE_OAUTH_TOKEN, "c");
+  assert.equal(vaga.GH_TOKEN, "g");
+  assert.equal(vaga.AFK_DONO, "dono");
+  const integrador = envDaCaixa(e, "integrador", 1);
+  assert.ok(!("CLAUDE_CODE_OAUTH_TOKEN" in integrador));
+  assert.ok(!("GH_TOKEN" in integrador));
+  assert.equal(integrador.GIT_AUTHOR_NAME, "n");
+});
+
+test("os prompts leem a issue com comentários só do dono (AFK_DONO) (#575)", () => {
+  for (const arq of ["prompt.md", "revisao.md"]) {
+    const t = readFileSync(join(aqui, arq), "utf8");
+    assert.ok(!t.includes("--comments"), `${arq} ainda usa --comments`);
+    assert.ok(t.includes("--json title,body,comments") && t.includes("env.AFK_DONO"), `${arq} sem a leitura filtrada`);
+  }
 });
