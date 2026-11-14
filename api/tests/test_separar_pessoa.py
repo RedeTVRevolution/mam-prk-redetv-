@@ -3,12 +3,8 @@
 import json
 from typing import Any
 
-from api.correcoes import (
-    Correcao,
-    _juntar_as_do_mesmo_nome,
-    pares_proibidos,
-    versao_do_modelo,
-)
+from api.correcoes import Correcao, versao_do_modelo
+from api.regras_das_correcoes import _juntar_as_do_mesmo_nome, pares_proibidos
 from api.tests.test_correcoes import MODELO, Mundo, _pauta
 
 DESCRICAO = "Não identificado, blusa vermelha"

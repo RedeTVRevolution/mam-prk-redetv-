@@ -10,7 +10,7 @@ from api.catalogo_de_correcoes import (
     ROTULOS_DAS_RELACOES,
     ROTULOS_DOS_TONS,
 )
-from api.correcoes import TIPOS, Lista, TipoDeCorrecao, TipoNovo, valor_legivel
+from api.correcoes import TIPOS, Lista, TipoDeCorrecao, TipoNovo
 from api.decupagem import (
     CATEGORIAS_DE_OBJETO,
     CORES_BASE,
@@ -21,6 +21,7 @@ from api.decupagem import (
     TomDaPauta,
 )
 from api.indice_da_busca import NOME_DA_CATEGORIA
+from api.regras_das_correcoes import valor_legivel
 from api.tests.test_correcoes import AUTORIZACAO, Mundo
 
 
@@ -276,7 +277,8 @@ def test_valor_que_nao_e_o_json_esperado_sai_como_veio(tipo: str) -> None:
 def test_historico_e_fila_trazem_o_valor_legivel() -> None:
     from datetime import UTC, datetime
 
-    from api.correcoes import Ancora, Correcao, fila, historico
+    from api.correcoes import Ancora, Correcao
+    from api.regras_das_correcoes import fila, historico
 
     def correcao(id: str, tipo: str, antes: str, depois: str, **resto: str) -> Correcao:
         return Correcao(

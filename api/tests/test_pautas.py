@@ -4,14 +4,8 @@ from typing import Any
 
 import pytest
 
-from api.correcoes import (
-    Correcao,
-    TemposInvalidos,
-    aplicar,
-    fila,
-    reaplicar,
-    reconciliar,
-)
+from api.correcoes import Correcao, TemposInvalidos
+from api.regras_das_correcoes import aplicar, fila, reaplicar, reconciliar
 from api.tests.test_correcoes import (
     _AUTORIA,
     AUTORIZACAO,

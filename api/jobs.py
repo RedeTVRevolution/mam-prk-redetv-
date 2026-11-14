@@ -68,14 +68,6 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     TemposInvalidos,
     VersaoDesatualizada,
-    com_o_estado_na_busca,
-    corrigir,
-    decidir,
-    descartar,
-    desfazer,
-    fila,
-    historico,
-    reaplicar,
     versao_do_modelo,
 )
 from api.decupagem import caminho_do_quadro
@@ -99,6 +91,16 @@ from api.papeis import (
     permissoes_de,
 )
 from api.programas import RepositorioDeProgramas
+from api.regras_das_correcoes import (
+    com_o_estado_na_busca,
+    corrigir,
+    decidir,
+    descartar,
+    desfazer,
+    fila,
+    historico,
+    reaplicar,
+)
 from api.texto_como_dado import PADRAO_DA_LINHA, Linha, LinhaDaConsulta
 
 TIPO_DO_VIDEO = "video/mp4"

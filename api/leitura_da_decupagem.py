@@ -40,14 +40,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from api.catalogo_apagado import CATALOGO_ID, ids_do_catalogo, sem_catalogo_apagado
 from api.comparador import normalizar
-from api.correcoes import (
-    Correcao,
-    RepositorioDeCorrecoes,
-    decupagem_com_correcoes,
-    versao_do_modelo,
-)
+from api.correcoes import Correcao, RepositorioDeCorrecoes, versao_do_modelo
 from api.marcas import CatalogoDeMarcas
 from api.quem_conta import Destino, PessoasEmLote, QuemConta
+from api.regras_das_correcoes import decupagem_com_correcoes
 
 if TYPE_CHECKING:  # api.jobs importa este módulo
     from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs

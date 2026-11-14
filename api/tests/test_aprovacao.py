@@ -1,9 +1,6 @@
 from typing import Any
 
-from api.correcoes import (
-    aplicar,
-    historico,
-)
+from api.regras_das_correcoes import aplicar, historico
 from api.tests.test_correcoes import AUTORIZACAO, MODELO, VERSAO, Mundo
 
 CURADOR = {"Authorization": "Bearer token-curador"}

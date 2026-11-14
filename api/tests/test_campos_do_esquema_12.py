@@ -4,7 +4,8 @@ nome, papel e visual."""
 import json
 from typing import Any
 
-from api.correcoes import aplicar, reconciliar, versao_do_modelo
+from api.correcoes import versao_do_modelo
+from api.regras_das_correcoes import aplicar, reconciliar
 from api.tests.test_correcoes import MODELO, Mundo
 
 

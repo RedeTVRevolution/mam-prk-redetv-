@@ -127,6 +127,7 @@ COPY api/__init__.py \
      api/programas.py \
      api/progresso_das_janelas.py \
      api/quem_conta.py \
+     api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \
@@ -216,6 +217,7 @@ COPY api/__init__.py \
      api/progresso_das_janelas.py \
      api/quadros.py \
      api/quem_conta.py \
+     api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \
@@ -331,6 +333,7 @@ COPY api/__init__.py \
      api/programas.py \
      api/progresso_das_janelas.py \
      api/quem_conta.py \
+     api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \

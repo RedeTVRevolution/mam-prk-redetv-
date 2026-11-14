@@ -5,7 +5,8 @@ from typing import Any
 
 import pytest
 
-from api.correcoes import reconciliar, versao_do_modelo
+from api.correcoes import versao_do_modelo
+from api.regras_das_correcoes import reconciliar
 from api.tests.test_correcoes import MODELO, Mundo
 
 
