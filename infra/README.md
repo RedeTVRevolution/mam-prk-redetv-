@@ -154,6 +154,26 @@ Para clonar o banco inteiro naquele ponto, `gcloud firestore databases clone --s
 
 **Custo estimado**: o PITR e os backups cobram armazenamento por GiB-mês (PITR, os dados mais as versões dos últimos 7 dias; cada backup, o tamanho do banco naquele dia, e há até 7 diários e 14 semanais guardados ao mesmo tempo, 21 cópias no pior caso, mais as leituras da restauração quando houver). Para um banco de poucos GiB, como o do dev, isso fica em centavos a poucos dólares por mês; o custo cresce linear com o tamanho do banco. Conferir o tamanho real e o valor no faturamento (aba Custo do painel) depois do primeiro mês.
 
+## Voltar à versão estável
+
+Antes de uma série de mudanças, a versão que está no ar ganha duas marcas: a tag anotada `estavel-AAAA-MM-DD` no commit do git e a tag `estavel` no digest amd64 de cada uma das cinco imagens (web, validacao, transcricao-gpu, ocr-gpu, objetos-gpu), o mesmo digest da `em-uso` naquele dia. A limpeza do registro guarda o que tem a tag `estavel` (`tags_protegidas` em `modulos/mam/main.tf`), sem prazo; nenhum script a move. Marca atual: `estavel-2026-11-14` (commit `9ad8d478`, #631).
+
+Pôr a marca (com as credenciais de quem tem acesso ao registro; `<REPO>` vem dos outputs `repositorio` e `repositorio_gpu`):
+
+```
+git tag -a estavel-AAAA-MM-DD <COMMIT> -m "Versão estável" && git push origin estavel-AAAA-MM-DD
+gcloud artifacts docker tags list <REPO>/<IMAGEM>           # o digest da em-uso
+gcloud artifacts docker tags add "<REPO>/<IMAGEM>@sha256:<DIGEST>" "<REPO>/<IMAGEM>:estavel"
+```
+
+No zsh, escreva `"${i}:estavel"` com chaves: `$i:e` é um modificador do zsh e corta o nome.
+
+**Voltar o código e a infra**: numa worktree na tag (`git worktree add -b volta-estavel ../estavel estavel-AAAA-MM-DD`), traga primeiro o commit que pôs `estavel` em `tags_protegidas` (`git log -S tag_estavel --oneline origin/main` dá o commit; `git cherry-pick` nele), senão o primeiro apply do deploy tira a proteção e a limpeza pode apagar as imagens `estavel` antigas. A marca `estavel-2026-11-14` precisa disso; uma marca posta depois que esta regra entrou na `main`, não. Com o arquivo de ambiente do wizard copiado para a worktree, rode `make deploy-dev`: o deploy reconstrói as imagens daquele commit com o cache e faz o caminho de sempre (aceite dos esquemas, tags, teste de GPU). O `aplicar-sem-destruir.sh` para se o Terraform antigo quiser apagar algo criado depois: confira a lista antes de rodar de novo com `PERMITIR_DESTRUICAO=sim`, porque um recurso de dados apagado (bucket, banco, dataset, índice) não volta com o código.
+
+**Sem reconstruir**: se o build falhar, rode na mesma worktree o `scripts/aplicar-sem-destruir.sh` com as cinco imagens `estavel` pelo digest (`-var imagem=<REPO>/web@sha256:...`, e `imagem_validacao`, `imagem_transcricao_gpu`, `imagem_ocr_gpu`, `imagem_objetos`, como no `scripts/deploy-dev.sh`). Ele não carrega nada sozinho: antes, no mesmo shell, carregue o arquivo de ambiente e exporte os `TF_VAR_*` como as primeiras linhas do `scripts/deploy-dev.sh`. O teste de GPU (`scripts/testar-jobs-gpu.sh`) pede ainda as variáveis `GPU_*` dos outputs, como o trecho do deploy que o chama; essas imagens já passaram nele quando foram publicadas.
+
+**Os dados não voltam com o código.** O Firestore volta por backup ou ponto no tempo para um banco novo ("Recuperação do Firestore", acima): escolha o backup mais recente anterior à mudança que estragou os dados (o semanal fica 14 semanas, o diário 7 dias, o ponto no tempo 7 dias). Não voltam: o BigQuery além dos 7 dias da viagem no tempo, o índice da busca (refazer com `make reindexar` a partir do Firestore) e os arquivos que a purga já apagou dos buckets.
+
 ## Momentos por ano no BigQuery (#356)
 
 A tabela de momentos em uso é `momentos_por_ano` (`modulos/mam/momentos_por_ano.tf`), dividida por `YEAR` em `data_de_exibicao`: a por dia chegaria ao teto de 10.000 partições com 25 anos de acervo. Serviços, Jobs e o output `bigquery_tabela` apontam para ela. A antiga `momentos` foi apagada em dois applies (#567). Nenhum papel novo (o IAM é por dataset).
