@@ -2,7 +2,7 @@
 `/v1/catalogo/pessoas/{id_da_pessoa}/renomear`.
 
 O nome novo vale no catálogo e na leitura de todas as Decupagens na mesma hora (veja
-`com_pessoas_fundidas`: o gravado não é reescrito, ADR 0010), então catálogo e decupagens
+`api.quem_conta`: o gravado não é reescrito, ADR 0010), então catálogo e decupagens
 nunca ficam com nomes diferentes. O índice da busca e a cópia no BigQuery não guardam o
 nome da pessoa, só o `catalogo_id` (#417): a renomeação não reindexa nem copia nada, e a
 busca e o relatório de tempo de tela leem o nome novo do catálogo.
