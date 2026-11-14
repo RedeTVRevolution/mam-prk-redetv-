@@ -31,7 +31,7 @@ from api.copia_bigquery import (
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.erros import lido
-from api.jobs import RepositorioDeJobs
+from api.jobs import RepositorioDeJobs, programas_do_pedido
 from api.lixeira_na_leitura import PurgasDeMarca
 from api.marcas import CatalogoDeMarcas
 from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
@@ -48,7 +48,6 @@ from api.relatorios import (
     ou_503,
     poe_o_nome_dos_videos,
     posicao_do_cursor,
-    programas_do_pedido,
     recorta,
     resposta_em_csv,
 )
