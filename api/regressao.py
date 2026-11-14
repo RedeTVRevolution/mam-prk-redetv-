@@ -1,7 +1,7 @@
 """Conjunto de regressão (#253): trechos de vídeo com o esperado por categoria.
 
 Cada caso é um JSON em `evals/regressao/casos/`, sem vídeo: aponta o vídeo pelo SHA-256 do
-bloco `video` da Decupagem (o do arquivo enviado, o mesmo do gabarito do comparador). O esperado usa os `Item` e os tipos do `api/comparador.py`, então o
+bloco `video` da Decupagem (o do arquivo enviado, o mesmo do gabarito do comparador). O esperado usa os `Item` e os tipos do `api/pareamento.py`, então o
 comparador mede um caso como mede um gabarito. Duas origens: `anotado` (o CSV do gabarito,
 #252) e `correcao` (uma correção em vigor, com o Job, o trecho e a versão do pipeline que
 errou). Cada caso tem `reservado`: os reservados só entram na avaliação final e nunca no
@@ -27,7 +27,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
-from api.comparador import Item, Tipo
 from api.correcoes import (
     CORRIGIVEIS,
     Correcao,
@@ -43,6 +42,7 @@ from api.nuvem import (
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
+from api.pareamento import Item, Tipo
 from api.regras_das_correcoes import estado_das
 from api.reprocessar_versao import LeitorDeDecupagem
 from api.texto import normalizar

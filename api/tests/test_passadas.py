@@ -9,7 +9,6 @@ from google.api_core.exceptions import NotFound
 
 from api.ambiente import FaltaNoAmbiente
 from api.auth import Usuario
-from api.comparar_objetos import Preco
 from api.decupagem import Decupagem
 from api.gemini import Chamada
 from api.jobs import Job, RepositorioEmMemoria
@@ -23,6 +22,7 @@ from api.passadas import (
     PassadasStorage,
     rodar_passada,
 )
+from api.precos_dos_modelos import Preco
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import BOA
 from api.tests.test_jobs import ArmazenamentoFalso

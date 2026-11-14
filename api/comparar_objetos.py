@@ -32,15 +32,10 @@ from api.florence import ObjetosDaDecupagem
 from api.gemini import SessaoHttp, Transporte, TransporteVertex
 from api.inventario import Inventarios, converter_do_florence, olhar_com_gemini
 from api.nuvem import ObjetosStorage
+from api.precos_dos_modelos import Preco, precos_do_ambiente, tokens_do_transporte
 
 PRECO_DA_GPU_POR_HORA = 1.05
 ESPERA_DO_JOB_S = 30.0
-
-
-@dataclass(frozen=True)
-class Preco:
-    entrada: float  # US$ por milhão de tokens
-    saida: float
 
 
 @dataclass(frozen=True)
@@ -72,27 +67,6 @@ class Disparador(Protocol):
 
 def destino_do_florence(job_id: str) -> str:
     return f"{job_id}/objetos/comparacao-florence.json"
-
-
-def precos_do_ambiente(texto: str) -> dict[str, Preco]:
-    precos: dict[str, Preco] = {}
-    for item in filter(None, (p.strip() for p in texto.split(","))):
-        modelo, _, valores = item.partition("=")
-        entrada, _, saida = valores.partition(":")
-        try:
-            precos[modelo] = Preco(float(entrada), float(saida))
-        except ValueError as e:
-            raise FaltaNoAmbiente(
-                f"preço inválido em PRECOS_DOS_MODELOS: {item!r}"
-            ) from e
-    return precos
-
-
-def tokens_do_transporte(transporte: Transporte) -> tuple[int, int]:
-    return (
-        getattr(transporte, "tokens_de_entrada", 0),
-        getattr(transporte, "tokens_de_saida", 0),
-    )
 
 
 def _medir(

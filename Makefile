@@ -377,7 +377,7 @@ comparar-passadas:
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
 	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
-	uv run --locked python -m api.comparar_passadas "$(or $(JOBS),$(JOB))" "$(PASSADA)" "$(MODELO)" "$(PASTA)"
+	uv run --locked python -m api.ferramentas.comparar_passadas "$(or $(JOBS),$(JOB))" "$(PASSADA)" "$(MODELO)" "$(PASTA)"
 
 # Tempo de revisão por vídeo e por pessoa, em CSV (#251): make tempo-de-revisao [DESDE=2026-11-01]
 tempo-de-revisao:

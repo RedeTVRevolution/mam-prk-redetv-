@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from api.comparador import TIPOS, Item, itens_do_modelo, ler_gabarito, parear
+from api.comparador import ler_gabarito
 from api.correcoes import (
     CORRIGIVEIS,
     Ancora,
@@ -20,6 +20,7 @@ from api.correcoes import (
 )
 from api.decupagem import Decupagem
 from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.pareamento import TIPOS, Item, itens_do_modelo, parear
 from api.regressao import (
     PERCENTUAL_RESERVADO,
     Caso,
