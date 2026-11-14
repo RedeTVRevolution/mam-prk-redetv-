@@ -49,9 +49,6 @@ FERRAMENTAS = {
 
 # Violações que sobram (expand-contract): #650 e #651 tiram as suas, #652 as últimas e apaga a lista.
 EXCECOES = {
-    ("comparar_passadas", "comparador"),
-    ("comparar_passadas", "comparar_objetos"),
-    ("passadas", "comparar_objetos"),
     ("taxa_diaria", "reprocessar_versao"),
     ("taxa_de_correcao", "reprocessar_versao"),
 }
