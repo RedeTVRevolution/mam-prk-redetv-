@@ -18,11 +18,16 @@ from typing import Annotated, Any, Literal, Protocol, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 
 from api.cache_curto import CacheCurto
 from api.comparador import normalizar
-from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, Transporte, parametro
+from api.copia_bigquery import (
+    ConfigDoBigQuery,
+    CopiaEmMemoria,
+    Transporte,
+    parametro_de_lista,
+)
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.erros import lido
@@ -45,7 +50,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
-from api.texto_como_dado import LinhaDaConsulta
+from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta
 
 TIPOS_DE_INSERCAO: tuple[str, ...] = get_args(Comercial.model_fields["tipo"].annotation)
 COLUNAS_DO_CSV = ("marca", "tipo", "insercoes", "tempo_ms", "videos")
@@ -79,7 +84,7 @@ class ConsultaDeInsercoes(Protocol):
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
         """As inserções com marca, somadas; `desde` e `ate` são datas de exibição,
         inclusive."""
@@ -114,11 +119,15 @@ class ConsultaEmMemoria:
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
     ) -> list[Insercao]:
         achadas: list[Insercao] = []
         for x in linhas_da_copia(self._copia, ("comercial",), programa, desde, ate):
-            if x.marca and x.tipo_de_insercao and tipo in (None, x.tipo_de_insercao):
+            if (
+                x.marca
+                and x.tipo_de_insercao
+                and (not tipos or x.tipo_de_insercao in tipos)
+            ):
                 achadas.append(
                     Insercao(
                         x.job_id, x.marca, x.tipo_de_insercao, x.inicio_ms, x.fim_ms
@@ -131,9 +140,9 @@ class ConsultaEmMemoria:
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
-        return somar(self.insercoes(programa, desde, ate, tipo))
+        return somar(self.insercoes(programa, desde, ate, tipos))
 
 
 def ranking_em_python(
@@ -204,7 +213,7 @@ class ConsultaBigQuery:
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
         # Marca ou tipo vazio também fica de fora, como no dublê.
         condicoes = [
@@ -212,9 +221,9 @@ class ConsultaBigQuery:
             "NULLIF(t.tipo_de_insercao, '') IS NOT NULL",
         ]
         parametros = []
-        if tipo is not None:
-            condicoes.append("t.tipo_de_insercao = @tipo_de_insercao")
-            parametros.append(parametro("tipo_de_insercao", tipo))
+        if tipos:
+            condicoes.append("t.tipo_de_insercao IN UNNEST(@tipos_de_insercao)")
+            parametros.append(parametro_de_lista("tipos_de_insercao", tipos))
         linhas = consultar_no_bigquery(
             self._config,
             self._transporte,
@@ -246,11 +255,11 @@ class ConsultaComCache:
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
         return self._cache.obter(
-            ("marcas", programa, desde, ate, tipo),
-            lambda: self._consulta.somas(programa, desde, ate, tipo),
+            ("marcas", programa, desde, ate, tipos),
+            lambda: self._consulta.somas(programa, desde, ate, tipos),
         )
 
 
@@ -283,16 +292,16 @@ class SoMarcasQueContam:
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
-        return self._que_contam(self._consulta.somas(programa, desde, ate, tipo))
+        return self._que_contam(self._consulta.somas(programa, desde, ate, tipos))
 
     def insercoes_dos_nomes(self, nomes: set[str]) -> int:
         """Quantas inserções de todo o histórico, com o texto em `nomes` (normalizados),
         o relatório contaria se a marca não estivesse na lixeira (#597): as somas sem a
         exclusão da lixeira, só com o corte das purgas. Cada inserção é uma linha da cópia,
         com ou sem vínculo no catálogo, então conta uma vez."""
-        somas = self._consulta.somas(None, None, None, None)
+        somas = self._consulta.somas(None, None, None, ())
         return sum(
             s.insercoes
             for s in self._que_contam(
@@ -329,11 +338,13 @@ class SoMarcasQueContam:
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
         depois: int,
         limite: int,
     ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-        return ranking_em_python(self.somas(programa, desde, ate, tipo), depois, limite)
+        return ranking_em_python(
+            self.somas(programa, desde, ate, tipos), depois, limite
+        )
 
     def lista_da_marca(
         self,
@@ -341,12 +352,12 @@ class SoMarcasQueContam:
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
         depois: int,
         limite: int,
     ) -> "list[InsercaoNoRelatorio]":
         # Só a marca pedida passa pela regra: os Jobs lidos são só os dos vídeos dela.
-        somas = self._consulta.somas(programa, desde, ate, tipo)
+        somas = self._consulta.somas(programa, desde, ate, tipos)
         dela = self._que_contam([s for s in somas if s.marca == marca])
         return lista_em_python(dela, marca, depois, limite)
 
@@ -399,7 +410,7 @@ class RankingDeMarcas(BaseModel):
     programa: str | None
     desde: date | None
     ate: date | None
-    tipo: str | None
+    tipos: list[str]
     total: TotalDasMarcas
     marcas: list[MarcaResumida]
 
@@ -408,8 +419,23 @@ class RelatorioDeMarcas(BaseModel):
     programa: str | None
     desde: date | None
     ate: date | None
-    tipo: str | None
+    tipos: list[str]
     marcas: list[MarcaNoRelatorio]
+
+
+# Cada `tipo` repetido é uma linha só, com tamanho máximo.
+TipoDoPedido = Annotated[str, StringConstraints(max_length=40, pattern=PADRAO_DA_LINHA)]
+
+
+def tipos_do_pedido(tipo: list[str] | None) -> tuple[str, ...]:
+    """Os tipos marcados do `tipo` repetido, na ordem de `TIPOS_DE_INSERCAO` e sem repetir;
+    vazio ou ausente é "todos" (tupla vazia). Valor fora da lista: 422."""
+    pedidos = {t for t in tipo or [] if t}
+    if desconhecido := next(
+        (t for t in sorted(pedidos) if t not in TIPOS_DE_INSERCAO), None
+    ):
+        raise HTTPException(422, f"Tipo de inserção desconhecido: {desconhecido}")
+    return tuple(t for t in TIPOS_DE_INSERCAO if t in pedidos)
 
 
 def _total(tipo: str, grupos: list[InsercoesDaMarca]) -> TotalPorTipo:
@@ -485,11 +511,7 @@ def criar_rotas_das_marcas(
         else None
     )
 
-    def _confere(
-        programa: str | None, desde: date | None, ate: date | None, tipo: str | None
-    ) -> SoMarcasQueContam:
-        if tipo is not None and tipo not in TIPOS_DE_INSERCAO:
-            raise HTTPException(422, f"Tipo de inserção desconhecido: {tipo}")
+    def _confere(desde: date | None, ate: date | None) -> SoMarcasQueContam:
         return confere_o_pedido(com_lixeira, desde, ate)
 
     @rotas.get("/marcas", response_model=RelatorioDeMarcas | RankingDeMarcas)
@@ -497,41 +519,41 @@ def criar_rotas_das_marcas(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
-        tipo: Annotated[str | None, LinhaDaConsulta(40)] = None,
+        tipo: Annotated[list[TipoDoPedido] | None, Query()] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> Any:
         """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa (ou com
-        `programa=` vazio) e sem tipo (ou vazio), todos. Com `limite`, uma página do
-        ranking (sem a lista das inserções, com os totais do período) e o cursor da
+        `programa=` vazio) e sem `tipo` (ou só vazios), todos; `tipo` se repete, um por tipo
+        marcado. Com `limite`, uma página do ranking (sem a lista das inserções, com os totais do período) e o cursor da
         próxima em `X-Proximo-Cursor`; as inserções de uma marca ficam em
         `/marcas/insercoes`. O CSV vem sempre inteiro."""
         programa = programa or None
-        tipo = tipo or None
+        tipos = tipos_do_pedido(tipo)
         desde, ate = periodo
-        fonte = _confere(programa, desde, ate, tipo)
+        fonte = _confere(desde, ate)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
             lidas, total = ou_503(
-                lambda: fonte.ranking(programa, desde, ate, tipo, depois, limite)
+                lambda: fonte.ranking(programa, desde, ate, tipos, depois, limite)
             )
             pagina, cabecalhos = recorta(lidas, depois, limite)
             corpo = RankingDeMarcas(
                 programa=programa,
                 desde=desde,
                 ate=ate,
-                tipo=tipo,
+                tipos=list(tipos),
                 total=total,
                 marcas=pagina,
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
-        achadas = ou_503(lambda: relatorio(fonte.somas(programa, desde, ate, tipo)))
+        achadas = ou_503(lambda: relatorio(fonte.somas(programa, desde, ate, tipos)))
         if formato == "csv":
             return resposta_em_csv(em_csv(achadas), "marcas.csv")
         poe_o_nome_dos_videos((i for m in achadas for i in m.lista), repositorio)
         return RelatorioDeMarcas(
-            programa=programa, desde=desde, ate=ate, tipo=tipo, marcas=achadas
+            programa=programa, desde=desde, ate=ate, tipos=list(tipos), marcas=achadas
         )
 
     @rotas.get("/marcas/insercoes", response_model=list[InsercaoNoRelatorio])
@@ -540,20 +562,20 @@ def criar_rotas_das_marcas(
         periodo: Annotated[Periodo, Depends(no_periodo)],
         marca: Annotated[str, LinhaDaConsulta(200, min_length=1)],
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
-        tipo: Annotated[str | None, LinhaDaConsulta(40)] = None,
+        tipo: Annotated[list[TipoDoPedido] | None, Query()] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
         """As inserções de uma marca no mesmo filtro do relatório, na ordem do vídeo e do
         tempo, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""
         programa = programa or None
-        tipo = tipo or None
+        tipos = tipos_do_pedido(tipo)
         desde, ate = periodo
-        fonte = _confere(programa, desde, ate, tipo)
+        fonte = _confere(desde, ate)
         depois = posicao_do_cursor(cursor)
         lidas = ou_503(
             lambda: fonte.lista_da_marca(
-                marca, programa, desde, ate, tipo, depois, limite
+                marca, programa, desde, ate, tipos, depois, limite
             )
         )
         lista, cabecalhos = recorta(lidas, depois, limite)

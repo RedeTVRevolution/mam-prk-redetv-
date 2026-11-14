@@ -64,7 +64,7 @@ export function enderecoDoPainel(aba: AbaDoPainel, filtros: FiltrosDoPainel): st
 
 /** O endereço do relatório de marcas, com os filtros na query. */
 export function enderecoDasMarcas(filtros: FiltrosDeMarcas): string {
-  return `${MARCAS}${filtrosParaEndereco(filtros, { tipo: filtros.tipo })}`
+  return `${MARCAS}${filtrosParaEndereco(filtros, { tipo: filtros.tipos })}`
 }
 
 /** O endereço da busca, com a consulta e os filtros na query. */

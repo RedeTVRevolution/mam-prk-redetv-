@@ -336,6 +336,15 @@ def parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
     }
 
 
+def parametro_de_lista(nome: str, valores: Sequence[str]) -> dict[str, Any]:
+    """Um parâmetro de array de texto, para `IN UNNEST(@nome)`."""
+    return {
+        "name": nome,
+        "parameterType": {"type": "ARRAY", "arrayType": {"type": "STRING"}},
+        "parameterValue": {"arrayValues": [{"value": v} for v in valores]},
+    }
+
+
 def transporte_http(projeto: str) -> Transporte:
     """O transporte real: REST com as credenciais padrão (ADC) de quem roda."""
     sessao = sessao_autenticada("https://www.googleapis.com/auth/bigquery")

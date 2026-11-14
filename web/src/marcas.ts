@@ -42,7 +42,8 @@ export interface PaginaDeMarcas {
   programa: string | null
   desde: string | null
   ate: string | null
-  tipo: string | null
+  /** Os tipos marcados; vazio é tudo marcado. */
+  tipos: string[]
   total: TotalDasMarcas
   marcas: MarcaResumida[]
   proximo: string | null
@@ -58,12 +59,13 @@ export interface RelatorioDeMarcas {
   programa: string | null
   desde: string | null
   ate: string | null
-  tipo: string | null
+  tipos: string[]
   marcas: MarcaNoRelatorio[]
 }
 
 export interface FiltrosDeMarcas extends FiltrosDoRelatorio {
-  tipo: string
+  /** Os tipos marcados; vazio é tudo marcado (nada vai ao endereço nem à API). */
+  tipos: string[]
 }
 
 /** Os tipos de inserção da decupagem (`Comercial.tipo`), com o nome que a tela mostra. */
@@ -82,8 +84,9 @@ export function nomeDoTipo(tipo: string): string {
   return Object.hasOwn(TIPOS_DE_INSERCAO, tipo) ? TIPOS_DE_INSERCAO[tipo] : tipo
 }
 
-/** Os filtros da query do endereço; tipo desconhecido de um link editado à mão sai. */
+/** Os filtros da query do endereço (`tipo` repetido); tipo desconhecido de um link editado à mão sai, e tudo marcado vira vazio. */
 export function filtrosDeMarcas(busca: string): FiltrosDeMarcas {
-  const tipo = new URLSearchParams(busca).get('tipo') ?? ''
-  return { ...filtrosDoRelatorio(busca), tipo: Object.hasOwn(TIPOS_DE_INSERCAO, tipo) ? tipo : '' }
+  const pedidos = new Set(new URLSearchParams(busca).getAll('tipo'))
+  const tipos = Object.keys(TIPOS_DE_INSERCAO).filter((t) => pedidos.has(t))
+  return { ...filtrosDoRelatorio(busca), tipos: tipos.length === Object.keys(TIPOS_DE_INSERCAO).length ? [] : tipos }
 }

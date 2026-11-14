@@ -1,4 +1,4 @@
-import { IconBadgeTm } from "@tabler/icons-react";
+import { IconBadgeTm, IconTag } from "@tabler/icons-react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { codigoDoErro } from "../../api.ts";
@@ -11,9 +11,10 @@ import {
 import { enderecoDasMarcas, enderecoDoVideo, navegar, seguir } from "../../rotas.ts";
 import { duracaoLegivel } from "../../tempoDeTela.ts";
 import { Falha } from "../comum/Falha.tsx";
-import { CAMPO, mensagemDoErro, repetirFalha } from "../comum/relatorio.ts";
-import { BaixarCsv, Campo } from "../comum/relatorio.tsx";
+import { mensagemDoErro, repetirFalha } from "../comum/relatorio.ts";
+import { BaixarCsv } from "../comum/relatorio.tsx";
 import { useApi } from "../consultas.ts";
+import { Faceta } from "../acervo/Filtros.tsx";
 import { numero } from "../painel/formato.ts";
 import {
   GraficoOuTabela,
@@ -54,7 +55,7 @@ function Insercoes({ filtros, marca, tipo }: { filtros: FiltrosDeMarcas; marca: 
   const api = useApi();
   const consulta = useInfiniteQuery({
     queryKey: ["relatorios", "marcas", "insercoes", filtros, marca, tipo],
-    queryFn: ({ pageParam }) => api.insercoesDaMarca(filtros, marca, tipo || undefined, pageParam),
+    queryFn: ({ pageParam }) => api.insercoesDaMarca(filtros, marca, tipo ? [tipo] : undefined, pageParam),
     initialPageParam: "",
     getNextPageParam: (ultima) => ultima.proximo ?? undefined,
     retry: repetirFalha,
@@ -147,23 +148,17 @@ export default function Marcas({ filtros }: { filtros: FiltrosDeMarcas }) {
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <FiltrosDoPeriodo filtros={filtros} aoMudar={mudar}>
-          <Campo rotulo="Tipo de inserção">
-            {(id) => (
-              <select
-                id={id}
-                className={`${CAMPO} w-56`}
-                value={filtros.tipo}
-                onChange={(e) => mudar({ tipo: e.target.value })}
-              >
-                <option value="">Todos os tipos</option>
-                {Object.entries(TIPOS_DE_INSERCAO).map(([valor, nome]) => (
-                  <option key={valor} value={valor}>
-                    {nome}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Campo>
+          <div className="grid min-w-0 gap-1">
+            <span className="text-xs text-muted-foreground">Tipo de inserção</span>
+            <Faceta
+              rotulo="Tipo de inserção"
+              Icone={IconTag}
+              opcoes={Object.entries(TIPOS_DE_INSERCAO).map(([valor, rotulo]) => ({ valor, rotulo }))}
+              valor={filtros.tipos}
+              aoMudar={(tipos) => mudar({ tipos })}
+              tudoMarcado
+            />
+          </div>
         </FiltrosDoPeriodo>
         <BaixarCsv
           key={JSON.stringify(filtros)}
