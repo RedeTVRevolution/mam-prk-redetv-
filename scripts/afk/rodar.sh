@@ -19,6 +19,9 @@ plugin=$(jq -r '[.plugins | to_entries[] | select(.key | startswith("mattpocock-
 segredo() { security find-generic-password -a "$USER" -s "$1" -w; }
 claude_token=$(segredo afk-claude)
 gh_agente=$(segredo afk-github-agente)
+# Os comentários do agente saem com o login do dono do PAT, não com o da organização do repositório.
+dono=$(GH_TOKEN=$gh_agente gh api user --jq .login)
+[ -n "$dono" ] || { echo "Não consegui o login do dono do token afk-github-agente." >&2; exit 1; }
 gh_script=$(segredo afk-github-script)
 
 # git e gh do Mac com o token do script, sem depender do login local.
@@ -64,7 +67,7 @@ export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME=$GIT_AUTHOR_NAME GIT_
 set +e
 CLAUDE_CODE_OAUTH_TOKEN=$claude_token GH_TOKEN=$gh_agente \
   FIRESTORE_EMULATOR_HOST=localhost:8686 STORAGE_EMULATOR_HOST=http://localhost:4443 \
-  AFK_REDE="container:$emuladores" AFK_PLUGIN_HOST=$plugin GH_REPO=$repo AFK_DONO=${repo%%/*} \
+  AFK_REDE="container:$emuladores" AFK_PLUGIN_HOST=$plugin GH_REPO=$repo AFK_DONO=$dono \
   node "$raiz/scripts/afk/main.mts" "$clone" "$branch" "$iteracoes"
 saida=$?
 set -e
