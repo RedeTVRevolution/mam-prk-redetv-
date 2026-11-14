@@ -32,6 +32,8 @@ from api.resumos_de_uso import (
     ResumosEmMemoria,
     UsoDoDia,
 )
+from api.tests.test_busca import job as _job
+from api.tests.test_lixeira_na_leitura import ENVIO
 from api.tests.sem_periodo_padrao import ClienteSemPeriodoPadrao
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_escopos import MAC
@@ -532,6 +534,18 @@ def test_videos_por_dia_programa_e_usuario_com_o_tempo_medio() -> None:
         ("usuario", "bia", "bia@redetv.com.br", 2),
         ("sistema", "cms", None, 1),
     ]
+
+
+def test_o_painel_continua_contando_o_video_na_lixeira() -> None:
+    jobs = RepositorioEmMemoria()
+    jobs.salvar(_job("j1"))
+    mundo = Mundo(["diretoria"], jobs=jobs)
+    antes = mundo.get("/videos").json()["total"]
+
+    jobs.trocar("j1", lambda _: {"lixeira": ENVIO})
+
+    assert mundo.get("/videos").json()["total"] == antes
+    assert antes["concluidos"] == 3
 
 
 def test_a_soma_por_programa_bate_com_os_enviados_com_a_linha_sem_programa() -> None:

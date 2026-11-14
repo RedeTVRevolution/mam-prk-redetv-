@@ -124,8 +124,11 @@ def test_mais_de_200_valores_da_422_e_200_passa() -> None:
     assert mundo.get("&".join(f"programa=p{i}" for i in range(201))).status_code == 422
 
 
-def test_o_teto_de_200_vale_para_os_valores_recebidos_mesmo_repetidos() -> None:
-    assert Mundo().get("&".join(["programa=Jornal"] * 201)).status_code == 422
+def test_o_teto_de_200_conta_os_distintos_e_repetidos_valem_uma_vez() -> None:
+    mundo = Mundo()
+
+    assert mundo.get("&".join(["programa=Jornal"] * 201)).status_code == 200
+    assert mundo.get("&".join(f"programa=p{i}" for i in range(201))).status_code == 422
 
 
 def test_chave_de_sistema_so_ve_os_proprios_jobs() -> None:

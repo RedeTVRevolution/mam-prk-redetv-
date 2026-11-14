@@ -563,6 +563,17 @@ SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 MAXIMO_DE_PROGRAMAS = 200
 
 
+def programas_do_pedido(programa: list[str] | None) -> tuple[str, ...]:
+    """Os programas marcados do `programa` repetido, em ordem e sem repetir; vazio ou ausente
+    é "todos" (tupla vazia). Lista com mais de `MAXIMO_DE_PROGRAMAS` valores: 422."""
+    pedidos = sorted({p for p in programa or [] if p})
+    if len(pedidos) > MAXIMO_DE_PROGRAMAS:
+        raise HTTPException(
+            422, f"No máximo {MAXIMO_DE_PROGRAMAS} programas por pedido"
+        )
+    return tuple(pedidos)
+
+
 @dataclass(frozen=True)
 class FiltroDeJobs:
     """Os filtros do acervo; todos opcionais e combináveis."""
@@ -1274,8 +1285,7 @@ def criar_rotas(
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         programa: Annotated[
-            list[Annotated[str, Linha(100)]] | None,
-            Query(max_length=MAXIMO_DE_PROGRAMAS),
+            list[Annotated[str, Linha(100)]] | None, Query()
         ] = None,
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,
@@ -1297,7 +1307,7 @@ def criar_rotas(
                 return JSONResponse([])
             sistema = chamador.sistema
         filtro = FiltroDeJobs(
-            programas=frozenset(p for p in programa or () if p),
+            programas=frozenset(programas_do_pedido(programa)),
             estados=frozenset(estado or ()),
             exibicao_de=exibicao_de,
             exibicao_ate=exibicao_ate,

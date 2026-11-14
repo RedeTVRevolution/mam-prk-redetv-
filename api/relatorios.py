@@ -28,10 +28,10 @@ from api.copia_bigquery import (
 )
 from api.erros import lido
 from api.jobs import (
-    MAXIMO_DE_PROGRAMAS,
     FiltroDeJobs,
     RepositorioDeJobs,
     _confere_permissao,
+    programas_do_pedido,
 )
 from api.texto_como_dado import Linha
 
@@ -50,17 +50,6 @@ PodeVerORelatorio = Annotated[Usuario, Depends(_exige_ver_o_relatorio)]
 
 # Cada `programa` repetido é uma linha só, com tamanho máximo (#621).
 ProgramaDoPedido = Annotated[str, Linha(100)]
-
-
-def programas_do_pedido(programa: list[str] | None) -> tuple[str, ...]:
-    """Os programas marcados do `programa` repetido, em ordem e sem repetir; vazio ou ausente
-    é "todos" (tupla vazia). Lista com mais de `MAXIMO_DE_PROGRAMAS` valores: 422."""
-    pedidos = sorted({p for p in programa or [] if p})
-    if len(pedidos) > MAXIMO_DE_PROGRAMAS:
-        raise HTTPException(
-            422, f"No máximo {MAXIMO_DE_PROGRAMAS} programas por pedido"
-        )
-    return tuple(pedidos)
 
 
 def confere_o_pedido[T](consulta: T | None, desde: date | None, ate: date | None) -> T:
