@@ -35,15 +35,18 @@ class Destino:
     """Onde a pessoa pedida acabou: `pessoa` é o registro no fim da cadeia de fusão, ou
     `None` se a pessoa foi purgada, o destino foi purgado ou a cadeia volta sobre si mesma.
     `fundida` diz que a pessoa pedida foi fundida em outra; `origem` é o registro dela.
+    `na_lixeira`: algum elo do caminho, o fim incluído, está na lixeira (a pessoa não conta,
+    mas a Decupagem corrigida ainda mostra o fim da cadeia).
     """
 
     pessoa: PessoaDoCatalogo | None
     fundida: bool
     origem: PessoaDoCatalogo | None = None
+    na_lixeira: bool = False
 
     @property
     def conta(self) -> bool:
-        return self.pessoa is not None and self.pessoa.lixeira is None
+        return self.pessoa is not None and not self.na_lixeira
 
 
 @dataclass(frozen=True)
@@ -99,10 +102,14 @@ class QuemConta:
             for pedido, onde in list(ponta.items()):
                 origem, pessoa = self._lidas[pedido], self._lidas[onde]
                 fundida = origem is not None and origem.fundida is not None
+                lixeira = any(
+                    (elo := self._lidas.get(v)) is not None and elo.lixeira is not None
+                    for v in vistos[pedido]
+                )
                 if pessoa is None or pessoa.fundida is None:
-                    destinos[pedido] = Destino(pessoa, fundida, origem)
+                    destinos[pedido] = Destino(pessoa, fundida, origem, lixeira)
                 elif pessoa.fundida.destino_id in vistos[pedido]:
-                    destinos[pedido] = Destino(None, True, origem)
+                    destinos[pedido] = Destino(None, True, origem, lixeira)
                 else:
                     vistos[pedido].add(pessoa.fundida.destino_id)
                     ponta[pedido] = pessoa.fundida.destino_id
