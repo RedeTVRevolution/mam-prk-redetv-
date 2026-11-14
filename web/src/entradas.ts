@@ -39,7 +39,7 @@ export function filtrosParaEnderecoDasEntradas(f: FiltrosDasEntradas, agora: Dat
   const p = new URLSearchParams()
   if (f.por) p.set('por', f.por)
   for (const e of f.estado) p.append('estado', e)
-  if (f.de !== inicioDaUltimaSemana(agora)) p.set('de', f.de || SEM_PERIODO)
+  if (f.ate || f.de !== inicioDaUltimaSemana(agora)) p.set('de', f.de || SEM_PERIODO)
   if (f.ate) p.set('ate', f.ate)
   const texto = p.toString()
   return texto ? `?${texto}` : ''
@@ -65,7 +65,8 @@ export function filtrosDasEntradas(busca: string, agora: Date = new Date()): Fil
     por: por === 'pessoas' || sistemaDoFiltro(por) !== null ? por : '',
     // Estado desconhecido num link editado à mão sai do filtro, em vez de fazer a API recusar.
     estado: [...new Set(p.getAll('estado'))].filter((e) => Object.hasOwn(ESTADOS_DO_JOB, e)),
-    de: p.get('de') === SEM_PERIODO ? '' : data('de') || inicioDaUltimaSemana(agora),
+    // O padrão da semana só vale sem período nenhum: com `ate`, o início fica aberto.
+    de: p.get('de') === SEM_PERIODO ? '' : data('de') || (data('ate') ? '' : inicioDaUltimaSemana(agora)),
     ate: data('ate'),
   }
 }
