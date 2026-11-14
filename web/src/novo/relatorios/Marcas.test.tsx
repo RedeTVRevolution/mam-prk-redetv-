@@ -32,7 +32,7 @@ const PRIMEIRA = {
   programas: [],
   desde: null,
   ate: null,
-  tipo: null,
+  tipos: [],
   // Os totais são do período todo: 3 marcas, de uma página de 2.
   total: { marcas: 3, insercoes: 4, tempo_ms: 60_000, videos: 2 },
   marcas: [AMBEV, NATURA],

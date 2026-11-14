@@ -563,6 +563,17 @@ SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 MAXIMO_DE_PROGRAMAS = 200
 
 
+def programas_do_pedido(programa: list[str] | None) -> tuple[str, ...]:
+    """Os programas marcados do `programa` repetido, em ordem e sem repetir; vazio ou ausente
+    é "todos" (tupla vazia). Lista com mais de `MAXIMO_DE_PROGRAMAS` valores: 422."""
+    pedidos = sorted({p for p in programa or [] if p})
+    if len(pedidos) > MAXIMO_DE_PROGRAMAS:
+        raise HTTPException(
+            422, f"No máximo {MAXIMO_DE_PROGRAMAS} programas por pedido"
+        )
+    return tuple(pedidos)
+
+
 @dataclass(frozen=True)
 class FiltroDeJobs:
     """Os filtros do acervo; todos opcionais e combináveis."""
@@ -1273,10 +1284,7 @@ def criar_rotas(
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        programa: Annotated[
-            list[Annotated[str, Linha(100)]] | None,
-            Query(max_length=MAXIMO_DE_PROGRAMAS),
-        ] = None,
+        programa: Annotated[list[Annotated[str, Linha(100)]] | None, Query()] = None,
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,
         exibicao_ate: date | None = None,
@@ -1291,13 +1299,14 @@ def criar_rotas(
     ) -> Response:
         if enviado_de and enviado_ate and enviado_de > enviado_ate:
             raise HTTPException(422, "enviado_de depois de enviado_ate")
+        programas = frozenset(programas_do_pedido(programa))
         if isinstance(chamador, Sistema):
             # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
             if sistema not in (None, chamador.sistema):
                 return JSONResponse([])
             sistema = chamador.sistema
         filtro = FiltroDeJobs(
-            programas=frozenset(p for p in programa or () if p),
+            programas=programas,
             estados=frozenset(estado or ()),
             exibicao_de=exibicao_de,
             exibicao_ate=exibicao_ate,
