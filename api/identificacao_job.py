@@ -20,7 +20,7 @@ from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import rodar_etapa
 from api.clientes_de_nuvem import sessao_autenticada
-from api.correcoes import Correcao, pares_proibidos, pessoas_corrigidas
+from api.correcoes import Correcao
 from api.decupagem import Decupagem
 from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs
@@ -37,6 +37,7 @@ from api.nuvem import (
 from api.programas import Perfis, perfis_dos_programas
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros
+from api.regras_das_correcoes import pares_proibidos, pessoas_corrigidas
 from api.sinais import imprimir
 from api.transcricao import Transcricao
 

@@ -32,7 +32,6 @@ from api.correcoes import (
     CORRIGIVEIS,
     Correcao,
     RepositorioDeCorrecoes,
-    estado_das,
     tempos_de,
     versao_do_modelo,
 )
@@ -43,6 +42,7 @@ from api.nuvem import (
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
+from api.regras_das_correcoes import estado_das
 from api.reprocessar_versao import LeitorDeDecupagem
 
 log = logging.getLogger(__name__)
