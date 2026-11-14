@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import PurePath
 from typing import Annotated, Any, Literal, Protocol, Self
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -556,6 +557,8 @@ LIMITE_MAXIMO = 200
 # tiver, com o cursor (pode vir vazia); só vale com `limite`.
 TETO_DE_CANDIDATOS = 2000
 
+SAO_PAULO = ZoneInfo("America/Sao_Paulo")
+
 
 @dataclass(frozen=True)
 class FiltroDeJobs:
@@ -568,6 +571,9 @@ class FiltroDeJobs:
     estados: frozenset[Estado] = frozenset()
     exibicao_de: date | None = None
     exibicao_ate: date | None = None
+    # Dia do envio (`criado_em`) no fuso de São Paulo, as duas pontas inclusive.
+    enviado_de: date | None = None
+    enviado_ate: date | None = None
     palavras: tuple[str, ...] = ()  # já normalizadas: todas precisam estar no nome
     sistema: str | None = None
     # `False`: só os Jobs fora da lixeira (o acervo); `True`: só os que estão nela;
@@ -631,6 +637,12 @@ def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
         if filtro.exibicao_de and job.data_exibicao < filtro.exibicao_de:
             return False
         if filtro.exibicao_ate and job.data_exibicao > filtro.exibicao_ate:
+            return False
+    if filtro.enviado_de is not None or filtro.enviado_ate is not None:
+        dia = job.criado_em.astimezone(SAO_PAULO).date()
+        if filtro.enviado_de and dia < filtro.enviado_de:
+            return False
+        if filtro.enviado_ate and dia > filtro.enviado_ate:
             return False
     return all(p in job.palavras for p in filtro.palavras)
 
@@ -1267,6 +1279,8 @@ def criar_rotas(
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,
         exibicao_ate: date | None = None,
+        enviado_de: date | None = None,
+        enviado_ate: date | None = None,
         q: Annotated[str | None, LinhaDaConsulta(300)] = None,
         sistema: Annotated[str | None, LinhaDaConsulta(100)] = None,
         ordem: Ordem = "enviado",
@@ -1274,6 +1288,8 @@ def criar_rotas(
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
         capa: bool = True,
     ) -> Response:
+        if enviado_de and enviado_ate and enviado_de > enviado_ate:
+            raise HTTPException(422, "enviado_de depois de enviado_ate")
         if isinstance(chamador, Sistema):
             # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
             if sistema not in (None, chamador.sistema):
@@ -1284,6 +1300,8 @@ def criar_rotas(
             estados=frozenset(estado or ()),
             exibicao_de=exibicao_de,
             exibicao_ate=exibicao_ate,
+            enviado_de=enviado_de,
+            enviado_ate=enviado_ate,
             palavras=tuple(palavras_do_nome(q or "")),
             sistema=sistema,
             ordem=ordem,

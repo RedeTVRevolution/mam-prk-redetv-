@@ -444,6 +444,40 @@
             }
           },
           {
+            "name": "enviado_de",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enviado De"
+            }
+          },
+          {
+            "name": "enviado_ate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enviado Ate"
+            }
+          },
+          {
             "name": "q",
             "in": "query",
             "required": false,

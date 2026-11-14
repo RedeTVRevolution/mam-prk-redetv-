@@ -23,7 +23,6 @@ import {
   casaComOsFiltrosDoCliente,
   emAndamento,
   haFiltroDeEntradas,
-  passouDoPeriodo,
   porSistema,
   SEM_FILTROS_DAS_ENTRADAS,
   sistemaDoFiltro,
@@ -329,8 +328,8 @@ export default function Entradas({
   const rolagem = useRef<HTMLDivElement>(null)
   useAtalhos(ATALHOS)
 
-  // Só sistema e estado vão à API: trocar o resto não recarrega a lista.
-  const chave = ['admin', 'entradas', sistemaDoFiltro(filtros.por), filtros.estado]
+  // Sistema, estado e período do envio vão à API: trocar qualquer um recarrega a lista, do início.
+  const chave = ['admin', 'entradas', sistemaDoFiltro(filtros.por), filtros.estado, filtros.de, filtros.ate]
   const lista = useListaPorCursor(chave, (cursor) => api.entradas(filtros, cursor))
   const chaves = useQuery({ queryKey: ['admin', 'chaves'], queryFn: () => api.chaves.listar(), enabled: podeVerSistemas })
   const jobs = lista.data?.pages.flatMap((p) => p.jobs) ?? []
@@ -367,7 +366,7 @@ export default function Entradas({
   ].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
   const visiveis = jobs.filter((j) => casaComOsFiltrosDoCliente(j, filtros))
-  const haMais = lista.hasNextPage && !passouDoPeriodo(jobs, filtros)
+  const haMais = lista.hasNextPage
   const { tabela, itens, antes, depois, medir } = useLinhasVirtuais(visiveis.length, rolagem, (i) => visiveis[i]?.id ?? String(i))
   const colunas = useColunasVisiveis(COLUNAS)
   const pronta = lista.data !== undefined
@@ -447,7 +446,7 @@ export default function Entradas({
           {!haFiltroDeEntradas(filtros)
             ? 'Nenhum vídeo entrou ainda.'
             : haMais
-              ? 'Nenhum vídeo com esses filtros entre os já carregados. Carregue mais para procurar nos mais antigos.'
+              ? 'Nenhum vídeo com esses filtros nesta página. Carregue mais para continuar procurando.'
               : 'Nenhum vídeo com esses filtros.'}
         </Vazio>
       )}
