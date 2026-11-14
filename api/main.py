@@ -61,7 +61,7 @@ from api.chaves import (
     RepositorioDeChaves,
     VerificadorDeChaveDeApi,
 )
-from api.comparar_passadas import criar_rotas_da_comparacao
+from api.comparacao_de_passadas import criar_rotas_da_comparacao
 from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente
 from api.correcao_de_estado import criar_rotas_da_correcao_de_estado
 from api.correcoes import (

@@ -36,7 +36,6 @@ from api.auth import Chamador
 from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.clientes_de_nuvem import sessao_autenticada
-from api.comparar_objetos import Preco, precos_do_ambiente, tokens_do_transporte
 from api.decupagem import Decupagem, Video
 from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
 from api.jobs import (
@@ -54,6 +53,7 @@ from api.nuvem import (
     TranscricoesStorage,
     objeto_do_proxy,
 )
+from api.precos_dos_modelos import Preco, precos_do_ambiente, tokens_do_transporte
 from api.programas import Perfis, perfis_dos_programas
 from api.transcricao import Transcricao
 

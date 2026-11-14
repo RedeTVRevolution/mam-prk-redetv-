@@ -8,29 +8,31 @@ from typing import Any
 import pytest
 
 from api.ambiente import FaltaNoAmbiente
-from api.comparador import TOLERANCIA_MS
-from api.comparar_objetos import Preco
-from api.comparar_passadas import (
+from api.comparacao_de_passadas import (
     Custo,
     LadoDoResultado,
     PrecoUsado,
     Tempo,
-    comparar,
     comparar_decupagens,
-    custo_do_job,
     custo_por_hora,
+    somar,
+    tempo_do_job,
+)
+from api.decupagem import Decupagem
+from api.ferramentas.comparar_passadas import (
+    comparar,
+    custo_do_job,
     gravar,
     relatorio_em_json,
     relatorio_em_markdown,
-    somar,
-    tempo_do_job,
     tokens_do_job,
 )
-from api.decupagem import Decupagem
 from api.jobs import Etapa, Job, RepositorioEmMemoria
+from api.pareamento import TOLERANCIA_MS
 from api.passadas import Custo as CustoDaPassada
 from api.passadas import Etapa as EtapaDaPassada
 from api.passadas import Passada, PassadasEmMemoria
+from api.precos_dos_modelos import Preco
 
 SHA = "a" * 64
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
@@ -286,12 +288,14 @@ def test_sem_pares_o_timecode_fica_vazio() -> None:
     assert (t.pares, t.media_ms, t.p95_ms, t.fora_da_tolerancia) == (0, None, None, 0)
 
 
-def test_o_pareamento_e_o_do_comparador(monkeypatch: pytest.MonkeyPatch) -> None:
-    from api import comparador
-    from api import comparar_passadas as modulo
+def test_o_pareamento_e_o_do_modulo_de_pareamento(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api import comparacao_de_passadas as modulo
+    from api import pareamento
 
     chamadas: list[int] = []
-    original = comparador.parear
+    original = pareamento.parear
 
     def espia(g: Any, m: Any) -> Any:
         chamadas.append(1)
