@@ -97,6 +97,7 @@ from api.regras_das_correcoes import (
     fila,
     historico,
 )
+from api.texto import sem_acento
 from api.texto_como_dado import PADRAO_DA_LINHA, Linha, LinhaDaConsulta
 
 TIPO_DO_VIDEO = "video/mp4"
@@ -327,10 +328,7 @@ def palavras_do_nome(nome: str) -> list[str]:
 
     Quebra em tudo que não é letra nem dígito (`_`, `-`, `.`, espaço, parênteses...).
     """
-    sem_acento = "".join(
-        c for c in unicodedata.normalize("NFKD", nome) if not unicodedata.combining(c)
-    )
-    palavras = [p for p in re.split(r"[\W_]+", sem_acento.casefold()) if p]
+    palavras = [p for p in re.split(r"[\W_]+", sem_acento(nome).casefold()) if p]
     return list(dict.fromkeys(palavras))
 
 
