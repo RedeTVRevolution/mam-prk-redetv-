@@ -8,9 +8,9 @@ from datetime import date
 from api.auditoria import FiltroDeAuditoria
 from api.qualidade_do_painel import QualidadeEmMemoria
 from api.resumos_de_uso import ChamadaDoDia, CorrecaoDoDia, ResumosEmMemoria
-from api.revisao_do_painel import RevisaoNoVideo
-from api.taxa_de_correcao import LinhaDaTaxa
 from api.tests.test_rotas_do_painel import USO, Mundo
+from api.tipos_da_revisao import RevisaoNoVideo
+from api.tipos_da_taxa import LinhaDaTaxa
 
 
 def _correcao(

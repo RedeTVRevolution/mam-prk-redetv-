@@ -85,7 +85,8 @@ def _como_antes(
     """O cálculo de antes do #360, só para comparar: o acervo inteiro, Job a Job."""
     from api.correcoes import CORRIGIVEIS, versao_do_modelo
     from api.itens_da_decupagem import itens_do_tipo as _itens_do_tipo
-    from api.taxa_de_correcao import LinhaDaTaxa, _no_periodo
+    from api.taxa_de_correcao import _no_periodo
+    from api.tipos_da_taxa import LinhaDaTaxa
 
     pulsados = {
         m.job_id

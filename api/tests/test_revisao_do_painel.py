@@ -18,13 +18,12 @@ from api.revisao_do_painel import (
     RepositorioDeRevisaoEspelhado,
     RevisaoBigQuery,
     RevisaoEmMemoria,
-    RevisaoNoVideo,
     TabelaDaRevisaoBigQuery,
     TabelaDaRevisaoEmMemoria,
-    agregar,
     preencher,
 )
 from api.tests.test_rotas_do_painel import Mundo
+from api.tipos_da_revisao import RevisaoNoVideo, agregar
 
 TF = (
     Path(__file__).parents[2] / "infra" / "modulos" / "mam" / "revisao_do_painel.tf"
