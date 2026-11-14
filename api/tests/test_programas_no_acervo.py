@@ -131,6 +131,15 @@ def test_o_teto_de_200_conta_os_distintos_e_repetidos_valem_uma_vez() -> None:
     assert mundo.get("&".join(f"programa=p{i}" for i in range(201))).status_code == 422
 
 
+def test_o_teto_vale_tambem_para_chave_que_pede_outro_sistema() -> None:
+    mundo = Mundo()
+    programas = "&".join(f"programa=p{i}" for i in range(201))
+
+    assert (
+        mundo.get(f"sistema=outro&{programas}", mundo.chave("rtv")).status_code == 422
+    )
+
+
 def test_chave_de_sistema_so_ve_os_proprios_jobs() -> None:
     mundo = Mundo()
     mundo.jobs.salvar(_job("meu", 9, sistema="rtv", programa="Jornal"))

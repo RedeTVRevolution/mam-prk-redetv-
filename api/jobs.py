@@ -1299,13 +1299,14 @@ def criar_rotas(
     ) -> Response:
         if enviado_de and enviado_ate and enviado_de > enviado_ate:
             raise HTTPException(422, "enviado_de depois de enviado_ate")
+        programas = frozenset(programas_do_pedido(programa))
         if isinstance(chamador, Sistema):
             # Uma chave só vê os próprios Jobs; pedir os de outro sistema não acha nada.
             if sistema not in (None, chamador.sistema):
                 return JSONResponse([])
             sistema = chamador.sistema
         filtro = FiltroDeJobs(
-            programas=frozenset(programas_do_pedido(programa)),
+            programas=programas,
             estados=frozenset(estado or ()),
             exibicao_de=exibicao_de,
             exibicao_ate=exibicao_ate,
