@@ -69,6 +69,7 @@ from api.correcoes import (
     VersaoDesatualizada,
 )
 from api.decupagem import caminho_do_quadro
+from api.dispositivo import Dispositivo
 from api.erros import ServicoIndisponivel as ServicoIndisponivel  # noqa: PLC0414 (reexport explícito para o mypy)
 from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
 from api.idempotencia import (
@@ -205,7 +206,6 @@ NomeDaEtapa = Literal[
 # Etapas do #112 retiradas no #327; só os Jobs antigos ainda as trazem.
 ETAPAS_QUE_SAIRAM = frozenset({"referencias", "comparacao"})
 ResultadoDaEtapa = Literal["concluida", "falhou"]
-DispositivoDaEtapa = Literal["gpu", "cpu"]
 
 
 class Etapa(BaseModel):
@@ -217,7 +217,7 @@ class Etapa(BaseModel):
     # Só a transcrição e a leitura da tela (#239): onde rodaram e quantas vezes o Workflows
     # tentou o Job com GPU (a espera por falta de GPU ou de cota); `None` nas outras etapas
     # e em etapa anterior ao campo.
-    dispositivo: DispositivoDaEtapa | None = None
+    dispositivo: Dispositivo | None = None
     tentativas_gpu: int | None = None
 
 

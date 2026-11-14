@@ -11,14 +11,17 @@ from api.decupagem import (
     ObjetoDoInventario,
     esquema_do_modelo,
 )
+from api.gemini import instrucao
 from api.inventario import (
+    INSTRUCAO_DA_CONVERSAO,
+    INSTRUCAO_DO_OLHAR,
     RespostaConvertida,
     RespostaVista,
-    _esquema,
     converter_do_florence,
+    esquema_obrigatorio,
     unir_repetidos,
 )
-from api.taxonomia_de_objetos import OPCOES_DE_TIPO
+from api.taxonomia_de_objetos import TIPOS_CANONICOS
 from api.tests.test_decupagem import decupagem_valida
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_inventario import (
@@ -45,18 +48,30 @@ def objeto(nome: str, **mais: Any) -> ObjetoDoInventario:
     return ObjetoDoInventario.model_validate(base | mais)
 
 
-def test_os_esquemas_do_modelo_trazem_o_tipo_em_enum_ao_lado_do_texto_livre() -> None:
+def test_os_esquemas_do_modelo_trazem_o_tipo_sem_enum_ao_lado_do_texto_livre() -> None:
+    # O Vertex recusa (400) o esquema com o enum de 278 tipos (#617): a lista vai na instrução.
     analise = esquema_do_modelo()["$defs"]["Objeto"]["properties"]
-    assert analise["tipo_canonico"]["enum"] == OPCOES_DE_TIPO
+    assert "enum" not in analise["tipo_canonico"]
     assert "tipo" in analise  # o texto livre continua
     for modelo in (RespostaConvertida, RespostaVista):
-        esquema = _esquema(modelo)
+        esquema = esquema_obrigatorio(modelo)
         descrito = esquema["$defs"][
             "ObjetoConvertido" if modelo is RespostaConvertida else "ObjetoVisto"
         ]
-        assert descrito["properties"]["tipo_canonico"]["enum"] == OPCOES_DE_TIPO
+        assert "enum" not in descrito["properties"]["tipo_canonico"]
         assert "tipo_canonico" in descrito["required"]
         assert "nome" in descrito["properties"]
+
+
+def test_a_lista_dos_tipos_aparece_na_instrucao_da_analise_e_do_inventario() -> None:
+    for texto in (
+        instrucao("Programa"),
+        INSTRUCAO_DA_CONVERSAO,
+        INSTRUCAO_DO_OLHAR,
+    ):
+        assert all(tipo in texto for tipo in TIPOS_CANONICOS)
+        # Só os nomes canônicos, da mesma fonte: nenhuma segunda lista escrita à mão.
+        assert ", ".join(TIPOS_CANONICOS) in texto
 
 
 def test_decupagem_antiga_sem_o_campo_novo_continua_valida() -> None:

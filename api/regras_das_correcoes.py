@@ -369,8 +369,13 @@ def desfazer(
     sem = aplicar(modelo, versao, restantes)
     if alvo.ancora.versao == versao:
         alvo_atual = alvo
-        antes = _valor_do_alvo(modelo, com, alvo)
+        # 422 só se o alvo falta nas duas decupagens. Se falta só na entregue com o
+        # desfazer, a própria troca o absorveu: o "antes" é o nome que ela deu.
         depois = _valor_do_alvo(modelo, sem, alvo)
+        try:
+            antes = _valor_do_alvo(modelo, com, alvo)
+        except ItemInexistente:
+            antes = alvo.depois
     else:
         casadas = reconciliar(modelo, versao, correcoes).casadas
         reapontada = next((c for c in casadas if c.id == alvo.id), None)
@@ -1009,6 +1014,8 @@ def reaplicar(
         item_id=item_id,
         motivo=motivo,
         ocorrencia=alvo.ocorrencia,
+        # Sem revalidar: a original foi validada e a leitura trata o que mudou depois.
+        catalogo_id=alvo.catalogo_id,
         antes=_valor_atual(
             aplicar(modelo, versao, correcoes),
             alvo.tipo,

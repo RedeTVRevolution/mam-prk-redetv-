@@ -22,7 +22,7 @@ from api import (
 from api.agent_retrieval import MODELO_DO_EMBEDDING
 from api.decupagem import VERSAO_ESQUEMA
 
-VERSAO_PIPELINE = "2026.11.12"
+VERSAO_PIPELINE = "2026.11.13"
 
 
 def _hash(texto: str) -> str:

@@ -1,5 +1,5 @@
 {
-  "versao_pipeline": "2026.11.12",
+  "versao_pipeline": "2026.11.13",
   "manifesto": {
     "esquema": "1.5",
     "modelos": {
@@ -14,10 +14,10 @@
       "modelo_forte": "standard"
     },
     "instrucoes": {
-      "analise": "22d9b8be0f68944e51015321be71e04226f7abbc95b79298671c2bfd0de03e7d",
+      "analise": "fab16b7008acbc72d437f129f405951ff0a71860db51e83399e46f0bc2d97d59",
       "modelo_forte": "ad94677b657ef48f3b5b2a2aa85f2dba0922cf2de38bcb6275afab2fb027980c",
-      "conversao_do_inventario": "80a8d2530c34323b138f8fd54075247a481becef5aacb05a53b1a2f26e91027c",
-      "olhar_do_inventario": "4c107336505236d57fb591977c563b30f7d2d46436cd3694ee97d2ac5a815bb2"
+      "conversao_do_inventario": "2e74c671588de96ec9c93ca72a007851dd79c3c195f7a14f53f989402d2c2579",
+      "olhar_do_inventario": "c4db173ac4130fa26a38b38f383894fbe9b00aca578546f1c921ef4842d722ca"
     },
     "motores": {
       "transcricao": {
