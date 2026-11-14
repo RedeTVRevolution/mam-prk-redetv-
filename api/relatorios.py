@@ -23,9 +23,16 @@ from api.copia_bigquery import (
     LinhaDoMomento,
     Transporte,
     parametro,
+    parametro_de_lista,
     transporte_http,
 )
-from api.jobs import RepositorioDeJobs, _confere_permissao
+from api.erros import lido
+from api.jobs import (
+    FiltroDeJobs,
+    RepositorioDeJobs,
+    _confere_permissao,
+)
+from api.texto_como_dado import Linha
 
 
 def _exige_ver_o_relatorio(request: Request, chamador: ChamadorAutenticado) -> Usuario:
@@ -38,6 +45,10 @@ def _exige_ver_o_relatorio(request: Request, chamador: ChamadorAutenticado) -> U
 
 
 PodeVerORelatorio = Annotated[Usuario, Depends(_exige_ver_o_relatorio)]
+
+
+# Cada `programa` repetido é uma linha só, com tamanho máximo (#621).
+ProgramaDoPedido = Annotated[str, Linha(100)]
 
 
 def confere_o_pedido[T](consulta: T | None, desde: date | None, ate: date | None) -> T:
@@ -107,7 +118,7 @@ def resposta_em_csv(texto: str, arquivo: str) -> Response:
 def linhas_da_copia(
     copia: CopiaEmMemoria,
     tipos: Sequence[str],
-    programa: str | None,
+    programas: Sequence[str],
     desde: date | None,
     ate: date | None,
 ) -> Iterator[LinhaDoMomento]:
@@ -117,7 +128,7 @@ def linhas_da_copia(
             dia = x.data_de_exibicao
             if x.tipo not in tipos:
                 continue
-            if programa is not None and x.programa != programa:
+            if programas and x.programa not in programas:
                 continue
             if (desde or ate) and dia is None:
                 continue
@@ -132,7 +143,7 @@ def consultar_no_bigquery(
     *,
     colunas: str,
     tipos: Sequence[str],
-    programa: str | None,
+    programas: Sequence[str],
     desde: date | None,
     ate: date | None,
     unnest_das_pessoas: bool = False,
@@ -152,9 +163,9 @@ def consultar_no_bigquery(
     lista_de_tipos = ", ".join(f"'{t}'" for t in tipos)
     onde = [f"t.tipo IN ({lista_de_tipos})", *condicoes]
     parametros = list(parametros)
-    if programa is not None:
-        onde.append("t.programa = @programa")
-        parametros.append(parametro("programa", programa))
+    if programas:
+        onde.append("t.programa IN UNNEST(@programas)")
+        parametros.append(parametro_de_lista("programas", programas))
     for nome, dia, comparacao in (("desde", desde, ">="), ("ate", ate, "<=")):
         if dia is not None:
             onde.append(f"t.data_de_exibicao {comparacao} @{nome}")
@@ -229,6 +240,21 @@ def poe_o_nome_dos_videos(
     nomes = {j.id: j.nome for j in jobs if j.lixeira is None}
     for item in itens:
         item.nome = nomes.get(item.job_id)
+
+
+def ids_dos_jobs_na_lixeira(repositorio: RepositorioDeJobs) -> set[str]:
+    """Os Jobs na lixeira (#619), pela consulta da tela da lixeira, sem limite. Os
+    relatórios tiram as linhas deles depois do cache das somas, uma leitura por pedido."""
+    return {
+        j.id
+        for j in lido(
+            lambda: (
+                repositorio.consultar(
+                    FiltroDeJobs(na_lixeira=True, so_os_da_lista=True)
+                ).jobs
+            )
+        )
+    }
 
 
 def config_e_transporte_do_ambiente(

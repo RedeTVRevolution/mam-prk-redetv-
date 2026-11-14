@@ -382,7 +382,9 @@ def criar_rotas_dos_programas(
         # Antes de gravar: todos os vídeos com o nome antigo, inclusive os da lixeira,
         # mais os que a troca que falhou deixou pendentes.
         herdados = anterior.pendentes if anterior is not None else []
-        achados = jobs.consultar(FiltroDeJobs(programa=antes.nome, na_lixeira=None))
+        achados = jobs.consultar(
+            FiltroDeJobs(programas=frozenset({antes.nome}), na_lixeira=None)
+        )
         ids = list(dict.fromkeys([*herdados, *(j.id for j in achados.jobs)]))
         nova = RenomeacaoDoPrograma(
             id=uuid.uuid4().hex,
@@ -507,7 +509,7 @@ def criar_rotas_dos_programas(
         programa = programas.obter(id)
         if programa is None:
             raise HTTPException(404, "Programa inexistente")
-        achados = jobs.consultar(FiltroDeJobs(programa=programa.nome))
+        achados = jobs.consultar(FiltroDeJobs(programas=frozenset({programa.nome})))
         return ImpactoDoPrograma(videos=len(achados.jobs))
 
     @rotas.delete("/{id}", status_code=204)

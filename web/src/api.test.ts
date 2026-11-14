@@ -157,7 +157,7 @@ test('o ranking do tempo de tela pede uma página com o cursor e devolve o próx
     }),
   )
   const { api } = await cliente()
-  const filtros = { programa: 'TV Fama', de: '2026-10-01', ate: '' }
+  const filtros = { programas: ['TV Fama', 'Leo Dias'], de: '2026-10-01', ate: '' }
 
   const primeira = await api.rankingDoTempoDeTela(filtros)
   const segunda = await api.rankingDoTempoDeTela(filtros, 'NTA')
@@ -165,7 +165,7 @@ test('o ranking do tempo de tela pede uma página com o cursor e devolve o próx
   expect([primeira.proximo, segunda.proximo]).toEqual(['NTA', null])
   expect(pedidos[0].get('limite')).toBe('50')
   expect(pedidos[0].get('cursor')).toBeNull()
-  expect(pedidos[0].get('programa')).toBe('TV Fama')
+  expect(pedidos[0].getAll('programa')).toEqual(['TV Fama', 'Leo Dias'])
   expect(pedidos[0].get('desde')).toBe('2026-10-01')
   expect(pedidos[1].get('cursor')).toBe('NTA')
 })
@@ -180,7 +180,7 @@ test('os vídeos de uma pessoa vêm de /tempo-de-tela/videos, com o mesmo filtro
   )
   const { api } = await cliente()
 
-  const pagina = await api.videosDaPessoa({ programa: '', de: '', ate: '2026-10-31' }, 'c1', 'MjU')
+  const pagina = await api.videosDaPessoa({ programas: [], de: '', ate: '2026-10-31' }, 'c1', 'MjU')
 
   expect(pagina).toEqual({ videos: [{ job_id: 'v1' }], proximo: 'MjU' })
   expect(pedidos[0].get('pessoa_id')).toBe('c1')
@@ -189,7 +189,7 @@ test('os vídeos de uma pessoa vêm de /tempo-de-tela/videos, com o mesmo filtro
   expect(pedidos[0].get('limite')).toBe('25')
 })
 
-test('o ranking de marcas leva o tipo, e as inserções de uma marca, o tipo da célula', async () => {
+test('o ranking de marcas leva os tipos marcados, e as inserções de uma marca, o tipo da célula', async () => {
   const pedidos: URLSearchParams[] = []
   servidor.use(
     http.get('/v1/relatorios/marcas', ({ request }) => {
@@ -202,15 +202,15 @@ test('o ranking de marcas leva o tipo, e as inserções de uma marca, o tipo da 
     }),
   )
   const { api } = await cliente()
-  const filtros = { programa: '', de: '', ate: '', tipo: 'intervalo' }
+  const filtros = { programas: [], de: '', ate: '', tipos: ['intervalo', 'testemunhal'] }
 
   expect((await api.rankingDeMarcas(filtros)).proximo).toBeNull()
-  const lista = await api.insercoesDaMarca(filtros, 'Ambev', 'testemunhal')
+  const lista = await api.insercoesDaMarca(filtros, 'Ambev', ['testemunhal'])
 
-  expect(pedidos[0].get('tipo')).toBe('intervalo')
+  expect(pedidos[0].getAll('tipo')).toEqual(['intervalo', 'testemunhal'])
   expect(pedidos[0].get('limite')).toBe('50')
   expect(pedidos[1].get('marca')).toBe('Ambev')
-  expect(pedidos[1].get('tipo')).toBe('testemunhal')
+  expect(pedidos[1].getAll('tipo')).toEqual(['testemunhal'])
   expect(pedidos[1].get('limite')).toBe('25')
   expect(lista).toEqual({ insercoes: [], proximo: 'MjU' })
 })

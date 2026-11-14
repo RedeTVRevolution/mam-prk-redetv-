@@ -46,3 +46,9 @@ def test_colecao_de_texto_chega_aos_tres_escritores_e_aos_outputs() -> None:
     makefile = (MODULO.parents[2] / "Makefile").read_text()
     assert "BUSCA_COLECAO_DE_TEXTO=" in makefile
     assert "output -raw busca_colecao_de_texto" in makefile
+
+
+def test_o_padrao_da_cota_acompanha_a_cota_do_dev_em_6000() -> None:
+    # As duas cotas `data_object_writes` (planos e texto) estão em 6.000/min no dev (#630).
+    bloco = _bloco(MAIN, 'variable "cota_de_escrita_da_busca"')
+    assert re.search(r"default\s*=\s*6000\b", bloco)

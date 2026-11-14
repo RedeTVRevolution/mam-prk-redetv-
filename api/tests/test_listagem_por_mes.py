@@ -14,7 +14,7 @@ from api.nuvem import (
     RepositorioFirestore,
     listagem_por_mes_do_ambiente,
     meses_do_periodo,
-    meses_para_o_firestore,
+    plano_da_consulta,
 )
 from api.tests.test_nuvem import EMULADOR_FIRESTORE
 
@@ -79,13 +79,18 @@ def test_meses_do_periodo_atravessa_a_virada_do_ano() -> None:
 
 class TestLimitesDoFirestore:
     def test_periodo_simples_usa_os_meses(self) -> None:
-        assert meses_para_o_firestore(_filtro()) == ["2026-08", "2026-09", "2026-10"]
+        assert plano_da_consulta(_filtro(), True)[0] == [
+            "2026-08",
+            "2026-09",
+            "2026-10",
+        ]
 
     def test_sem_uma_ponta_do_periodo_nao_usa(self) -> None:
         assert (
-            meses_para_o_firestore(FiltroDeJobs(exibicao_de=date(2026, 8, 1))) is None
+            plano_da_consulta(FiltroDeJobs(exibicao_de=date(2026, 8, 1)), True)[0]
+            is None
         )
-        assert meses_para_o_firestore(FiltroDeJobs()) is None
+        assert plano_da_consulta(FiltroDeJobs(), True)[0] is None
 
     def test_mais_de_30_disjuncoes_nao_usa(self) -> None:
         # 31 meses, sem estado: 31 disjunções.
@@ -93,7 +98,7 @@ class TestLimitesDoFirestore:
             exibicao_de=date(2024, 1, 1), exibicao_ate=date(2026, 7, 31)
         )
         assert len(meses_do_periodo(date(2024, 1, 1), date(2026, 7, 31))) == 31
-        assert meses_para_o_firestore(filtro) is None
+        assert plano_da_consulta(filtro, True)[0] is None
 
     def test_5_meses_x_6_estados_com_programa_sistema_e_palavra_passa_dos_100_componentes(
         self,
@@ -104,17 +109,19 @@ class TestLimitesDoFirestore:
             estados=frozenset(
                 {"concluido", "falhou", "cancelado", "processando", "enviado", "fila"}  # type: ignore[arg-type]
             ),
-            programa="TV Fama",
+            programas=frozenset({"TV Fama"}),
             sistema="mam",
             palavras=("fama",),
         )
         assert len(filtro.estados) == 6
-        assert meses_para_o_firestore(filtro) is None
+        assert plano_da_consulta(filtro, True)[0] is None
 
     def test_cabe_no_limite_de_componentes(self) -> None:
         # 3 meses × 2 estados × (programa, estado, mês + ordem + id) = 6 × 5 = 30.
-        filtro = _filtro(estados=frozenset({"concluido", "falhou"}), programa="TV Fama")
-        assert meses_para_o_firestore(filtro) == ["2026-08", "2026-09", "2026-10"]
+        filtro = _filtro(
+            estados=frozenset({"concluido", "falhou"}), programas=frozenset({"TV Fama"})
+        )
+        assert plano_da_consulta(filtro, True)[0] == ["2026-08", "2026-09", "2026-10"]
 
 
 @pytest.mark.parametrize(
@@ -169,7 +176,7 @@ class TestConsulta:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         filtros, ordem = self._campos_da_consulta(
-            monkeypatch, True, _filtro(programa="TV Fama")
+            monkeypatch, True, _filtro(programas=frozenset({"TV Fama"}))
         )
         assert filtros == ["programa:EQUAL", "mes_exibicao:IN"]
         assert ordem == ["criado_em"]

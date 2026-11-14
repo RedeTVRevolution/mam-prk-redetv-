@@ -25,7 +25,7 @@ import { Falha } from '../comum/Falha.tsx'
 import { GradeVirtual } from '../comum/GradeVirtual.tsx'
 import { MandarParaLixeira } from '../comum/MandarParaLixeira.tsx'
 import { Reprocessar } from '../comum/Reprocessar.tsx'
-import { useApi, useProgramas } from '../consultas.ts'
+import { opcoesDosProgramas, useApi, useProgramas } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Slider } from '../ui/slider.tsx'
@@ -173,10 +173,11 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
             <Faceta
               rotulo="Programa"
               Icone={IconBroadcast}
-              unico
-              opcoes={programas.map((p) => ({ valor: p, rotulo: p }))}
-              valor={filtros.programa ? [filtros.programa] : []}
-              aoMudar={([p]) => mudar({ programa: p ?? '' })}
+              tudoMarcado
+              // O programa do endereço que não está na lista (renomeado, removido) continua marcado.
+              opcoes={opcoesDosProgramas(programas, filtros.programas)}
+              valor={filtros.programas}
+              aoMudar={(p) => mudar({ programas: p })}
             />
             <Faceta rotulo="Estado" Icone={IconCircleDot} opcoes={ESTADOS} valor={filtros.estado} aoMudar={(estado) => mudar({ estado })} />
             <Periodo de={filtros.de} ate={filtros.ate} aoMudar={mudar} />

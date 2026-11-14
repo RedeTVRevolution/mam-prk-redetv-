@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { tempoDaEntradaMs } from './entradas.ts'
+import { casaComOsFiltrosDoCliente, consultaDasEntradas, filtrosDasEntradas, filtrosParaEnderecoDasEntradas, SEM_FILTROS_DAS_ENTRADAS, tempoDaEntradaMs } from './entradas.ts'
 import type { Job } from './jobs.ts'
 
 const JOB: Job = {
@@ -102,4 +102,63 @@ test.each([
     ],
   }
   expect(tempoDaEntradaMs(job, AGORA)).toBe(AGORA - Date.parse('2026-11-03T14:00:00Z'))
+})
+
+// 14/11 12:00 em São Paulo; e 13/11 23:00 em São Paulo (já é 14/11 em UTC).
+const MEIO_DIA = new Date('2026-11-14T15:00:00Z')
+const PERTO_DA_MEIA_NOITE = new Date('2026-11-14T02:00:00Z')
+
+test('sem período no endereço, a aba abre na última semana: hoje menos 6 dias, no dia de São Paulo', () => {
+  expect(filtrosDasEntradas('', MEIO_DIA)).toMatchObject({ de: '2026-11-08', ate: '' })
+  expect(filtrosDasEntradas('', PERTO_DA_MEIA_NOITE)).toMatchObject({ de: '2026-11-07', ate: '' })
+  // Data malformada vira vazio, como nas outras telas.
+  expect(filtrosDasEntradas('?de=lixo', MEIO_DIA)).toMatchObject({ de: '', ate: '' })
+})
+
+test('de= e ate= vazios são "sem período"; ?ate=X sozinho é início aberto; um período explícito vale como está', () => {
+  expect(filtrosDasEntradas('?de=&ate=', MEIO_DIA)).toMatchObject({ de: '', ate: '' })
+  expect(filtrosDasEntradas('?ate=2026-10-05', MEIO_DIA)).toMatchObject({ de: '', ate: '2026-10-05' })
+  expect(filtrosDasEntradas('?de=2026-10-01&ate=2026-10-05', MEIO_DIA)).toMatchObject({ de: '2026-10-01', ate: '2026-10-05' })
+})
+
+test('o endereço distingue o padrão (sem de nem ate) de "sem período" (de=&ate=) e sobrevive a recarregar', () => {
+  const tudo = filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS }, MEIO_DIA)
+  expect(tudo).toBe('?de=&ate=')
+  expect(filtrosDasEntradas(tudo, MEIO_DIA).de).toBe('')
+  const periodo = filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS, de: '2026-10-01', ate: '2026-10-05' }, MEIO_DIA)
+  expect(periodo).toBe('?de=2026-10-01&ate=2026-10-05')
+  expect(filtrosDasEntradas(periodo, MEIO_DIA)).toMatchObject({ de: '2026-10-01', ate: '2026-10-05' })
+  expect(filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS, ate: '2026-10-05' }, MEIO_DIA)).toBe('?de=&ate=2026-10-05')
+  // De igual ao padrão com ate: sobrevive a reabrir em outro dia.
+  const comAte = filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS, de: '2026-11-08', ate: '2026-11-10' }, MEIO_DIA)
+  expect(filtrosDasEntradas(comAte, PERTO_DA_MEIA_NOITE)).toMatchObject({ de: '2026-11-08', ate: '2026-11-10' })
+  // O padrão não vai escrito: o link de hoje não congela a semana de hoje.
+  expect(filtrosParaEnderecoDasEntradas(filtrosDasEntradas('', MEIO_DIA), MEIO_DIA)).toBe('')
+})
+
+test('o período vai à API; sem período, não vai nada', () => {
+  const consulta = (f: object, cursor: string | null = null) => new URLSearchParams(consultaDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS, ...f }, cursor))
+  expect(consulta({ de: '2026-10-01', ate: '2026-10-05' }).get('enviado_de')).toBe('2026-10-01')
+  expect(consulta({ de: '2026-10-01', ate: '2026-10-05' }).get('enviado_ate')).toBe('2026-10-05')
+  expect(consulta({}).has('enviado_de')).toBe(false)
+  expect(consulta({}).has('enviado_ate')).toBe(false)
+})
+
+test('o filtro do cliente não esconde mais por período, só os que não são de pessoa na lista "pessoas"', () => {
+  const antigo = { ...JOB, criado_em: '2020-01-01T12:00:00Z', enviado_por: { tipo: 'pessoa' as const, nome: null } }
+  expect(casaComOsFiltrosDoCliente(antigo, { ...SEM_FILTROS_DAS_ENTRADAS, de: '2026-11-01', ate: '2026-11-05' })).toBe(true)
+  expect(casaComOsFiltrosDoCliente({ ...antigo, enviado_por: { tipo: 'sistema', nome: 'x' } }, { ...SEM_FILTROS_DAS_ENTRADAS, por: 'pessoas' })).toBe(false)
+})
+
+test('só com `ate` no endereço, o início fica aberto: o padrão da semana não entra', () => {
+  expect(filtrosDasEntradas('?ate=2026-10-05', MEIO_DIA)).toMatchObject({ de: '', ate: '2026-10-05' })
+  expect(filtrosDasEntradas('?de=lixo&ate=2026-10-05', MEIO_DIA)).toMatchObject({ de: '', ate: '2026-10-05' })
+})
+
+test('o `de` igual ao padrão só some do endereço quando não há `ate`', () => {
+  const f = { ...SEM_FILTROS_DAS_ENTRADAS, de: '2026-11-08', ate: '2026-11-08' }
+  const endereco = filtrosParaEnderecoDasEntradas(f, MEIO_DIA)
+  expect(endereco).toBe('?de=2026-11-08&ate=2026-11-08')
+  // Reaberto no dia seguinte, o período é o mesmo (antes virava 09/11 a 08/11 e a API dava 422).
+  expect(filtrosDasEntradas(endereco, new Date('2026-11-15T15:00:00Z'))).toMatchObject({ de: '2026-11-08', ate: '2026-11-08' })
 })

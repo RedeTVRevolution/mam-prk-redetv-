@@ -89,7 +89,8 @@ export type Ordem = 'enviado' | 'exibicao'
 
 export interface FiltrosDoAcervo {
   q: string
-  programa: string
+  /** Os programas marcados; vazio é tudo marcado (nada vai ao endereço nem à API). */
+  programas: string[]
   de: string
   ate: string
   estado: string[]
@@ -98,7 +99,7 @@ export interface FiltrosDoAcervo {
 
 export const SEM_FILTROS: FiltrosDoAcervo = {
   q: '',
-  programa: '',
+  programas: [],
   de: '',
   ate: '',
   estado: [],
@@ -114,14 +115,14 @@ export interface PaginaDoAcervo {
 export const POR_PAGINA = 50
 
 export function haFiltro(f: FiltrosDoAcervo): boolean {
-  return Boolean(f.q || f.programa || f.de || f.ate || f.estado.length)
+  return Boolean(f.q || f.programas.length || f.de || f.ate || f.estado.length)
 }
 
 /** Os filtros na query da URL do app (`/acervo?q=&programa=&de=&ate=&estado=&ordem=`). */
 export function filtrosParaBusca(f: FiltrosDoAcervo): string {
   const p = new URLSearchParams()
   if (f.q) p.set('q', f.q)
-  if (f.programa) p.set('programa', f.programa)
+  for (const programa of f.programas) p.append('programa', programa)
   if (f.de) p.set('de', f.de)
   if (f.ate) p.set('ate', f.ate)
   for (const e of f.estado) p.append('estado', e)
@@ -140,7 +141,7 @@ export function filtrosDaBusca(busca: string): FiltrosDoAcervo {
   }
   return {
     q: p.get('q') ?? '',
-    programa: p.get('programa') ?? '',
+    programas: [...new Set(p.getAll('programa').filter(Boolean))],
     de: data('de'),
     ate: data('ate'),
     // Estado desconhecido num link editado à mão sai do filtro, em vez de fazer a API recusar.
@@ -160,7 +161,7 @@ export function dataDeExibicao(data: string | null | undefined): string {
 export function filtrosParaApi(f: FiltrosDoAcervo, cursor: string | null): string {
   const p = new URLSearchParams({ limite: String(POR_PAGINA), ordem: f.ordem })
   if (f.q) p.set('q', f.q)
-  if (f.programa) p.set('programa', f.programa)
+  for (const programa of f.programas) p.append('programa', programa)
   if (f.de) p.set('exibicao_de', f.de)
   if (f.ate) p.set('exibicao_ate', f.ate)
   for (const e of f.estado) p.append('estado', e)

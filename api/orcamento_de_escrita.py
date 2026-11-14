@@ -8,9 +8,11 @@ O documento tem o nome da coleção da busca (que vem da configuração), então
 diferentes (a de medida) têm orçamentos diferentes. Cada reserva vai como um mapa
 `{quando, objetos}`: o Firestore não aceita lista dentro de lista.
 
-Uma reserva cuja escrita falhou não é devolvida: sai sozinha da janela de 60 s. O
-relógio é o de parede (`time.time`), igual em todos os processos; a folga de
-`FRACAO_DA_COTA` cobre a diferença entre os relógios e o do serviço.
+Uma reserva cuja escrita falhou não é devolvida: sai sozinha da janela de 60 s. Cada
+processo usa o seu relógio (`time.time`), e os relógios diferem. A hora adotada é a maior
+entre a própria e a das reservas gravadas (o `max()` de `reservar_na_janela`, #629): quem
+chega com o relógio atrasado não descarta reservas que ainda contam para ele. A folga de
+`FRACAO_DA_COTA` cobre o resto da diferença entre os relógios e o do serviço.
 """
 
 import random
@@ -43,7 +45,10 @@ def reservar_na_janela(
 ) -> tuple[list[Reserva], float]:
     """As reservas que sobram na janela e a espera: 0 se `objetos` coube (e então a
     reserva já vai na lista). Com a janela vazia o lote entra mesmo acima do limite,
-    senão um lote maior que ele nunca sairia."""
+    senão um lote maior que ele nunca sairia. O tempo do orçamento não anda para trás:
+    o "agora" é o maior entre o do chamador e o da reserva mais recente, para quem chega
+    com a hora atrasada não descartar reservas que ainda contam para ele."""
+    agora = max([agora, *(r[0] for r in reservas)])
     vivas = sorted(r for r in reservas if r[0] > agora - JANELA_S)
     gasto = sum(n for _, n in vivas)
     saidas = 0

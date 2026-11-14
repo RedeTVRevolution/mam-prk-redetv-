@@ -402,7 +402,7 @@ export interface ClienteDaApi {
   /** Uma página do ranking de marcas, com os totais do período; `cursor` é o `proximo` da página anterior. */
   rankingDeMarcas(filtros: FiltrosDeMarcas, cursor?: string): Promise<PaginaDeMarcas>
   /** As inserções de uma marca no mesmo filtro (`tipo` estreita só a lista), só quando a linha é aberta. */
-  insercoesDaMarca(filtros: FiltrosDeMarcas, marca: string, tipo?: string, cursor?: string): Promise<PaginaDeInsercoes>
+  insercoesDaMarca(filtros: FiltrosDeMarcas, marca: string, tipos?: string[], cursor?: string): Promise<PaginaDeInsercoes>
   nomes: ClienteDeNomes
   fusao: ClienteDaFusao
   renomeacao: ClienteDaRenomeacao
@@ -587,16 +587,16 @@ export function criarClienteDaApi(
     custoDoPainel: (filtros) => chamar(`/v1/painel/custo?${parametrosDoPainel(filtros)}`),
     custoDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/custo?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
     buscasDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/buscas?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
-    marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipo })}`),
+    marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipos })}`),
     marcasEmCsv: async (filtros) =>
-      (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipo })}`)).blob(),
+      (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipos })}`)).blob(),
     rankingDeMarcas: async (filtros, cursor = '') => {
-      const extras = { tipo: filtros.tipo, limite: String(POR_PAGINA_DO_RANKING), cursor }
+      const extras = { tipo: filtros.tipos, limite: String(POR_PAGINA_DO_RANKING), cursor }
       const resposta = await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, extras)}`)
       return { ...(await resposta.json()), proximo: resposta.headers.get('X-Proximo-Cursor') }
     },
-    insercoesDaMarca: async (filtros, marca, tipo = filtros.tipo, cursor = '') => {
-      const extras = { marca, tipo, limite: String(POR_PAGINA_DO_DETALHE), cursor }
+    insercoesDaMarca: async (filtros, marca, tipos = filtros.tipos, cursor = '') => {
+      const extras = { marca, tipo: tipos, limite: String(POR_PAGINA_DO_DETALHE), cursor }
       const resposta = await pedir(`/v1/relatorios/marcas/insercoes?${parametrosDoRelatorio(filtros, undefined, extras)}`)
       return { insercoes: await resposta.json(), proximo: resposta.headers.get('X-Proximo-Cursor') }
     },

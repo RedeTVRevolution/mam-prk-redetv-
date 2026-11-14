@@ -144,14 +144,15 @@ variable "dimensao_dos_vetores" {
   default     = 256
 }
 
-# A cota `vectorsearch.googleapis.com/data_object_writes` da coleção de momentos, lida no
-# Service Usage do dev (#411). Vale para a coleção inteira; a indexação grava abaixo dela
+# A cota `vectorsearch.googleapis.com/data_object_writes` de cada coleção da busca (planos e
+# texto, as duas em 6.000 no dev desde 14/11, antes 3.000; #630). Vale para a coleção
+# inteira; a indexação grava abaixo dela
 # (BUSCA_COTA_DE_ESCRITA, também no mam-web e no mam-purga) e, no 429 de dois vídeos
 # juntos, espera e tenta de novo.
 variable "cota_de_escrita_da_busca" {
   description = "Objetos por minuto que a coleção da busca aceita gravar"
   type        = number
-  default     = 3000
+  default     = 6000
 }
 
 # O índice ANN da descrição (réplica dedicada, cobrada por hora). Em false a busca vai

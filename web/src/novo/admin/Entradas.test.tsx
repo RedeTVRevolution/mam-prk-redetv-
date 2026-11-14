@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -389,6 +389,36 @@ test('a capa que chega na atualização entra na linha que não tinha capa', asy
   expect(linha.querySelector('img')?.getAttribute('src')).toBe('/capa-nova.jpg')
 })
 
+test('trocar o período mantém as capas e o polling do andamento não mistura as listas', async () => {
+  const andando = (id: string) => job({ id, nome: `${id}.mp4`, estado: 'analisando', etapa_atual: 'analise', capa_url: `/capa-${id}.jpg` })
+  servidor.use(
+    http.get('/v1/jobs', ({ request }) => {
+      const url = new URL(request.url)
+      consultas.push(url.search)
+      return HttpResponse.json([andando(url.searchParams.get('enviado_de') === '2026-10-01' ? 'b' : 'a')])
+    }),
+    // Como a API: o andamento não traz capa_url.
+    http.get('/v1/jobs/andamento', ({ request }) => {
+      const ids = new URL(request.url).searchParams.get('ids')!.split(',')
+      pedidos.push(ids)
+      return HttpResponse.json(ids.map((id) => ({ ...andando(id), etapa_atual: 'transcricao', capa_url: undefined })))
+    }),
+  )
+  await abrir({ endereco: '/admin/entradas?de=2026-11-01' })
+  await waitFor(() => expect(pedidos.some((p) => p.includes('a'))).toBe(true))
+
+  pedidos.length = 0
+  fireEvent.change(campo('Enviado de'), { target: { value: '2026-10-01' } })
+  const linha = await linhaDe('b.mp4')
+  await waitFor(() => expect(within(linha).getByText('Transcrição')).toBeTruthy())
+  await waitFor(() => expect(pedidos.length).toBeGreaterThan(1))
+  expect(linha.querySelector('img')?.getAttribute('src')).toBe('/capa-b.jpg')
+  expect(screen.queryByText('a.mp4')).toBeNull()
+  // Um pedido de andamento do período antigo, ainda no ar, pode cair logo após a troca: só os
+  // seguintes contam.
+  expect(pedidos.slice(1).every((p) => p.join() === 'b')).toBe(true)
+})
+
 test('a linha mostra a capa, o estado com ícone e a régua das etapas; o filtro de estado vai à API', async () => {
   jobs = [
     job({ capa_url: 'https://exemplo.invalid/capa.jpg', etapas: [{ nome: 'validacao', ...ETAPA_OK }, { nome: 'transcricao', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] }),
@@ -445,4 +475,68 @@ test.each(['falhou', 'concluido'] as const)('não abre o reprocessamento se o pr
   await userEvent.click(segundo)
   expect(segundo.disabled).toBe(true)
   expect(screen.queryByLabelText(/^Motivo/)).toBeNull()
+})
+
+const campo = (nome: string) => screen.getByLabelText(nome) as HTMLInputElement
+
+test('sem período no endereço, abre na última semana e pede à API o enviado_de (dia de São Paulo)', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-14T02:00:00Z')) // 13/11 23:00 em São Paulo
+  try {
+    jobs = [job({ id: 'a', nome: 'recente.mp4' })]
+    await abrir()
+    await linhaDe('recente.mp4')
+    expect(new URLSearchParams(consultas[0]).get('enviado_de')).toBe('2026-11-07')
+    expect(new URLSearchParams(consultas[0]).has('enviado_ate')).toBe(false)
+    expect(campo('Enviado de').value).toBe('2026-11-07')
+    expect(campo('Enviado até').value).toBe('')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('de= e ate= vazios abrem sem período e não manda enviado_de nem enviado_ate', async () => {
+  jobs = [job({ id: 'a', nome: 'antigo.mp4', criado_em: '2020-01-01T12:00:00Z' })]
+  await abrir({ endereco: '/admin/entradas?de=&ate=' })
+  await linhaDe('antigo.mp4')
+  expect(consultas[0]).not.toContain('enviado_')
+  expect(campo('Enviado de').value).toBe('')
+})
+
+test('a tela mostra o que a API devolveu, mesmo fora do período: o filtro é do servidor', async () => {
+  jobs = [job({ id: 'a', nome: 'antigo.mp4', criado_em: '2020-01-01T12:00:00Z' })]
+  await abrir({ endereco: '/admin/entradas?de=2026-10-01&ate=2026-10-05' })
+  await linhaDe('antigo.mp4')
+  expect(new URLSearchParams(consultas[0]).get('enviado_de')).toBe('2026-10-01')
+  expect(new URLSearchParams(consultas[0]).get('enviado_ate')).toBe('2026-10-05')
+})
+
+test('trocar o período reinicia o cursor e a escolha fica no endereço; limpar o "de" vira de=&ate=', async () => {
+  servidor.use(
+    http.get('/v1/jobs', ({ request }) => {
+      const url = new URL(request.url)
+      consultas.push(url.search)
+      const nome = url.searchParams.get('enviado_de') === '2026-10-01' ? 'velho.mp4' : 'novo.mp4'
+      return HttpResponse.json([job({ id: nome, nome })], { headers: { 'X-Proximo-Cursor': 'c2' } })
+    }),
+  )
+  await abrir({ endereco: '/admin/entradas?de=2026-11-01' })
+  await linhaDe('novo.mp4')
+  await userEvent.click(screen.getByRole('button', { name: 'Carregar mais' }))
+  await waitFor(() => expect(consultas.some((c) => c.includes('cursor=c2'))).toBe(true))
+
+  consultas.length = 0
+  fireEvent.change(campo('Enviado de'), { target: { value: '2026-10-01' } })
+  await linhaDe('velho.mp4')
+  expect(location.search).toContain('de=2026-10-01')
+  expect(consultas).toHaveLength(1)
+  expect(consultas[0]).toContain('enviado_de=2026-10-01')
+  expect(consultas[0]).not.toContain('cursor=')
+  expect(screen.queryByText('novo.mp4')).toBeNull()
+
+  consultas.length = 0
+  fireEvent.change(campo('Enviado de'), { target: { value: '' } })
+  await linhaDe('novo.mp4')
+  expect(location.search).toContain('de=&ate=')
+  expect(consultas[0]).not.toContain('enviado_de')
 })

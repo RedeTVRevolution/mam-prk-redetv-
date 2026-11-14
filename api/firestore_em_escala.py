@@ -262,12 +262,12 @@ def casos(hoje: date) -> list[Caso]:
     ano = {"exibicao_de": hoje - timedelta(days=365), "exibicao_ate": hoje}
     cinco = {"exibicao_de": hoje - timedelta(days=5 * 365), "exibicao_ate": hoje}
     mes = {"exibicao_de": hoje - timedelta(days=30), "exibicao_ate": hoje}
-    grande = {"programa": PROGRAMA_GRANDE}
+    grande = {"programas": frozenset({PROGRAMA_GRANDE})}
     return [
         f("sem filtro"),
         f("sistema comum", sistema="Playout"),
         f("programa grande", **grande),
-        f("programa pequeno", programa=PROGRAMA_PEQUENO),
+        f("programa pequeno", programas=frozenset({PROGRAMA_PEQUENO})),
         f("estado falhou (raro)", estados=falhou),
         f("estado falhou+cancelado", estados=falhou | cancelado),
         f("palavra comum", palavras=(PALAVRA_COMUM,)),
