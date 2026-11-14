@@ -1,5 +1,6 @@
 import { POR_PAGINA, finalizando, type Job } from './jobs.ts'
 import { ESTADOS_DO_JOB } from './cores.ts'
+import { periodoDoEndereco, periodoPadrao, poePeriodoNoEndereco } from './periodoPadrao.ts'
 
 // A aba Entradas da administração: os filtros que viajam na URL e as contas das linhas.
 
@@ -14,9 +15,7 @@ export interface FiltrosDasEntradas {
 
 export const SEM_FILTROS_DAS_ENTRADAS: FiltrosDasEntradas = { por: '', estado: [], de: '', ate: '' }
 
-const DATA = /^\d{4}-\d{2}-\d{2}$/
 const PREFIXO_DO_SISTEMA = 'sistema:'
-const SEM_PERIODO = 'tudo'
 
 export function porSistema(nome: string): string {
   return `${PREFIXO_DO_SISTEMA}${nome}`
@@ -31,43 +30,32 @@ export function haFiltroDeEntradas(f: FiltrosDasEntradas): boolean {
   return Boolean(f.por || f.estado.length || f.de || f.ate)
 }
 
+/** O padrão das Entradas: a última semana, sem fim. */
+function periodoPadraoDasEntradas(agora: Date): { de: string; ate: string } {
+  return { de: periodoPadrao(agora).de, ate: '' }
+}
+
 /**
- * Os filtros na query da URL (`?por=&estado=&de=&ate=`). Sem `de` o endereço vale o padrão
- * (a última semana, que não vai escrita: o link não congela a semana); "sem período" é `de=tudo`.
+ * Os filtros na query da URL (`?por=&estado=&de=&ate=`). O período padrão não vai escrito (o link
+ * não congela a semana); qualquer outro vai sempre, e "ver tudo" é `?de=&ate=`.
  */
 export function filtrosParaEnderecoDasEntradas(f: FiltrosDasEntradas, agora: Date = new Date()): string {
   const p = new URLSearchParams()
   if (f.por) p.set('por', f.por)
   for (const e of f.estado) p.append('estado', e)
-  if (f.ate || f.de !== inicioDaUltimaSemana(agora)) p.set('de', f.de || SEM_PERIODO)
-  if (f.ate) p.set('ate', f.ate)
+  if (f.de !== periodoPadraoDasEntradas(agora).de || f.ate) poePeriodoNoEndereco(p, f)
   const texto = p.toString()
   return texto ? `?${texto}` : ''
-}
-
-// Um formatador só: o `toLocaleDateString` com fuso monta um a cada chamada, e a lista chama por linha a cada desenho.
-const DIA_EM_SAO_PAULO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' })
-
-/** O padrão da aba: hoje menos 6 dias, no dia de São Paulo (`AAAA-MM-DD`). */
-function inicioDaUltimaSemana(agora: Date): string {
-  const hoje = DIA_EM_SAO_PAULO.format(agora)
-  return new Date(Date.parse(`${hoje}T00:00:00Z`) - 6 * 86_400_000).toISOString().slice(0, 10)
 }
 
 export function filtrosDasEntradas(busca: string, agora: Date = new Date()): FiltrosDasEntradas {
   const p = new URLSearchParams(busca)
   const por = p.get('por') ?? ''
-  const data = (nome: string) => {
-    const valor = p.get(nome) ?? ''
-    return DATA.test(valor) ? valor : ''
-  }
   return {
     por: por === 'pessoas' || sistemaDoFiltro(por) !== null ? por : '',
     // Estado desconhecido num link editado à mão sai do filtro, em vez de fazer a API recusar.
     estado: [...new Set(p.getAll('estado'))].filter((e) => Object.hasOwn(ESTADOS_DO_JOB, e)),
-    // O padrão da semana só vale sem período nenhum: com `ate`, o início fica aberto.
-    de: p.get('de') === SEM_PERIODO ? '' : data('de') || (data('ate') ? '' : inicioDaUltimaSemana(agora)),
-    ate: data('ate'),
+    ...(p.has('de') || p.has('ate') ? periodoDoEndereco(p) : periodoPadraoDasEntradas(agora)),
   }
 }
 

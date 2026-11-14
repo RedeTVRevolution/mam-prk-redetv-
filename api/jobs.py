@@ -559,13 +559,15 @@ TETO_DE_CANDIDATOS = 2000
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
+# Teto de programas marcados num pedido (Acervo e relatórios).
+MAXIMO_DE_PROGRAMAS = 200
+
 
 @dataclass(frozen=True)
 class FiltroDeJobs:
     """Os filtros do acervo; todos opcionais e combináveis."""
 
-    programa: str | None = None
-    # Vários programas (o `GET /v1/jobs` do Acervo); imutável porque o filtro é a chave do
+    # Os programas do filtro (o `GET /v1/jobs` do Acervo); imutável porque o filtro é a chave do
     # cache da lista sem capa. Vazio: todos.
     programas: frozenset[str] = frozenset()
     estados: frozenset[Estado] = frozenset()
@@ -622,8 +624,6 @@ def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
         filtro.marca_do_catalogo is not None
         and filtro.marca_do_catalogo not in job.marcas_do_catalogo
     ):
-        return False
-    if filtro.programa is not None and job.programa != filtro.programa:
         return False
     if filtro.programas and job.programa not in filtro.programas:
         return False
@@ -1274,7 +1274,8 @@ def criar_rotas(
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
         programa: Annotated[
-            list[Annotated[str, Linha(100)]] | None, Query(max_length=200)
+            list[Annotated[str, Linha(100)]] | None,
+            Query(max_length=MAXIMO_DE_PROGRAMAS),
         ] = None,
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,

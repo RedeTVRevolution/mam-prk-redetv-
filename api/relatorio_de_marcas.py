@@ -18,7 +18,7 @@ from typing import Annotated, Any, Literal, Protocol, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel
 
 from api.cache_curto import CacheCurto
 from api.comparador import normalizar
@@ -52,7 +52,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
-from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta
+from api.texto_como_dado import Linha, LinhaDaConsulta
 
 TIPOS_DE_INSERCAO: tuple[str, ...] = get_args(Comercial.model_fields["tipo"].annotation)
 COLUNAS_DO_CSV = ("marca", "tipo", "insercoes", "tempo_ms", "videos")
@@ -426,7 +426,7 @@ class RelatorioDeMarcas(BaseModel):
 
 
 # Cada `tipo` repetido é uma linha só, com tamanho máximo.
-TipoDoPedido = Annotated[str, StringConstraints(max_length=40, pattern=PADRAO_DA_LINHA)]
+TipoDoPedido = Annotated[str, Linha(40)]
 
 
 def tipos_do_pedido(tipo: list[str] | None) -> tuple[str, ...]:
@@ -513,9 +513,6 @@ def criar_rotas_das_marcas(
         else None
     )
 
-    def _confere(desde: date | None, ate: date | None) -> SoMarcasQueContam:
-        return confere_o_pedido(com_lixeira, desde, ate)
-
     @rotas.get("/marcas", response_model=RelatorioDeMarcas | RankingDeMarcas)
     def marcas(
         _pessoa: PodeVerORelatorio,
@@ -533,7 +530,7 @@ def criar_rotas_das_marcas(
         programas = programas_do_pedido(programa)
         tipos = tipos_do_pedido(tipo)
         desde, ate = periodo
-        fonte = _confere(desde, ate)
+        fonte = confere_o_pedido(com_lixeira, desde, ate)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
             lidas, total = ou_503(
@@ -576,7 +573,7 @@ def criar_rotas_das_marcas(
         programas = programas_do_pedido(programa)
         tipos = tipos_do_pedido(tipo)
         desde, ate = periodo
-        fonte = _confere(desde, ate)
+        fonte = confere_o_pedido(com_lixeira, desde, ate)
         depois = posicao_do_cursor(cursor)
         lidas = ou_503(
             lambda: fonte.lista_da_marca(

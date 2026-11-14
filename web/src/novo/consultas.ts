@@ -33,3 +33,8 @@ export function useProgramas(): string[] {
   const api = useApi()
   return useQuery({ queryKey: ['programas'], queryFn: () => api.programas(), staleTime: 5 * 60_000 }).data ?? []
 }
+
+/** As opções do filtro de programa: os listados, mais o marcado no endereço que a lista não tem (renomeado, removido). */
+export function opcoesDosProgramas(listados: string[], marcados: string[]): { valor: string; rotulo: string }[] {
+  return [...listados, ...marcados.filter((p) => !listados.includes(p))].map((p) => ({ valor: p, rotulo: p }))
+}

@@ -25,7 +25,7 @@ import { Falha } from '../comum/Falha.tsx'
 import { GradeVirtual } from '../comum/GradeVirtual.tsx'
 import { MandarParaLixeira } from '../comum/MandarParaLixeira.tsx'
 import { Reprocessar } from '../comum/Reprocessar.tsx'
-import { useApi, useProgramas } from '../consultas.ts'
+import { opcoesDosProgramas, useApi, useProgramas } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
 import { Slider } from '../ui/slider.tsx'
@@ -175,7 +175,7 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
               Icone={IconBroadcast}
               tudoMarcado
               // O programa do endereço que não está na lista (renomeado, removido) continua marcado.
-              opcoes={[...programas, ...filtros.programas.filter((p) => !programas.includes(p))].map((p) => ({ valor: p, rotulo: p }))}
+              opcoes={opcoesDosProgramas(programas, filtros.programas)}
               valor={filtros.programas}
               aoMudar={(p) => mudar({ programas: p })}
             />

@@ -7,7 +7,7 @@ import { Falha } from "../comum/Falha.tsx";
 import { CAMPO, mensagemDoErro } from "../comum/relatorio.ts";
 import { Campo } from "../comum/relatorio.tsx";
 import { Faceta } from "../acervo/Filtros.tsx";
-import { useProgramas } from "../consultas.ts";
+import { opcoesDosProgramas, useProgramas } from "../consultas.ts";
 import { Button } from "../ui/button.tsx";
 
 // O que o Tempo de tela e as Marcas têm em comum na tela: os filtros do período, a paginação da
@@ -32,7 +32,7 @@ export function FiltrosDoPeriodo({
           rotulo="Programa"
           Icone={IconBroadcast}
           // O programa do endereço que não está na lista continua marcado.
-          opcoes={[...programas, ...filtros.programas.filter((p) => !programas.includes(p))].map((p) => ({ valor: p, rotulo: p }))}
+          opcoes={opcoesDosProgramas(programas, filtros.programas)}
           valor={filtros.programas}
           aoMudar={(marcados) => aoMudar({ programas: marcados })}
           tudoMarcado

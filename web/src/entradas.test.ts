@@ -111,22 +111,27 @@ const PERTO_DA_MEIA_NOITE = new Date('2026-11-14T02:00:00Z')
 test('sem período no endereço, a aba abre na última semana: hoje menos 6 dias, no dia de São Paulo', () => {
   expect(filtrosDasEntradas('', MEIO_DIA)).toMatchObject({ de: '2026-11-08', ate: '' })
   expect(filtrosDasEntradas('', PERTO_DA_MEIA_NOITE)).toMatchObject({ de: '2026-11-07', ate: '' })
-  expect(filtrosDasEntradas('?de=lixo', MEIO_DIA)).toMatchObject({ de: '2026-11-08', ate: '' })
+  // Data malformada vira vazio, como nas outras telas.
+  expect(filtrosDasEntradas('?de=lixo', MEIO_DIA)).toMatchObject({ de: '', ate: '' })
 })
 
-test('de=tudo é "sem período"; um período explícito vale como está', () => {
-  expect(filtrosDasEntradas('?de=tudo', MEIO_DIA)).toMatchObject({ de: '', ate: '' })
+test('de= e ate= vazios são "sem período"; ?ate=X sozinho é início aberto; um período explícito vale como está', () => {
+  expect(filtrosDasEntradas('?de=&ate=', MEIO_DIA)).toMatchObject({ de: '', ate: '' })
+  expect(filtrosDasEntradas('?ate=2026-10-05', MEIO_DIA)).toMatchObject({ de: '', ate: '2026-10-05' })
   expect(filtrosDasEntradas('?de=2026-10-01&ate=2026-10-05', MEIO_DIA)).toMatchObject({ de: '2026-10-01', ate: '2026-10-05' })
 })
 
-test('o endereço distingue o padrão (sem de) de "sem período" (de=tudo) e sobrevive a recarregar', () => {
+test('o endereço distingue o padrão (sem de nem ate) de "sem período" (de=&ate=) e sobrevive a recarregar', () => {
   const tudo = filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS }, MEIO_DIA)
-  expect(tudo).toBe('?de=tudo')
+  expect(tudo).toBe('?de=&ate=')
   expect(filtrosDasEntradas(tudo, MEIO_DIA).de).toBe('')
   const periodo = filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS, de: '2026-10-01', ate: '2026-10-05' }, MEIO_DIA)
   expect(periodo).toBe('?de=2026-10-01&ate=2026-10-05')
   expect(filtrosDasEntradas(periodo, MEIO_DIA)).toMatchObject({ de: '2026-10-01', ate: '2026-10-05' })
-  expect(filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS, ate: '2026-10-05' }, MEIO_DIA)).toBe('?de=tudo&ate=2026-10-05')
+  expect(filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS, ate: '2026-10-05' }, MEIO_DIA)).toBe('?de=&ate=2026-10-05')
+  // De igual ao padrão com ate: sobrevive a reabrir em outro dia.
+  const comAte = filtrosParaEnderecoDasEntradas({ ...SEM_FILTROS_DAS_ENTRADAS, de: '2026-11-08', ate: '2026-11-10' }, MEIO_DIA)
+  expect(filtrosDasEntradas(comAte, PERTO_DA_MEIA_NOITE)).toMatchObject({ de: '2026-11-08', ate: '2026-11-10' })
   // O padrão não vai escrito: o link de hoje não congela a semana de hoje.
   expect(filtrosParaEnderecoDasEntradas(filtrosDasEntradas('', MEIO_DIA), MEIO_DIA)).toBe('')
 })

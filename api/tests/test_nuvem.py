@@ -223,7 +223,9 @@ class TestRepositorioFirestore:
             return [j.id for j in repositorio.consultar(FiltroDeJobs(**filtro)).jobs]
 
         assert ids() == ["j5", "j4", "j3", "j2", "j1", "j0"]
-        assert ids(programa="TV Fama", estados=frozenset({"concluido"})) == [
+        assert ids(
+            programas=frozenset({"TV Fama"}), estados=frozenset({"concluido"})
+        ) == [
             "j5",
             "j3",
             "j2",
@@ -231,7 +233,7 @@ class TestRepositorioFirestore:
         ]
         assert ids(palavras=("fama", "blu")) == ["j4", "j3", "j2", "j1", "j0"]
         assert ids(
-            programa="TV Fama",
+            programas=frozenset({"TV Fama"}),
             estados=frozenset({"concluido"}),
             exibicao_de=date(2026, 10, 19),
             exibicao_ate=date(2026, 10, 20),
@@ -364,7 +366,7 @@ class TestRepositorioFirestore:
         repositorio.salvar(_job("a", BASE, programa="Jornal", lixeira=envio))
         repositorio.salvar(_job("b", BASE, programa="Outro", lixeira=envio))
 
-        filtro = FiltroDeJobs(na_lixeira=True, programa="Jornal")
+        filtro = FiltroDeJobs(na_lixeira=True, programas=frozenset({"Jornal"}))
 
         assert [j.id for j in repositorio.consultar(filtro).jobs] == ["a"]
 

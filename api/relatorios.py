@@ -27,7 +27,12 @@ from api.copia_bigquery import (
     transporte_http,
 )
 from api.erros import lido
-from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
+from api.jobs import (
+    MAXIMO_DE_PROGRAMAS,
+    FiltroDeJobs,
+    RepositorioDeJobs,
+    _confere_permissao,
+)
 from api.texto_como_dado import Linha
 
 
@@ -45,7 +50,6 @@ PodeVerORelatorio = Annotated[Usuario, Depends(_exige_ver_o_relatorio)]
 
 # Cada `programa` repetido é uma linha só, com tamanho máximo (#621).
 ProgramaDoPedido = Annotated[str, Linha(100)]
-MAXIMO_DE_PROGRAMAS = 200
 
 
 def programas_do_pedido(programa: list[str] | None) -> tuple[str, ...]:
