@@ -31,7 +31,6 @@ from api.jobs import (
     FiltroDeJobs,
     RepositorioDeJobs,
     _confere_permissao,
-    programas_do_pedido,
 )
 from api.texto_como_dado import Linha
 

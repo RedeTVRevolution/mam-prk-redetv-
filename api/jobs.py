@@ -1284,9 +1284,7 @@ def criar_rotas(
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        programa: Annotated[
-            list[Annotated[str, Linha(100)]] | None, Query()
-        ] = None,
+        programa: Annotated[list[Annotated[str, Linha(100)]] | None, Query()] = None,
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,
         exibicao_ate: date | None = None,

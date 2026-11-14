@@ -32,11 +32,11 @@ from api.resumos_de_uso import (
     ResumosEmMemoria,
     UsoDoDia,
 )
-from api.tests.test_busca import job as _job
-from api.tests.test_lixeira_na_leitura import ENVIO
 from api.tests.sem_periodo_padrao import ClienteSemPeriodoPadrao
 from api.tests.test_auth import VerificadorFalso
+from api.tests.test_busca import job as _job
 from api.tests.test_escopos import MAC
+from api.tests.test_lixeira_na_leitura import ENVIO
 from api.usuarios import ContaDoIdentityPlatform, ContasDeUsuarioEmMemoria
 
 ANA = Usuario(uid="ana", email="ana@redetv.com.br")
