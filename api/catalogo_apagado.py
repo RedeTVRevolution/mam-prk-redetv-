@@ -6,9 +6,6 @@ Só a leitura muda: a saída do modelo e as correções ficam como estão (ADR 0
 from collections.abc import Callable
 from typing import Any
 
-from api.catalogo import PessoaDoCatalogo
-from api.comparador import normalizar
-
 # O que sustenta um nome "só pelo rosto": sem GC nem fala.
 FONTES_DO_ROSTO = frozenset({"rosto", "referencia"})
 NAO_IDENTIFICADO = "não identificado"
@@ -72,43 +69,3 @@ def sem_catalogo_apagado(
         if id is not None and not marca_viva(id):
             comercial.pop(CATALOGO_ID)
     return entregue
-
-
-def com_pessoas_fundidas(
-    entregue: dict[str, Any],
-    obter: Callable[[str], PessoaDoCatalogo | None],
-) -> dict[str, Any]:
-    """A leitura da Decupagem com o destino no lugar da pessoa fundida (#209): o
-    `catalogo_id` e o nome passam a ser os do destino; o que está gravado não muda. A
-    fusão em cadeia (A em B, depois B em C) leva ao último destino. Também troca o nome
-    que a pessoa teve antes de uma renomeação em todos os vídeos (#263) pelo atual; um
-    nome que o editor corrigiu no vídeo para outro fica como está."""
-    for pessoa in entregue.get("pessoas") or []:
-        id = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
-        if id is None:
-            continue
-        destino = destino_final(id, obter)
-        if destino is not None:
-            pessoa.update(nome=destino.nome, catalogo_id=destino.id)
-            continue
-        atual = obter(id)
-        if atual is not None and atual.renomeacao is not None:
-            antigos = {normalizar(n) for n in atual.renomeacao.nomes_anteriores}
-            if normalizar(str(pessoa.get("nome"))) in antigos:
-                pessoa["nome"] = atual.nome
-    return entregue
-
-
-def destino_final(
-    id: str, obter: Callable[[str], PessoaDoCatalogo | None]
-) -> PessoaDoCatalogo | None:
-    """O destino em que a pessoa acabou fundida, ou `None` se ela não foi fundida."""
-    achada = obter(id)
-    vistos = {id}
-    while achada is not None and achada.fundida is not None:
-        proximo = achada.fundida.destino_id
-        if proximo in vistos:
-            return None
-        vistos.add(proximo)
-        achada = obter(proximo)
-    return achada if achada is not None and len(vistos) > 1 else None

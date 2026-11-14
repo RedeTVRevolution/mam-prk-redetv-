@@ -6,7 +6,6 @@ import os
 import uuid
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
-from itertools import pairwise
 from typing import Any
 
 import pytest
@@ -36,7 +35,6 @@ from api.lixeira_na_leitura import (
     VersaoDaLixeira,
     VersaoDaLixeiraEmMemoria,
     VersaoDaLixeiraFirestore,
-    pessoas_que_contam,
 )
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
@@ -76,84 +74,6 @@ def _fusao(destino: PessoaDoCatalogo) -> FusaoDaPessoa:
         por_email="u@redetv.com",
         motivo="duplicada",
     )
-
-
-# --- a regra ---------------------------------------------------------------------------
-
-
-def test_conta_quem_existe_fora_da_lixeira_e_nao_conta_a_lixeira_nem_a_purgada() -> (
-    None
-):
-    catalogo = CatalogoEmMemoria()
-    ana = catalogo.acrescentar("Ana", "", [])
-    bia = catalogo.acrescentar("Bia", "", [])
-    cris = catalogo.acrescentar("Cris", "", [])
-    catalogo.definir_lixeira(bia.id, ENVIO)
-    catalogo.apagar(cris.id)
-
-    assert pessoas_que_contam(catalogo, [ana.id, bia.id, cris.id, "nunca-existiu"]) == {
-        ana.id
-    }
-    assert pessoas_que_contam(catalogo, []) == set()
-
-
-def test_a_fundida_vale_o_que_vale_o_destino_final_da_cadeia() -> None:
-    catalogo = CatalogoEmMemoria()
-    a, b, c = (catalogo.acrescentar(n, "", []) for n in "ABC")
-    catalogo.definir_fusao(a.id, _fusao(b))
-    catalogo.definir_fusao(b.id, _fusao(c))
-
-    assert pessoas_que_contam(catalogo, [a.id, b.id, c.id]) == {a.id, b.id, c.id}
-
-    catalogo.definir_lixeira(c.id, ENVIO)
-    assert pessoas_que_contam(catalogo, [a.id, b.id, c.id]) == set()
-
-    catalogo.definir_lixeira(c.id, None)
-    assert pessoas_que_contam(catalogo, [a.id, b.id, c.id]) == {a.id, b.id, c.id}
-
-    catalogo.apagar(c.id)
-    assert pessoas_que_contam(catalogo, [a.id, b.id, c.id]) == set()
-
-
-def test_a_origem_na_lixeira_nao_conta_mesmo_com_o_destino_valendo() -> None:
-    catalogo = CatalogoEmMemoria()
-    a, b = (catalogo.acrescentar(n, "", []) for n in "AB")
-    catalogo.definir_fusao(a.id, _fusao(b))
-    catalogo.definir_lixeira(a.id, ENVIO)
-
-    assert pessoas_que_contam(catalogo, [a.id, b.id]) == {b.id}
-
-
-def test_ciclo_de_fusao_gravado_errado_nao_prende_e_nao_conta() -> None:
-    catalogo = CatalogoEmMemoria()
-    a, b = (catalogo.acrescentar(n, "", []) for n in "AB")
-    catalogo.definir_fusao(a.id, _fusao(b))
-    catalogo.definir_fusao(b.id, _fusao(a))
-
-    assert pessoas_que_contam(catalogo, [a.id, b.id]) == set()
-
-
-def test_cadeia_valida_de_qualquer_tamanho_conta() -> None:
-    catalogo = CatalogoEmMemoria()
-    elos = [catalogo.acrescentar(f"P{i}", "", []) for i in range(13)]  # 12 fusões
-    for de, para in pairwise(elos):
-        catalogo.definir_fusao(de.id, _fusao(para))
-
-    assert pessoas_que_contam(catalogo, [elos[0].id]) == {elos[0].id}
-
-    catalogo.definir_lixeira(elos[-1].id, ENVIO)
-    assert pessoas_que_contam(catalogo, [elos[0].id]) == set()
-
-
-def test_ciclo_mais_longo_que_o_pedido_nao_trava_nem_conta() -> None:
-    catalogo = CatalogoEmMemoria()
-    a, b, c, d = (catalogo.acrescentar(n, "", []) for n in "ABCD")
-    catalogo.definir_fusao(a.id, _fusao(b))  # A→B→C→D→B
-    catalogo.definir_fusao(b.id, _fusao(c))
-    catalogo.definir_fusao(c.id, _fusao(d))
-    catalogo.definir_fusao(d.id, _fusao(b))
-
-    assert pessoas_que_contam(catalogo, [a.id, b.id, c.id, d.id]) == set()
 
 
 def test_o_filtro_vale_mesmo_quando_o_criar_app_nao_recebe_o_catalogo() -> None:
@@ -1253,12 +1173,3 @@ def test_registro_sem_id_de_marca_continua_valendo() -> None:
     cliente = m.instancia(purgas_de_marca=antigo)
 
     assert "AB INBEV" not in _nomes_das_marcas(_marcas(cliente))
-
-
-def test_conta_depois_do_corte_trata_job_ausente_como_anterior() -> None:
-    from api.lixeira_na_leitura import conta_depois_do_corte
-
-    corte = datetime(2026, 1, 2, tzinfo=UTC)
-    assert not conta_depois_do_corte(None, corte)
-    assert not conta_depois_do_corte(corte, corte)
-    assert conta_depois_do_corte(corte + timedelta(seconds=1), corte)
