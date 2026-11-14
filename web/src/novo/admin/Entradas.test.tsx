@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -445,4 +445,68 @@ test.each(['falhou', 'concluido'] as const)('não abre o reprocessamento se o pr
   await userEvent.click(segundo)
   expect(segundo.disabled).toBe(true)
   expect(screen.queryByLabelText(/^Motivo/)).toBeNull()
+})
+
+const campo = (nome: string) => screen.getByLabelText(nome) as HTMLInputElement
+
+test('sem período no endereço, abre na última semana e pede à API o enviado_de (dia de São Paulo)', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-14T02:00:00Z')) // 13/11 23:00 em São Paulo
+  try {
+    jobs = [job({ id: 'a', nome: 'recente.mp4' })]
+    await abrir()
+    await linhaDe('recente.mp4')
+    expect(new URLSearchParams(consultas[0]).get('enviado_de')).toBe('2026-11-07')
+    expect(new URLSearchParams(consultas[0]).has('enviado_ate')).toBe(false)
+    expect(campo('Enviado de').value).toBe('2026-11-07')
+    expect(campo('Enviado até').value).toBe('')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('de=tudo abre sem período e não manda enviado_de nem enviado_ate', async () => {
+  jobs = [job({ id: 'a', nome: 'antigo.mp4', criado_em: '2020-01-01T12:00:00Z' })]
+  await abrir({ endereco: '/admin/entradas?de=tudo' })
+  await linhaDe('antigo.mp4')
+  expect(consultas[0]).not.toContain('enviado_')
+  expect(campo('Enviado de').value).toBe('')
+})
+
+test('a tela mostra o que a API devolveu, mesmo fora do período: o filtro é do servidor', async () => {
+  jobs = [job({ id: 'a', nome: 'antigo.mp4', criado_em: '2020-01-01T12:00:00Z' })]
+  await abrir({ endereco: '/admin/entradas?de=2026-10-01&ate=2026-10-05' })
+  await linhaDe('antigo.mp4')
+  expect(new URLSearchParams(consultas[0]).get('enviado_de')).toBe('2026-10-01')
+  expect(new URLSearchParams(consultas[0]).get('enviado_ate')).toBe('2026-10-05')
+})
+
+test('trocar o período reinicia o cursor e a escolha fica no endereço; limpar o "de" vira de=tudo', async () => {
+  servidor.use(
+    http.get('/v1/jobs', ({ request }) => {
+      const url = new URL(request.url)
+      consultas.push(url.search)
+      const nome = url.searchParams.get('enviado_de') === '2026-10-01' ? 'velho.mp4' : 'novo.mp4'
+      return HttpResponse.json([job({ id: nome, nome })], { headers: { 'X-Proximo-Cursor': 'c2' } })
+    }),
+  )
+  await abrir({ endereco: '/admin/entradas?de=2026-11-01' })
+  await linhaDe('novo.mp4')
+  await userEvent.click(screen.getByRole('button', { name: 'Carregar mais' }))
+  await waitFor(() => expect(consultas.some((c) => c.includes('cursor=c2'))).toBe(true))
+
+  consultas.length = 0
+  fireEvent.change(campo('Enviado de'), { target: { value: '2026-10-01' } })
+  await linhaDe('velho.mp4')
+  expect(location.search).toContain('de=2026-10-01')
+  expect(consultas).toHaveLength(1)
+  expect(consultas[0]).toContain('enviado_de=2026-10-01')
+  expect(consultas[0]).not.toContain('cursor=')
+  expect(screen.queryByText('novo.mp4')).toBeNull()
+
+  consultas.length = 0
+  fireEvent.change(campo('Enviado de'), { target: { value: '' } })
+  await linhaDe('novo.mp4')
+  expect(location.search).toContain('de=tudo')
+  expect(consultas[0]).not.toContain('enviado_de')
 })

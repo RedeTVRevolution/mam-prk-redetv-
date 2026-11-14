@@ -16,6 +16,7 @@ export const SEM_FILTROS_DAS_ENTRADAS: FiltrosDasEntradas = { por: '', estado: [
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/
 const PREFIXO_DO_SISTEMA = 'sistema:'
+const SEM_PERIODO = 'tudo'
 
 export function porSistema(nome: string): string {
   return `${PREFIXO_DO_SISTEMA}${nome}`
@@ -30,18 +31,30 @@ export function haFiltroDeEntradas(f: FiltrosDasEntradas): boolean {
   return Boolean(f.por || f.estado.length || f.de || f.ate)
 }
 
-/** Os filtros na query da URL (`?por=&estado=&de=&ate=`). */
-export function filtrosParaEnderecoDasEntradas(f: FiltrosDasEntradas): string {
+/**
+ * Os filtros na query da URL (`?por=&estado=&de=&ate=`). Sem `de` o endereço vale o padrão
+ * (a última semana, que não vai escrita: o link não congela a semana); "sem período" é `de=tudo`.
+ */
+export function filtrosParaEnderecoDasEntradas(f: FiltrosDasEntradas, agora: Date = new Date()): string {
   const p = new URLSearchParams()
   if (f.por) p.set('por', f.por)
   for (const e of f.estado) p.append('estado', e)
-  if (f.de) p.set('de', f.de)
+  if (f.ate || f.de !== inicioDaUltimaSemana(agora)) p.set('de', f.de || SEM_PERIODO)
   if (f.ate) p.set('ate', f.ate)
   const texto = p.toString()
   return texto ? `?${texto}` : ''
 }
 
-export function filtrosDasEntradas(busca: string): FiltrosDasEntradas {
+// Um formatador só: o `toLocaleDateString` com fuso monta um a cada chamada, e a lista chama por linha a cada desenho.
+const DIA_EM_SAO_PAULO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' })
+
+/** O padrão da aba: hoje menos 6 dias, no dia de São Paulo (`AAAA-MM-DD`). */
+function inicioDaUltimaSemana(agora: Date): string {
+  const hoje = DIA_EM_SAO_PAULO.format(agora)
+  return new Date(Date.parse(`${hoje}T00:00:00Z`) - 6 * 86_400_000).toISOString().slice(0, 10)
+}
+
+export function filtrosDasEntradas(busca: string, agora: Date = new Date()): FiltrosDasEntradas {
   const p = new URLSearchParams(busca)
   const por = p.get('por') ?? ''
   const data = (nome: string) => {
@@ -52,44 +65,27 @@ export function filtrosDasEntradas(busca: string): FiltrosDasEntradas {
     por: por === 'pessoas' || sistemaDoFiltro(por) !== null ? por : '',
     // Estado desconhecido num link editado à mão sai do filtro, em vez de fazer a API recusar.
     estado: [...new Set(p.getAll('estado'))].filter((e) => Object.hasOwn(ESTADOS_DO_JOB, e)),
-    de: data('de'),
+    // O padrão da semana só vale sem período nenhum: com `ate`, o início fica aberto.
+    de: p.get('de') === SEM_PERIODO ? '' : data('de') || (data('ate') ? '' : inicioDaUltimaSemana(agora)),
     ate: data('ate'),
   }
 }
 
-/** A query de `GET /v1/jobs` para a aba: só o sistema e o estado filtram na API. */
+/** A query de `GET /v1/jobs` para a aba: sistema, estado e o período do envio filtram na API. */
 export function consultaDasEntradas(f: FiltrosDasEntradas, cursor: string | null): string {
   const p = new URLSearchParams({ limite: String(POR_PAGINA) })
   const sistema = sistemaDoFiltro(f.por)
   if (sistema) p.set('sistema', sistema)
   for (const e of f.estado) p.append('estado', e)
+  if (f.de) p.set('enviado_de', f.de)
+  if (f.ate) p.set('enviado_ate', f.ate)
   if (cursor) p.set('cursor', cursor)
   return p.toString()
 }
 
-// Um formatador só: o `toLocaleDateString` com fuso monta um a cada chamada, e a lista chama por linha a cada desenho.
-const DIA_EM_SAO_PAULO = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' })
-
-/** O dia do envio em São Paulo, `AAAA-MM-DD`. */
-function diaDoEnvio(job: Job): string {
-  return DIA_EM_SAO_PAULO.format(new Date(job.criado_em))
-}
-
-/**
- * O que a API não filtra: a lista de "pessoas" e o período do envio. A lista vem do mais
- * recente para o mais antigo, e este filtro só esconde linhas já carregadas.
- */
+/** O que a API não filtra: a lista de "pessoas", que só esconde linhas já carregadas. */
 export function casaComOsFiltrosDoCliente(job: Job, f: FiltrosDasEntradas): boolean {
-  if (f.por === 'pessoas' && job.enviado_por?.tipo !== 'pessoa') return false
-  if (!f.de && !f.ate) return true
-  const dia = diaDoEnvio(job)
-  return (!f.de || dia >= f.de) && (!f.ate || dia <= f.ate)
-}
-
-/** Já passou do começo do período: carregar páginas mais antigas não traz mais nada. */
-export function passouDoPeriodo(jobs: Job[], f: FiltrosDasEntradas): boolean {
-  const ultimo = jobs.at(-1)
-  return Boolean(f.de && ultimo && diaDoEnvio(ultimo) < f.de)
+  return f.por !== 'pessoas' || job.enviado_por?.tipo === 'pessoa'
 }
 
 const EM_ANDAMENTO = ['aguardando_upload', 'validando', 'analisando']

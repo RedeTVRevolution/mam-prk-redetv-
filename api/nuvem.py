@@ -61,6 +61,7 @@ from api.itens_da_decupagem import contar_itens, objeto_dos_itens
 from api.jobs import (
     JANELA_DA_URL_DO_QUADRO,
     PRAZO_DA_URL_DE_UPLOAD,
+    SAO_PAULO,
     TETO_DE_CANDIDATOS,
     CursorInvalido,
     Estado,
@@ -238,11 +239,37 @@ def meses_do_periodo(de: date, ate: date) -> list[str]:
     return meses
 
 
+def limites_do_envio(filtro: FiltroDeJobs) -> tuple[datetime | None, datetime | None]:
+    """O período do envio como instantes: da meia-noite de São Paulo do primeiro dia (inclusive)
+    à meia-noite do dia seguinte ao último (exclusivo)."""
+
+    def meia_noite(dia: date) -> datetime:
+        return datetime(dia.year, dia.month, dia.day, tzinfo=SAO_PAULO)
+
+    de = filtro.enviado_de
+    ate = filtro.enviado_ate
+    return (
+        meia_noite(de) if de else None,
+        meia_noite(ate + timedelta(days=1)) if ate else None,
+    )
+
+
+def _pontas_no_firestore(filtro: FiltroDeJobs) -> int:
+    """As pontas do período que vão ao Firestore como desigualdade no campo da ordem:
+    a data de exibição na ordem por exibição, o dia do envio na ordem por envio."""
+    de, ate = (
+        (filtro.exibicao_de, filtro.exibicao_ate)
+        if filtro.ordem == "exibicao"
+        else (filtro.enviado_de, filtro.enviado_ate)
+    )
+    return (de is not None) + (ate is not None)
+
+
 def _cabe_no_firestore(
     filtro: FiltroDeJobs, meses: int, programas: int, datas: int = 0
 ) -> bool:
-    """Se a consulta com `meses`, `programas` (0 = fora da consulta) e `datas` (as pontas
-    do período na ordem por exibição) cabe nos tetos do Firestore."""
+    """Se a consulta com `meses`, `programas` (0 = fora da consulta) e `datas` (as pontas do
+    período que vão ao Firestore, `_pontas_no_firestore`) cabe nos tetos do Firestore."""
     disjuncoes = max(1, meses) * max(1, len(filtro.estados)) * max(1, programas)
     filtros = (
         (filtro.programa is not None or programas > 0)
@@ -265,6 +292,7 @@ def plano_da_consulta(
     (`programa in`) que vão ao Firestore; o que não cabe nos tetos fica em
     `casa_com_o_filtro`. Sai primeiro o mês, depois os programas."""
     programas = sorted(filtro.programas) if len(filtro.programas) > 1 else []
+    datas = _pontas_no_firestore(filtro)
     meses = None
     if (
         por_mes
@@ -273,14 +301,9 @@ def plano_da_consulta(
         and filtro.exibicao_ate is not None
     ):
         meses = meses_do_periodo(filtro.exibicao_de, filtro.exibicao_ate)
-        if _cabe_no_firestore(filtro, len(meses), len(programas)):
+        if _cabe_no_firestore(filtro, len(meses), len(programas), datas):
             return meses, programas
         meses = None
-    datas = (
-        (filtro.exibicao_de is not None) + (filtro.exibicao_ate is not None)
-        if filtro.ordem == "exibicao"
-        else 0
-    )
     if programas and not _cabe_no_firestore(filtro, 0, len(programas), datas):
         programas = []
     return meses, programas
@@ -453,6 +476,12 @@ class RepositorioFirestore:
                 filter=FieldFilter("palavras", "array_contains", filtro.palavras[0])
             )
         campo = "criado_em" if filtro.ordem == "enviado" else "data_exibicao"
+        if filtro.ordem == "enviado":
+            enviado_de, enviado_ate = limites_do_envio(filtro)
+            if enviado_de is not None:
+                consulta = consulta.where(filter=FieldFilter(campo, ">=", enviado_de))
+            if enviado_ate is not None:
+                consulta = consulta.where(filter=FieldFilter(campo, "<", enviado_ate))
         if filtro.ordem == "exibicao":
             if filtro.exibicao_de is not None:
                 consulta = consulta.where(
