@@ -39,6 +39,7 @@ from api.relatorios import (
     confere_o_pedido,
     config_e_transporte_do_ambiente,
     consultar_no_bigquery,
+    ids_dos_jobs_na_lixeira,
     linhas_da_copia,
     ou_503,
     poe_o_nome_dos_videos,
@@ -304,17 +305,31 @@ class SoComQuemConta:
     totais, das posições e da paginação, a pessoa que não conta (`QuemConta`), com o
     catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda. O nome de cada
     pessoa que conta é o atual do catálogo, o do destino no fim da cadeia se foi fundida
-    (#613), e desempata o ranking antes de cortar a página."""
+    (#613), e desempata o ranking antes de cortar a página. O vídeo na lixeira também sai
+    (#619): os Jobs dela são lidos uma vez por pedido, depois do cache das somas."""
 
-    def __init__(self, consulta: ConsultaDeMomentos, catalogo: Catalogo) -> None:
+    def __init__(
+        self,
+        consulta: ConsultaDeMomentos,
+        catalogo: Catalogo,
+        jobs: RepositorioDeJobs,
+    ) -> None:
         self._consulta = consulta
         self._catalogo = catalogo
+        self._jobs = jobs
+
+    def _somas_dos_videos_fora_da_lixeira(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        somas = self._consulta.somas(programa, desde, ate)
+        na_lixeira = ids_dos_jobs_na_lixeira(self._jobs)
+        return [s for s in somas if s.job_id not in na_lixeira]
 
     def somas_e_nomes(
         self, programa: str | None, desde: date | None, ate: date | None
     ) -> tuple[list[PessoaNoVideo], dict[str, str]]:
         """As somas de quem conta e o nome atual de cada um, numa leitura do catálogo."""
-        somas = self._consulta.somas(programa, desde, ate)
+        somas = self._somas_dos_videos_fora_da_lixeira(programa, desde, ate)
         destinos = QuemConta(self._catalogo).pessoas({s.pessoa_id for s in somas})
         nomes = {i: d.pessoa.nome for i, d in destinos.items() if d.pessoa and d.conta}
         return [s for s in somas if s.pessoa_id in nomes], nomes
@@ -341,7 +356,7 @@ class SoComQuemConta:
     ) -> "list[VideoDaPessoa]":
         if not QuemConta(self._catalogo).contam([pessoa_id]):
             return []
-        somas = self._consulta.somas(programa, desde, ate)
+        somas = self._somas_dos_videos_fora_da_lixeira(programa, desde, ate)
         return videos_em_python(somas, pessoa_id, depois, limite)
 
 
@@ -479,7 +494,11 @@ def criar_rotas_do_tempo_de_tela(
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
     no_periodo = dependencia_do_periodo(relogio)
-    com_lixeira = SoComQuemConta(consulta, catalogo) if consulta is not None else None
+    com_lixeira = (
+        SoComQuemConta(consulta, catalogo, repositorio)
+        if consulta is not None
+        else None
+    )
 
     @rotas.get(
         "/tempo-de-tela",
