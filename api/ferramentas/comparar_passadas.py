@@ -55,6 +55,7 @@ from api.comparacao_de_passadas import (
     tempo_do_job,
 )
 from api.decupagem import Decupagem
+from api.ferramentas.comum import dolar
 from api.gemini import MODELO
 from api.jobs import RepositorioDeJobs
 from api.nuvem import DecupagensStorage, RepositorioFirestore
@@ -194,7 +195,7 @@ def _linha(e: Entrada) -> str:
 
 
 def _usd(valor: float | None) -> str:
-    return f"US$ {valor:.4f}" if valor is not None else "n/d"
+    return dolar(valor, casas=4, ptbr=False) if valor is not None else "n/d"
 
 
 def _custo(lado: LadoDoResultado, duracao_ms: int) -> str:
