@@ -29,7 +29,7 @@ from api.agent_retrieval import (
     criar_colecao,
     transporte_http,
 )
-from api.exemplos_da_busca import EXEMPLOS, OUTRA, SABRINA
+from api.ferramentas.exemplos_da_busca import EXEMPLOS, OUTRA, SABRINA
 from api.indice_da_busca import Consulta, Filtros, IndiceDaBusca
 
 CONSULTA = "Sabrina Sato no estúdio"

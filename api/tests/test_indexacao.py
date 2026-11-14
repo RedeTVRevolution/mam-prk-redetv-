@@ -22,7 +22,7 @@ from api.correcoes import (
     RepositorioDeCorrecoesEmMemoria,
     versao_do_modelo,
 )
-from api.exemplos_da_busca import EXEMPLOS, SABRINA
+from api.ferramentas.exemplos_da_busca import EXEMPLOS, SABRINA
 from api.indexacao import reindexar, reindexar_jobs
 from api.indice_da_busca import (
     Consulta,

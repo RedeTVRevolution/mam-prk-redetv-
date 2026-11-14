@@ -11,7 +11,7 @@ Roda sobre uma pasta local por vídeo, que a pessoa baixa do dev:
     <pasta>/cortes_ms.json   os `cortes_ms` do Job (opcional; sem ele, os planos são do modelo)
     <pasta>/quadros/*.jpg    os quadros de `plano.quadros`
 
-    python -m api.planos_curtos PASTA [PASTA...]
+    python -m api.ferramentas.planos_curtos PASTA [PASTA...]
 """
 
 import json
@@ -148,7 +148,10 @@ def tabela(linhas: Sequence[LinhaDoDiagnostico]) -> str:
 
 def main(argumentos: list[str]) -> int:
     if not argumentos:
-        print("uso: python -m api.planos_curtos PASTA [PASTA...]", file=sys.stderr)
+        print(
+            "uso: python -m api.ferramentas.planos_curtos PASTA [PASTA...]",
+            file=sys.stderr,
+        )
         return 2
     linhas = [ln for pasta in argumentos for ln in diagnosticar_pasta(Path(pasta))]
     print(tabela(linhas))

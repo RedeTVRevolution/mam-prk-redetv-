@@ -8,7 +8,7 @@ from typing import Any
 from PIL import Image
 
 from api.decupagem import Decupagem
-from api.planos_curtos import diagnosticar, diagnosticar_pasta, tabela
+from api.ferramentas.planos_curtos import diagnosticar, diagnosticar_pasta, tabela
 
 
 def _jpeg(variante: int) -> bytes:

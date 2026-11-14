@@ -106,7 +106,7 @@ def test_medida_temporaria_nao_escreve_nem_apaga_na_colecao_de_texto(
 ) -> None:
     from typing import Any
 
-    from api.exemplos_da_busca import EXEMPLOS
+    from api.ferramentas.exemplos_da_busca import EXEMPLOS
     from api.medir_busca import main
     from api.tests.test_agent_retrieval import CONFIG, _ColecaoEmMemoria, _lido
 

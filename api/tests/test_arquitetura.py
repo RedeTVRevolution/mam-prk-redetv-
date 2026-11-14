@@ -52,7 +52,6 @@ EXCECOES = {
     ("comparar_passadas", "comparador"),
     ("comparar_passadas", "comparar_objetos"),
     ("passadas", "comparar_objetos"),
-    ("planos_recorrentes", "medir_agrupamento_de_objetos"),
     ("taxa_diaria", "reprocessar_versao"),
     ("taxa_de_correcao", "reprocessar_versao"),
 }
