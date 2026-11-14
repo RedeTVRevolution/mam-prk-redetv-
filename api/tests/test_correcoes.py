@@ -1080,3 +1080,69 @@ def test_registros_no_formato_gravado_continuam_sendo_aplicados() -> None:
             "acrescentado": True,
         }
     ]
+
+
+# --- Desfazer a renomeação casa a pessoa pelo id, não pela posição (#625) ---
+
+_QUATRO_PESSOAS: dict[str, Any] = {
+    **MODELO,
+    "pessoas": [
+        _pessoa("pes01", "Ana Souza", 1000, 5000),
+        _pessoa("pes02", "Beto Lima", 6000, 8000),
+        _pessoa("pes03", "Carla Reis", 9000, 11000),
+        _pessoa("pes04", "Davi Nunes", 12000, 14000),
+    ],
+}
+_VERSAO_DAS_QUATRO = versao_do_modelo(json.dumps(_QUATRO_PESSOAS).encode())
+
+
+def _tira_a_pessoa_so_da_lista_entregue(mundo: Mundo, cenario: str) -> None:
+    """A junção (Ana e Beto) ou o `nao_e` que esvazia o Beto (rosto e fala)."""
+    if cenario == "juncao":
+        for pessoa in ("pes01", "pes02"):
+            r = mundo.corrigir(item_id=pessoa, valor="Zeca", versao=_VERSAO_DAS_QUATRO)
+            assert r.status_code == 201
+        return
+    for lista, inicio, fim in (
+        ("na_imagem", 6000, 8000),
+        ("citada_na_fala", 8005, 8009),
+    ):
+        r = mundo.corrigir(
+            tipo="pessoa.nao_e",
+            item_id="pes02",
+            valor="Não identificado",
+            ocorrencia={"lista": lista, "inicio_ms": inicio, "fim_ms": fim},
+            versao=_VERSAO_DAS_QUATRO,
+        )
+        assert r.status_code == 201
+
+
+@pytest.mark.parametrize("cenario", ["juncao", "nao_e"])
+@pytest.mark.parametrize(
+    ("item_id", "nome", "renomeada"),
+    [
+        ("pes03", "Carla Reis", "Carla Reis Lima"),
+        ("pes04", "Davi Nunes", "Davi Nunes Jr"),
+    ],
+)
+def test_desfazer_renomeacao_depois_de_juncao_ou_nao_e_registra_os_nomes_da_pessoa(
+    cenario: str, item_id: str, nome: str, renomeada: str
+) -> None:
+    mundo = Mundo(["editor"])
+    mundo.reprocessar(_QUATRO_PESSOAS)
+    cid = mundo.corrigir(
+        item_id=item_id, valor=renomeada, versao=_VERSAO_DAS_QUATRO
+    ).json()["id"]
+    _tira_a_pessoa_so_da_lista_entregue(mundo, cenario)
+    mundo.avancar()
+
+    r = mundo.desfazer(cid)
+
+    assert r.status_code == 201
+    desfeita = mundo.correcoes.listar("j1")[-1]
+    assert (desfeita.tipo, desfeita.antes, desfeita.depois) == (
+        "desfazer",
+        renomeada,
+        nome,
+    )
+    assert nome in {p["nome"] for p in mundo.decupagem()["pessoas"]}
