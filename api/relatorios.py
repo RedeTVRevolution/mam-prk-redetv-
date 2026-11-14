@@ -25,7 +25,8 @@ from api.copia_bigquery import (
     parametro,
     transporte_http,
 )
-from api.jobs import RepositorioDeJobs, _confere_permissao
+from api.erros import lido
+from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
 
 
 def _exige_ver_o_relatorio(request: Request, chamador: ChamadorAutenticado) -> Usuario:
@@ -229,6 +230,21 @@ def poe_o_nome_dos_videos(
     nomes = {j.id: j.nome for j in jobs if j.lixeira is None}
     for item in itens:
         item.nome = nomes.get(item.job_id)
+
+
+def ids_dos_jobs_na_lixeira(repositorio: RepositorioDeJobs) -> set[str]:
+    """Os Jobs na lixeira (#619), pela consulta da tela da lixeira, sem limite. Os
+    relatórios tiram as linhas deles depois do cache das somas, uma leitura por pedido."""
+    return {
+        j.id
+        for j in lido(
+            lambda: (
+                repositorio.consultar(
+                    FiltroDeJobs(na_lixeira=True, so_os_da_lista=True)
+                ).jobs
+            )
+        )
+    }
 
 
 def config_e_transporte_do_ambiente(

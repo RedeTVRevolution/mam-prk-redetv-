@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
-from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, Rosto
+from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira, FusaoDaPessoa, Rosto
 from api.copia_bigquery import CopiaEmMemoria, LinhaDoMomento
 from api.jobs import RepositorioEmMemoria
 from api.lixeira_do_catalogo import FotosEmMemoria, purgar_catalogo_vencido
@@ -26,6 +26,9 @@ CURADOR = {"Authorization": "Bearer curador"}
 EDITOR = {"Authorization": "Bearer editor"}
 LIXEIRA = "/v1/admin/lixeira"
 AGORA = BASE + timedelta(days=40)
+ENVIO_DO_VIDEO = EnvioParaLixeira(
+    em=BASE, por_uid="u", por_email="u@redetv.com", motivo="teste"
+)
 FOTOS = [f"referencias/ana/{i}.jpg" for i in range(3)]
 
 
@@ -269,6 +272,15 @@ def test_o_impacto_da_marca_conta_as_insercoes_do_relatorio_pelo_nome_e_pelo_ape
 
     assert impacto["insercoes_que_saem_do_relatorio"] == 4
     assert impacto["ocorrencias_que_perdem_o_vinculo"] == 2  # o sentido de antes
+
+
+def test_o_impacto_da_marca_nao_conta_insercoes_de_video_na_lixeira() -> None:
+    mundo = Mundo(_relatorio({"j1": ["Acme"], "j2": ["Acme", "Acme"]}))
+    assert _impacto_da_marca(mundo)["insercoes_que_saem_do_relatorio"] == 3
+
+    mundo.jobs.trocar("j2", lambda _: {"lixeira": ENVIO_DO_VIDEO})
+
+    assert _impacto_da_marca(mundo)["insercoes_que_saem_do_relatorio"] == 1
 
 
 def test_a_contagem_nova_vale_na_lixeira_e_sem_relatorio_configurado() -> None:
