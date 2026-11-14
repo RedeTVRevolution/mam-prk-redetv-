@@ -127,6 +127,7 @@ COPY api/__init__.py \
      api/programas.py \
      api/progresso_das_janelas.py \
      api/quem_conta.py \
+     api/registro_da_correcao.py \
      api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
@@ -217,6 +218,7 @@ COPY api/__init__.py \
      api/progresso_das_janelas.py \
      api/quadros.py \
      api/quem_conta.py \
+     api/registro_da_correcao.py \
      api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
@@ -333,6 +335,7 @@ COPY api/__init__.py \
      api/programas.py \
      api/progresso_das_janelas.py \
      api/quem_conta.py \
+     api/registro_da_correcao.py \
      api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
