@@ -438,7 +438,7 @@ resource "google_project_service" "apis" {
 #   no build que o serviço e os Jobs usam depois do apply, e `volta` no build que os Jobs com GPU
 #   tinham antes dele, o que o testar-jobs-gpu.sh restaura se o teste de GPU falha. Um KEEP guarda
 #   o que tem uma dessas tags, por mais velho que seja ou por mais que já tenha saído dos N
-#   últimos. A tag se move a cada deploy; o build que perdeu as duas volta às regras comuns.
+#   últimos. A terceira, `estavel`, é posta à mão no build a que se quer poder voltar. A tag se move a cada deploy; o build que perdeu as duas volta às regras comuns.
 # - Antes de mexer nas regras ou na idade, `make conferir-limpeza-de-imagens` (só lê) simula as
 #   regras sobre as versões que existem e diz o que seria apagado; sai com 1 se apagasse uma
 #   versão em uso ou a da volta. Ele lê as regras do output limpeza_de_imagens, as mesmas daqui.
@@ -453,7 +453,10 @@ locals {
   pacotes_do_cache         = ["cache"]
   tag_do_build_em_uso      = "em-uso"
   tag_da_volta             = "volta"
-  tags_protegidas          = [local.tag_do_build_em_uso, local.tag_da_volta]
+  # `estavel`: posta à mão no build que se quer guardar para voltar (infra/README.md, "Voltar à
+  # versão estável"); nenhum script a move.
+  tag_estavel     = "estavel"
+  tags_protegidas = [local.tag_do_build_em_uso, local.tag_da_volta, local.tag_estavel]
 }
 
 resource "google_artifact_registry_repository" "mam" {
