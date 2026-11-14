@@ -75,12 +75,23 @@ export function filtrosDoRelatorio(busca: string): FiltrosDoRelatorio {
   return { programa: p.get('programa') ?? '', ...periodoDoEndereco(p) }
 }
 
+/** Os filtros próprios de um relatório: texto, ou lista (o nome se repete na query, um por valor); vazio não vai. */
+type Extras = Record<string, string | readonly string[]>
+
+function poeOsExtras(p: URLSearchParams, extras: Extras) {
+  for (const [nome, valor] of Object.entries(extras)) {
+    if (typeof valor === 'string') {
+      if (valor) p.set(nome, valor)
+    } else for (const v of valor) p.append(nome, v)
+  }
+}
+
 /** A query do endereço da tela (o período vai sempre, vazio inclusive, para não cair no padrão); `extras` são os filtros próprios de cada relatório. */
-export function filtrosParaEndereco(f: FiltrosDoRelatorio, extras: Record<string, string> = {}): string {
+export function filtrosParaEndereco(f: FiltrosDoRelatorio, extras: Extras = {}): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)
   poePeriodoNoEndereco(p, f)
-  for (const [nome, valor] of Object.entries(extras)) if (valor) p.set(nome, valor)
+  poeOsExtras(p, extras)
   return `?${p}`
 }
 
@@ -88,12 +99,12 @@ export function filtrosParaEndereco(f: FiltrosDoRelatorio, extras: Record<string
 export function parametrosDoRelatorio(
   f: FiltrosDoRelatorio,
   formato?: 'csv',
-  extras: Record<string, string> = {},
+  extras: Extras = {},
 ): string {
   const p = new URLSearchParams()
   if (f.programa) p.set('programa', f.programa)
   poePeriodoNaConsulta(p, f)
-  for (const [nome, valor] of Object.entries(extras)) if (valor) p.set(nome, valor)
+  poeOsExtras(p, extras)
   if (formato) p.set('formato', formato)
   return p.toString()
 }

@@ -129,24 +129,103 @@ test("os cartões vêm do total do período, e os vídeos são os distintos", as
   expect(valor("Vídeos")).toBe("2");
 });
 
-test("os filtros, o tipo inclusive, vão à API e ao endereço", async () => {
-  const usuario = userEvent.setup();
-  await abrir("/relatorios/marcas?programa=TV+Fama&de=2026-10-01&ate=2026-10-31&tipo=intervalo");
+test("os filtros, os tipos marcados inclusive, vão à API e ao endereço", async () => {
+  await abrir("/relatorios/marcas?programa=TV+Fama&de=2026-10-01&ate=2026-10-31&tipo=intervalo&tipo=testemunhal");
   await tabela();
 
   expect(pedidos[0].get("programa")).toBe("TV Fama");
   expect(pedidos[0].get("desde")).toBe("2026-10-01");
   expect(pedidos[0].get("ate")).toBe("2026-10-31");
-  expect(pedidos[0].get("tipo")).toBe("intervalo");
+  expect(pedidos[0].getAll("tipo")).toEqual(["intervalo", "testemunhal"]);
   expect(pedidos[0].get("limite")).toBe("50");
 
   fireEvent.change(screen.getByLabelText("Exibido até"), { target: { value: "2026-10-15" } });
   await waitFor(() => expect(pedidos.at(-1)?.get("ate")).toBe("2026-10-15"));
   expect(location.search).toContain("ate=2026-10-15");
+  expect(new URLSearchParams(location.search).getAll("tipo")).toEqual(["intervalo", "testemunhal"]);
+});
 
-  await usuario.selectOptions(screen.getByLabelText("Tipo de inserção"), "Testemunhal");
-  await waitFor(() => expect(pedidos.at(-1)?.get("tipo")).toBe("testemunhal"));
-  expect(location.search).toContain("tipo=testemunhal");
+const TIPOS = ["intervalo", "merchan_apresentador", "testemunhal", "produto_em_cena", "patrocinio_vinheta", "sobreposicao_grafica", "marca_incidental", "mencao_editorial"];
+
+test("o filtro de tipo abre com tudo marcado e não manda nem põe no endereço nenhum tipo", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/relatorios/marcas");
+  await tabela();
+
+  expect(pedidos[0].has("tipo")).toBe(false);
+  expect(location.search).not.toContain("tipo");
+  await usuario.click(screen.getByRole("button", { name: "Tipo de inserção: Todos" }));
+  const opcoes = within(await screen.findByRole("dialog")).getAllByRole("option");
+  expect(opcoes.map((o) => o.getAttribute("aria-checked"))).toEqual(["true", ...TIPOS.map(() => "true")]);
+});
+
+test("desmarcar a menção editorial manda os outros sete, põe no endereço e sobrevive a recarregar", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/relatorios/marcas");
+  await tabela();
+
+  await usuario.click(screen.getByRole("button", { name: "Tipo de inserção: Todos" }));
+  await usuario.click(await screen.findByRole("option", { name: "Menção editorial" }));
+
+  const sem = TIPOS.filter((t) => t !== "mencao_editorial");
+  await waitFor(() => expect(pedidos.at(-1)?.getAll("tipo")).toEqual(sem));
+  expect(new URLSearchParams(location.search).getAll("tipo")).toEqual(sem);
+  expect(screen.getByRole("button", { name: "Tipo de inserção: 7 de 8" })).toBeTruthy();
+
+  // Recarregar: a tela nasce do endereço, com a mesma escolha.
+  cleanup();
+  pedidos.length = 0;
+  const endereco = `/relatorios/marcas${location.search}`;
+  await abrir(endereco);
+  await tabela();
+  expect(pedidos[0].getAll("tipo")).toEqual(sem);
+  expect(screen.getByRole("button", { name: "Tipo de inserção: 7 de 8" })).toBeTruthy();
+});
+
+test("com uma caixa só marcada o resumo é o nome, e ela não se desmarca", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/relatorios/marcas?tipo=intervalo");
+  await tabela();
+
+  await usuario.click(screen.getByRole("button", { name: "Tipo de inserção: Intervalo" }));
+  await usuario.click(await screen.findByRole("option", { name: "Intervalo" }));
+
+  expect(screen.getByRole("option", { name: "Intervalo" }).getAttribute("aria-checked")).toBe("true");
+  expect(location.search).toContain("tipo=intervalo");
+  expect(screen.getByRole("button", { name: "Tipo de inserção: Intervalo" })).toBeTruthy();
+});
+
+test("Selecionar tudo e marcar todas as caixas uma a uma tiram o tipo do endereço", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/relatorios/marcas?tipo=intervalo&tipo=testemunhal");
+  await tabela();
+
+  await usuario.click(screen.getByRole("button", { name: "Tipo de inserção: 2 de 8" }));
+  await usuario.click(await screen.findByRole("option", { name: "Selecionar tudo" }));
+  await waitFor(() => expect(location.search).not.toContain("tipo"));
+  expect(pedidos.at(-1)?.has("tipo")).toBe(false);
+  expect(screen.getByRole("button", { name: "Tipo de inserção: Todos" })).toBeTruthy();
+
+  await usuario.click(await screen.findByRole("option", { name: "Menção editorial" }));
+  await waitFor(() => expect(location.search).toContain("tipo="));
+  await usuario.click(screen.getByRole("option", { name: "Menção editorial" }));
+  await waitFor(() => expect(location.search).not.toContain("tipo"));
+});
+
+test("tipo desconhecido do endereço sai, e o endereço só com tipos desconhecidos vale tudo marcado", async () => {
+  await abrir("/relatorios/marcas?tipo=outdoor");
+  await tabela();
+
+  expect(pedidos[0].has("tipo")).toBe(false);
+  expect(screen.getByRole("button", { name: "Tipo de inserção: Todos" })).toBeTruthy();
+});
+
+test("a matriz só tem as colunas dos tipos que vieram nas somas", async () => {
+  resposta = () => HttpResponse.json({ ...PRIMEIRA, marcas: [NATURA] });
+  await abrir("/relatorios/marcas?tipo=intervalo");
+
+  const matriz = await screen.findByRole("table", { name: "Tempo por marca e tipo de inserção" });
+  expect(within(matriz).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(["Marca", "Intervalo"]);
 });
 
 test("clicar numa marca pede as inserções dela só então: o vídeo, o tipo e o tempo", async () => {
@@ -276,9 +355,9 @@ test("o trilho leva ao relatório", async () => {
 });
 
 test("tipo desconhecido no endereço sai dos filtros", () => {
-  expect(filtrosDeMarcas("tipo=outdoor&programa=X&de=&ate=")).toEqual({ programa: "X", de: "", ate: "", tipo: "" });
-  expect(filtrosDeMarcas("tipo=testemunhal").tipo).toBe("testemunhal");
-  expect(filtrosDeMarcas("tipo=toString").tipo).toBe("");
+  expect(filtrosDeMarcas("tipo=outdoor&programa=X&de=&ate=")).toEqual({ programa: "X", de: "", ate: "", tipos: [] });
+  expect(filtrosDeMarcas("tipo=testemunhal&tipo=outdoor&tipo=testemunhal").tipos).toEqual(["testemunhal"]);
+  expect(filtrosDeMarcas("tipo=toString").tipos).toEqual([]);
 });
 
 test("o ranking vem acima da tabela; clicar na barra abre a linha da marca", async () => {

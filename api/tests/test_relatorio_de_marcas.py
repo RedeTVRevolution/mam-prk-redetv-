@@ -134,11 +134,16 @@ def test_a_consulta_em_memoria_traz_so_comerciais_e_filtra_por_tipo_programa_e_p
     def jobs(*filtros: Any) -> set[str]:
         return {i.job_id for i in consulta.insercoes(*filtros)}
 
-    assert len(consulta.insercoes(None, None, None, None)) == 4  # o plano fica de fora
-    assert jobs("Fama", None, None, None) == {"j2"}
-    assert jobs(None, date(2026, 10, 10), date(2026, 10, 20), None) == {"j2"}
-    assert jobs(None, date(2020, 1, 1), None, None) == {"j1", "j2"}  # sem data sai
-    assert jobs(None, None, None, "intervalo") == {"j1", "j3"}
+    assert len(consulta.insercoes(None, None, None, ())) == 4  # o plano fica de fora
+    assert jobs("Fama", None, None, ()) == {"j2"}
+    assert jobs(None, date(2026, 10, 10), date(2026, 10, 20), ()) == {"j2"}
+    assert jobs(None, date(2020, 1, 1), None, ()) == {"j1", "j2"}  # sem data sai
+    assert jobs(None, None, None, ("intervalo",)) == {"j1", "j3"}
+    assert jobs(None, None, None, ("intervalo", "merchan_apresentador")) == {
+        "j1",
+        "j2",
+        "j3",
+    }
 
 
 class Transporte:
@@ -177,7 +182,7 @@ def test_bigquery_pede_so_comerciais_com_marca_e_os_filtros_como_parametros() ->
     )
 
     achadas = ConsultaBigQuery(CONFIG, transporte).somas(
-        "Jornal", date(2026, 10, 1), date(2026, 10, 31), "intervalo"
+        "Jornal", date(2026, 10, 1), date(2026, 10, 31), ("intervalo",)
     )
 
     assert achadas == [
@@ -191,11 +196,11 @@ def test_bigquery_pede_so_comerciais_com_marca_e_os_filtros_como_parametros() ->
     assert "NULLIF(t.marca, '') IS NOT NULL" in consulta
     assert "GROUP BY marca, tipo, job_id" in consulta  # a soma é do BigQuery
     parametros = {
-        p["name"]: (p["parameterType"]["type"], p["parameterValue"]["value"])
+        p["name"]: (p["parameterType"]["type"], p["parameterValue"].get("value"))
         for p in corpo["queryParameters"]
     }
     assert parametros == {
-        "tipo_de_insercao": ("STRING", "intervalo"),
+        "tipos_de_insercao": ("ARRAY", None),
         "programa": ("STRING", "Jornal"),
         "desde": ("DATE", "2026-10-01"),
         "ate": ("DATE", "2026-10-31"),
@@ -207,11 +212,11 @@ def test_bigquery_sem_filtros_nao_leva_parametros_e_resposta_incompleta_falha_al
     None
 ):
     transporte = Transporte({"jobComplete": True})
-    assert ConsultaBigQuery(CONFIG, transporte).somas(None, None, None, None) == []
+    assert ConsultaBigQuery(CONFIG, transporte).somas(None, None, None, ()) == []
     assert transporte.corpos[0]["queryParameters"] == []
     with pytest.raises(RuntimeError):
         ConsultaBigQuery(CONFIG, Transporte({"jobComplete": False})).somas(
-            None, None, None, None
+            None, None, None, ()
         )
 
 
@@ -254,7 +259,7 @@ def test_rota_devolve_a_tabela_por_marca_com_as_insercoes_e_o_nome_do_video() ->
 
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert (corpo["programa"], corpo["tipo"]) == ("Jornal", None)
+    assert (corpo["programa"], corpo["tipos"]) == ("Jornal", [])
     assert [m["marca"] for m in corpo["marcas"]] == ["Ambev", "Natura"]
     ambev = corpo["marcas"][0]
     assert (ambev["insercoes"], ambev["videos"]) == (2, 2)  # j1 e j3 (sem data)
@@ -328,7 +333,7 @@ def test_programa_e_tipo_vazios_sao_todos() -> None:
     ).json()
     todos = cliente.get(ROTA, headers=AUTORIZACAO).json()
 
-    assert vazio["programa"] is None and vazio["tipo"] is None
+    assert vazio["programa"] is None and vazio["tipos"] == []
     assert vazio["marcas"] == todos["marcas"] != []
 
 
@@ -418,7 +423,7 @@ def test_sem_limite_a_resposta_e_a_de_antes() -> None:
     assert resposta.status_code == 200  # sem `limite`, o cursor não conta
     assert "X-Proximo-Cursor" not in resposta.headers
     corpo = resposta.json()
-    assert set(corpo) == {"programa", "desde", "ate", "tipo", "marcas"}
+    assert set(corpo) == {"programa", "desde", "ate", "tipos", "marcas"}
     assert all("lista" in m for m in corpo["marcas"])
 
 
@@ -497,9 +502,9 @@ class SoSomas:
         programa: str | None,
         desde: date | None,
         ate: date | None,
-        tipo: str | None,
+        tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
-        return self._em_memoria.somas(programa, desde, ate, tipo)
+        return self._em_memoria.somas(programa, desde, ate, tipos)
 
 
 def test_uma_fonte_so_com_somas_serve_ao_ranking_e_as_insercoes_da_marca() -> None:
@@ -515,3 +520,135 @@ def test_uma_fonte_so_com_somas_serve_ao_ranking_e_as_insercoes_da_marca() -> No
         resposta = nova.get(url, params=params, headers=AUTORIZACAO)
         assert resposta.status_code == 200
         assert resposta.text == velha.get(url, params=params, headers=AUTORIZACAO).text
+
+
+# Vários tipos (#620): o parâmetro `tipo` repetido, cada valor marcado no filtro.
+
+
+def _copia_com_tipos() -> CopiaEmMemoria:
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            _linha("j1", "Jornal", None, "Ambev", "intervalo"),
+            _linha("j1", "Jornal", None, "RedeTV!", "mencao_editorial"),
+            _linha("j1", "Jornal", None, "Ambev", "tipo_antigo"),
+        ],
+    )
+    return copia
+
+
+def _marcas_de(cliente: TestClient, rota: str = ROTA, **extra: Any) -> dict[str, Any]:
+    params: Any = extra.pop("params", [])
+    resposta = cliente.get(rota, params=params, headers=AUTORIZACAO)
+    assert resposta.status_code == 200
+    return resposta.json()  # type: ignore[no-any-return]
+
+
+def test_tipo_repetido_soma_so_os_tipos_marcados_e_a_resposta_devolve_a_lista() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia_com_tipos()))
+
+    corpo = _marcas_de(
+        cliente, params=[("tipo", "intervalo"), ("tipo", "mencao_editorial")]
+    )
+
+    assert corpo["tipos"] == ["intervalo", "mencao_editorial"]
+    assert {m["marca"] for m in corpo["marcas"]} == {"Ambev", "RedeTV!"}
+    ambev = next(m for m in corpo["marcas"] if m["marca"] == "Ambev")
+    assert [t["tipo"] for t in ambev["por_tipo"]] == ["intervalo"]
+
+
+def test_desmarcar_a_mencao_editorial_tira_a_marca_do_ranking_dos_totais_e_do_csv() -> (
+    None
+):
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia_com_tipos()))
+    sem = [("tipo", t) for t in TIPOS_DE_INSERCAO if t != "mencao_editorial"]
+
+    pagina = _marcas_de(cliente, params=[*sem, ("limite", "10")])
+    lista = cliente.get(
+        f"{ROTA}/insercoes", params=[*sem, ("marca", "RedeTV!")], headers=AUTORIZACAO
+    ).json()
+    csv_ = cliente.get(ROTA, params=[*sem, ("formato", "csv")], headers=AUTORIZACAO)
+
+    assert [m["marca"] for m in pagina["marcas"]] == ["Ambev"]
+    assert pagina["total"]["marcas"] == 1
+    assert lista == []
+    assert "RedeTV!" not in csv_.text
+
+
+def test_tipo_antigo_so_aparece_com_tudo_marcado() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia_com_tipos()))
+
+    tudo = _marcas_de(cliente)  # tudo marcado: nenhum `tipo` na API
+    algum_desmarcado = _marcas_de(
+        cliente, params=[("tipo", t) for t in TIPOS_DE_INSERCAO]
+    )
+
+    ambev = next(m for m in tudo["marcas"] if m["marca"] == "Ambev")
+    assert [t["tipo"] for t in ambev["por_tipo"]] == ["intervalo", "tipo_antigo"]
+    ambev = next(m for m in algum_desmarcado["marcas"] if m["marca"] == "Ambev")
+    assert [t["tipo"] for t in ambev["por_tipo"]] == ["intervalo"]
+
+
+def test_tipo_repetido_ignora_vazio_conta_repetido_uma_vez_e_so_vazio_e_todos() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia_com_tipos()))
+
+    um_so = _marcas_de(cliente, params=[("tipo", ""), ("tipo", "intervalo")])
+    repetido = _marcas_de(
+        cliente, params=[("tipo", "intervalo"), ("tipo", "intervalo")]
+    )
+    so_vazios = _marcas_de(cliente, params=[("tipo", ""), ("tipo", "")])
+
+    assert um_so["tipos"] == ["intervalo"] == repetido["tipos"]
+    assert um_so["marcas"] == repetido["marcas"]
+    assert so_vazios["tipos"] == []
+    assert so_vazios["marcas"] == _marcas_de(cliente)["marcas"]
+
+
+def test_tipo_repetido_com_um_valor_fora_da_lista_e_422_em_todas_as_rotas() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia_com_tipos()))
+    ruim = [("tipo", "intervalo"), ("tipo", "outdoor")]
+
+    for rota, extra in (
+        (ROTA, []),
+        (ROTA, [("limite", "5")]),
+        (ROTA, [("formato", "csv")]),
+        (f"{ROTA}/insercoes", [("marca", "Ambev")]),
+    ):
+        resposta = cliente.get(rota, params=[*ruim, *extra], headers=AUTORIZACAO)
+        assert resposta.status_code == 422, (rota, extra)
+
+
+def test_as_insercoes_da_marca_aceitam_tipo_repetido() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(_copia_com_tipos()))
+
+    lista = cliente.get(
+        f"{ROTA}/insercoes",
+        params=[("marca", "Ambev"), ("tipo", "intervalo"), ("tipo", "tipo_antigo")],
+        headers=AUTORIZACAO,
+    )
+    # tipo_antigo não está em TIPOS_DE_INSERCAO: 422
+    assert lista.status_code == 422
+    lista = cliente.get(
+        f"{ROTA}/insercoes",
+        params=[("marca", "Ambev"), ("tipo", ""), ("tipo", "intervalo")],
+        headers=AUTORIZACAO,
+    )
+    assert [i["tipo"] for i in lista.json()] == ["intervalo"]
+
+
+def test_bigquery_com_varios_tipos_leva_um_parametro_de_array() -> None:
+    transporte = Transporte({"jobComplete": True})
+
+    ConsultaBigQuery(CONFIG, transporte).somas(
+        None, None, None, ("intervalo", "testemunhal")
+    )
+
+    (corpo,) = transporte.corpos
+    assert "t.tipo_de_insercao IN UNNEST(@tipos_de_insercao)" in corpo["query"]
+    (p,) = corpo["queryParameters"]
+    assert p["name"] == "tipos_de_insercao"
+    assert p["parameterType"] == {"type": "ARRAY", "arrayType": {"type": "STRING"}}
+    assert p["parameterValue"] == {
+        "arrayValues": [{"value": "intervalo"}, {"value": "testemunhal"}]
+    }

@@ -8,7 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover.tsx'
 const ESPERA_DA_BUSCA_MS = 300
 
 /** O botão de um filtro: o nome (ou o valor escolhido) e, com valor, o X que limpa. */
-function Gatilho({ rotulo, Icone, texto, ativo, aoLimpar }: { rotulo: string; Icone: Icon; texto: string; ativo: boolean; aoLimpar: () => void }) {
+function Gatilho({ rotulo, Icone, texto, ativo, aoLimpar, comResumo }: { rotulo: string; Icone: Icon; texto: string; ativo: boolean; aoLimpar: () => void; comResumo?: boolean }) {
   return (
     <div
       className={cn(
@@ -17,7 +17,7 @@ function Gatilho({ rotulo, Icone, texto, ativo, aoLimpar }: { rotulo: string; Ic
       )}
     >
       <PopoverTrigger asChild>
-        <button type="button" aria-label={ativo ? `${rotulo}: ${texto}` : rotulo} className={cn('flex h-full min-w-0 items-center gap-1 pl-2', ativo ? 'pr-1' : 'pr-2')}>
+        <button type="button" aria-label={ativo || comResumo ? `${rotulo}: ${texto}` : rotulo} className={cn('flex h-full min-w-0 items-center gap-1 pl-2', ativo ? 'pr-1' : 'pr-2')}>
           <Icone size={16} stroke={1.75} className="shrink-0" aria-hidden />
           <span className="truncate text-sm">{texto}</span>
           {!ativo && <IconChevronDown size={14} className="shrink-0 opacity-60" aria-hidden />}
@@ -32,7 +32,31 @@ function Gatilho({ rotulo, Icone, texto, ativo, aoLimpar }: { rotulo: string; Ic
   )
 }
 
-/** Um filtro com lista de valores (Popover + Command do shadcn); `unico` troca o valor em vez de somar. */
+function Marca({ marcado }: { marcado: boolean }) {
+  return (
+    <span className={cn('flex size-4 shrink-0 items-center justify-center rounded-xs border', marcado ? 'border-primary bg-primary text-primary-foreground' : 'border-strong')} aria-hidden>
+      {marcado && <IconCheck size={12} stroke={2.5} />}
+    </span>
+  )
+}
+
+/** A linha "Selecionar tudo" do filtro `tudoMarcado`. */
+function Caixa({ rotulo, marcado, aoEscolher }: { rotulo: string; marcado: boolean; aoEscolher: () => void }) {
+  return (
+    <CommandItem value={rotulo} onSelect={aoEscolher} aria-checked={marcado}>
+      <Marca marcado={marcado} />
+      <span className="flex-1 truncate">{rotulo}</span>
+    </CommandItem>
+  )
+}
+
+/**
+ * Um filtro com lista de valores (Popover + Command do shadcn); `unico` troca o valor em vez de somar.
+ *
+ * `tudoMarcado` é o jeito do Excel: vazio em `valor` quer dizer tudo marcado (nada vai ao endereço nem à API,
+ * e uma opção nova já entra marcada); desmarcar uma opção devolve os marcados; a última marcada não se
+ * desmarca; "Selecionar tudo" devolve vazio. O botão resume em "Todos", no nome ou em "N de M".
+ */
 export function Faceta({
   rotulo,
   Icone,
@@ -40,6 +64,7 @@ export function Faceta({
   valor,
   aoMudar,
   unico,
+  tudoMarcado,
 }: {
   rotulo: string
   Icone: Icon
@@ -48,19 +73,39 @@ export function Faceta({
   valor: string[]
   aoMudar: (valor: string[]) => void
   unico?: boolean
+  tudoMarcado?: boolean
 }) {
   const [aberto, setAberto] = useState(false)
   const nomeDe = (v: string) => opcoes.find((o) => o.valor === v)?.rotulo ?? v
+  const todas = opcoes.map((o) => o.valor)
+  const marcadas = tudoMarcado && valor.length === 0 ? todas : valor
   const escolher = (v: string) => {
-    if (unico) {
+    if (tudoMarcado) {
+      if (marcadas.includes(v)) {
+        if (marcadas.length > 1) aoMudar(marcadas.filter((x) => x !== v))
+      } else {
+        const novas = [...marcadas, v]
+        aoMudar(todas.every((t) => novas.includes(t)) ? [] : novas)
+      }
+    } else if (unico) {
       aoMudar(valor.includes(v) ? [] : [v])
       setAberto(false)
     } else aoMudar(valor.includes(v) ? valor.filter((x) => x !== v) : [...valor, v])
   }
-  const texto = valor.length === 0 ? rotulo : valor.length === 1 ? nomeDe(valor[0]) : `${rotulo}: ${valor.length}`
+  const texto = tudoMarcado
+    ? valor.length === 0
+      ? 'Todos'
+      : valor.length === 1
+        ? nomeDe(valor[0])
+        : `${valor.length} de ${opcoes.length}`
+    : valor.length === 0
+      ? rotulo
+      : valor.length === 1
+        ? nomeDe(valor[0])
+        : `${rotulo}: ${valor.length}`
   return (
     <Popover open={aberto} onOpenChange={setAberto}>
-      <Gatilho rotulo={rotulo} Icone={Icone} texto={texto} ativo={valor.length > 0} aoLimpar={() => aoMudar([])} />
+      <Gatilho rotulo={rotulo} Icone={Icone} texto={texto} ativo={valor.length > 0} aoLimpar={() => aoMudar([])} comResumo={tudoMarcado} />
       <PopoverContent
         align="start"
         className="w-64 p-0"
@@ -77,13 +122,12 @@ export function Faceta({
           <CommandList>
             <CommandEmpty>Nenhum valor com esse nome.</CommandEmpty>
             <CommandGroup>
+              {tudoMarcado && <Caixa rotulo="Selecionar tudo" marcado={valor.length === 0} aoEscolher={() => aoMudar([])} />}
               {opcoes.map((o) => {
-                const marcado = valor.includes(o.valor)
+                const marcado = marcadas.includes(o.valor)
                 return (
                   <CommandItem key={o.valor} value={o.rotulo} onSelect={() => escolher(o.valor)} aria-checked={marcado}>
-                    <span className={cn('flex size-4 shrink-0 items-center justify-center rounded-xs border', marcado ? 'border-primary bg-primary text-primary-foreground' : 'border-strong')} aria-hidden>
-                      {marcado && <IconCheck size={12} stroke={2.5} />}
-                    </span>
+                    <Marca marcado={marcado} />
                     <span className="flex-1 truncate">{o.rotulo}</span>
                     {o.contagem !== undefined && <span className="text-xs text-muted-foreground tabular-nums">{o.contagem}</span>}
                   </CommandItem>

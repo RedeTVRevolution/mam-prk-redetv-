@@ -11,9 +11,11 @@ from fastapi.testclient import TestClient
 
 class ClienteSemPeriodoPadrao(TestClient):
     def request(self, method: str, url: Any, **kwargs: Any) -> Any:
-        params = dict(kwargs.get("params") or {})
+        # Pares (nome, valor) ou dicionário; o nome repetido (`tipo=a&tipo=b`) se mantém.
+        params = kwargs.get("params") or {}
+        pares = list(params.items() if isinstance(params, dict) else params)
         na_url = parse_qs(urlsplit(str(url)).query, keep_blank_values=True)
-        if not {"desde", "ate"} & (params.keys() | na_url.keys()):
-            params.update(desde="", ate="")
-        kwargs["params"] = params
+        if not {"desde", "ate"} & ({n for n, _ in pares} | na_url.keys()):
+            pares += [("desde", ""), ("ate", "")]
+        kwargs["params"] = pares
         return super().request(method, url, **kwargs)
