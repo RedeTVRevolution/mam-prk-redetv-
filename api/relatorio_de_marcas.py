@@ -39,6 +39,7 @@ from api.quem_conta import QuemConta
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
+    ProgramaDoPedido,
     confere_o_pedido,
     config_e_transporte_do_ambiente,
     consultar_no_bigquery,
@@ -47,6 +48,7 @@ from api.relatorios import (
     ou_503,
     poe_o_nome_dos_videos,
     posicao_do_cursor,
+    programas_do_pedido,
     recorta,
     resposta_em_csv,
 )
@@ -81,7 +83,7 @@ class InsercoesDaMarca:
 class ConsultaDeInsercoes(Protocol):
     def somas(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
@@ -116,13 +118,13 @@ class ConsultaEmMemoria:
 
     def insercoes(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
     ) -> list[Insercao]:
         achadas: list[Insercao] = []
-        for x in linhas_da_copia(self._copia, ("comercial",), programa, desde, ate):
+        for x in linhas_da_copia(self._copia, ("comercial",), programas, desde, ate):
             if (
                 x.marca
                 and x.tipo_de_insercao
@@ -137,12 +139,12 @@ class ConsultaEmMemoria:
 
     def somas(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
-        return somar(self.insercoes(programa, desde, ate, tipos))
+        return somar(self.insercoes(programas, desde, ate, tipos))
 
 
 def ranking_em_python(
@@ -210,7 +212,7 @@ class ConsultaBigQuery:
 
     def somas(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
@@ -231,7 +233,7 @@ class ConsultaBigQuery:
                 "t.job_id, t.marca, t.tipo_de_insercao AS tipo, t.inicio_ms, t.fim_ms"
             ),
             tipos=("comercial",),
-            programa=programa,
+            programas=programas,
             desde=desde,
             ate=ate,
             condicoes=condicoes,
@@ -252,14 +254,14 @@ class ConsultaComCache:
 
     def somas(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
         return self._cache.obter(
-            ("marcas", programa, desde, ate, tipos),
-            lambda: self._consulta.somas(programa, desde, ate, tipos),
+            ("marcas", programas, desde, ate, tipos),
+            lambda: self._consulta.somas(programas, desde, ate, tipos),
         )
 
 
@@ -289,19 +291,19 @@ class SoMarcasQueContam:
 
     def somas(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
-        return self._que_contam(self._consulta.somas(programa, desde, ate, tipos))
+        return self._que_contam(self._consulta.somas(programas, desde, ate, tipos))
 
     def insercoes_dos_nomes(self, nomes: set[str]) -> int:
         """Quantas inserções de todo o histórico, com o texto em `nomes` (normalizados),
         o relatório contaria se a marca não estivesse na lixeira (#597): as somas sem a
         exclusão da lixeira, só com o corte das purgas. Cada inserção é uma linha da cópia,
         com ou sem vínculo no catálogo, então conta uma vez."""
-        somas = self._consulta.somas(None, None, None, ())
+        somas = self._consulta.somas((), None, None, ())
         return sum(
             s.insercoes
             for s in self._que_contam(
@@ -335,7 +337,7 @@ class SoMarcasQueContam:
 
     def ranking(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
@@ -343,13 +345,13 @@ class SoMarcasQueContam:
         limite: int,
     ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
         return ranking_em_python(
-            self.somas(programa, desde, ate, tipos), depois, limite
+            self.somas(programas, desde, ate, tipos), depois, limite
         )
 
     def lista_da_marca(
         self,
         marca: str,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
@@ -357,7 +359,7 @@ class SoMarcasQueContam:
         limite: int,
     ) -> "list[InsercaoNoRelatorio]":
         # Só a marca pedida passa pela regra: os Jobs lidos são só os dos vídeos dela.
-        somas = self._consulta.somas(programa, desde, ate, tipos)
+        somas = self._consulta.somas(programas, desde, ate, tipos)
         dela = self._que_contam([s for s in somas if s.marca == marca])
         return lista_em_python(dela, marca, depois, limite)
 
@@ -407,7 +409,7 @@ class TotalDasMarcas(BaseModel):
 class RankingDeMarcas(BaseModel):
     """O relatório com `limite`: uma página das marcas, sem a lista das inserções."""
 
-    programa: str | None
+    programas: list[str]
     desde: date | None
     ate: date | None
     tipos: list[str]
@@ -416,7 +418,7 @@ class RankingDeMarcas(BaseModel):
 
 
 class RelatorioDeMarcas(BaseModel):
-    programa: str | None
+    programas: list[str]
     desde: date | None
     ate: date | None
     tipos: list[str]
@@ -518,29 +520,28 @@ def criar_rotas_das_marcas(
     def marcas(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
-        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        programa: Annotated[list[ProgramaDoPedido] | None, Query()] = None,
         tipo: Annotated[list[TipoDoPedido] | None, Query()] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> Any:
-        """`desde` e `ate` são datas de exibição, as duas inclusive; sem programa (ou com
-        `programa=` vazio) e sem `tipo` (ou só vazios), todos; `tipo` se repete, um por tipo
-        marcado. Com `limite`, uma página do ranking (sem a lista das inserções, com os totais do período) e o cursor da
+        """`desde` e `ate` são datas de exibição, as duas inclusive; sem `programa` e sem `tipo` (ou só vazios), todos; os dois se repetem, um
+        por valor marcado. Com `limite`, uma página do ranking (sem a lista das inserções, com os totais do período) e o cursor da
         próxima em `X-Proximo-Cursor`; as inserções de uma marca ficam em
         `/marcas/insercoes`. O CSV vem sempre inteiro."""
-        programa = programa or None
+        programas = programas_do_pedido(programa)
         tipos = tipos_do_pedido(tipo)
         desde, ate = periodo
         fonte = _confere(desde, ate)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
             lidas, total = ou_503(
-                lambda: fonte.ranking(programa, desde, ate, tipos, depois, limite)
+                lambda: fonte.ranking(programas, desde, ate, tipos, depois, limite)
             )
             pagina, cabecalhos = recorta(lidas, depois, limite)
             corpo = RankingDeMarcas(
-                programa=programa,
+                programas=list(programas),
                 desde=desde,
                 ate=ate,
                 tipos=list(tipos),
@@ -548,12 +549,16 @@ def criar_rotas_das_marcas(
                 marcas=pagina,
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
-        achadas = ou_503(lambda: relatorio(fonte.somas(programa, desde, ate, tipos)))
+        achadas = ou_503(lambda: relatorio(fonte.somas(programas, desde, ate, tipos)))
         if formato == "csv":
             return resposta_em_csv(em_csv(achadas), "marcas.csv")
         poe_o_nome_dos_videos((i for m in achadas for i in m.lista), repositorio)
         return RelatorioDeMarcas(
-            programa=programa, desde=desde, ate=ate, tipos=list(tipos), marcas=achadas
+            programas=list(programas),
+            desde=desde,
+            ate=ate,
+            tipos=list(tipos),
+            marcas=achadas,
         )
 
     @rotas.get("/marcas/insercoes", response_model=list[InsercaoNoRelatorio])
@@ -561,21 +566,21 @@ def criar_rotas_das_marcas(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
         marca: Annotated[str, LinhaDaConsulta(200, min_length=1)],
-        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        programa: Annotated[list[ProgramaDoPedido] | None, Query()] = None,
         tipo: Annotated[list[TipoDoPedido] | None, Query()] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
         """As inserções de uma marca no mesmo filtro do relatório, na ordem do vídeo e do
         tempo, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""
-        programa = programa or None
+        programas = programas_do_pedido(programa)
         tipos = tipos_do_pedido(tipo)
         desde, ate = periodo
         fonte = _confere(desde, ate)
         depois = posicao_do_cursor(cursor)
         lidas = ou_503(
             lambda: fonte.lista_da_marca(
-                marca, programa, desde, ate, tipos, depois, limite
+                marca, programas, desde, ate, tipos, depois, limite
             )
         )
         lista, cabecalhos = recorta(lidas, depois, limite)

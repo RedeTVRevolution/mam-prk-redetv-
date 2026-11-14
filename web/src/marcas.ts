@@ -39,7 +39,8 @@ export interface TotalDasMarcas {
 
 /** Uma página do ranking (`limite` na API), sem a lista das inserções; `proximo` é o cursor da seguinte. */
 export interface PaginaDeMarcas {
-  programa: string | null
+  /** Os programas marcados; vazio é tudo marcado. */
+  programas: string[]
   desde: string | null
   ate: string | null
   /** Os tipos marcados; vazio é tudo marcado. */
@@ -56,7 +57,8 @@ export interface PaginaDeInsercoes {
 }
 
 export interface RelatorioDeMarcas {
-  programa: string | null
+  /** Os programas marcados; vazio é tudo marcado. */
+  programas: string[]
   desde: string | null
   ate: string | null
   tipos: string[]

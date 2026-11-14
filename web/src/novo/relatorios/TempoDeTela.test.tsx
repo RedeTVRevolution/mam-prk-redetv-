@@ -47,7 +47,7 @@ const TOTAL = {
   mencoes_no_texto: 4,
 };
 const PRIMEIRA = {
-  programa: null,
+  programas: [],
   desde: null,
   ate: null,
   total: TOTAL,
@@ -140,11 +140,10 @@ test("os cartões trazem o total do período todo, não só o da página", async
 });
 
 test("os filtros vão à API e ao endereço; o endereço reproduz os filtros", async () => {
-  const usuario = userEvent.setup();
   await abrir("/relatorios/tempo-de-tela?programa=TV+Fama&de=2026-10-01&ate=2026-10-31");
   await tabela();
 
-  expect(pedidos[0].get("programa")).toBe("TV Fama");
+  expect(pedidos[0].getAll("programa")).toEqual(["TV Fama"]);
   expect(pedidos[0].get("desde")).toBe("2026-10-01");
   expect(pedidos[0].get("ate")).toBe("2026-10-31");
   // O ranking vem de 50 em 50, não inteiro.
@@ -153,10 +152,63 @@ test("os filtros vão à API e ao endereço; o endereço reproduz os filtros", a
   fireEvent.change(screen.getByLabelText("Exibido até"), { target: { value: "2026-10-15" } });
   await waitFor(() => expect(pedidos.at(-1)?.get("ate")).toBe("2026-10-15"));
   expect(location.search).toContain("ate=2026-10-15");
+});
 
-  await usuario.selectOptions(screen.getByLabelText("Programa"), "Leo Dias");
-  await waitFor(() => expect(pedidos.at(-1)?.get("programa")).toBe("Leo Dias"));
-  expect(location.search).toContain("programa=Leo+Dias");
+test("o filtro de programa abre com tudo marcado e não manda nem põe no endereço nenhum programa", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/relatorios/tempo-de-tela");
+  await tabela();
+
+  expect(pedidos[0].has("programa")).toBe(false);
+  expect(location.search).not.toContain("programa");
+  await usuario.click(screen.getByRole("button", { name: "Programa: Todos" }));
+  const opcoes = within(await screen.findByRole("dialog")).getAllByRole("option");
+  expect(opcoes.map((o) => o.getAttribute("aria-checked"))).toEqual(["true", "true", "true"]);
+});
+
+test("desmarcar um programa manda os marcados, põe no endereço e sobrevive a recarregar", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/relatorios/tempo-de-tela");
+  await tabela();
+
+  await usuario.click(screen.getByRole("button", { name: "Programa: Todos" }));
+  await usuario.click(await screen.findByRole("option", { name: "TV Fama" }));
+
+  await waitFor(() => expect(pedidos.at(-1)?.getAll("programa")).toEqual(["Leo Dias"]));
+  expect(new URLSearchParams(location.search).getAll("programa")).toEqual(["Leo Dias"]);
+  expect(screen.getByRole("button", { name: "Programa: Leo Dias" })).toBeTruthy();
+
+  cleanup();
+  pedidos.length = 0;
+  await abrir(`/relatorios/tempo-de-tela${location.search}`);
+  await tabela();
+  expect(pedidos[0].getAll("programa")).toEqual(["Leo Dias"]);
+  expect(screen.getByRole("button", { name: "Programa: Leo Dias" })).toBeTruthy();
+});
+
+test("com os dois programas marcados um a um, o programa sai do endereço", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/relatorios/tempo-de-tela?programa=Leo+Dias");
+  await tabela();
+
+  await usuario.click(screen.getByRole("button", { name: "Programa: Leo Dias" }));
+  await usuario.click(await screen.findByRole("option", { name: "TV Fama" }));
+
+  await waitFor(() => expect(location.search).not.toContain("programa"));
+  expect(pedidos.at(-1)?.has("programa")).toBe(false);
+  expect(screen.getByRole("button", { name: "Programa: Todos" })).toBeTruthy();
+});
+
+test("um programa do endereço que não está na lista continua marcado", async () => {
+  const usuario = userEvent.setup();
+  await abrir("/relatorios/tempo-de-tela?programa=Extinto&programa=TV+Fama");
+  await tabela();
+
+  expect(pedidos[0].getAll("programa")).toEqual(["Extinto", "TV Fama"]);
+  await usuario.click(screen.getByRole("button", { name: "Programa: 2 de 3" }));
+  const dialogo = await screen.findByRole("dialog");
+  expect(within(dialogo).getByRole("option", { name: "Extinto" }).getAttribute("aria-checked")).toBe("true");
+  expect(within(dialogo).getByRole("option", { name: "Leo Dias" }).getAttribute("aria-checked")).toBe("false");
 });
 
 test("clicar numa pessoa pede os vídeos dela só então, e a lista mostra os tempos", async () => {
@@ -252,14 +304,14 @@ test("Baixar CSV pede o formato csv com os mesmos filtros e entrega o arquivo", 
   const criar = vi.fn(() => "blob:csv");
   Object.assign(URL, { createObjectURL: criar, revokeObjectURL: vi.fn() });
   const clique = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-  await abrir("/relatorios/tempo-de-tela?programa=TV+Fama");
+  await abrir("/relatorios/tempo-de-tela?programa=TV+Fama&programa=Leo+Dias");
   await tabela();
 
   await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
 
   await waitFor(() => expect(clique).toHaveBeenCalled());
   const csv = pedidos.find((p) => p.get("formato") === "csv");
-  expect(csv?.get("programa")).toBe("TV Fama");
+  expect(csv?.getAll("programa")).toEqual(["TV Fama", "Leo Dias"]);
   // Sem período no endereço, o CSV leva o padrão, como a tela.
   expect([csv?.get("desde"), csv?.get("ate")]).toEqual([periodoPadrao().de, periodoPadrao().ate]);
   // O CSV vem inteiro: não leva limite nem cursor.
@@ -304,7 +356,7 @@ test("o trilho leva ao relatório", async () => {
 test("duração legível e filtros do endereço", () => {
   expect(duracaoLegivel(3_720_000)).toBe("1h02min");
   expect(duracaoLegivel(45_000)).toBe("45s");
-  expect(filtrosDoRelatorio("de=ontem&ate=2026-10-31&programa=X")).toEqual({ programa: "X", de: "", ate: "2026-10-31" });
+  expect(filtrosDoRelatorio("de=ontem&ate=2026-10-31&programa=X&programa=&programa=X&programa=Y")).toEqual({ programas: ["X", "Y"], de: "", ate: "2026-10-31" });
 });
 
 test("o gráfico mostra as pessoas e a divisão por tipo da primeira; clicar na barra abre a linha da tabela", async () => {

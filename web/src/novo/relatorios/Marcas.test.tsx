@@ -29,7 +29,7 @@ const NATURA = {
   por_tipo: [{ tipo: "intervalo", insercoes: 1, tempo_ms: 5_000, videos: 1 }],
 };
 const PRIMEIRA = {
-  programa: null,
+  programas: [],
   desde: null,
   ate: null,
   tipo: null,
@@ -133,7 +133,8 @@ test("os filtros, os tipos marcados inclusive, vão à API e ao endereço", asyn
   await abrir("/relatorios/marcas?programa=TV+Fama&de=2026-10-01&ate=2026-10-31&tipo=intervalo&tipo=testemunhal");
   await tabela();
 
-  expect(pedidos[0].get("programa")).toBe("TV Fama");
+  expect(pedidos[0].getAll("programa")).toEqual(["TV Fama"]);
+  expect(new URLSearchParams(location.search).getAll("programa")).toEqual(["TV Fama"]);
   expect(pedidos[0].get("desde")).toBe("2026-10-01");
   expect(pedidos[0].get("ate")).toBe("2026-10-31");
   expect(pedidos[0].getAll("tipo")).toEqual(["intervalo", "testemunhal"]);
@@ -310,7 +311,7 @@ test("Baixar CSV pede o formato csv com os mesmos filtros e entrega o arquivo", 
 
   await waitFor(() => expect(clique).toHaveBeenCalled());
   const csv = pedidos.find((p) => p.get("formato") === "csv");
-  expect(csv?.get("programa")).toBe("TV Fama");
+  expect(csv?.getAll("programa")).toEqual(["TV Fama"]);
   // Sem período no endereço, o CSV leva o padrão, como a tela.
   expect([csv?.get("desde"), csv?.get("ate")]).toEqual([periodoPadrao().de, periodoPadrao().ate]);
   expect(csv?.get("tipo")).toBe("intervalo");
@@ -355,7 +356,7 @@ test("o trilho leva ao relatório", async () => {
 });
 
 test("tipo desconhecido no endereço sai dos filtros", () => {
-  expect(filtrosDeMarcas("tipo=outdoor&programa=X&de=&ate=")).toEqual({ programa: "X", de: "", ate: "", tipos: [] });
+  expect(filtrosDeMarcas("tipo=outdoor&programa=X&de=&ate=")).toEqual({ programas: ["X"], de: "", ate: "", tipos: [] });
   expect(filtrosDeMarcas("tipo=testemunhal&tipo=outdoor&tipo=testemunhal").tipos).toEqual(["testemunhal"]);
   expect(filtrosDeMarcas("tipo=toString").tipos).toEqual([]);
 });

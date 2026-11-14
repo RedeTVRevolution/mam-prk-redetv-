@@ -1,12 +1,12 @@
-import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import { IconBroadcast, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import type { UseQueryResult } from "@tanstack/react-query";
-import { cn } from "cn";
 import type { ReactNode } from "react";
 import { codigoDoErro } from "../../api.ts";
 import type { FiltrosDoRelatorio } from "../../tempoDeTela.ts";
 import { Falha } from "../comum/Falha.tsx";
 import { CAMPO, mensagemDoErro } from "../comum/relatorio.ts";
 import { Campo } from "../comum/relatorio.tsx";
+import { Faceta } from "../acervo/Filtros.tsx";
 import { useProgramas } from "../consultas.ts";
 import { Button } from "../ui/button.tsx";
 
@@ -26,27 +26,18 @@ export function FiltrosDoPeriodo({
   const programas = useProgramas();
   return (
     <>
-      <Campo rotulo="Programa">
-        {(id) => (
-          <select
-            id={id}
-            className={cn(CAMPO, "w-48")}
-            value={filtros.programa}
-            onChange={(e) => aoMudar({ programa: e.target.value })}
-          >
-            <option value="">Todos os programas</option>
-            {/* O programa do endereço que não está na lista continua escolhido. */}
-            {filtros.programa && !programas.includes(filtros.programa) && (
-              <option value={filtros.programa}>{filtros.programa}</option>
-            )}
-            {programas.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        )}
-      </Campo>
+      <div className="grid min-w-0 gap-1">
+        <span className="text-xs text-muted-foreground">Programa</span>
+        <Faceta
+          rotulo="Programa"
+          Icone={IconBroadcast}
+          // O programa do endereço que não está na lista continua marcado.
+          opcoes={[...programas, ...filtros.programas.filter((p) => !programas.includes(p))].map((p) => ({ valor: p, rotulo: p }))}
+          valor={filtros.programas}
+          aoMudar={(marcados) => aoMudar({ programas: marcados })}
+          tudoMarcado
+        />
+      </div>
       <Campo rotulo="Exibido de">
         {(id) => (
           <input
