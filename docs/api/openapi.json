@@ -4535,8 +4535,8 @@
               {
                 "type": "string",
                 "enum": [
-                  "gpu",
-                  "cpu"
+                  "cpu",
+                  "gpu"
                 ]
               },
               {

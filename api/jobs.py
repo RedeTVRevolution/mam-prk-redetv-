@@ -205,7 +205,9 @@ NomeDaEtapa = Literal[
 # Etapas do #112 retiradas no #327; só os Jobs antigos ainda as trazem.
 ETAPAS_QUE_SAIRAM = frozenset({"referencias", "comparacao"})
 ResultadoDaEtapa = Literal["concluida", "falhou"]
-DispositivoDaEtapa = Literal["gpu", "cpu"]
+DispositivoDaEtapa = Literal[
+    "cpu", "gpu"
+]  # a mesma ordem de api/dispositivo.py: o Literal é cacheado e a ordem do OpenAPI dependia de qual módulo importava primeiro
 
 
 class Etapa(BaseModel):
