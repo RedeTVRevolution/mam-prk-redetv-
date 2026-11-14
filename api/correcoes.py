@@ -1661,11 +1661,14 @@ def _aparicao_acrescentada_na_lista(
 def _nome_entregue_do_alvo(
     modelo: dict[str, Any], entregue: dict[str, Any], alvo: Correcao
 ) -> str:
-    # Sem `strict`: se uma renomeação juntou duas pessoas, a decupagem entregue tem
-    # menos que o modelo e o alvo pode já não estar nela (item inexistente, 422).
-    for original, pessoa in zip(_pessoas(modelo), _pessoas(entregue), strict=False):
+    # Pelo id, não pela posição: junção e `nao_e` tiram pessoas só da lista entregue.
+    # A pessoa absorvida já não está nela (item inexistente, 422).
+    for original in _pessoas(modelo):
         if identidade_da_pessoa(original) == alvo.ancora.identidade:
-            return str(pessoa["nome"])
+            for pessoa in _pessoas(entregue):
+                if pessoa.get("id") == original.get("id"):
+                    return str(pessoa["nome"])
+            break
     raise ItemInexistente(alvo.ancora.identidade)
 
 

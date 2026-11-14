@@ -92,6 +92,14 @@ def test_desfazer_a_troca_separa_as_pessoas_de_novo() -> None:
     assert [p["id"] for p in decupagem["pessoas"]] == ["pes01", "pes05", "pes06"]
     assert decupagem["pautas"][0]["pessoas"] == ["pes05", "pes01"]
     assert decupagem["objetos"][0]["pessoa"] == "pes05"
+    # #625: a pessoa absorvida pela própria troca não está na entregue com o desfazer,
+    # então o "antes" é o nome que a troca deu.
+    desfeita = mundo.correcoes.listar("j1")[-1]
+    assert (desfeita.tipo, desfeita.antes, desfeita.depois) == (
+        "desfazer",
+        "Alberto",
+        "não identificado",
+    )
 
 
 def test_correcao_na_absorvida_antes_da_juncao_continua_valendo() -> None:
