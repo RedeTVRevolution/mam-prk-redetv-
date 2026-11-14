@@ -2,20 +2,25 @@
 
 import hashlib
 from collections.abc import Iterator, Mapping
+from typing import TYPE_CHECKING
 
-from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs
+if TYPE_CHECKING:
+    from api.jobs import Job, RepositorioDeJobs
 
 TAMANHO_DA_PAGINA = 500
 
 
 def jobs_concluidos(
-    repositorio: RepositorioDeJobs,
+    repositorio: "RepositorioDeJobs",
     *,
     na_lixeira: bool | None,
     tamanho_da_pagina: int = TAMANHO_DA_PAGINA,
-) -> Iterator[Job]:
+) -> Iterator["Job"]:
     """Os Jobs concluídos, página a página. `na_lixeira=None` traz também os da lixeira (as
     cargas que a lixeira marca); `False` os deixa de fora (quem reprocessa)."""
+    # Import aqui: api.jobs puxa o app, e as ferramentas que só usam hash ou percentil não.
+    from api.jobs import FiltroDeJobs
+
     cursor: str | None = None
     while True:
         pagina = repositorio.consultar(
