@@ -79,18 +79,18 @@ def test_filtros_do_tempo_de_tela_chegam_so_como_parametro() -> None:
     transporte = TransporteQueGuarda()
     consulta = TempoDeTelaBigQuery(CONFIG, transporte)
 
-    consulta.somas(HOSTIL, DIA, DIA)
+    consulta.somas((HOSTIL,), DIA, DIA)
 
-    _confere(transporte, {"programa"})
+    _confere(transporte, {"programas"})
 
 
 def test_filtros_das_marcas_chegam_so_como_parametro() -> None:
     transporte = TransporteQueGuarda()
     consulta = MarcasBigQuery(CONFIG, transporte)
 
-    consulta.somas(HOSTIL, DIA, DIA, (HOSTIL,))
+    consulta.somas((HOSTIL,), DIA, DIA, (HOSTIL,))
 
-    _confere(transporte, {"programa", "tipos_de_insercao"})
+    _confere(transporte, {"programas", "tipos_de_insercao"})
 
 
 def test_filtros_dos_resumos_de_uso_chegam_so_como_parametro() -> None:
