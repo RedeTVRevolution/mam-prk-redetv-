@@ -124,7 +124,7 @@ def com_os_planos_recorrentes(
 
     O limite entre dois planos seguidos é corte real quando os quadros dos dois lados
     diferem mais que `LIMITE_DO_CORTE_REAL`; parecidos, é corte falso (flash, transição), como no
-    diagnóstico de `api/planos_curtos.py`. Quadro que não abre deixa o plano sem grupo e o
+    diagnóstico de `api/ferramentas/planos_curtos.py`. Quadro que não abre deixa o plano sem grupo e o
     corte, por prudência, como real.
     """
     planos = sorted(decupagem.planos, key=lambda p: p.inicio_ms)
