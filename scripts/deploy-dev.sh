@@ -104,7 +104,7 @@ marcar() { # <repo/imagem@digest> <tag>: põe a tag no digest, movendo-a se já 
 for imagem in "$TRANSCRICAO_GPU_ANTES" "$OCR_GPU_ANTES" "$OBJETOS_GPU_ANTES"; do
   [[ -z $imagem ]] || marcar "$imagem" "$TAG_DA_VOLTA"
 done
-# Aceite dos três esquemas do Gemini contra o Vertex (#617), como a mam-terraform: o CI usa
+# Aceite dos cinco esquemas do Gemini contra o Vertex (#617), como a mam-terraform: o CI usa
 # cassete e não vê um esquema recusado (400). Roda antes do build, para um esquema recusado não
 # ir ao ar: saída 1 (400) derruba o deploy. Saída 2 (sem prova: 403 de IAM ainda não propagado
 # no primeiro deploy, modelo indisponível...) só avisa, e 429 e 5xx são passageiros. A

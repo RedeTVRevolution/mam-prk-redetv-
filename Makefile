@@ -126,7 +126,7 @@ gravar-cassetes: gravar-cassete-da-busca
 	BUCKET_CLIPES_OURO="$${BUCKET_CLIPES_OURO:-$$(terraform -chdir=infra output -raw bucket_clipes_ouro)}" \
 	uv run --locked python -m api.cassete
 
-# Aceite dos três esquemas do Gemini contra o Vertex (#617): chamadas curtas de texto, só 400
+# Aceite dos cinco esquemas do Gemini contra o Vertex (#617): chamadas curtas de texto, só 400
 # reprova. O deploy-dev já o chama; fora do `verificar` e do CI, que não têm credenciais.
 aceitar-esquemas:
 	set -a && . ./.env && set +a && uv run --locked python -m api.aceite_dos_esquemas
