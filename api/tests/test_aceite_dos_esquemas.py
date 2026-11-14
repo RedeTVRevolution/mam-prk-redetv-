@@ -136,7 +136,13 @@ def test_falha_de_autenticacao_ou_rede_no_meio_da_chamada_da_saida_2(
 
 
 def test_outra_excecao_vira_sem_prova_e_as_demais_seguem() -> None:
-    t = Transporte("{}", RefreshError("token"), ValueError("json"), "{}", "{}")
+    t = Transporte(
+        "{}",
+        requests.exceptions.ConnectionError("token"),
+        ValueError("json"),
+        "{}",
+        "{}",
+    )
 
     resultados = aceitar(t)
 
