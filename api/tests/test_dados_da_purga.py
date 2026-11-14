@@ -105,6 +105,7 @@ class BigQueryFalso:
             for comando in (
                 corpo["query"]
                 .replace("CURRENT_TIMESTAMP()", "CURRENT_TIMESTAMP")
+                .replace("UNNEST([1])", "(SELECT 1)")
                 .split(";")
             ):
                 if comando.strip():
@@ -287,3 +288,18 @@ def test_limpeza_recusa_video_ainda_vivo_antes_de_apagar(
     with pytest.raises(RuntimeError, match="ainda existe"):
         limpar(banco, ambiente, bq)  # type: ignore[arg-type]
     assert bq.chamadas == []
+
+
+def test_script_da_purga_nao_tem_select_com_where_e_sem_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # O BigQuery recusa "SELECT <literais> WHERE ..." (http 400), o SQLite aceita:
+    # o BigQuery falso não pega, então o teste olha o texto de cada comando.
+    from api.dados_da_purga import DadosDaPurga
+
+    bq = BigQueryFalso()
+    DadosDaPurga(FirestoreFalso(monkeypatch), AMBIENTE, bq).apagar("j1")  # type: ignore[arg-type]
+    for comando in bq.chamadas[0]["query"].split(";"):
+        antes_do_where = comando.split("WHERE", 1)[0]
+        if "SELECT" in antes_do_where:
+            assert "FROM" in antes_do_where.split("SELECT", 1)[1], comando
