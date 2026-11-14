@@ -694,13 +694,13 @@ export async function loop(c: Config): Promise<number> {
   return loopa.saida;
 }
 
-if (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
-  const { docker } = await import("@ai-hero/sandcastle/sandboxes/docker");
-  const [clone, branch, n] = process.argv.slice(2);
-  const e = process.env;
-  const vagas = Number(e.AFK_VAGAS || 1);
-  const repassa = ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN", "FIRESTORE_EMULATOR_HOST", "STORAGE_EMULATOR_HOST",
-    "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
+// Os tokens do claude e do gh só vão às vagas: o integrador roda git, instalação, make e bundle.
+// AFK_DONO é o login do dono do repositório, o único cujos comentários os prompts leem.
+const repassa = ["FIRESTORE_EMULATOR_HOST", "STORAGE_EMULATOR_HOST", "AFK_DONO",
+  "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
+const repassaDaVaga = ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"];
+
+export function envDaCaixa(e: Record<string, string | undefined>, papel: "vaga" | "integrador", vagas: number): Record<string, string> {
   // O pre-commit do projeto (gitleaks) nos commits do agente: o config do .git é só leitura no sandbox.
   // Só nas vagas: no integrador, os hooks do branch (escritos pelo agente) não rodam. Em todos, o git
   // ignora os refs/replace do agente, que trocariam o conteúdo de um commit no checkout e no merge.
@@ -710,12 +710,21 @@ if (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url
   const divide = vagas > 1
     ? { PYTEST_XDIST_AUTO_NUM_WORKERS: e.AFK_PYTEST_PROCESSOS || "6", VITEST_MAX_WORKERS: e.AFK_VITEST_PROCESSOS || "4" }
     : {};
+  const chaves = papel === "vaga" ? [...repassaDaVaga, ...repassa] : repassa;
+  return { ...Object.fromEntries(chaves.map((k) => [k, e[k] ?? ""])), GIT_NO_REPLACE_OBJECTS: "1", ...(papel === "vaga" ? hooks : {}), ...divide };
+}
+
+if (realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+  const { docker } = await import("@ai-hero/sandcastle/sandboxes/docker");
+  const [clone, branch, n] = process.argv.slice(2);
+  const e = process.env;
+  const vagas = Number(e.AFK_VAGAS || 1);
   const plugin = "/opt/plugins/mattpocock-skills";
   process.exitCode = await loop({
     clone, branch, maxIteracoes: Number(n), vagas,
     caixa: (papel) => docker({
       imageName: "mam-afk", containerUid: 1000, containerGid: 1000, network: e.AFK_REDE,
-      env: { ...Object.fromEntries(repassa.map((k) => [k, e[k] ?? ""])), GIT_NO_REPLACE_OBJECTS: "1", ...(papel === "vaga" ? hooks : {}), ...divide },
+      env: envDaCaixa(e, papel, vagas),
       mounts: [{ hostPath: e.AFK_PLUGIN_HOST!, sandboxPath: plugin, readonly: true }],
     }),
     claude: "claude",

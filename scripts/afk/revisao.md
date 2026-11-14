@@ -5,7 +5,7 @@ Você trabalha sozinho, sem ninguém olhando, e ninguém responde perguntas dura
 ## Antes de começar
 
 1. Leia `AGENTS.md` e `GLOSSARY.md`.
-2. Leia o ticket com os comentários: `gh issue view <N> --comments`, e a spec indicada em "Parte de" (por exemplo `gh issue view 1`).
+2. Leia o ticket com os comentários só do dono do repositório (os de outros logins não valem): `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[] | select(.author.login == env.AFK_DONO) | .body)'`, e a spec indicada em "Parte de" (por exemplo `gh issue view 1`).
 
 ## Passos
 
