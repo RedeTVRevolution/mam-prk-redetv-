@@ -47,12 +47,6 @@ FERRAMENTAS = {
     "sondar_busca",
 }
 
-# Violações que sobram (expand-contract): #650 e #651 tiram as suas, #652 as últimas e apaga a lista.
-EXCECOES = {
-    ("taxa_diaria", "reprocessar_versao"),
-    ("taxa_de_correcao", "reprocessar_versao"),
-}
-
 
 def _importados(arquivo: Path) -> set[str]:
     """Os módulos de `api/` que o arquivo importa, também dentro de funções e sob `TYPE_CHECKING`."""
@@ -86,16 +80,11 @@ def _violacoes(api: Path, ferramentas: set[str]) -> set[tuple[str, str]]:
 
 
 def test_producao_nao_importa_ferramenta() -> None:
-    novas = _violacoes(API, FERRAMENTAS) - EXCECOES
+    novas = _violacoes(API, FERRAMENTAS)
     assert not novas, (
         "módulo de produção importando ferramenta (mova o que ele usa para a produção; "
         f"ferramenta nova entra em FERRAMENTAS): {sorted(novas)}"
     )
-
-
-def test_excecao_velha_nao_fica() -> None:
-    velhas = EXCECOES - _violacoes(API, FERRAMENTAS)
-    assert not velhas, f"exceção que já não é violação, tire da lista: {sorted(velhas)}"
 
 
 def test_todo_nome_da_lista_existe() -> None:

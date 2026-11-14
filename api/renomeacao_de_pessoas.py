@@ -21,8 +21,7 @@ from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, PessoaDoCatalogo, RenomeacaoDaPessoa
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
-from api.leitura_da_decupagem import decupagens_dos_jobs
-from api.lixeira_do_catalogo import LeituraDeDecupagens
+from api.leitura_da_decupagem import AbreDecupagem, decupagens_dos_jobs
 from api.texto import normalizar
 from api.texto_como_dado import Linha
 
@@ -74,7 +73,7 @@ def criar_rotas_da_renomeacao(
     pessoas: Catalogo,
     repositorio: RepositorioDeJobs,
     correcoes: RepositorioDeCorrecoes,
-    decupagens: LeituraDeDecupagens,
+    decupagens: AbreDecupagem,
     auditoria: RepositorioDeAuditoria,
     relogio: Callable[[], datetime],
     ao_renomear: Callable[[], None],

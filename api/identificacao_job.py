@@ -9,6 +9,7 @@ termina bem, para o Workflows seguir.
 
 import logging
 import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -16,6 +17,7 @@ from typing import Protocol
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
+from api.ambiente import FaltaNoAmbiente
 from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import rodar_etapa
@@ -126,6 +128,11 @@ def executar(
 
 
 def main() -> None:
+    try:
+        decupagens = DecupagensStorage.do_ambiente()
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        sys.exit(2)
     projeto = os.environ["GCP_PROJECT_ID"]
     aceitos = os.environ["BUCKET_ACEITOS"]
     sessao = sessao_autenticada()
@@ -133,9 +140,7 @@ def main() -> None:
     executar(
         os.environ["JOB_ID"],
         RepositorioFirestore(cliente_do_firestore(projeto)),
-        DecupagensStorage(
-            ClienteStorage(project=projeto), aceitos, os.environ["BUCKET_DECUPAGENS"]
-        ),
+        decupagens,
         TransporteVertex(projeto, sessao, imprimir),
         TranscricoesStorage(ClienteStorage(project=projeto), aceitos),
         catalogo,

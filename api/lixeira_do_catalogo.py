@@ -26,7 +26,7 @@ from api.catalogo import (
 from api.catalogo_apagado import so_o_rosto
 from api.correcoes import RepositorioDeCorrecoes
 from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
-from api.leitura_da_decupagem import decupagens_corrigidas
+from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.lixeira import (
     PRAZO_DA_PURGA,
     Envio,
@@ -68,10 +68,6 @@ class FotosEmMemoria:
 
     def apagar_prefixo(self, prefixo: str) -> None:
         self.objetos = {o for o in self.objetos if not o.startswith(prefixo)}
-
-
-class LeituraDeDecupagens(Protocol):
-    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
 
 
 class ImpactoDaPessoa(BaseModel):
@@ -183,7 +179,7 @@ def criar_rotas_da_lixeira_do_catalogo(
     marcas: CatalogoDeMarcas,
     repositorio: RepositorioDeJobs,
     correcoes: RepositorioDeCorrecoes,
-    decupagens: LeituraDeDecupagens,
+    decupagens: AbreDecupagem,
     fotos: FotosDeReferencia,
     auditoria: RepositorioDeAuditoria,
     relogio: Callable[[], datetime],
