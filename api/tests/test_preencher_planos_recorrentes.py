@@ -48,7 +48,7 @@ def _acervo() -> tuple[RepositorioEmMemoria, Armazem]:
 def test_a_previa_conta_antes_e_depois_e_nao_grava_nada() -> None:
     jobs, armazem = _acervo()
 
-    total = preencher(jobs, armazem, gravar=False, por_pagina=1)
+    total = preencher(jobs, armazem, gravar=False, tamanho_da_pagina=1)
 
     assert total == {
         "videos": 2,

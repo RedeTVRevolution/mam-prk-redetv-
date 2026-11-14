@@ -78,9 +78,9 @@ def test_o_job_concluido_na_lixeira_entra_nos_tres_preencher() -> None:
     )
     leitura = _Leitura()
 
-    planos = preencher_planos(jobs, Armazem(), gravar=False, por_pagina=1)
-    filtros = preencher_filtros(jobs, indice, por_lote=1)
-    preencher_catalogo(jobs, leitura, por_lote=1)  # type: ignore[arg-type]
+    planos = preencher_planos(jobs, Armazem(), gravar=False, tamanho_da_pagina=1)
+    filtros = preencher_filtros(jobs, indice, tamanho_da_pagina=1)
+    preencher_catalogo(jobs, leitura, tamanho_da_pagina=1)  # type: ignore[arg-type]
 
     assert planos["falhou"] == 4  # a, b, c e `lixo` (o em andamento fica fora)
     assert filtros["videos"] == 1 and indice._por_job["lixo"][0].sistema == "Playout"

@@ -16,47 +16,39 @@ import sys
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.bancos import cliente_do_firestore
+from api.ferramentas.comum import TAMANHO_DA_PAGINA, jobs_concluidos
 from api.indice_da_busca import IndiceDaBusca
-from api.jobs import FiltroDeJobs, RepositorioDeJobs
+from api.jobs import RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
 from api.orcamento_de_escrita import OrcamentoFirestore
 
 log = logging.getLogger(__name__)
 
-POR_LOTE = 500
-
 
 def preencher(
     repositorio: RepositorioDeJobs,
     indice: IndiceDaBusca,
-    por_lote: int = POR_LOTE,
+    tamanho_da_pagina: int = TAMANHO_DA_PAGINA,
 ) -> dict[str, int]:
     """Devolve quantos `objetos` atualizou, em quantos `videos`, e quantos `falhou` (o
     índice recusou; o vídeo fica para a próxima rodada)."""
     contagem = {"videos": 0, "objetos": 0, "falhou": 0}
-    cursor: str | None = None
-    while True:
-        pagina = repositorio.consultar(
-            FiltroDeJobs(na_lixeira=None, limite=por_lote, cursor=cursor)
-        )
-        for job in pagina.jobs:
-            if job.estado != "concluido":
-                continue
-            na_lixeira = job.lixeira is not None
-            try:
-                mudou = indice.preencher_filtros(job.id, job.sistema, na_lixeira)
-                if mudou:
-                    _conferir_a_lixeira(repositorio, indice, job.id, na_lixeira)
-            except Exception:
-                log.exception("filtros da busca não preenchidos para %s", job.id)
-                contagem["falhou"] += 1
-                continue
+    for job in jobs_concluidos(
+        repositorio, na_lixeira=None, tamanho_da_pagina=tamanho_da_pagina
+    ):
+        na_lixeira = job.lixeira is not None
+        try:
+            mudou = indice.preencher_filtros(job.id, job.sistema, na_lixeira)
             if mudou:
-                contagem["videos"] += 1
-                contagem["objetos"] += mudou
-        cursor = pagina.proximo_cursor
-        if cursor is None:
-            return contagem
+                _conferir_a_lixeira(repositorio, indice, job.id, na_lixeira)
+        except Exception:
+            log.exception("filtros da busca não preenchidos para %s", job.id)
+            contagem["falhou"] += 1
+            continue
+        if mudou:
+            contagem["videos"] += 1
+            contagem["objetos"] += mudou
+    return contagem
 
 
 def _conferir_a_lixeira(
