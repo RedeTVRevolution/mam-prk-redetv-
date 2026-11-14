@@ -2721,7 +2721,12 @@ def _aparicao_acrescentada_na_lista(
 def _nome_entregue_do_alvo(
     modelo: dict[str, Any], entregue: dict[str, Any], alvo: Correcao
 ) -> str:
-    for original, pessoa in zip(_pessoas(modelo), _pessoas(entregue), strict=True):
+    originais, entregues = _pessoas(modelo), _pessoas(entregue)
+    if len(originais) != len(entregues):
+        # Uma pessoa foi absorvida por outra (renomeação para o mesmo nome): o
+        # item do alvo já não está na decupagem entregue.
+        raise ItemInexistente(alvo.ancora.identidade)
+    for original, pessoa in zip(originais, entregues, strict=True):
         if identidade_da_pessoa(original) == alvo.ancora.identidade:
             return str(pessoa["nome"])
     raise ItemInexistente(alvo.ancora.identidade)

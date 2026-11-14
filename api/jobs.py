@@ -1628,6 +1628,8 @@ def criar_rotas(
             correcoes.acrescentar(registro)
         except CorrecaoInexistente:
             raise HTTPException(404, "Correção não encontrada") from None
+        except ItemInexistente:
+            raise HTTPException(422, "Item inexistente") from None
         except (NaoDesfazivel, CorrecaoJaExiste):
             raise HTTPException(
                 409,

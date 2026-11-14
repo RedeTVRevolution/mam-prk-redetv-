@@ -52,3 +52,20 @@ def test_reaplicar_no_item_que_sumiu_da_decupagem_da_422() -> None:
     assert [
         f["id"] for f in mundo.cliente.get("/v1/jobs/j1/fila", headers=EDITOR).json()
     ] == [cid]
+
+
+def test_desfazer_troca_de_nome_com_a_pessoa_que_sumiu_da_decupagem_da_422() -> None:
+    mundo = Mundo(["editor"])
+    # pes02 vira "Ana Souza" e é absorvida por pes01: some da Decupagem entregue.
+    cid = mundo.corrigir(item_id="pes02", valor="Ana Souza").json()["id"]
+    mundo.avancar()
+    cliente = TestClient(mundo.cliente.app, raise_server_exceptions=False)
+
+    r = cliente.post(
+        f"/v1/jobs/j1/correcoes/{cid}/desfazer",
+        json={"motivo": "enganei-me"},
+        headers=EDITOR,
+    )
+
+    assert (r.status_code, r.json()) == (422, {"detail": "Item inexistente"})
+    assert [c.tipo for c in mundo.correcoes.listar("j1")] == ["pessoa.renomear"]
