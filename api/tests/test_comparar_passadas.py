@@ -7,8 +7,9 @@ from typing import Any
 
 import pytest
 
+from api.ambiente import FaltaNoAmbiente
 from api.comparador import TOLERANCIA_MS
-from api.comparar_objetos import FaltaNoAmbiente, Preco
+from api.comparar_objetos import Preco
 from api.comparar_passadas import (
     Custo,
     LadoDoResultado,

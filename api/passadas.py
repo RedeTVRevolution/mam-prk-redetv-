@@ -23,28 +23,22 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Annotated, Any, Protocol, cast
+from typing import Annotated, Protocol
 
-import google.auth
 from fastapi import APIRouter, Depends, HTTPException, Path
 from google.api_core.exceptions import NotFound
-from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.analise_por_janelas import analisar_video
 from api.auth import Chamador
 from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo, CatalogoEmMemoria
-from api.comparar_objetos import (
-    FaltaNoAmbiente,
-    Preco,
-    exigir_do_ambiente,
-    precos_do_ambiente,
-    tokens_do_transporte,
-)
+from api.clientes_de_nuvem import sessao_autenticada
+from api.comparar_objetos import Preco, precos_do_ambiente, tokens_do_transporte
 from api.decupagem import Decupagem, Video
-from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
+from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
 from api.jobs import (
     RepositorioDeJobs,
     _enxerga,
@@ -333,11 +327,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     except (FaltaNoAmbiente, ValueError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    credenciais: Any
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
+    sessao = sessao_autenticada()
     banco = cliente_do_firestore(projeto)
     catalogo = CatalogoFirestore(banco)
     try:

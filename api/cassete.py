@@ -18,10 +18,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol
 
-import google.auth
-from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
 from api import gemini  # lido na chamada, para o teste trocar `INSTRUCAO`
@@ -32,11 +30,11 @@ from api.agent_retrieval import (
     transporte_http,
 )
 from api.agent_retrieval import Transporte as TransporteDaBusca
+from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import Video
 from api.gemini import (
     MODELO,
     Chamada,
-    SessaoHttp,
     Transporte,
     TransporteVertex,
     analisar,
@@ -139,11 +137,7 @@ def main() -> None:
         bucket.blob(OBJETO).upload_from_filename(
             str(aceito.proxy), content_type="video/mp4"
         )
-    credenciais: Any
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
+    sessao = sessao_autenticada()
     gravar(
         TransporteVertex(projeto, sessao),
         video_uri=f"gs://{bucket.name}/{OBJETO}",

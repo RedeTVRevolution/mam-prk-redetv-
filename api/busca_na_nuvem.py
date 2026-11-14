@@ -6,12 +6,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
-import google.auth
-import google.auth.transport.requests
 import requests
 from requests.adapters import HTTPAdapter
 
 from api.busca import Ranking
+from api.clientes_de_nuvem import sessao_autenticada
 from api.gemini import ErroHttp, SessaoHttp, Transporte, TransporteVertex
 from api.indice_da_busca import Registro
 
@@ -171,10 +170,4 @@ def adaptadores_da_busca(
 
 
 def _sessao_autorizada() -> SessaoHttp:
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    return cast(
-        SessaoHttp,
-        google.auth.transport.requests.AuthorizedSession(credenciais),  # type: ignore[no-untyped-call]
-    )
+    return cast(SessaoHttp, sessao_autenticada())

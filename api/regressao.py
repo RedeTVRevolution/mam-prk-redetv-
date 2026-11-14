@@ -25,9 +25,9 @@ from typing import Annotated, Any, Literal, Self
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
 from api.comparador import Item, Tipo
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import (
     CORRIGIVEIS,
     Correcao,

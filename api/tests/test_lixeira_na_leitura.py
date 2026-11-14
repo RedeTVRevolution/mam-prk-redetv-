@@ -188,6 +188,22 @@ class CatalogoEspiao:
         return getattr(self._catalogo, nome)
 
 
+def test_falha_do_firestore_na_leitura_do_catalogo_no_tempo_de_tela_vira_503() -> None:
+    mundo = Mundo()
+
+    def cai(ids: Any) -> Any:
+        raise ServiceUnavailable("Firestore fora")  # type: ignore[no-untyped-call]
+
+    mundo.catalogo.obter_varios = cai  # type: ignore[method-assign]
+    cliente = mundo.instancia()
+
+    for caminho in (ROTA, f"{ROTA}/videos"):
+        resposta = cliente.get(
+            caminho, params={"pessoa_id": mundo.ana.id}, headers=ADMIN
+        )
+        assert resposta.status_code == 503, caminho
+
+
 # --- o relatório -----------------------------------------------------------------------
 
 

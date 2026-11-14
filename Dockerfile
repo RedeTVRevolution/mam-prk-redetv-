@@ -95,12 +95,14 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
@@ -177,12 +179,14 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
@@ -291,12 +295,14 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/florence.py \

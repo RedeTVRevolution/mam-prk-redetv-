@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, _parametro, transporte_http
+from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.jobs import Job, RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
 
@@ -144,7 +144,7 @@ VALUES
                 "location": c.regiao,
                 "timeoutMs": 120_000,
                 "queryParameters": [
-                    _parametro(
+                    parametro(
                         "linhas",
                         json.dumps(
                             [_json_da_linha(x) for x in linhas], ensure_ascii=False

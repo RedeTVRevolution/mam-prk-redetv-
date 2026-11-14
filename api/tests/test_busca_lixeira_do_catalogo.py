@@ -786,12 +786,10 @@ def test_falha_na_leitura_do_job_com_marca_purgada_e_503_nao_job_ausente(
         busca.buscar("vestido")
 
 
-def test_pela_api_a_marca_purgada_so_tira_o_video_anterior_a_purga_do_filtro() -> None:
-    c = Cenario("memoria")
-    _com_video_antigo_e_novo(c)
+def _cliente_da_busca(c: Cenario) -> TestClient:
     papeis = RepositorioDePapeisEmMemoria()
     papeis.salvar("adm", ["administrador"])
-    cliente = TestClient(
+    return TestClient(
         criar_app(
             VerificadorFalso(
                 {
@@ -808,12 +806,98 @@ def test_pela_api_a_marca_purgada_so_tira_o_video_anterior_a_purga_do_filtro() -
             auditoria=RepositorioDeAuditoriaEmMemoria(),
             marcas=c.marcas,
             purgas_de_marca=c.purgas,
-        )
+        ),
+        raise_server_exceptions=False,
     )
-    r = cliente.get(
+
+
+def _buscar_pela_api(c: Cenario, q: str, **params: str) -> Any:
+    return _cliente_da_busca(c).get(
         "/v1/busca",
-        params={"q": "vestido", "marca": "Nike"},
+        params={"q": q, **params},
         headers={"Authorization": "Bearer admin"},
     )
+
+
+def test_pela_api_a_marca_purgada_so_tira_o_video_anterior_a_purga_do_filtro() -> None:
+    c = Cenario("memoria")
+    _com_video_antigo_e_novo(c)
+    r = _buscar_pela_api(c, "vestido", marca="Nike")
     assert r.status_code == 200
     assert [v["job_id"] for v in r.json()["videos"]] == ["novo"]
+
+
+def test_pela_api_o_corte_da_purga_mais_recente_vale_em_todos_os_lotes() -> None:
+    """A busca lê as marcas em lotes (um por cláusula). A Nike (com o apelido Swoosh) foi
+    purgada em P1 e a Swoosh em P2: para o texto Swoosh vale P2, a purga mais recente. O
+    segundo lote traz a Nike, cuja purga também cita Swoosh, e não pode rebaixar o corte
+    para P1: o vídeo criado entre as duas continua sem a marca, como no relatório."""
+    c = Cenario("memoria")
+    p1 = BASE + timedelta(days=1)
+    entre = BASE + timedelta(days=2)
+    p2 = BASE + timedelta(days=3)
+    nike = c.marcas.acrescentar("Nike", ["Swoosh"])
+    swoosh = c.marcas.acrescentar("Swoosh", [])
+    c.purgar_marca(nike, p1)
+    c.purgar_marca(swoosh, p2)
+    # Lote 1 (plano da Ana): a marca Swoosh num vídeo entre P1 e P2.
+    c.m.com(
+        job("a", criado_em=entre),
+        Registro(
+            id="a:plano:0",
+            tipo="plano",
+            job_id="a",
+            inicio_ms=0,
+            fim_ms=5_000,
+            programa="TV Fama",
+            pessoas=[c.ana],
+            descricao="vestido",
+            marca="Swoosh",
+        ),
+    )
+    # Lote 2 (fala): a Nike, que traz a purga P1 de volta, e outra Swoosh entre P1 e P2.
+    for id, marca, em in (("b", "Nike", BASE), ("c", "Swoosh", entre)):
+        c.m.com(
+            job(id, criado_em=em),
+            Registro(
+                id=f"{id}:fala:0",
+                tipo="fala",
+                job_id=id,
+                inicio_ms=0,
+                fim_ms=5_000,
+                programa="TV Fama",
+                texto="ana de vestido",
+                marca=marca,
+            ),
+        )
+
+    r = _buscar_pela_api(c, "Ana vestido")
+
+    assert r.status_code == 200
+    assert sorted(v["job_id"] for v in r.json()["videos"]) == ["a", "b", "c"]
+    assert r.json()["facetas"]["marca"] == []
+
+
+def test_pela_api_falha_do_firestore_na_leitura_do_catalogo_e_503() -> None:
+    c = Cenario("memoria")
+    c.plano("j1", "estúdio de tv", c.ana)
+
+    def cai(ids: Any) -> Any:
+        raise ServiceUnavailable("firestore fora")  # type: ignore[no-untyped-call]
+
+    c.m.catalogo.obter_varios = cai  # type: ignore[method-assign]
+
+    assert _buscar_pela_api(c, "Ana estúdio").status_code == 503
+
+
+def test_pela_api_falha_do_firestore_na_leitura_das_marcas_na_lixeira_e_503() -> None:
+    c = Cenario("memoria")
+    c.marcas.acrescentar("Nike", [])
+    _vestido(c, "j1", "Nike")
+
+    def cai() -> Any:
+        raise ServiceUnavailable("firestore fora")  # type: ignore[no-untyped-call]
+
+    c.marcas.na_lixeira = cai  # type: ignore[method-assign]
+
+    assert _buscar_pela_api(c, "vestido").status_code == 503

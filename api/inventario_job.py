@@ -13,16 +13,15 @@ import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, cast
+from typing import Literal, Protocol, cast
 
-import google.auth
-from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
+from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import Decupagem
 from api.florence import ObjetosDaDecupagem
-from api.gemini import SessaoHttp, Transporte, TransporteVertex
+from api.gemini import Transporte, TransporteVertex
 from api.inventario import (
     Inventarios,
     aplicar_inventario,
@@ -116,11 +115,7 @@ def executar(
 
 def main() -> None:
     projeto = os.environ["GCP_PROJECT_ID"]
-    credenciais: Any
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
+    sessao = sessao_autenticada()
     executar(
         os.environ["JOB_ID"],
         ObjetosStorage(

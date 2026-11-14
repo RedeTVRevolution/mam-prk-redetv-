@@ -16,13 +16,13 @@ import base64
 import json
 import logging
 import uuid
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
 from api.auth import Chamador, Sistema
+from api.clientes_de_nuvem import TransporteRest
 
 log = logging.getLogger(__name__)
 
@@ -36,9 +36,6 @@ TipoDeEvento = Literal[
     "purga",
 ]
 Quem = tuple[Literal["usuario", "sistema"], str]
-
-# (método, caminho a partir de /v1, corpo) -> (status HTTP, resposta em JSON)
-Transporte = Callable[[str, str, dict[str, Any] | None], tuple[int, dict[str, Any]]]
 
 
 class Filtro(BaseModel):
@@ -122,7 +119,7 @@ class ErroAoPublicarUso(Exception):
 
 
 class EventosPubSub:
-    def __init__(self, topico: str, transporte: Transporte) -> None:
+    def __init__(self, topico: str, transporte: TransporteRest) -> None:
         # `projects/<p>/topics/<t>`
         self._topico = topico
         self._transporte = transporte

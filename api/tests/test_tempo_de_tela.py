@@ -4,7 +4,7 @@ import csv
 import io
 import random
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.cache_curto import CacheCurto
-from api.catalogo import CatalogoEmMemoria, PessoaDoCatalogo
+from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, PessoaDoCatalogo
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -29,22 +29,17 @@ from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
     NOMES_EM_JSON,
-    RANKING_EM_SQL,
     SOMA_EM_SQL,
     UNIAO_EM_SQL,
-    VIDEOS_DA_PESSOA_EM_SQL,
     ConsultaBigQuery,
     ConsultaDeMomentos,
     ConsultaEmMemoria,
     MomentoDaPessoa,
     PessoaNoRelatorio,
     PessoaNoVideo,
-    pagina_do_ranking,
     pessoa_no_video,
     ranking_em_python,
     somar,
-    video_da_pessoa,
-    videos_em_python,
 )
 from api.tempo_de_tela import ConsultaComCache as ComCache
 from api.tempo_de_tela import relatorio as relatorio_das_somas
@@ -705,77 +700,6 @@ def test_os_videos_de_uma_pessoa_vem_paginados_e_com_o_nome() -> None:
     assert sem_bigquery.status_code == 503
 
 
-def test_o_ranking_e_os_videos_em_sql_dao_o_mesmo_que_em_python() -> None:
-    # Os SQLs da página rodam num SQLite (com o JSON dos nomes trocado, como na soma) e
-    # passam pela mesma leitura da consulta real; a referência é a versão em Python.
-    def no_sqlite(sql: str, tabela: str) -> str:
-        return f"WITH base AS (SELECT * FROM {tabela})\n" + sql.replace(
-            NOMES_EM_JSON,
-            "json_group_array(json_object('nome', nome, 'linhas', linhas))",
-        )
-
-    sorteio = random.Random(14)
-    for _ in range(100):
-        momentos = [
-            MomentoDaPessoa(
-                job_id=sorteio.choice(["j1", "j2", "j3"]),
-                pessoa_id=(pessoa := sorteio.choice(["c1", "c2", "c3", "c4"])),
-                nome=sorteio.choice([pessoa, pessoa + "x", ""]),
-                tipo=sorteio.choice(["aparicao", "aparicao", "mencao_na_fala"]),
-                inicio_ms=(inicio := sorteio.randrange(0, 50)),
-                fim_ms=inicio + sorteio.randrange(0, 15),
-            )
-            for _ in range(sorteio.randrange(1, 30))
-        ]
-        banco = _sqlite_com(momentos)
-        banco.execute("ALTER TABLE base RENAME TO linhas")
-        depois, limite = sorteio.randrange(0, 4), sorteio.randrange(1, 4)
-        pagina = {"posicao_de": depois, "posicao_ate": depois + limite + 1}
-
-        do_sql = pagina_do_ranking(
-            banco.execute(no_sqlite(RANKING_EM_SQL, "linhas"), pagina).fetchall()
-        )
-        em_python = ranking_em_python(somar(momentos), depois, limite)
-        if do_sql[0]:
-            assert do_sql == em_python
-        else:  # página vazia: os totais vêm zerados
-            assert em_python[0] == []
-
-        pessoa = sorteio.choice(["c1", "c2"])
-        # A condição `p.id = @pessoa_id` da base, aqui como uma visão (sem parâmetro).
-        banco.execute(
-            f"CREATE TEMP VIEW dela AS SELECT * FROM linhas WHERE pessoa_id = '{pessoa}'"
-        )
-        videos = [
-            video_da_pessoa(v)
-            for v in banco.execute(no_sqlite(VIDEOS_DA_PESSOA_EM_SQL, "dela"), pagina)
-        ]
-        assert videos == videos_em_python(somar(momentos), pessoa, depois, limite)
-
-
-def test_bigquery_pede_a_pagina_e_a_pessoa_como_parametros() -> None:
-    transporte = Transporte({"jobComplete": True})
-    consulta = ConsultaBigQuery(CONFIG, transporte)
-
-    assert consulta.ranking(None, None, None, 50, 25) == ranking_em_python([], 0, 1)
-    assert consulta.videos_da_pessoa("c1", None, None, None, 0, 25) == []
-
-    def parametros(corpo: dict[str, Any]) -> dict[str, str]:
-        return {
-            p["name"]: p["parameterValue"]["value"] for p in corpo["queryParameters"]
-        }
-
-    ranking, videos = transporte.corpos
-    assert parametros(ranking) == {"posicao_de": "50", "posicao_ate": "76"}
-    assert "ROW_NUMBER()" in ranking["query"]
-    assert parametros(videos) == {
-        "pessoa_id": "c1",
-        "posicao_de": "0",
-        "posicao_ate": "26",
-    }
-    assert "p.id = @pessoa_id" in videos["query"]
-
-
 def test_o_nome_do_relatorio_vem_do_catalogo_inclusive_depois_de_renomear() -> None:
     catalogo = CatalogoEmMemoria()
     ana = catalogo.acrescentar("Ana Souza", "apresentadora", [])
@@ -843,3 +767,139 @@ def test_o_nome_do_catalogo_nao_suja_o_ranking_guardado_no_cache() -> None:
     assert nome() == "Ana"
     catalogo.corrigir(ana.id, nome="Ana Maria", apelidos=[])
     assert nome() == "Ana Maria"
+
+
+class CatalogoQueConta(CatalogoEmMemoria):
+    """O catálogo em memória que anota quantas leituras em lote recebeu."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.leituras = 0
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
+        self.leituras += 1
+        return super().obter_varios(ids)
+
+
+def _empate_com_nome_atual() -> tuple[CatalogoQueConta, CopiaEmMemoria]:
+    """Quatro pessoas empatadas em 2 s, com o id na ordem contrária à dos nomes atuais.
+    p1 se chama "Zélia" no catálogo e "Ana" (o mais frequente) na cópia; p3 foi fundida em
+    p4 ("Carla"), e o nome dela mesma ("Zzz Velho") não vale."""
+    catalogo = CatalogoQueConta()
+    for id_, nome in (
+        ("p1", "Zélia"),
+        ("p2", "Bia"),
+        ("p3", "Zzz Velho"),
+        ("p4", "Carla"),
+    ):
+        catalogo._pessoas[id_] = PessoaDoCatalogo(id=id_, nome=nome, papel="")
+    catalogo.definir_fusao(
+        "p3",
+        FusaoDaPessoa(
+            destino_id="p4",
+            em=agora_utc(),
+            por_uid="u",
+            por_email="u@r.com",
+            motivo="x",
+        ),
+    )
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            LinhaDoMomento(
+                job_id="j1",
+                programa="Jornal",
+                data_de_exibicao=date(2026, 10, 1),
+                tipo="aparicao",
+                inicio_ms=0,
+                fim_ms=2_000,
+                pessoas=[PessoaDoMomento(id_, "Ana" if id_ == "p1" else id_)],
+            )
+            for id_ in ("p1", "p2", "p3", "p4")
+        ],
+    )
+    return catalogo, copia
+
+
+def test_tela_e_csv_saem_na_mesma_ordem_no_empate_pelo_nome_atual() -> None:
+    catalogo, copia = _empate_com_nome_atual()
+    cliente = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
+    esperado = [("p2", "Bia"), ("p3", "Carla"), ("p4", "Carla"), ("p1", "Zélia")]
+
+    completo = cliente.get(ROTA, headers=AUTORIZACAO).json()["pessoas"]
+    csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO).text
+    paginas: list[tuple[str, str]] = []
+    cursor: str | None = None
+    while True:
+        params: dict[str, Any] = {"limite": 1}
+        if cursor:
+            params["cursor"] = cursor
+        pagina = cliente.get(ROTA, params=params, headers=AUTORIZACAO)
+        paginas += [(p["pessoa_id"], p["nome"]) for p in pagina.json()["pessoas"]]
+        if cursor is None:
+            assert (
+                pagina.headers["X-Proximo-Cursor"] == "MQ"
+            )  # a posição 1, como sempre
+        cursor = pagina.headers.get("X-Proximo-Cursor")
+        if not cursor:
+            break
+
+    assert [(p["pessoa_id"], p["nome"]) for p in completo] == esperado
+    linhas = list(csv.DictReader(io.StringIO(csv_)))
+    assert [(r["pessoa_id"], r["nome"]) for r in linhas] == esperado
+    assert paginas == esperado  # o empate cortado entre páginas não troca a ordem
+
+
+def test_o_catalogo_e_lido_uma_vez_por_pedido() -> None:
+    catalogo, copia = _empate_com_nome_atual()
+    cliente = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
+
+    for params in ({"limite": 2}, {}, {"formato": "csv"}):
+        catalogo.leituras = 0
+        cliente.get(ROTA, params=params, headers=AUTORIZACAO)
+        assert catalogo.leituras == 1
+
+
+def test_sem_catalogo_o_ranking_usa_o_nome_mais_frequente_das_somas() -> None:
+    somas = somar(
+        [
+            MomentoDaPessoa("j1", "p1", "Zed", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j1", "p2", "Abe", "aparicao", 0, 1_000),
+        ]
+    )
+
+    sem_mapa, _ = ranking_em_python(somas, 0, 10)
+    com_mapa, _ = ranking_em_python(somas, 0, 10, {"p1": "Ana", "p2": "Zeca"})
+
+    assert [(p.pessoa_id, p.nome) for p in sem_mapa] == [("p2", "Abe"), ("p1", "Zed")]
+    assert [(p.pessoa_id, p.nome) for p in com_mapa] == [("p1", "Ana"), ("p2", "Zeca")]
+
+
+class SoSomas:
+    """Uma fonte nova das somas: implementa só `somas`, como o Protocol exige."""
+
+    def __init__(self, copia: CopiaEmMemoria) -> None:
+        self._em_memoria = ConsultaEmMemoria(copia)
+
+    def somas(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        return self._em_memoria.somas(programa, desde, ate)
+
+
+def test_uma_fonte_so_com_somas_serve_ao_ranking_e_aos_videos_da_pessoa() -> None:
+    copia = _varias_pessoas()
+    catalogo = _catalogo_da_copia(ConsultaEmMemoria(copia))
+    nova = _cliente(consulta=SoSomas(copia), catalogo=catalogo)
+    velha = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
+
+    casos: list[tuple[str, dict[str, Any]]] = [
+        (ROTA, {"limite": 2}),
+        (ROTA, {}),
+        (f"{ROTA}/videos", {"pessoa_id": "c1"}),
+    ]
+    for url, params in casos:
+        resposta = nova.get(url, params=params, headers=AUTORIZACAO)
+        assert resposta.status_code == 200
+        assert resposta.text == velha.get(url, params=params, headers=AUTORIZACAO).text

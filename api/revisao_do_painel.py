@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, _parametro, transporte_http
+from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.jobs import RepositorioDeJobs
 from api.nuvem import RepositorioDeRevisaoFirestore
 from api.relatorios import linhas_da_consulta
@@ -217,16 +217,16 @@ class RevisaoBigQuery:
         onde = ["TRUE"]
         parametros: list[dict[str, Any]] = []
         if inicio is not None:
-            parametros.append(_parametro("inicio", inicio.isoformat(), "TIMESTAMP"))
+            parametros.append(parametro("inicio", inicio.isoformat(), "TIMESTAMP"))
             onde.append("r.ultimo_pulso >= @inicio")
         if fim is not None:
-            parametros.append(_parametro("fim", fim.isoformat(), "TIMESTAMP"))
+            parametros.append(parametro("fim", fim.isoformat(), "TIMESTAMP"))
             onde.append("r.ultimo_pulso < @fim")
         if programa is not None:
-            parametros.append(_parametro("programa", programa))
+            parametros.append(parametro("programa", programa))
             onde.append("j.programa = @programa")
         if usuario is not None:
-            parametros.append(_parametro("usuario", usuario))
+            parametros.append(parametro("usuario", usuario))
             onde.append("r.uid = @usuario")
         revisao = f"`{c.projeto}.{c.dataset}.{c.tabela_da_revisao}`"
         jobs = f"`{c.projeto}.{c.dataset}.{c.tabela_dos_jobs}`"
@@ -337,7 +337,7 @@ VALUES
                 "location": c.regiao,
                 "timeoutMs": 120_000,
                 "queryParameters": [
-                    _parametro(
+                    parametro(
                         "linhas",
                         json.dumps(
                             [_json_da_medida(m) for m in medidas], ensure_ascii=False

@@ -23,10 +23,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-import google.auth
-from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
+from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import Decupagem
 from api.florence import ObjetosDaDecupagem
 from api.gemini import SessaoHttp, Transporte, TransporteVertex
@@ -35,10 +35,6 @@ from api.nuvem import ObjetosStorage
 
 PRECO_DA_GPU_POR_HORA = 1.05
 ESPERA_DO_JOB_S = 30.0
-
-
-class FaltaNoAmbiente(Exception):
-    pass
 
 
 @dataclass(frozen=True)
@@ -282,12 +278,6 @@ class DisparadorDoCloudRun:
             )
 
 
-def exigir_do_ambiente(ambiente: Mapping[str, str], nome: str) -> str:
-    if not ambiente.get(nome):
-        raise FaltaNoAmbiente(f"{nome} não está no ambiente")
-    return ambiente[nome]
-
-
 def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int:
     if len(argumentos) != 2:
         print("uso: python -m api.comparar_objetos JOB_ID PASTA", file=sys.stderr)
@@ -309,11 +299,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     except (FaltaNoAmbiente, ValueError) as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
-    credenciais: Any
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    sessao: Any = AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
+    sessao = sessao_autenticada()
     try:
         medidas = comparar(
             job_id,

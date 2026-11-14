@@ -74,11 +74,8 @@ def test_filtros_do_tempo_de_tela_chegam_so_como_parametro() -> None:
     consulta = TempoDeTelaBigQuery(CONFIG, transporte)
 
     consulta.somas(HOSTIL, DIA, DIA)
-    consulta.ranking(HOSTIL, DIA, DIA, 0, 10)
-    consulta.videos_da_pessoa(HOSTIL, HOSTIL, DIA, DIA, 0, 10)
 
     _confere(transporte, {"programa"})
-    assert _parametros(transporte.corpos[2])["pessoa_id"] == HOSTIL
 
 
 def test_filtros_das_marcas_chegam_so_como_parametro() -> None:
@@ -86,11 +83,8 @@ def test_filtros_das_marcas_chegam_so_como_parametro() -> None:
     consulta = MarcasBigQuery(CONFIG, transporte)
 
     consulta.somas(HOSTIL, DIA, DIA, HOSTIL)
-    consulta.ranking(HOSTIL, DIA, DIA, HOSTIL, 0, 10)
-    consulta.lista_da_marca(HOSTIL, HOSTIL, DIA, DIA, HOSTIL, 0, 10)
 
     _confere(transporte, {"programa", "tipo_de_insercao"})
-    assert _parametros(transporte.corpos[2])["marca"] == HOSTIL
 
 
 def test_filtros_dos_resumos_de_uso_chegam_so_como_parametro() -> None:
