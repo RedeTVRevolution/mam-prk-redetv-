@@ -4,6 +4,8 @@ Serve ao comparador do gabarito, ao conjunto de regressão e à comparação de 
 tela lado a lado: produção, sem importar ferramenta.
 """
 
+from bisect import bisect_left, bisect_right
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, get_args
@@ -76,32 +78,57 @@ def parear(
 
     Mesmo tipo; aparição, menção e comercial exigem também a mesma identidade.
     Sem trecho em comum, não há par; item pontual pareia com o que o contém.
+    Entre candidatos de mesma sobreposição, vence o de menor desvio de início e de fim
+    e, persistindo o empate, o primeiro na ordem do modelo.
     """
+    # Grupos por (tipo, identidade normalizada) com os itens do modelo por início, guardando
+    # a posição original; só os que começam na janela do item do gabarito são vistos.
+    grupos: dict[tuple[str, str], list[tuple[int, int, Item]]] = defaultdict(list)
+    for posicao, m in enumerate(modelo):
+        grupos[_chave(m)].append((m.inicio_ms, posicao, m))
+    inicios: dict[tuple[str, str], list[int]] = {}
+    maior_duracao: dict[tuple[str, str], int] = {}
+    for chave, itens in grupos.items():
+        itens.sort(key=lambda x: (x[0], x[1]))
+        inicios[chave] = [x[0] for x in itens]
+        maior_duracao[chave] = max(x[2].fim_ms - x[0] for x in itens)
+    normalizadas: dict[str, str] = {}
     pareados: list[Pareado] = []
     sem_par: list[Item] = []
     for g in gabarito:
-        candidatos = [
-            m
-            for m in modelo
-            if m.tipo == g.tipo
-            and (
-                g.tipo not in TIPOS_COM_IDENTIDADE
-                or normalizar(m.identidade) == normalizar(g.identidade)
+        identidade = ""
+        if g.tipo in TIPOS_COM_IDENTIDADE:
+            identidade = normalizadas.get(g.identidade) or normalizadas.setdefault(
+                g.identidade, normalizar(g.identidade)
             )
-            and se_sobrepoem(g, m)
-        ]
-        if not candidatos:
+        chave = (g.tipo, identidade)
+        itens = grupos.get(chave)
+        melhor: tuple[int, int, int] | None = None
+        escolhido: Item | None = None
+        if itens:
+            # Um candidato começa em [g.inicio - maior duração, g.fim] (ponytail: uma
+            # duração enorme alarga a janela até o grupo todo; árvore de intervalos se for o caso).
+            lo = bisect_left(inicios[chave], g.inicio_ms - maior_duracao[chave])
+            hi = bisect_right(inicios[chave], g.fim_ms)
+            for _, posicao, m in itens[lo:hi]:
+                if not se_sobrepoem(g, m):
+                    continue
+                pontos = (
+                    sobreposicao_ms(g, m),
+                    -(abs(m.inicio_ms - g.inicio_ms) + abs(m.fim_ms - g.fim_ms)),
+                    -posicao,
+                )
+                if melhor is None or pontos > melhor:
+                    melhor, escolhido = pontos, m
+        if escolhido is None:
             sem_par.append(g)
-            continue
-        melhor = max(
-            candidatos,
-            key=lambda m: (
-                sobreposicao_ms(g, m),
-                -(abs(m.inicio_ms - g.inicio_ms) + abs(m.fim_ms - g.fim_ms)),
-            ),
-        )
-        pareados.append(Pareado(g, melhor))
+        else:
+            pareados.append(Pareado(g, escolhido))
     return pareados, sem_par
+
+
+def _chave(m: Item) -> tuple[str, str]:
+    return m.tipo, normalizar(m.identidade) if m.tipo in TIPOS_COM_IDENTIDADE else ""
 
 
 def itens_do_modelo(d: Decupagem) -> list[Item]:
