@@ -56,7 +56,7 @@ BEGIN TRANSACTION;
 DELETE FROM {jobs} WHERE id = @job_id;
 INSERT INTO {eventos} (id, tipo, quando, quem_tipo, quem_id, job_id)
 SELECT CONCAT('purga:', @job_id), 'purga', CURRENT_TIMESTAMP(), 'sistema', 'purga', @job_id
-FROM UNNEST([1])
+FROM (SELECT 1)
 WHERE NOT EXISTS (SELECT 1 FROM {eventos} WHERE tipo = 'purga' AND job_id = @job_id);
 {apagamentos}
 COMMIT TRANSACTION;

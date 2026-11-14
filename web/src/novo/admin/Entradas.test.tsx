@@ -465,9 +465,9 @@ test('sem período no endereço, abre na última semana e pede à API o enviado_
   }
 })
 
-test('de=tudo abre sem período e não manda enviado_de nem enviado_ate', async () => {
+test('de= e ate= vazios abrem sem período e não manda enviado_de nem enviado_ate', async () => {
   jobs = [job({ id: 'a', nome: 'antigo.mp4', criado_em: '2020-01-01T12:00:00Z' })]
-  await abrir({ endereco: '/admin/entradas?de=tudo' })
+  await abrir({ endereco: '/admin/entradas?de=&ate=' })
   await linhaDe('antigo.mp4')
   expect(consultas[0]).not.toContain('enviado_')
   expect(campo('Enviado de').value).toBe('')
@@ -481,7 +481,7 @@ test('a tela mostra o que a API devolveu, mesmo fora do período: o filtro é do
   expect(new URLSearchParams(consultas[0]).get('enviado_ate')).toBe('2026-10-05')
 })
 
-test('trocar o período reinicia o cursor e a escolha fica no endereço; limpar o "de" vira de=tudo', async () => {
+test('trocar o período reinicia o cursor e a escolha fica no endereço; limpar o "de" vira de=&ate=', async () => {
   servidor.use(
     http.get('/v1/jobs', ({ request }) => {
       const url = new URL(request.url)
@@ -507,6 +507,6 @@ test('trocar o período reinicia o cursor e a escolha fica no endereço; limpar 
   consultas.length = 0
   fireEvent.change(campo('Enviado de'), { target: { value: '' } })
   await linhaDe('novo.mp4')
-  expect(location.search).toContain('de=tudo')
+  expect(location.search).toContain('de=&ate=')
   expect(consultas[0]).not.toContain('enviado_de')
 })

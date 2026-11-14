@@ -105,7 +105,6 @@ class BigQueryFalso:
             for comando in (
                 corpo["query"]
                 .replace("CURRENT_TIMESTAMP()", "CURRENT_TIMESTAMP")
-                .replace("UNNEST([1])", "(SELECT 1)")
                 .split(";")
             ):
                 if comando.strip():

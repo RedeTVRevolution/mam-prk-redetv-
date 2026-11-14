@@ -266,13 +266,13 @@ def _pontas_no_firestore(filtro: FiltroDeJobs) -> int:
 
 
 def _cabe_no_firestore(
-    filtro: FiltroDeJobs, meses: int, programas: int, datas: int = 0
+    filtro: FiltroDeJobs, meses: int, programas: int, datas: int
 ) -> bool:
     """Se a consulta com `meses`, `programas` (0 = fora da consulta) e `datas` (as pontas do
     período que vão ao Firestore, `_pontas_no_firestore`) cabe nos tetos do Firestore."""
     disjuncoes = max(1, meses) * max(1, len(filtro.estados)) * max(1, programas)
     filtros = (
-        (filtro.programa is not None or programas > 0)
+        (len(filtro.programas) == 1 or programas > 0)
         + (filtro.sistema is not None)
         + bool(filtro.estados)
         + bool(filtro.palavras)
@@ -307,13 +307,6 @@ def plano_da_consulta(
     if programas and not _cabe_no_firestore(filtro, 0, len(programas), datas):
         programas = []
     return meses, programas
-
-
-def meses_para_o_firestore(filtro: FiltroDeJobs) -> list[str] | None:
-    """Os meses do período, se a consulta com `mes_exibicao in [...]` cabe nos limites do
-    Firestore; `None` se faltar uma ponta do período ou algum limite estourar (a lista cai
-    então no filtro de datas em Python)."""
-    return plano_da_consulta(filtro, True)[0]
 
 
 def listagem_por_mes_do_ambiente(ambiente: Mapping[str, str]) -> bool:
@@ -459,10 +452,6 @@ class RepositorioFirestore:
         elif len(filtro.programas) == 1:
             (unico,) = filtro.programas
             consulta = consulta.where(filter=FieldFilter("programa", "==", unico))
-        elif filtro.programa is not None:
-            consulta = consulta.where(
-                filter=FieldFilter("programa", "==", filtro.programa)
-            )
         if filtro.sistema is not None:
             consulta = consulta.where(
                 filter=FieldFilter("sistema", "==", filtro.sistema)
