@@ -219,6 +219,18 @@ def test_renomeacao_troca_o_nome_antigo_pelo_atual() -> None:
     assert _nome(leitura.corrigida("j1")) == "Ana Souza Lima"
 
 
+def test_destino_purgado_na_corrigida_a_renomeacao_da_origem_vale() -> None:
+    """A corrigida não muda (#612): sem destino, vale a renomeação da própria origem."""
+    catalogo = CatalogoEmMemoria()
+    a = _renomeada(catalogo, "Ana Souza", "Ana Souza Lima")
+    b = catalogo.acrescentar("Ana B", "p", [])
+    catalogo._pessoas[a.id] = _fundida_em(a, b.id)
+    catalogo.apagar(b.id)
+    leitura = _leitura(_modelo(_pessoa("pes01", "Ana Souza", a.id)), catalogo)
+    lida = leitura.corrigida("j1")
+    assert (_nome(lida), _vinculo(lida)) == ("Ana Souza Lima", a.id)
+
+
 def test_renomeacao_respeita_o_nome_corrigido_no_video() -> None:
     catalogo = CatalogoEmMemoria()
     p = _renomeada(catalogo, "Ana Souza", "Ana Souza Lima")

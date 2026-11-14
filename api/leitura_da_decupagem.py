@@ -105,20 +105,21 @@ def _com_destinos(lida: dict[str, Any], destinos: Mapping[str, Destino]) -> None
     """O destino no lugar da pessoa fundida (#209): `catalogo_id` e nome passam a ser os do
     destino; o gravado não muda. Também troca o nome que a pessoa teve antes de uma
     renomeação em todos os vídeos (#263) pelo atual; um nome que o editor corrigiu no vídeo
-    para outro fica. Destino purgado ou ciclo: nada muda aqui, e a `entregue` tira o vínculo."""
+    para outro fica. Destino purgado ou ciclo: vale a renomeação da origem, como antes, e a `entregue` tira
+    o vínculo."""
     for pessoa in lida.get("pessoas") or []:
         id = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
         destino = destinos.get(id) if id is not None else None
-        if destino is None or destino.pessoa is None:
+        if destino is None:
             continue
-        if destino.fundida:
+        if destino.fundida and destino.pessoa is not None:
             pessoa.update(nome=destino.pessoa.nome, catalogo_id=destino.pessoa.id)
-        elif destino.pessoa.renomeacao is not None:
-            antigos = {
-                normalizar(n) for n in destino.pessoa.renomeacao.nomes_anteriores
-            }
+            continue
+        origem = destino.origem
+        if origem is not None and origem.renomeacao is not None:
+            antigos = {normalizar(n) for n in origem.renomeacao.nomes_anteriores}
             if normalizar(str(pessoa.get("nome"))) in antigos:
-                pessoa["nome"] = destino.pessoa.nome
+                pessoa["nome"] = origem.nome
 
 
 def decupagens_dos_jobs(

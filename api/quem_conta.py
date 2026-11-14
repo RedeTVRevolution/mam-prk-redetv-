@@ -34,10 +34,12 @@ class PessoasEmLote(Protocol):
 class Destino:
     """Onde a pessoa pedida acabou: `pessoa` é o registro no fim da cadeia de fusão, ou
     `None` se a pessoa foi purgada, o destino foi purgado ou a cadeia volta sobre si mesma.
-    `fundida` diz que a pessoa pedida foi fundida em outra."""
+    `fundida` diz que a pessoa pedida foi fundida em outra; `origem` é o registro dela.
+    """
 
     pessoa: PessoaDoCatalogo | None
     fundida: bool
+    origem: PessoaDoCatalogo | None = None
 
     @property
     def conta(self) -> bool:
@@ -98,9 +100,9 @@ class QuemConta:
                 origem, pessoa = self._lidas[pedido], self._lidas[onde]
                 fundida = origem is not None and origem.fundida is not None
                 if pessoa is None or pessoa.lixeira or pessoa.fundida is None:
-                    destinos[pedido] = Destino(pessoa, fundida)
+                    destinos[pedido] = Destino(pessoa, fundida, origem)
                 elif pessoa.fundida.destino_id in vistos[pedido]:
-                    destinos[pedido] = Destino(None, True)
+                    destinos[pedido] = Destino(None, True, origem)
                 else:
                     vistos[pedido].add(pessoa.fundida.destino_id)
                     ponta[pedido] = pessoa.fundida.destino_id
