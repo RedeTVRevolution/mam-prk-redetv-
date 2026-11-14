@@ -35,7 +35,8 @@ fi
 tf init -input=false -backend-config="bucket=$ESTADO"
 
 # A imagem precisa do repositório, da chave web do Identity Platform e do que o
-# Cloud Build usa (#71), e o serviço precisa da imagem. Este apply só cria esses,
+# Cloud Build usa (#71), e o serviço precisa da imagem; o aceite dos esquemas, logo antes
+# do build, precisa da predição da mam-terraform (#617). Este apply só cria esses,
 # então a imagem ainda não importa.
 # Os dois applies passam por scripts/aplicar-sem-destruir.sh: plano com destruição ou
 # recriação para aqui, salvo PERMITIR_DESTRUICAO=sim. Os recursos estão no módulo `mam` (#292).
@@ -53,6 +54,7 @@ scripts/aplicar-sem-destruir.sh -target=module.mam.google_artifact_registry_repo
   -target=module.mam.google_artifact_registry_repository_iam_member.build_envia \
   -target=module.mam.google_artifact_registry_repository.mam_gpu \
   -target=module.mam.google_artifact_registry_repository_iam_member.build_envia_gpu \
+  -target=module.mam.google_project_iam_member.terraform_predicao_vertex \
   -var imagem=pendente -var imagem_validacao=pendente \
   -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente -var imagem_objetos=pendente
 # O nome do repositório vem do Terraform, o único lugar que monta os nomes.
