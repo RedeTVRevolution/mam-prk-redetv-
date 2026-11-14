@@ -150,6 +150,11 @@ for imagem in "$IMAGEM" "$IMAGEM_VALIDACAO" \
   marcar "$imagem" "$TAG_EM_USO"
 done
 
+# Aceite dos três esquemas do Gemini contra o Vertex (#617), como a mam-terraform: o CI usa
+# cassete e não vê um esquema recusado (400). Sai com erro se algum for recusado; 429 e 5xx
+# são passageiros. A mam-terraform ganha a predição no Terraform (papel_vertex.tf).
+uv run --locked python -m api.aceite_dos_esquemas
+
 # Teste dos Jobs com GPU (#238), só dos que mudaram: se não passar, o script volta os Jobs
 # para a imagem anterior e esta publicação falha, e o Workflows não manda vídeo para uma
 # imagem com GPU quebrada. Os Jobs em CPU não entram.

@@ -31,8 +31,10 @@ from api.sinais import (
     imprimir,
     registro_da_resposta_fora_do_esquema,
     registro_das_pessoas_fora_da_pauta,
+    registro_do_erro_http,
     registro_do_uso_do_modelo,
 )
+from api.taxonomia_de_objetos import TEXTO_DOS_TIPOS
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA, aplicar_transcricao
 
@@ -93,6 +95,7 @@ REGRAS GERAIS
 - Para cada pessoa na imagem, registre em objetos o que ela veste, calça e usa (roupa, calçado, acessório) e o que segura na mão, com o id dela em pessoa e a relação (veste, calca, usa, segura). Só o que estiver visível; não deduza o calçado se os pés não aparecem. No máximo 5 peças por pessoa em cada aparição, as mais visíveis.
 - Os objetos de cena não são pedidos aqui: veículo, produto, eletrônico, troféu, joia, animal ou comida só entram se uma pessoa os veste, usa ou segura.
 - A categoria diz o que a peça é. Use na_mao só quando nenhuma outra servir.
+- `tipo_canonico`: o tipo da lista abaixo que melhor descreve a peça ("camiseta" e "blusa" são `camisa`); `outro` só quando nenhum servir. O tipo continua livre e fiel ao que se vê. Lista: {tipos_canonicos}.
 - Para cada peça: categoria, tipo no singular, a cor base da lista (até 2 cores) e o tom como você vê no campo cor, detalhe curto e os intervalos em que está visível.
 - Marca só quando o logo ou o nome estiver legível. Na dúvida, deixe em branco.
 - A cor sob a luz do estúdio engana: prefira a cor base mais provável e diga o tom no campo cor.
@@ -108,7 +111,7 @@ REGRAS GERAIS
 - O nome ou o site do próprio programa e da emissora não é anúncio: registre como mencao_editorial.
 - Para cada uma: marca, tipo, início, fim e evidência (fala, logo ou texto na tela).
 - Distinga ação comercial de menção editorial a uma marca.
-"""
+""".replace("{tipos_canonicos}", TEXTO_DOS_TIPOS)
 
 
 SECAO_SEM_TRANSCRICAO = """\
@@ -195,9 +198,26 @@ def _duracao(ms: int) -> str:
 
 
 class ErroHttp(Exception):
-    def __init__(self, status: int) -> None:
-        super().__init__(f"HTTP {status}")
+    """`codigo` e `mensagem` são os do serviço (`error.status`, `error.message`), quando vêm."""
+
+    def __init__(self, status: int, codigo: str = "", mensagem: str = "") -> None:
+        detalhe = f" {codigo}" if codigo else ""
+        detalhe += f": {mensagem}" if mensagem else ""
+        super().__init__(f"HTTP {status}{detalhe}")
         self.status = status
+        self.codigo = codigo
+        self.mensagem = mensagem
+
+
+def _erro_do_servico(resposta: Any) -> tuple[str, str]:
+    """(código, mensagem) do corpo do erro do Vertex; vazios se o corpo não for o esperado."""
+    try:
+        erro = resposta.json().get("error")
+    except (ValueError, AttributeError):
+        return "", ""
+    if not isinstance(erro, dict):
+        return "", ""
+    return str(erro.get("status") or "")[:50], str(erro.get("message") or "")[:300]
 
 
 class AnaliseFalhou(Exception):
@@ -306,7 +326,17 @@ class TransporteVertex:
         except (requests.RequestException, OSError) as e:
             raise ErroHttp(503) from e
         if resposta.status_code != 200:
-            raise ErroHttp(resposta.status_code)
+            codigo, mensagem = _erro_do_servico(resposta)
+            self._registrar(
+                registro_do_erro_http(
+                    resposta.status_code,
+                    codigo,
+                    mensagem,
+                    chamada.modelo,
+                    self._etapa or chamada.rotulos.get("etapa"),
+                )
+            )
+            raise ErroHttp(resposta.status_code, codigo, mensagem)
         try:
             dados = resposta.json()
         except ValueError as e:  # 200 com corpo que não é JSON: falha do servidor
@@ -413,7 +443,7 @@ def gerar_validado[T](
             texto = transporte.gerar(chamada)
         except ErroHttp as e:
             if not _repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
-                raise AnaliseFalhou() from e
+                raise AnaliseFalhou(str(e)) from e
             dormir(
                 espera_com_jitter(falhas_rede, BACKOFF_BASE_S, BACKOFF_TETO_S, sortear)
             )
