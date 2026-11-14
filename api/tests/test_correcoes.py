@@ -488,6 +488,18 @@ def test_desfazer_duas_vezes_a_mesma_correcao_da_409() -> None:
     assert len(mundo.correcoes.listar("j1")) == 2
 
 
+def test_desfazer_que_perde_a_corrida_pelo_id_da_409() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+
+    def ja_existe(correcao: Correcao) -> None:
+        raise CorrecaoJaExiste(correcao.id)
+
+    mundo.correcoes.acrescentar = ja_existe  # type: ignore[method-assign]
+
+    assert mundo.desfazer(cid).status_code == 409
+
+
 def test_dois_desfazer_simultaneos_gravam_um_so() -> None:
     mundo = Mundo(["editor"])
     cid = mundo.corrigir().json()["id"]
