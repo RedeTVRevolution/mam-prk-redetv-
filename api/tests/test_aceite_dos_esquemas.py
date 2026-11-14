@@ -1,5 +1,10 @@
 """O aceite dos esquemas contra o Vertex (#617): a lógica, com transporte falso."""
 
+import pytest
+import requests
+from google.auth.exceptions import DefaultCredentialsError, RefreshError
+
+from api import aceite_dos_esquemas as aceite
 from api.aceite_dos_esquemas import aceitar, codigo_de_saida
 from api.decupagem import esquema_do_modelo
 from api.gemini import MODO_STANDARD, Chamada, ErroHttp
@@ -72,3 +77,33 @@ def test_chamadas_em_standard_e_com_prazo_curto_para_nao_segurar_o_deploy() -> N
     aceitar(t)
 
     assert all(c.modo == MODO_STANDARD and c.timeout_s == 60 for c in t.chamadas)
+
+
+@pytest.mark.parametrize("erro", [RefreshError, DefaultCredentialsError])
+def test_falha_de_autenticacao_na_sessao_da_saida_2(
+    monkeypatch: pytest.MonkeyPatch, erro: type[Exception]
+) -> None:
+    monkeypatch.setenv("GCP_PROJECT_ID", "p")
+
+    def sessao(**_: object) -> None:
+        raise erro("falhou")
+
+    monkeypatch.setattr(aceite, "sessao_autenticada", sessao)
+    assert aceite.main() == 2
+
+
+@pytest.mark.parametrize("erro", [RefreshError, requests.exceptions.Timeout])
+def test_falha_de_autenticacao_ou_rede_no_meio_da_chamada_da_saida_2(
+    monkeypatch: pytest.MonkeyPatch, erro: type[Exception]
+) -> None:
+    monkeypatch.setenv("GCP_PROJECT_ID", "p")
+    monkeypatch.setattr(aceite, "sessao_autenticada", lambda **_: object())
+
+    class Falho:
+        def __init__(self, *_: object, **__: object) -> None: ...
+
+        def gerar(self, chamada: Chamada) -> str:
+            raise erro("falhou")
+
+    monkeypatch.setattr(aceite, "TransporteVertex", Falho)
+    assert aceite.main() == 2

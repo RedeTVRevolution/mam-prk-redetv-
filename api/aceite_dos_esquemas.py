@@ -84,14 +84,19 @@ def codigo_de_saida(resultados: list[Resultado]) -> int:
 
 
 def main() -> int:
-    transporte = TransporteVertex(
-        os.environ["GCP_PROJECT_ID"],
-        sessao_autenticada(
-            personificar=os.environ.get("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT")
-        ),
-        etapa="aceite_dos_esquemas",
-    )
-    resultados = aceitar(transporte)
+    try:
+        transporte = TransporteVertex(
+            os.environ["GCP_PROJECT_ID"],
+            sessao_autenticada(
+                personificar=os.environ.get("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT")
+            ),
+            etapa="aceite_dos_esquemas",
+        )
+        resultados = aceitar(transporte)
+    except Exception as e:  # noqa: BLE001
+        # Autenticação ou rede: não prova nada sobre o esquema. Só o 400 dá saída 1.
+        print(f"sem prova: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+        return 2
     for r in resultados:
         print(f"{r.nome}: {r.veredito} {r.detalhe}".rstrip(), flush=True)
     return codigo_de_saida(resultados)
