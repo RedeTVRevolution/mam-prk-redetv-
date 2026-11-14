@@ -13,7 +13,6 @@ correções em vigor (aprovadas, ou de tipo que não exige aprovação, e não d
 Ambiente: `GCP_PROJECT_ID`, `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`.
 """
 
-import hashlib
 import json
 import logging
 import os
@@ -34,6 +33,7 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.erros import ServicoIndisponivel
+from api.ferramentas.comum import hash_estavel
 from api.identidade import identidade_do_nome
 from api.jobs import RepositorioDeJobs
 from api.leitura_da_decupagem import AbreDecupagem
@@ -71,9 +71,7 @@ __all__ = [
 
 def reservado_pelo_sorteio(id: str) -> bool:
     """Estável: depende só do id do caso, nunca da ordem nem do que já existe."""
-    return int(hashlib.sha256(id.encode()).hexdigest()[:8], 16) % 100 < (
-        PERCENTUAL_RESERVADO
-    )
+    return hash_estavel(id, 8) % 100 < PERCENTUAL_RESERVADO
 
 
 class ItemEsperado(BaseModel):

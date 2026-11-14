@@ -1,6 +1,7 @@
 """Utilitários que as ferramentas dividem (`api/ferramentas/comum.py`, #658)."""
 
 import hashlib
+import math
 from datetime import UTC, datetime
 
 import pytest
@@ -109,9 +110,11 @@ def test_hash_estavel_e_o_prefixo_hexadecimal_do_sha256_como_inteiro() -> None:
 def test_percentil_e_o_posto_mais_proximo_sem_interpolar(n: int) -> None:
     valores = [float(i) for i in range(n, 0, -1)]  # fora de ordem de propósito
 
+    ordenados = sorted(valores)
     for p in (50, 95, 99, 100):
-        esperado = sorted(valores)[max(1, -(-n * p // 100)) - 1]
-        assert percentil(valores, p) == esperado
+        da_medir_busca = ordenados[max(1, -(-n * p // 100)) - 1]
+        da_carga_dev = ordenados[max(0, math.ceil(p / 100 * n) - 1)]
+        assert percentil(valores, p) == da_medir_busca == da_carga_dev
 
 
 def test_o_custo_por_hora_vem_do_ambiente_ou_e_nd() -> None:
