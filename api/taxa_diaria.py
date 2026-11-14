@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
@@ -52,6 +52,7 @@ from api.nuvem import (
 )
 from api.revisao import RepositorioDeRevisao
 from api.taxa_de_correcao import calcular_com_itens, modelo_da_decupagem
+from api.tipos_da_taxa import ConfigDaTaxa, LinhaDiaria
 
 log = logging.getLogger(__name__)
 
@@ -63,29 +64,15 @@ DIAS_DA_CARGA_INICIAL = 365
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 __all__ = [
-    "ConfigDaTaxa",
     "ItensEmMemoria",
     "ItensNoStorage",
-    "LinhaDiaria",
     "TabelaDaTaxaBigQuery",
-    "TabelaDaTaxaEmMemoria",
     "atualizar",
     "dias_recentes",
     "linhas_do_dia",
     "main",
     "preencher_itens",
 ]
-
-
-@dataclass(frozen=True)
-class LinhaDiaria:
-    dia: date
-    job_id: str
-    programa: str | None
-    versao_pipeline: str | None
-    tipo: str
-    correcoes: int
-    itens: int
 
 
 class LeitorDeItens(Protocol):
@@ -137,14 +124,6 @@ class TabelaDaTaxa(Protocol):
     def substituir(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
         """Troca tudo o que a tabela tem desses dias pelas `linhas` (dias sem linha ficam
         vazios). Os outros dias não mudam; repetir dá o mesmo resultado."""
-
-
-class TabelaDaTaxaEmMemoria:
-    def __init__(self) -> None:
-        self.linhas: list[LinhaDiaria] = []
-
-    def substituir(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
-        self.linhas = [x for x in self.linhas if x.dia not in dias] + linhas
 
 
 def _periodo_do_dia(dia: date) -> tuple[datetime, datetime]:
@@ -234,23 +213,6 @@ def preencher_itens(
         itens.gravar_itens(job.id, contagem)
         gravados += 1
     return gravados
-
-
-@dataclass(frozen=True)
-class ConfigDaTaxa:
-    projeto: str
-    dataset: str
-    regiao: str
-    tabela: str
-
-    @classmethod
-    def do_ambiente(cls, ambiente: Any) -> "ConfigDaTaxa":
-        return cls(
-            projeto=ambiente["GCP_PROJECT_ID"],
-            dataset=ambiente["BIGQUERY_DATASET"],
-            regiao=ambiente["BIGQUERY_REGIAO"],
-            tabela=ambiente["BIGQUERY_TABELA_DA_TAXA"],
-        )
 
 
 def _json_da_linha(linha: LinhaDiaria) -> dict[str, Any]:

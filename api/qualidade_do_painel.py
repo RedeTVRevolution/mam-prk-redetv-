@@ -12,14 +12,14 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
-from api.revisao_do_painel import (
+from api.taxa_do_painel import LeitorDaTaxa
+from api.tipos_da_revisao import (
     RevisaoAgregada,
     RevisaoNoVideo,
     TempoDeRevisao,
     agregar,
 )
-from api.taxa_de_correcao import LinhaDaTaxa
-from api.taxa_do_painel import LeitorDaTaxa
+from api.tipos_da_taxa import LinhaDaTaxa
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 

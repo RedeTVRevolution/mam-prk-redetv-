@@ -57,6 +57,7 @@ from api.nuvem import (
 from api.regras_das_correcoes import estado_das, reconciliar
 from api.revisao import RepositorioDeRevisao
 from api.texto_como_dado import LinhaDaConsulta
+from api.tipos_da_taxa import LinhaDaTaxa
 
 log = logging.getLogger(__name__)
 
@@ -78,15 +79,6 @@ COLUNAS_DO_CSV = (
     "itens",
     "taxa_de_correcao",
 )
-
-
-class LinhaDaTaxa(BaseModel):
-    programa: str | None
-    versao_pipeline: str | None
-    tipo: str
-    correcoes: int
-    itens: int
-    taxa_de_correcao: float | None
 
 
 def _no_periodo(quando: datetime, desde: datetime | None, ate: datetime | None) -> bool:

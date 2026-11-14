@@ -19,8 +19,12 @@ from typing import Any, Protocol
 
 from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.relatorios import linhas_da_consulta
-from api.taxa_de_correcao import LinhaDaTaxa
-from api.taxa_diaria import ConfigDaTaxa, LinhaDiaria, TabelaDaTaxaEmMemoria
+from api.tipos_da_taxa import (
+    ConfigDaTaxa,
+    LinhaDaTaxa,
+    LinhaDiaria,
+    TabelaDaTaxaEmMemoria,
+)
 
 __all__ = [
     "LeitorDaTaxa",

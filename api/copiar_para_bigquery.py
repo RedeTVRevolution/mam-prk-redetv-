@@ -23,9 +23,9 @@ from api.copia_bigquery import (
 )
 from api.correcoes import RepositorioDeCorrecoes
 from api.indexacao import (
-    _duas_tentativas,
-    _registrar,
     decupagem_do_job,
+    duas_tentativas,
+    registrar,
     reindexar,
 )
 from api.indice_da_busca import IndiceDaBusca
@@ -77,7 +77,7 @@ def copiar(
         ultima_copia = job.copia_bigquery or CopiaNoBigQuery(
             estado="pendente", em=inicio
         )
-        pendente = _registrar(
+        pendente = registrar(
             repositorio,
             job.id,
             "copia_bigquery",
@@ -109,7 +109,7 @@ def copiar(
         except Exception:
             log.exception("cópia para o BigQuery falhou para %s", job.id)
             estado = "falhou"
-        _registrar(
+        registrar(
             repositorio,
             job.id,
             "copia_bigquery",
@@ -119,7 +119,7 @@ def copiar(
         )
         return estado
     finally:
-        fechado = _duas_tentativas(
+        fechado = duas_tentativas(
             partial(
                 fechar_a_rodada,
                 repositorio,

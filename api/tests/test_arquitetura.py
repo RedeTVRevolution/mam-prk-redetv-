@@ -101,3 +101,22 @@ def test_pega_import_novo_de_ferramenta(tmp_path: Path) -> None:
         ("producao", "ferramentas"),
         ("gadget_ligado", "medidor"),
     }
+
+
+def _fecho(modulo: str) -> set[str]:
+    visto: set[str] = set()
+    pendentes = [modulo]
+    while pendentes:
+        atual = pendentes.pop()
+        arquivo = API / f"{atual}.py"
+        if atual in visto or not arquivo.exists():
+            continue
+        visto.add(atual)
+        pendentes += _importados(arquivo)
+    return visto
+
+
+def test_leitura_do_painel_nao_puxa_os_modulos_de_lote() -> None:
+    lote = {"taxa_diaria", "taxa_de_correcao", "revisao_do_painel"}
+    for modulo in ("taxa_do_painel", "qualidade_do_painel"):
+        assert not _fecho(modulo) & lote, (modulo, _fecho(modulo) & lote)

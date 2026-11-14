@@ -195,7 +195,6 @@ from api.revisao import (
 from api.revisao_do_painel import (
     RepositorioDeRevisaoEspelhado,
     RevisaoEmMemoria,
-    TempoDeRevisao,
     revisao_do_ambiente,
     tabela_do_ambiente,
 )
@@ -224,6 +223,7 @@ from api.tempo_de_tela import (
 )
 from api.teste_de_carga import aceita_teste_de_carga_do_ambiente
 from api.texto_como_dado import conferir_ids_e_consultas
+from api.tipos_da_revisao import TempoDeRevisao
 from api.tipos_de_objeto import (
     TiposDeObjeto,
     TiposDeObjetoEmMemoria,
