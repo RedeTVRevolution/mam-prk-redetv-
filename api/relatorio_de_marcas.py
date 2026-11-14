@@ -37,6 +37,7 @@ from api.relatorios import (
     confere_o_pedido,
     config_e_transporte_do_ambiente,
     consultar_no_bigquery,
+    ids_dos_jobs_na_lixeira,
     linhas_da_copia,
     ou_503,
     poe_o_nome_dos_videos,
@@ -262,7 +263,8 @@ class SoMarcasQueContam:
     criados até o instante da purga ficam fora, as dos criados depois contam. A data vem de
     `Job.criado_em` no Firestore (não muda com o reprocessamento nem com a recópia), lida em
     lote, uma vez por vídeo, só para as somas que batem com um registro; Job ausente conta
-    como anterior; falha de leitura é erro (503), não "Job ausente"."""
+    como anterior; falha de leitura é erro (503), não "Job ausente". O vídeo na lixeira
+    sai também (#619), depois do cache das somas."""
 
     def __init__(
         self,
@@ -301,6 +303,9 @@ class SoMarcasQueContam:
     def _que_contam(
         self, somas: list[InsercoesDaMarca], *, so_a_purga: bool = False
     ) -> list[InsercoesDaMarca]:
+        # O vídeo na lixeira não conta (#619), lido uma vez por operação (também no impacto).
+        na_lixeira = ids_dos_jobs_na_lixeira(self._jobs)
+        somas = [s for s in somas if s.job_id not in na_lixeira]
         # Um Quem conta por operação; `normalizar` uma vez por marca distinta, não por linha.
         nome = {m: normalizar(m) for m in {s.marca for s in somas}}
         cortes = QuemConta(marcas=self._marcas, purgas=self._purgas).cortes(
