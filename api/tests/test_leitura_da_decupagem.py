@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -304,6 +304,13 @@ def test_pessoa_purgada_perde_o_vinculo_so_na_entregue() -> None:
     )
     assert _vinculo(leitura.corrigida("j1")) == "sumiu"
     assert _vinculo(leitura.entregue("j1")) is None
+
+
+def test_catalogo_id_que_nao_e_texto_perde_o_vinculo_na_entregue() -> None:
+    for catalogo in (CatalogoEmMemoria(), None):
+        modelo = _modelo(_pessoa("pes01", "Ana", cast(str, 123), fontes=["rosto"]))
+        entregue = _leitura(modelo, catalogo).entregue("j1")
+        assert (_nome(entregue), _vinculo(entregue)) == ("não identificado", None)
 
 
 def test_marca_na_lixeira_ou_purgada_mantem_o_texto_e_perde_o_vinculo_na_entregue() -> (

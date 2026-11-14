@@ -85,7 +85,10 @@ class LeituraDaDecupagem:
         corrigida, quem, sem_vinculo = self._corrigida(job_id)
         marcas = quem.marcas_vivas(ids_do_catalogo(corrigida, "comerciais"))
         return sem_catalogo_apagado(
-            corrigida, lambda p: id(p) not in sem_vinculo, lambda id: id in marcas
+            corrigida,
+            # `catalogo_id` que não é texto não é do catálogo: perde o vínculo, como antes
+            lambda p: isinstance(p[CATALOGO_ID], str) and id(p) not in sem_vinculo,
+            lambda id: id in marcas,
         )
 
     def _corrigida(self, job_id: str) -> tuple[dict[str, Any], QuemConta, set[int]]:
