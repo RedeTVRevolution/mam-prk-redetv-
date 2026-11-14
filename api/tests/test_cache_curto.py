@@ -337,9 +337,9 @@ def test_filtro_diferente_do_tempo_de_tela_consulta_de_novo() -> None:
     fonte = MomentosQueContam(tempo_de_tela._varias_pessoas())
     consulta = TempoDeTelaComCache(fonte, CacheCurto())
 
-    consulta.ranking(None, None, None, 0, 5)
-    consulta.ranking(None, date(2026, 1, 1), None, 0, 5)
-    consulta.ranking(None, None, None, 5, 5)
+    consulta.somas(None, None, None)
+    consulta.somas(None, date(2026, 1, 1), None)
+    consulta.somas(None, None, None)
 
     assert fonte.consultas == 2
 

@@ -46,7 +46,7 @@ from api.catalogo import (
     visivel,
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
-from api.clientes_de_nuvem import sessao_autenticada
+from api.clientes_de_nuvem import ESCOPO_DA_NUVEM, sessao_autenticada
 from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
@@ -1451,9 +1451,7 @@ class AssinaturaPeloIam:
 
     @staticmethod
     def _credenciais_do_ambiente() -> Any:
-        credenciais, _ = google.auth.default(
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
+        credenciais, _ = google.auth.default(scopes=[ESCOPO_DA_NUVEM])
         return credenciais
 
     def __call__(self) -> dict[str, Any]:

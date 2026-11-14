@@ -55,6 +55,12 @@ class AbreDecupagem(Protocol):
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
 
 
+def ler_modelo(decupagens: AbreDecupagem, job_id: str) -> tuple[dict[str, Any], str]:
+    """O JSON do modelo e a versão (SHA-256 dos bytes guardados)."""
+    conteudo = b"".join(decupagens.abrir_decupagem(job_id))
+    return json.loads(conteudo), versao_do_modelo(conteudo)
+
+
 class ListaCorrecoes(Protocol):
     def listar(self, job_id: str) -> list[Correcao]: ...
 
@@ -85,11 +91,8 @@ class LeituraDaDecupagem:
 
     def _corrigida(self, job_id: str) -> tuple[dict[str, Any], QuemConta]:
         """A leitura corrigida e o Quem conta que a leu (a `entregue` o reaproveita)."""
-        conteudo = b"".join(self._decupagens.abrir_decupagem(job_id))
         lida = decupagem_com_correcoes(
-            json.loads(conteudo),
-            versao_do_modelo(conteudo),
-            self._correcoes.listar(job_id),
+            *ler_modelo(self._decupagens, job_id), self._correcoes.listar(job_id)
         )
         quem = QuemConta(self._pessoas, self._marcas)
         if self._pessoas is not None:

@@ -67,7 +67,6 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     TemposInvalidos,
     VersaoDesatualizada,
-    versao_do_modelo,
 )
 from api.decupagem import caminho_do_quadro
 from api.erros import ServicoIndisponivel as ServicoIndisponivel  # noqa: PLC0414 (reexport explícito para o mypy)
@@ -79,7 +78,7 @@ from api.idempotencia import (
     RepositorioDeIdempotenciaEmMemoria,
     impressao_do_corpo,
 )
-from api.leitura_da_decupagem import LeituraDaDecupagem
+from api.leitura_da_decupagem import LeituraDaDecupagem, ler_modelo
 from api.marcas import CatalogoDeMarcas
 from api.papeis import (
     DocumentoDePapeis,
@@ -1486,11 +1485,6 @@ def criar_rotas(
             corpo, media_type="application/json", headers=cabecalhos
         )
 
-    def _ler_modelo(job_id: str) -> tuple[dict[str, Any], str]:
-        """O JSON do modelo e a versão (SHA-256 dos bytes guardados)."""
-        conteudo = b"".join(armazenamento.abrir_decupagem(job_id))
-        return json.loads(conteudo), versao_do_modelo(conteudo)
-
     def _ler_correcoes(job_id: str) -> list[Correcao]:
         return correcoes.listar(job_id)
 
@@ -1615,8 +1609,7 @@ def criar_rotas(
         job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
     ) -> list[ItemDaFila]:
         job = obter_concluido(job_id, autor)
-        modelo, versao_atual = _ler_modelo(job.id)
-        return fila(modelo, versao_atual, _ler_correcoes(job.id))
+        return fila(*ler_modelo(armazenamento, job.id), _ler_correcoes(job.id))
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
     def reaplicar_correcao(

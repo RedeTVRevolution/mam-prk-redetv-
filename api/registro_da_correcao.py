@@ -14,7 +14,7 @@ o Catálogo do Job: se o catálogo falhar, o Job fica velho até a próxima inde
 `make preencher-catalogo-dos-jobs`. Chave de idempotência e transação só se o web passar a repetir.
 """
 
-import json
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from api.catalogo import Catalogo
@@ -28,10 +28,9 @@ from api.correcoes import (
     NaoPendente,
     NovaCorrecao,
     RepositorioDeCorrecoes,
-    versao_do_modelo,
 )
 from api.eventos_de_uso import Eventos, registrar
-from api.leitura_da_decupagem import AbreDecupagem, LeituraDaDecupagem
+from api.leitura_da_decupagem import AbreDecupagem, LeituraDaDecupagem, ler_modelo
 from api.marcas import CatalogoDeMarcas
 from api.regras_das_correcoes import (
     corrigir,
@@ -61,6 +60,7 @@ class RegistroDaCorrecao:
         self._marcas = marcas
         self._jobs = jobs
         self._publicador = publicador
+        self._leitura = LeituraDaDecupagem(decupagens, correcoes, catalogo)
 
     def corrigir(
         self,
@@ -71,7 +71,7 @@ class RegistroDaCorrecao:
         exige_aprovacao: bool,
     ) -> tuple[Correcao, str]:
         """A Correção gravada e a versão da Decupagem em que ela se apoia."""
-        modelo, versao = self._modelo(job)
+        modelo, versao = ler_modelo(self._decupagens, job.id)
         correcao = corrigir(
             modelo,
             versao,
@@ -89,48 +89,36 @@ class RegistroDaCorrecao:
     def desfazer(
         self, job: "Job", alvo_id: str, motivo: str, autoria: Autoria
     ) -> Correcao:
-        modelo, versao = self._modelo(job)
-        registro = desfazer(
-            modelo,
-            versao,
-            self._correcoes.listar(job.id),
-            alvo_id,
-            motivo,
-            job.id,
+        return self._sobre_o_modelo(
+            job,
+            lambda m, v, todas: desfazer(m, v, todas, alvo_id, motivo, job.id, autoria),
             autoria,
+            NaoDesfazivel,
         )
-        return self._gravar(job, registro, autoria, NaoDesfazivel)
 
     def reaplicar(
         self, job: "Job", alvo_id: str, item_id: str, motivo: str, autoria: Autoria
     ) -> Correcao:
-        modelo, versao = self._modelo(job)
-        registro = reaplicar(
-            modelo,
-            versao,
-            self._correcoes.listar(job.id),
-            alvo_id,
-            item_id,
-            motivo,
-            job.id,
+        return self._sobre_o_modelo(
+            job,
+            lambda m, v, todas: reaplicar(
+                m, v, todas, alvo_id, item_id, motivo, job.id, autoria
+            ),
             autoria,
+            NaoNaFila,
         )
-        return self._gravar(job, registro, autoria, NaoNaFila)
 
     def descartar(
         self, job: "Job", alvo_id: str, motivo: str, autoria: Autoria
     ) -> Correcao:
-        modelo, versao = self._modelo(job)
-        registro = descartar(
-            modelo,
-            versao,
-            self._correcoes.listar(job.id),
-            alvo_id,
-            motivo,
-            job.id,
+        return self._sobre_o_modelo(
+            job,
+            lambda m, v, todas: descartar(
+                m, v, todas, alvo_id, motivo, job.id, autoria
+            ),
             autoria,
+            NaoNaFila,
         )
-        return self._gravar(job, registro, autoria, NaoNaFila)
 
     def decidir(
         self, job: "Job", alvo_id: str, aprovada: bool, motivo: str, autoria: Autoria
@@ -146,10 +134,17 @@ class RegistroDaCorrecao:
         )
         return self._gravar(job, registro, autoria, NaoPendente)
 
-    def _modelo(self, job: "Job") -> tuple[dict[str, Any], str]:
-        """O JSON do modelo e a versão (SHA-256 dos bytes guardados)."""
-        conteudo = b"".join(self._decupagens.abrir_decupagem(job.id))
-        return json.loads(conteudo), versao_do_modelo(conteudo)
+    def _sobre_o_modelo(
+        self,
+        job: "Job",
+        regra: Callable[[dict[str, Any], str, list[Correcao]], Correcao],
+        autoria: Autoria,
+        se_ja_existe: type[Exception],
+    ) -> Correcao:
+        """Lê o modelo e as Correções, aplica a regra e grava o registro que ela devolve."""
+        modelo, versao = ler_modelo(self._decupagens, job.id)
+        registro = regra(modelo, versao, self._correcoes.listar(job.id))
+        return self._gravar(job, registro, autoria, se_ja_existe)
 
     def _gravar(
         self,
@@ -175,9 +170,5 @@ class RegistroDaCorrecao:
             programa=job.programa,
             tipo_de_correcao=registro.tipo,
         )
-        atualizar_catalogo_do_job(
-            job,
-            self._jobs,
-            LeituraDaDecupagem(self._decupagens, self._correcoes, self._catalogo),
-        )
+        atualizar_catalogo_do_job(job, self._jobs, self._leitura)
         return registro

@@ -9,7 +9,7 @@ aquela espécie. Toda leitura do Firestore passa por `lido`: falha vira 503, nã
 Só a biblioteca padrão, o catálogo e `api.erros`: o módulo de Jobs não entra (sem ciclo).
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -89,12 +89,13 @@ class QuemConta:
         corta, e então a pessoa é tratada como purgada."""
         if self._pessoas is None:
             raise ValueError("sem catálogo de pessoas: use `contam`")
+        obter = self._pessoas.obter_varios
         pedidos = list(dict.fromkeys(ids))
         ponta = {i: i for i in pedidos}  # o id pedido -> onde a cadeia está agora
         vistos = {i: {i} for i in pedidos}
         destinos: dict[str, Destino] = {}
         while ponta:
-            self._ler_pessoas(ponta.values())
+            _ler_em_lote(self._lidas, obter, ponta.values())
             for pedido, onde in list(ponta.items()):
                 origem, pessoa = self._lidas[pedido], self._lidas[onde]
                 fundida = origem is not None and origem.fundida is not None
@@ -124,7 +125,7 @@ class QuemConta:
         pedidos = list(dict.fromkeys(ids))
         if self._marcas is None:
             return set(pedidos)
-        self._ler_marcas(pedidos)
+        _ler_em_lote(self._marcas_lidas, self._marcas.obter_varios, pedidos)
         return {
             i for i in pedidos if (m := self._marcas_lidas[i]) and m.lixeira is None
         }
@@ -136,27 +137,11 @@ class QuemConta:
         if self._marcas is None:
             return Cortes(frozenset(), {})
         nomes = set(nomes)
-        self._resolver_cortes(nomes)
+        self._resolver_cortes(nomes, self._marcas)
         return Cortes(
             frozenset() if so_a_purga else self._nomes_na_lixeira(self._marcas),
             {n: self._cortes[n] for n in nomes if n in self._cortes},
         )
-
-    def _ler_pessoas(self, ids: Iterable[str]) -> None:
-        assert self._pessoas is not None
-        pessoas = self._pessoas
-        faltam = [i for i in dict.fromkeys(ids) if i not in self._lidas]
-        if faltam:
-            achadas = lido(lambda: pessoas.obter_varios(faltam))
-            self._lidas.update({i: achadas.get(i) for i in faltam})
-
-    def _ler_marcas(self, ids: Iterable[str]) -> None:
-        assert self._marcas is not None
-        marcas = self._marcas
-        faltam = [i for i in dict.fromkeys(ids) if i not in self._marcas_lidas]
-        if faltam:
-            achadas = lido(lambda: marcas.obter_varios(faltam))
-            self._marcas_lidas.update({i: achadas.get(i) for i in faltam})
 
     def _nomes_na_lixeira(self, marcas: CatalogoDeMarcas) -> frozenset[str]:
         if self._na_lixeira is None:
@@ -165,7 +150,7 @@ class QuemConta:
             )
         return self._na_lixeira
 
-    def _resolver_cortes(self, nomes: set[str]) -> None:
+    def _resolver_cortes(self, nomes: set[str], marcas: CatalogoDeMarcas) -> None:
         """Resolve os nomes ainda não vistos, um a um: só a purga que vale conta (a de uma
         marca que ainda existe não terminou; a da homônima recriada vale, o id é outro)."""
         novos = nomes - self._resolvidos
@@ -174,9 +159,25 @@ class QuemConta:
         if self._todas_as_purgas is None:
             self._todas_as_purgas = lido(self._purgas.todas) if self._purgas else []
         achadas = [p for p in self._todas_as_purgas if novos & set(p.nomes)]
-        self._ler_marcas(p.marca_id for p in achadas if p.marca_id)
+        _ler_em_lote(
+            self._marcas_lidas,
+            marcas.obter_varios,
+            (p.marca_id for p in achadas if p.marca_id),
+        )
         for p in achadas:
             if p.marca_id is None or self._marcas_lidas[p.marca_id] is None:
                 for n in novos & set(p.nomes):
                     self._cortes[n] = max(p.em, self._cortes.get(n, p.em))
         self._resolvidos |= novos
+
+
+def _ler_em_lote[T](
+    lidos: dict[str, T | None],
+    obter_varios: Callable[[list[str]], Mapping[str, T]],
+    ids: Iterable[str],
+) -> None:
+    """Lê de uma vez os `ids` ainda não lidos e guarda em `lidos` (ausente: `None`)."""
+    faltam = [i for i in dict.fromkeys(ids) if i not in lidos]
+    if faltam:
+        achados = lido(lambda: obter_varios(faltam))
+        lidos.update({i: achados.get(i) for i in faltam})

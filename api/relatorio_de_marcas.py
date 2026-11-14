@@ -252,31 +252,6 @@ class ConsultaComCache:
             lambda: self._consulta.somas(programa, desde, ate, tipo),
         )
 
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
-        # O ranking não é guardado pronto: sai das somas, onde a exclusão já agiu.
-        return ranking_em_python(self.somas(programa, desde, ate, tipo), depois, limite)
-
-    def lista_da_marca(
-        self,
-        marca: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        tipo: str | None,
-        depois: int,
-        limite: int,
-    ) -> "list[InsercaoNoRelatorio]":
-        somas = self.somas(programa, desde, ate, tipo)
-        return lista_em_python(somas, marca, depois, limite)
-
 
 class SoMarcasQueContam:
     """A lixeira do catálogo vale na hora (#593): tira das somas, antes do ranking, dos
@@ -365,8 +340,10 @@ class SoMarcasQueContam:
         depois: int,
         limite: int,
     ) -> "list[InsercaoNoRelatorio]":
-        somas = self.somas(programa, desde, ate, tipo)
-        return lista_em_python(somas, marca, depois, limite)
+        # Só a marca pedida passa pela regra: os Jobs lidos são só os dos vídeos dela.
+        somas = self._consulta.somas(programa, desde, ate, tipo)
+        dela = self._que_contam([s for s in somas if s.marca == marca])
+        return lista_em_python(dela, marca, depois, limite)
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:

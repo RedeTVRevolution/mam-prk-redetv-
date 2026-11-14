@@ -298,29 +298,6 @@ class ConsultaComCache:
             lambda: self._consulta.somas(programa, desde, ate),
         )
 
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        # O ranking não é guardado pronto: sai das somas, onde a exclusão já agiu.
-        return ranking_em_python(self.somas(programa, desde, ate), depois, limite)
-
-    def videos_da_pessoa(
-        self,
-        pessoa_id: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "list[VideoDaPessoa]":
-        somas = self.somas(programa, desde, ate)
-        return videos_em_python(somas, pessoa_id, depois, limite)
-
 
 class SoComQuemConta:
     """A lixeira do catálogo vale na hora (#591): tira das somas, antes do ranking, dos
