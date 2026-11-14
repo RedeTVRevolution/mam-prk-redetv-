@@ -19,13 +19,14 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api.bancos import cliente_do_firestore
 from api.jobs import Job
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import COLECAO_DE_JOBS, DecupagensStorage
-from api.reprocessar_versao import ANTERIOR, LeitorDeDecupagem, versao_da_decupagem
+from api.reprocessar_versao import ANTERIOR, versao_da_decupagem
 
 LOTE = 400  # o limite do Firestore é 500 gravações por lote
 
 
-def gravar(colecao: Any, cliente: Any, decupagens: LeitorDeDecupagem) -> dict[str, int]:
+def gravar(colecao: Any, cliente: Any, decupagens: AbreDecupagem) -> dict[str, int]:
     """Devolve quantos Jobs `gravados`, `iguais` (já tinham a versão), `sem_versao` (dos
     gravados, os que levaram `anterior`) e `nao_lidos` (a decupagem não foi lida)."""
     contagem = {"gravados": 0, "iguais": 0, "sem_versao": 0, "nao_lidos": 0}

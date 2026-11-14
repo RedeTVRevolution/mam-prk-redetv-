@@ -42,13 +42,13 @@ from api.itens_da_decupagem import (
     objeto_dos_itens,
 )
 from api.jobs import RepositorioDeJobs, ServicoIndisponivel
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioDeRevisaoFirestore,
     RepositorioFirestore,
 )
-from api.reprocessar_versao import LeitorDeDecupagem
 from api.revisao import RepositorioDeRevisao
 from api.taxa_de_correcao import calcular_com_itens, modelo_da_decupagem
 
@@ -211,7 +211,7 @@ def dias_recentes(hoje: date, quantos: int) -> list[date]:
 
 def preencher_itens(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     itens: GravadorDeItens,
 ) -> int:
     """Grava a contagem das decupagens de Jobs concluídos que não a têm (as anteriores ao

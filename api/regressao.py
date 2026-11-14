@@ -37,6 +37,7 @@ from api.correcoes import (
 from api.erros import ServicoIndisponivel
 from api.identidade import identidade_do_nome
 from api.jobs import RepositorioDeJobs
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
@@ -44,7 +45,6 @@ from api.nuvem import (
 )
 from api.pareamento import Item, Tipo
 from api.regras_das_correcoes import estado_das
-from api.reprocessar_versao import LeitorDeDecupagem
 
 log = logging.getLogger(__name__)
 
@@ -360,7 +360,7 @@ def casos_das_correcoes(
 
 def exportar(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pasta: Path,
     escrever: Callable[[str], None] = print,

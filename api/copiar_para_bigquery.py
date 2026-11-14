@@ -24,7 +24,6 @@ from api.copia_bigquery import (
 )
 from api.correcoes import RepositorioDeCorrecoes
 from api.indexacao import (
-    LeitorDeDecupagem,
     _duas_tentativas,
     _registrar,
     decupagem_do_job,
@@ -32,6 +31,7 @@ from api.indexacao import (
 )
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import CopiaNoBigQuery, EstadoDaCopia, Job, RepositorioDeJobs, agora_utc
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -52,7 +52,7 @@ log = logging.getLogger(__name__)
 def copiar(
     job: Job,
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     copia: CopiaDosMomentos,
     relogio: Callable[[], datetime] = agora_utc,
@@ -154,7 +154,7 @@ def copiar(
 def copiar_jobs(
     ids: list[str] | None,
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     copia: CopiaDosMomentos,
     pessoas: PessoasEmLote | None = None,

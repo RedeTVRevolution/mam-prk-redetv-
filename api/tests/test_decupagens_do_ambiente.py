@@ -26,7 +26,9 @@ class ClienteFalso:
         return self
 
 
-def test_lê_os_três_nomes_e_cria_o_cliente_do_projeto(monkeypatch) -> None:
+def test_lê_os_três_nomes_e_cria_o_cliente_do_projeto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     criados: list[ClienteFalso] = []
 
     def criar(project: str) -> ClienteFalso:
@@ -40,7 +42,7 @@ def test_lê_os_três_nomes_e_cria_o_cliente_do_projeto(monkeypatch) -> None:
     assert leitor._decupagens == "decupagens"
 
 
-def test_reaproveita_o_cliente_dado(monkeypatch) -> None:
+def test_reaproveita_o_cliente_dado(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         nuvem, "ClienteStorage", lambda **_: pytest.fail("criou outro cliente")
     )

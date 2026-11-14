@@ -41,7 +41,7 @@ def decupagens_dos_jobs(
             log.warning("decupagem de %s não lida; marcas dela ficam de fora", job.id)
 
 
-if __name__ == "__main__":
+def main() -> int:
     projeto = os.environ.get("GCP_PROJECT_ID") or sys.exit("defina GCP_PROJECT_ID")
     cliente = cliente_do_firestore(projeto)
     entraram = carregar_marcas(
@@ -57,3 +57,8 @@ if __name__ == "__main__":
         ),
     )
     print(f"{entraram} marca(s) acrescentada(s) ao catálogo")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

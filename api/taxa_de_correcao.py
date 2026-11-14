@@ -48,6 +48,7 @@ from api.jobs import (
     _confere_permissao,
     _tem_permissao,
 )
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
@@ -55,7 +56,6 @@ from api.nuvem import (
     RepositorioFirestore,
 )
 from api.regras_das_correcoes import estado_das, reconciliar
-from api.reprocessar_versao import LeitorDeDecupagem
 from api.revisao import RepositorioDeRevisao
 from api.texto_como_dado import LinhaDaConsulta
 
@@ -94,18 +94,18 @@ def _no_periodo(quando: datetime, desde: datetime | None, ate: datetime | None) 
     return (desde is None or quando >= desde) and (ate is None or quando < ate)
 
 
-def _itens_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> ItensDaDecupagem:
+def _itens_da_decupagem(decupagens: AbreDecupagem, job_id: str) -> ItensDaDecupagem:
     """A contagem tirada da decupagem inteira (o caminho de hoje do painel)."""
     return contar_itens(b"".join(decupagens.abrir_decupagem(job_id)))
 
 
-def modelo_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> dict[str, Any]:
+def modelo_da_decupagem(decupagens: AbreDecupagem, job_id: str) -> dict[str, Any]:
     return json.loads(b"".join(decupagens.abrir_decupagem(job_id)))  # type: ignore[no-any-return]
 
 
 def calcular(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     revisao: RepositorioDeRevisao,
     desde: datetime | None = None,
@@ -304,7 +304,7 @@ class TaxaDeCorrecao(BaseModel):
 
 def criar_rotas_da_qualidade(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     revisao: RepositorioDeRevisao,
 ) -> APIRouter:

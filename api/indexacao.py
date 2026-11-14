@@ -14,10 +14,10 @@ import os
 import sys
 import uuid
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from functools import partial
-from typing import Any, NamedTuple, Protocol, get_args
+from typing import Any, NamedTuple, get_args
 
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
@@ -40,7 +40,7 @@ from api.jobs import (
     RepositorioDeJobs,
     agora_utc,
 )
-from api.leitura_da_decupagem import LeituraDaDecupagem
+from api.leitura_da_decupagem import AbreDecupagem, LeituraDaDecupagem
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -57,10 +57,6 @@ from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
 from api.tipos_de_objeto import TiposDeObjeto
 
 log = logging.getLogger(__name__)
-
-
-class LeitorDeDecupagem(Protocol):
-    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
 
 
 def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, Any]:
@@ -144,7 +140,7 @@ def _registrar(
 
 def decupagem_do_job(
     job: Job,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pessoas: PessoasEmLote | None = None,
 ) -> Decupagem:
@@ -162,7 +158,7 @@ class _Resultado(NamedTuple):
 def _uma_rodada(
     job: Job,
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     relogio: Callable[[], datetime],
@@ -267,7 +263,7 @@ def _uma_rodada(
 def reindexar(
     job: Job,
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     relogio: Callable[[], datetime] = agora_utc,
@@ -387,7 +383,7 @@ def registrar_falhas_da_api(
 def reindexar_jobs(
     ids: list[str] | None,
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     copia: CopiaDosMomentos | None = None,
