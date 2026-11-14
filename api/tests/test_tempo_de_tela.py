@@ -4,7 +4,7 @@ import csv
 import io
 import random
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.cache_curto import CacheCurto
-from api.catalogo import CatalogoEmMemoria, PessoaDoCatalogo
+from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, PessoaDoCatalogo
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -38,6 +38,7 @@ from api.tempo_de_tela import (
     PessoaNoRelatorio,
     PessoaNoVideo,
     pessoa_no_video,
+    ranking_em_python,
     somar,
 )
 from api.tempo_de_tela import ConsultaComCache as ComCache
@@ -766,6 +767,113 @@ def test_o_nome_do_catalogo_nao_suja_o_ranking_guardado_no_cache() -> None:
     assert nome() == "Ana"
     catalogo.corrigir(ana.id, nome="Ana Maria", apelidos=[])
     assert nome() == "Ana Maria"
+
+
+class CatalogoQueConta(CatalogoEmMemoria):
+    """O catálogo em memória que anota quantas leituras em lote recebeu."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.leituras = 0
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
+        self.leituras += 1
+        return super().obter_varios(ids)
+
+
+def _empate_com_nome_atual() -> tuple[CatalogoQueConta, CopiaEmMemoria]:
+    """Quatro pessoas empatadas em 2 s, com o id na ordem contrária à dos nomes atuais.
+    p1 se chama "Zélia" no catálogo e "Ana" (o mais frequente) na cópia; p3 foi fundida em
+    p4 ("Carla"), e o nome dela mesma ("Zzz Velho") não vale."""
+    catalogo = CatalogoQueConta()
+    for id_, nome in (
+        ("p1", "Zélia"),
+        ("p2", "Bia"),
+        ("p3", "Zzz Velho"),
+        ("p4", "Carla"),
+    ):
+        catalogo._pessoas[id_] = PessoaDoCatalogo(id=id_, nome=nome, papel="")
+    catalogo.definir_fusao(
+        "p3",
+        FusaoDaPessoa(
+            destino_id="p4",
+            em=agora_utc(),
+            por_uid="u",
+            por_email="u@r.com",
+            motivo="x",
+        ),
+    )
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            LinhaDoMomento(
+                job_id="j1",
+                programa="Jornal",
+                data_de_exibicao=date(2026, 10, 1),
+                tipo="aparicao",
+                inicio_ms=0,
+                fim_ms=2_000,
+                pessoas=[PessoaDoMomento(id_, "Ana" if id_ == "p1" else id_)],
+            )
+            for id_ in ("p1", "p2", "p3", "p4")
+        ],
+    )
+    return catalogo, copia
+
+
+def test_tela_e_csv_saem_na_mesma_ordem_no_empate_pelo_nome_atual() -> None:
+    catalogo, copia = _empate_com_nome_atual()
+    cliente = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
+    esperado = [("p2", "Bia"), ("p3", "Carla"), ("p4", "Carla"), ("p1", "Zélia")]
+
+    completo = cliente.get(ROTA, headers=AUTORIZACAO).json()["pessoas"]
+    csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO).text
+    paginas: list[tuple[str, str]] = []
+    cursor: str | None = None
+    while True:
+        params: dict[str, Any] = {"limite": 1}
+        if cursor:
+            params["cursor"] = cursor
+        pagina = cliente.get(ROTA, params=params, headers=AUTORIZACAO)
+        paginas += [(p["pessoa_id"], p["nome"]) for p in pagina.json()["pessoas"]]
+        if cursor is None:
+            assert (
+                pagina.headers["X-Proximo-Cursor"] == "MQ"
+            )  # a posição 1, como sempre
+        cursor = pagina.headers.get("X-Proximo-Cursor")
+        if not cursor:
+            break
+
+    assert [(p["pessoa_id"], p["nome"]) for p in completo] == esperado
+    linhas = list(csv.DictReader(io.StringIO(csv_)))
+    assert [(r["pessoa_id"], r["nome"]) for r in linhas] == esperado
+    assert paginas == esperado  # o empate cortado entre páginas não troca a ordem
+
+
+def test_o_catalogo_e_lido_uma_vez_por_pedido() -> None:
+    catalogo, copia = _empate_com_nome_atual()
+    cliente = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
+
+    for params in ({"limite": 2}, {}, {"formato": "csv"}):
+        catalogo.leituras = 0
+        cliente.get(ROTA, params=params, headers=AUTORIZACAO)
+        assert catalogo.leituras == 1
+
+
+def test_sem_catalogo_o_ranking_usa_o_nome_mais_frequente_das_somas() -> None:
+    somas = somar(
+        [
+            MomentoDaPessoa("j1", "p1", "Zed", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j1", "p2", "Abe", "aparicao", 0, 1_000),
+        ]
+    )
+
+    sem_mapa, _ = ranking_em_python(somas, 0, 10)
+    com_mapa, _ = ranking_em_python(somas, 0, 10, {"p1": "Ana", "p2": "Zeca"})
+
+    assert [(p.pessoa_id, p.nome) for p in sem_mapa] == [("p2", "Abe"), ("p1", "Zed")]
+    assert [(p.pessoa_id, p.nome) for p in com_mapa] == [("p1", "Ana"), ("p2", "Zeca")]
 
 
 class SoSomas:
