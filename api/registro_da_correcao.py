@@ -1,0 +1,183 @@
+"""O Registro da Correção (#614): a sequência única de gravar uma Correção.
+
+Cinco operações, uma por regra de `api/regras_das_correcoes.py`: corrigir, desfazer, reaplicar,
+descartar e decidir (aprovar e recusar). Cada uma lê só o que precisa (o decidir não lê a
+Decupagem), aplica a regra, grava, registra o evento de uso e atualiza o Catálogo do Job. O evento
+e o catálogo são de melhor esforço: a falha deles vai ao log e não desfaz a Correção gravada.
+
+O que fica na rota (`api/jobs.py`): a conferência do Job concluído, a regra de aprovação, a
+autoria e o mapa das exceções para HTTP. Não importa `api.jobs` (que importa este módulo).
+
+ponytail: sem chave de idempotência. O web não repete o POST; repetir continua dando 409 (o id do
+registro é fixo por alvo, e o repositório não sobrescreve). Sem transação entre gravar, o evento e
+o Catálogo do Job: se o catálogo falhar, o Job fica velho até a próxima indexação ou até
+`make preencher-catalogo-dos-jobs`. Chave de idempotência e transação só se o web passar a repetir.
+"""
+
+import json
+from typing import TYPE_CHECKING, Any
+
+from api.catalogo import Catalogo
+from api.catalogo_dos_jobs import atualizar_catalogo_do_job
+from api.correcoes import (
+    Autoria,
+    Correcao,
+    CorrecaoJaExiste,
+    NaoDesfazivel,
+    NaoNaFila,
+    NaoPendente,
+    NovaCorrecao,
+    RepositorioDeCorrecoes,
+    versao_do_modelo,
+)
+from api.eventos_de_uso import Eventos, registrar
+from api.leitura_da_decupagem import AbreDecupagem, LeituraDaDecupagem
+from api.marcas import CatalogoDeMarcas
+from api.regras_das_correcoes import (
+    corrigir,
+    decidir,
+    descartar,
+    desfazer,
+    reaplicar,
+)
+
+if TYPE_CHECKING:  # api.jobs importa este módulo
+    from api.jobs import Job, RepositorioDeJobs
+
+
+class RegistroDaCorrecao:
+    def __init__(
+        self,
+        decupagens: AbreDecupagem,
+        correcoes: RepositorioDeCorrecoes,
+        catalogo: Catalogo,
+        marcas: CatalogoDeMarcas,
+        jobs: "RepositorioDeJobs",
+        publicador: Eventos,
+    ) -> None:
+        self._decupagens = decupagens
+        self._correcoes = correcoes
+        self._catalogo = catalogo
+        self._marcas = marcas
+        self._jobs = jobs
+        self._publicador = publicador
+
+    def corrigir(
+        self,
+        job: "Job",
+        novo: NovaCorrecao,
+        autoria: Autoria,
+        *,
+        exige_aprovacao: bool,
+    ) -> tuple[Correcao, str]:
+        """A Correção gravada e a versão da Decupagem em que ela se apoia."""
+        modelo, versao = self._modelo(job)
+        correcao = corrigir(
+            modelo,
+            versao,
+            self._correcoes.listar(job.id),
+            novo,
+            job.id,
+            autoria,
+            exige_aprovacao=exige_aprovacao,
+            catalogo=self._catalogo,
+            marcas=self._marcas,
+        )
+        self._gravar(job, correcao, autoria)
+        return correcao, versao
+
+    def desfazer(
+        self, job: "Job", alvo_id: str, motivo: str, autoria: Autoria
+    ) -> Correcao:
+        modelo, versao = self._modelo(job)
+        registro = desfazer(
+            modelo,
+            versao,
+            self._correcoes.listar(job.id),
+            alvo_id,
+            motivo,
+            job.id,
+            autoria,
+        )
+        return self._gravar(job, registro, autoria, NaoDesfazivel)
+
+    def reaplicar(
+        self, job: "Job", alvo_id: str, item_id: str, motivo: str, autoria: Autoria
+    ) -> Correcao:
+        modelo, versao = self._modelo(job)
+        registro = reaplicar(
+            modelo,
+            versao,
+            self._correcoes.listar(job.id),
+            alvo_id,
+            item_id,
+            motivo,
+            job.id,
+            autoria,
+        )
+        return self._gravar(job, registro, autoria, NaoNaFila)
+
+    def descartar(
+        self, job: "Job", alvo_id: str, motivo: str, autoria: Autoria
+    ) -> Correcao:
+        modelo, versao = self._modelo(job)
+        registro = descartar(
+            modelo,
+            versao,
+            self._correcoes.listar(job.id),
+            alvo_id,
+            motivo,
+            job.id,
+            autoria,
+        )
+        return self._gravar(job, registro, autoria, NaoNaFila)
+
+    def decidir(
+        self, job: "Job", alvo_id: str, aprovada: bool, motivo: str, autoria: Autoria
+    ) -> Correcao:
+        """Aprova ou recusa uma Correção pendente; não lê a Decupagem antes de gravar."""
+        registro = decidir(
+            self._correcoes.listar(job.id),
+            alvo_id,
+            aprovada,
+            motivo,
+            job.id,
+            autoria,
+        )
+        return self._gravar(job, registro, autoria, NaoPendente)
+
+    def _modelo(self, job: "Job") -> tuple[dict[str, Any], str]:
+        """O JSON do modelo e a versão (SHA-256 dos bytes guardados)."""
+        conteudo = b"".join(self._decupagens.abrir_decupagem(job.id))
+        return json.loads(conteudo), versao_do_modelo(conteudo)
+
+    def _gravar(
+        self,
+        job: "Job",
+        registro: Correcao,
+        autoria: Autoria,
+        se_ja_existe: type[Exception] | None = None,
+    ) -> Correcao:
+        """Grava, registra o evento e atualiza o Catálogo do Job. `se_ja_existe` é a exceção
+        da operação para o registro que outro pedido gravou no meio."""
+        try:
+            self._correcoes.acrescentar(registro)
+        except CorrecaoJaExiste as erro:
+            if se_ja_existe is None:
+                raise
+            raise se_ja_existe(registro.id) from erro
+        registrar(
+            self._publicador,
+            "correcao",
+            ("usuario", autoria.uid),
+            autoria.em,
+            job_id=job.id,
+            programa=job.programa,
+            tipo_de_correcao=registro.tipo,
+        )
+        atualizar_catalogo_do_job(
+            job,
+            self._jobs,
+            LeituraDaDecupagem(self._decupagens, self._correcoes, self._catalogo),
+        )
+        return registro
