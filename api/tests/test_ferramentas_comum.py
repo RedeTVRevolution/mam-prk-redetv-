@@ -8,7 +8,6 @@ import pytest
 
 from api.catalogo import EnvioParaLixeira
 from api.ferramentas.comum import (
-    custo_de_horas,
     custo_por_hora_do_ambiente,
     dolar,
     hash_estavel,
@@ -123,8 +122,9 @@ def test_o_custo_por_hora_vem_do_ambiente_ou_e_nd() -> None:
     assert custo_por_hora_do_ambiente({}) is None
 
 
-def test_o_custo_estimado_e_horas_vezes_o_custo() -> None:
-    assert custo_de_horas(2.5, 4.0) == 10.0
+def test_dolar_sem_valor_sai_nd() -> None:
+    assert dolar(None) == "n/d"
+    assert dolar(None, casas=4, ptbr=False) == "n/d"
 
 
 def test_os_dois_formatos_do_dolar() -> None:

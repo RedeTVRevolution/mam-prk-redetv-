@@ -1,7 +1,6 @@
 """O que mais de uma ferramenta de linha de comando precisa (#658). Só as ferramentas importam."""
 
 import hashlib
-import os
 from collections.abc import Iterator, Mapping
 
 from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs
@@ -47,7 +46,7 @@ def percentil(valores: list[float], p: int) -> float:
 
 
 def custo_por_hora_do_ambiente(
-    ambiente: Mapping[str, str] = os.environ,
+    ambiente: Mapping[str, str],
 ) -> float | None:
     """`CUSTO_POR_HORA_USD`, ou `None` sem ele (o custo sai "n/d"). Valor ilegível levanta
     `ValueError`."""
@@ -55,12 +54,10 @@ def custo_por_hora_do_ambiente(
     return float(custo) if custo else None
 
 
-def custo_de_horas(horas: float, custo_por_hora: float) -> float:
-    return horas * custo_por_hora
-
-
-def dolar(valor: float, *, casas: int = 2, ptbr: bool = True) -> str:
-    """`US$ 1.234,56` (`ptbr`) ou `US$ 1234.56`."""
+def dolar(valor: float | None, *, casas: int = 2, ptbr: bool = True) -> str:
+    """`US$ 1.234,56` (`ptbr`) ou `US$ 1234.56`; `n/d` sem valor."""
+    if valor is None:
+        return "n/d"
     texto = f"{valor:,.{casas}f}" if ptbr else f"{valor:.{casas}f}"
     if ptbr:
         texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")

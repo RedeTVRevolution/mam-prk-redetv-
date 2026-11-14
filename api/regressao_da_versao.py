@@ -31,11 +31,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from api.decupagem import Decupagem
-from api.ferramentas.comum import (
-    custo_de_horas,
-    custo_por_hora_do_ambiente,
-    dolar,
-)
+from api.ferramentas.comum import custo_por_hora_do_ambiente, dolar
 from api.pareamento import Item, itens_do_modelo, parear, se_sobrepoem
 from api.regressao import (
     ARQUIVO_DE_METAS,
@@ -197,7 +193,7 @@ def avaliar(
 
 def custo_estimado(casos: list[Caso], custo_por_hora: float) -> float:
     segundos = sum(c.fim_ms - c.inicio_ms for c in casos) / 1000
-    return custo_de_horas(segundos / 3600, custo_por_hora)
+    return segundos / 3600 * custo_por_hora
 
 
 def relatorio_em_json(r: Relatorio) -> str:
@@ -309,8 +305,8 @@ def main(
             f"{len(casos)} casos ({'reservados' if so_reservados else 'de ajuste'}), "
             f"versão {versao} contra {aprovada}."
         )
-        estimado = (
-            "n/d" if custo is None else dolar(custo_estimado(casos, custo), ptbr=False)
+        estimado = dolar(
+            None if custo is None else custo_estimado(casos, custo), ptbr=False
         )
         escrever(f"Custo estimado: {estimado}")
         if ambiente.get("CONFIRMAR") != "1":

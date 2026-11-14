@@ -28,7 +28,6 @@ from api.bancos import cliente_da_colecao, cliente_do_firestore
 from api.ciclo_de_vida import PRAZO_DO_REPROCESSAMENTO, NaoReprocessavel
 from api.ferramentas.comum import (
     TAMANHO_DA_PAGINA,
-    custo_de_horas,
     custo_por_hora_do_ambiente,
     dolar,
     jobs_concluidos,
@@ -139,11 +138,7 @@ def reprocessar_versao(
     escolhidos = escolher(repositorio, decupagens, de, limite, agora=relogio())
     horas = sum(c.duracao_s or 0 for c in escolhidos) / 3600
     sem_duracao = sum(1 for c in escolhidos if c.duracao_s is None)
-    custo = (
-        "n/d"
-        if custo_por_hora is None
-        else dolar(custo_de_horas(horas, custo_por_hora))
-    )
+    custo = dolar(None if custo_por_hora is None else horas * custo_por_hora)
     escrever(f"Versão do pipeline: {VERSAO_PIPELINE}")
     for c in escolhidos:
         duracao = (

@@ -16,8 +16,11 @@ from pathlib import Path
 from PIL import Image
 
 from api.decupagem import Decupagem, Plano
-from api.ferramentas.comum import hash_estavel
-from api.medir_agrupamento_de_objetos import margem_de_confianca, pares_para_margem
+from api.medir_agrupamento_de_objetos import (
+    _hash,
+    margem_de_confianca,
+    pares_para_margem,
+)
 from api.planos_recorrentes import (
     Sinal,
     _quadro_chave,
@@ -47,10 +50,6 @@ class PlanoDaAmostra:
     plano: str
     grupo: str | None
     sinal: Sinal
-
-
-def _hash(chave: str) -> int:
-    return hash_estavel(chave, 12)
 
 
 def _por_programa(

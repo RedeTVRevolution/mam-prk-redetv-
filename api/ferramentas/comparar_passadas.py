@@ -195,7 +195,7 @@ def _linha(e: Entrada) -> str:
 
 
 def _usd(valor: float | None) -> str:
-    return dolar(valor, casas=4, ptbr=False) if valor is not None else "n/d"
+    return dolar(valor, casas=4, ptbr=False)
 
 
 def _custo(lado: LadoDoResultado, duracao_ms: int) -> str:
