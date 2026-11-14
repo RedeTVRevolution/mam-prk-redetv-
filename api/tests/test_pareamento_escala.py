@@ -89,7 +89,9 @@ def _itens(
     return itens
 
 
-def _dois_lados(semente: int, quantos: int, tipos: tuple[Tipo, ...] = TIPOS):
+def _dois_lados(
+    semente: int, quantos: int, tipos: tuple[Tipo, ...] = TIPOS
+) -> tuple[list[Item], list[Item]]:
     rng = random.Random(semente)
     a = _itens(rng, quantos, tipos)
     # o outro lado: os mesmos deslocados, com sobra, repetidos e fora de ordem

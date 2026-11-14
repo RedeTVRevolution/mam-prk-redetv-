@@ -153,16 +153,14 @@ def test_main_com_amostra_zero_sai_com_zero(tmp_path: Path) -> None:
 def test_os_grupos_por_programa_saem_uma_vez_por_medicao(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import api.medir_agrupamento_de_objetos as modulo
-
     chamadas: list[int] = []
-    original = modulo.grupos_por_programa
+    original = grupos_por_programa
 
     def contada(videos):  # type: ignore[no-untyped-def]
         chamadas.append(1)
         return original(videos)
 
-    monkeypatch.setattr(modulo, "grupos_por_programa", contada)
+    monkeypatch.setattr("api.medir_agrupamento_de_objetos.grupos_por_programa", contada)
 
     resultado = medir(_pasta(tmp_path))
 

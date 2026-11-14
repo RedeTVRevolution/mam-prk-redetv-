@@ -68,16 +68,15 @@ def test_o_script_le_o_arquivo_local_e_imprime_json(
 def test_a_juncao_roda_uma_vez_por_decupagem(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import api.medir_juncao as modulo
+    from api.juncao_de_pessoas import juntar_sem_nome as original
 
     chamadas: list[object] = []
-    original = modulo.juntar_sem_nome
 
     def contada(d, **kw):  # type: ignore[no-untyped-def]
         chamadas.append(d)
         return original(d, **kw)
 
-    monkeypatch.setattr(modulo, "juntar_sem_nome", contada)
+    monkeypatch.setattr("api.medir_juncao.juntar_sem_nome", contada)
     arquivos = []
     for nome in ("a.json", "b.json"):
         arquivo = tmp_path / nome

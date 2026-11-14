@@ -102,15 +102,15 @@ def parear(
                 g.identidade, normalizar(g.identidade)
             )
         chave = (g.tipo, identidade)
-        itens = grupos.get(chave)
+        do_grupo = grupos.get(chave)
         melhor: tuple[int, int, int] | None = None
         escolhido: Item | None = None
-        if itens:
+        if do_grupo:
             # Um candidato começa em [g.inicio - maior duração, g.fim] (ponytail: uma
             # duração enorme alarga a janela até o grupo todo; árvore de intervalos se for o caso).
             lo = bisect_left(inicios[chave], g.inicio_ms - maior_duracao[chave])
             hi = bisect_right(inicios[chave], g.fim_ms)
-            for _, posicao, m in itens[lo:hi]:
+            for _, posicao, m in do_grupo[lo:hi]:
                 if not se_sobrepoem(g, m):
                     continue
                 pontos = (
