@@ -3,10 +3,8 @@
 import json
 from typing import Any
 
-from fastapi.testclient import TestClient
-
 from api.correcoes import versao_do_modelo
-from api.tests.test_correcoes import AUTORIZACAO, MODELO, Mundo, _pauta, _pessoa
+from api.tests.test_correcoes import MODELO, Mundo, _pauta, _pessoa
 
 
 def _com_papel(pessoa: dict[str, Any]) -> dict[str, Any]:
@@ -84,21 +82,24 @@ def test_pauta_e_objeto_da_absorvida_passam_para_a_que_fica() -> None:
     assert decupagem["objetos"][0]["pessoa"] == "pes01"
 
 
-def test_desfazer_a_troca_da_pessoa_absorvida_da_422() -> None:
-    """#625: a pessoa absorvida não está na Decupagem entregue, então o desfazer
-    recusa (item inexistente), como em `test_item_sumido`. Antes, passava por acaso:
-    o nome era lido da pessoa que caía na mesma posição (a pes06)."""
+def test_desfazer_a_troca_separa_as_pessoas_de_novo() -> None:
     mundo = _mundo()
     cid = _renomear_pes05(mundo)
 
-    r = TestClient(mundo.cliente.app, raise_server_exceptions=False).post(
-        f"/v1/jobs/j1/correcoes/{cid}/desfazer",
-        json={"motivo": "enganei-me"},
-        headers=AUTORIZACAO,
-    )
+    assert mundo.desfazer(cid).status_code == 201
 
-    assert (r.status_code, r.json()) == (422, {"detail": "Item inexistente"})
-    assert [p["id"] for p in mundo.decupagem()["pessoas"]] == ["pes01", "pes06"]
+    decupagem = mundo.decupagem()
+    assert [p["id"] for p in decupagem["pessoas"]] == ["pes01", "pes05", "pes06"]
+    assert decupagem["pautas"][0]["pessoas"] == ["pes05", "pes01"]
+    assert decupagem["objetos"][0]["pessoa"] == "pes05"
+    # #625: a pessoa absorvida pela própria troca não está na entregue com o desfazer,
+    # então o "antes" é o nome que a troca deu.
+    desfeita = mundo.correcoes.listar("j1")[-1]
+    assert (desfeita.tipo, desfeita.antes, desfeita.depois) == (
+        "desfazer",
+        "Alberto",
+        "não identificado",
+    )
 
 
 def test_correcao_na_absorvida_antes_da_juncao_continua_valendo() -> None:

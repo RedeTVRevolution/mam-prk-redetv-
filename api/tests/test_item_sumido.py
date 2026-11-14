@@ -55,9 +55,14 @@ def test_reaplicar_no_item_que_sumiu_da_decupagem_da_422() -> None:
 
 
 def test_desfazer_troca_de_nome_com_a_pessoa_que_sumiu_da_decupagem_da_422() -> None:
+    """A pes02 é renomeada sem juntar ("Beto") e, depois, de novo para "Ana Souza", o
+    nome da pes01: a segunda troca a absorve. Sem a primeira, ela ainda é absorvida,
+    então não há pessoa para desfazer: 422. (Absorvida pela própria troca, o desfazer
+    separa as duas de novo.)"""
     mundo = Mundo(["editor"])
-    # pes02 vira "Ana Souza" e é absorvida por pes01: some da Decupagem entregue.
-    cid = mundo.corrigir(item_id="pes02", valor="Ana Souza").json()["id"]
+    cid = mundo.corrigir(item_id="pes02", valor="Beto").json()["id"]
+    mundo.avancar()
+    assert mundo.corrigir(item_id="pes02", valor="Ana Souza").status_code == 201
     mundo.avancar()
     cliente = TestClient(mundo.cliente.app, raise_server_exceptions=False)
 
@@ -68,7 +73,10 @@ def test_desfazer_troca_de_nome_com_a_pessoa_que_sumiu_da_decupagem_da_422() -> 
     )
 
     assert (r.status_code, r.json()) == (422, {"detail": "Item inexistente"})
-    assert [c.tipo for c in mundo.correcoes.listar("j1")] == ["pessoa.renomear"]
+    assert [c.tipo for c in mundo.correcoes.listar("j1")] == [
+        "pessoa.renomear",
+        "pessoa.renomear",
+    ]
 
 
 def test_desfazer_de_outro_tipo_com_o_item_sumido_continua_gravando() -> None:
