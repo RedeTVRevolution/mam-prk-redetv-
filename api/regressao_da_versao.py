@@ -5,7 +5,7 @@
 Para cada caso do conjunto (`api/regressao.py`), pede ao transporte os itens da `VERSAO`
 e os da versão aprovada (a `VERSAO_PIPELINE` de hoje, ou `VERSAO_APROVADA`) no trecho do
 caso e mede os dois contra o esperado com o pareamento e a tolerância do
-`api/comparador.py`: um item esperado é acerto quando tem par dentro da tolerância. Por
+`api/pareamento.py`: um item esperado é acerto quando tem par dentro da tolerância. Por
 requisito, o relatório conta os acertos de cada versão, diz por caso se melhorou, piorou ou
 ficou igual e confere a meta (`metas.json`). Grava Markdown e JSON em `PASTA`
 (`regressao-da-versao`). Saída 1 se algum requisito com meta fica abaixo dela (o portão
@@ -30,8 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
-from api.comparador import Item, itens_do_modelo, parear, se_sobrepoem
 from api.decupagem import Decupagem
+from api.pareamento import Item, itens_do_modelo, parear, se_sobrepoem
 from api.regressao import (
     ARQUIVO_DE_METAS,
     PASTA_DOS_CASOS,

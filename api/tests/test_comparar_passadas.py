@@ -9,7 +9,6 @@ import pytest
 
 from api.ambiente import FaltaNoAmbiente
 from api.comparador import TOLERANCIA_MS
-from api.comparar_objetos import Preco
 from api.comparar_passadas import (
     Custo,
     LadoDoResultado,
@@ -31,6 +30,7 @@ from api.jobs import Etapa, Job, RepositorioEmMemoria
 from api.passadas import Custo as CustoDaPassada
 from api.passadas import Etapa as EtapaDaPassada
 from api.passadas import Passada, PassadasEmMemoria
+from api.precos_dos_modelos import Preco
 
 SHA = "a" * 64
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)

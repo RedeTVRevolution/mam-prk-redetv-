@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from api.comparador import Item
+from api.pareamento import Item
 from api.regressao import (
     Caso,
     caso_do_gabarito,
