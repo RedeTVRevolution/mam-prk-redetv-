@@ -5,6 +5,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from api.medir_agrupamento_de_objetos import (
     amostra_de_cobertura,
     amostra_de_precisao,
@@ -146,3 +148,23 @@ def test_amostra_maior_que_a_disponivel_usa_os_pares_reais(tmp_path: Path) -> No
 
 def test_main_com_amostra_zero_sai_com_zero(tmp_path: Path) -> None:
     assert main([str(_pasta(tmp_path)), "--amostra", "0"]) == 0
+
+
+def test_os_grupos_por_programa_saem_uma_vez_por_medicao(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import api.medir_agrupamento_de_objetos as modulo
+
+    chamadas: list[int] = []
+    original = modulo.grupos_por_programa
+
+    def contada(videos):  # type: ignore[no-untyped-def]
+        chamadas.append(1)
+        return original(videos)
+
+    monkeypatch.setattr(modulo, "grupos_por_programa", contada)
+
+    resultado = medir(_pasta(tmp_path))
+
+    assert len(chamadas) == 1
+    assert resultado["amostra_de_precisao"]

@@ -63,3 +63,37 @@ def test_o_script_le_o_arquivo_local_e_imprime_json(
 
     saida = json.loads(capsys.readouterr().out)
     assert (saida["pessoas_antes"], saida["pessoas_depois"]) == (2, 1)
+
+
+def test_a_juncao_roda_uma_vez_por_decupagem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import api.medir_juncao as modulo
+
+    chamadas: list[object] = []
+    original = modulo.juntar_sem_nome
+
+    def contada(d, **kw):  # type: ignore[no-untyped-def]
+        chamadas.append(d)
+        return original(d, **kw)
+
+    monkeypatch.setattr(modulo, "juntar_sem_nome", contada)
+    arquivos = []
+    for nome in ("a.json", "b.json"):
+        arquivo = tmp_path / nome
+        arquivo.write_text(
+            decupagem(
+                [
+                    pessoa("pes01", 0, [(100_000, 110_000)]),
+                    pessoa("pes02", 1, [(400_000, 410_000)]),
+                    pessoa("pes03", 2, [(700_000, 710_000)]),
+                ]
+            ).model_dump_json()
+        )
+        arquivos.append(str(arquivo))
+
+    assert main([*arquivos, "--amostra", "5"]) == 0
+
+    assert len(chamadas) == 2
+    linhas = capsys.readouterr().out.splitlines()
+    assert len(linhas) == 4  # duas medições e dois grupos na amostra

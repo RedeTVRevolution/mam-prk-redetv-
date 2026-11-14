@@ -476,3 +476,46 @@ def test_exportar_grava_um_arquivo_por_caso_e_e_idempotente(tmp_path: Path) -> N
 def test_comando_sem_ambiente_sai_com_2(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([], {}) == 2
     assert "erro:" in capsys.readouterr().err
+
+
+class _CorrecoesContadas(RepositorioDeCorrecoesEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.listados: list[str] = []
+
+    def listar(self, job_id: str) -> list[Correcao]:
+        self.listados.append(job_id)
+        return super().listar(job_id)
+
+
+def test_exportar_le_so_os_jobs_com_correcao_na_ordem_de_antes(tmp_path: Path) -> None:
+    jobs = RepositorioEmMemoria()
+    for i, j in enumerate(("j1", "j2", "j3", "j4", "j5")):
+        jobs.salvar(
+            _job(j, "falhou" if j == "j3" else "concluido").model_copy(
+                update={"criado_em": BASE - timedelta(hours=i)}
+            )
+        )
+    versao = versao_do_modelo(_bytes(MODELO))
+    ancora = _ancora("pessoa", "ana", 5_000).model_copy(update={"versao": versao})
+    correcoes = _CorrecoesContadas()
+    for job in (
+        "j1",
+        "j2",
+        "j3",
+        "j9",
+    ):  # j4 e j5 sem correção; j9 não é Job; j3 falhou
+        correcoes.acrescentar(_c(f"{job}-c", job_id=job, ancora=ancora))
+    decupagens = Decupagens({j: MODELO for j in ("j1", "j2", "j3", "j4", "j5")})
+
+    gravados = exportar(jobs, decupagens, correcoes, tmp_path, lambda _: None)
+
+    assert correcoes.listados == [
+        "j2",
+        "j1",
+    ]  # criado_em crescente; só concluído com correção
+    assert [c.job_id for c in gravados] == ["j2", "j1"]
+    assert sorted(p.name for p in tmp_path.glob("*.json")) == [
+        "correcao-j1-c.json",
+        "correcao-j2-c.json",
+    ]
