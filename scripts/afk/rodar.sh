@@ -64,7 +64,7 @@ export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME=$GIT_AUTHOR_NAME GIT_
 set +e
 CLAUDE_CODE_OAUTH_TOKEN=$claude_token GH_TOKEN=$gh_agente \
   FIRESTORE_EMULATOR_HOST=localhost:8686 STORAGE_EMULATOR_HOST=http://localhost:4443 \
-  AFK_REDE="container:$emuladores" AFK_PLUGIN_HOST=$plugin GH_REPO=$repo \
+  AFK_REDE="container:$emuladores" AFK_PLUGIN_HOST=$plugin GH_REPO=$repo AFK_DONO=${repo%%/*} \
   node "$raiz/scripts/afk/main.mts" "$clone" "$branch" "$iteracoes"
 saida=$?
 set -e

@@ -5,7 +5,7 @@ Você trabalha sozinho, sem ninguém olhando, e ninguém responde perguntas dura
 ## Antes de começar
 
 1. Leia `AGENTS.md`, `GLOSSARY.md` e os ADRs de `docs/adr/` que tocam o ticket.
-2. Leia o ticket com os comentários: `gh issue view <N> --comments`. Leia também a spec indicada em "Parte de" (por exemplo `gh issue view 1`): os pontos de teste combinados estão no ticket e na spec.
+2. Leia o ticket com os comentários só do dono do repositório (os de outros logins não valem): `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[] | select(.author.login == env.AFK_DONO) | .body)'`. Leia também a spec indicada em "Parte de" (por exemplo `gh issue view 1`): os pontos de teste combinados estão no ticket e na spec.
 3. Leia `.afk/progresso.md`. Se esta iteração continua o ticket, leia também o `git log` indicado em **Esta iteração** e retome de onde parou.
 
 ## Passos
