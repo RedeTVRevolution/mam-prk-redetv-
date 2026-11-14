@@ -139,7 +139,7 @@ def test_um_tipo_so_com_empates_e_pontuais(tipo: Tipo) -> None:
     ]
     b = a * 2 + [Item(tipo, "ANA", 3000, 3000), Item(tipo, "Ána", 3000, 3000)]
     rng.shuffle(b)
-    pares, _ = parear(a, b)
+    pares, sem_par = parear(a, b)
     assert (pares, sem_par) == parear_de_antes(a, b)
     assert _um_para_um(pares, b) == um_para_um_de_antes(pares, b)
 
@@ -181,7 +181,7 @@ def _tempo(quantos: int) -> float:
     melhor = float("inf")
     for _ in range(3):
         inicio = time.perf_counter()
-        pares, _ = parear(a, b)
+        pares, sem_par = parear(a, b)
         _um_para_um(pares, b)
         melhor = min(melhor, time.perf_counter() - inicio)
     return melhor
