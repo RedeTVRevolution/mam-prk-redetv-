@@ -181,7 +181,7 @@ def _tempo(quantos: int) -> float:
     melhor = float("inf")
     for _ in range(3):
         inicio = time.perf_counter()
-        pares, sem_par = parear(a, b)
+        pares, _ = parear(a, b)
         _um_para_um(pares, b)
         melhor = min(melhor, time.perf_counter() - inicio)
     return melhor
