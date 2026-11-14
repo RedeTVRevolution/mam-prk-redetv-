@@ -122,7 +122,7 @@ def test_o_pareamento_novo_devolve_o_mesmo_que_o_de_antes(
     a, b = _dois_lados(semente, quantos)
     esperado = parear_de_antes(a, b)
     assert parear(a, b) == esperado
-    pares, sem_par = esperado
+    pares = esperado[0]
     assert _um_para_um(pares, b) == um_para_um_de_antes(pares, b)
     # contra si mesmo (todos os itens são iguais ao seu par: empates em toda parte)
     assert parear(a, a) == parear_de_antes(a, a)
@@ -139,7 +139,7 @@ def test_um_tipo_so_com_empates_e_pontuais(tipo: Tipo) -> None:
     ]
     b = a * 2 + [Item(tipo, "ANA", 3000, 3000), Item(tipo, "Ána", 3000, 3000)]
     rng.shuffle(b)
-    pares, sem_par = parear(a, b)
+    pares, _ = parear(a, b)
     assert (pares, sem_par) == parear_de_antes(a, b)
     assert _um_para_um(pares, b) == um_para_um_de_antes(pares, b)
 
