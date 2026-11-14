@@ -43,7 +43,10 @@ def reservar_na_janela(
 ) -> tuple[list[Reserva], float]:
     """As reservas que sobram na janela e a espera: 0 se `objetos` coube (e então a
     reserva já vai na lista). Com a janela vazia o lote entra mesmo acima do limite,
-    senão um lote maior que ele nunca sairia."""
+    senão um lote maior que ele nunca sairia. O tempo do orçamento não anda para trás:
+    o "agora" é o maior entre o do chamador e o da reserva mais recente, para quem chega
+    com a hora atrasada não descartar reservas que ainda contam para ele."""
+    agora = max([agora, *(r[0] for r in reservas)])
     vivas = sorted(r for r in reservas if r[0] > agora - JANELA_S)
     gasto = sum(n for _, n in vivas)
     saidas = 0

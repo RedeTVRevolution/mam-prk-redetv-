@@ -1345,7 +1345,8 @@ class _OrcamentoFalso:
                 self.reservas, objetos, limite, agora
             )
             if not espera:
-                self.historico.append((agora, objetos))
+                # A hora guardada: a de quem reservou, ou a que o orçamento adotou.
+                self.historico.append((self.reservas[-1][0], objetos))
             return espera
 
 
@@ -1460,6 +1461,15 @@ def test_reserva_espera_o_bastante_para_o_lote_caber() -> None:
     assert mantidas == reservas and espera == 30.0
     mantidas, espera = reservar_na_janela(reservas, 1000, 2700, 70.0)
     assert espera == 0 and mantidas == [(20.0, 500), (70.0, 1000)]
+
+
+def test_reserva_com_hora_velha_nao_estoura_a_janela() -> None:
+    orcamento = _OrcamentoFalso()
+    # B (hora 70) descarta a reserva de A (hora 0); C chega depois, com a hora 30,
+    # e já não via A: sem o relógio monotônico, A e C ficavam juntos na janela.
+    for objetos, agora in [(2000, 0.0), (1000, 70.0), (1700, 30.0)]:
+        orcamento.reservar("c", objetos, 2700, agora)
+    _nenhuma_janela_de_60_s_passa(orcamento.historico, 2700)
 
 
 def test_id_do_objeto_com_id_de_correcao_cabe_nos_63_caracteres_do_rfc_1035() -> None:
