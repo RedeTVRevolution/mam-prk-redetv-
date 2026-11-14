@@ -10,6 +10,7 @@ import pytest
 
 from api.comparador import TIPOS, Item, itens_do_modelo, ler_gabarito, parear
 from api.correcoes import (
+    CORRIGIVEIS,
     Ancora,
     Correcao,
     Ocorrencia,
@@ -340,6 +341,77 @@ def test_pessoa_sem_nome_nao_vira_caso() -> None:
 def test_correcao_com_tempos_ilegiveis_fica_de_fora() -> None:
     c = _c("c", tipo="item.tempos", depois="lixo", ancora=_ancora("pauta"))
     assert casos_das_correcoes(MODELO, "v", [c]) == []
+
+
+OBJETO: dict[str, Any] = {
+    "id": "o1",
+    "tipo": "camiseta",
+    "ocorrencias": [
+        {"inicio_ms": 1_000, "fim_ms": 2_000},
+        {"inicio_ms": 8_000, "fim_ms": 9_000},
+    ],
+}
+MODELO_COM_OBJETO: dict[str, Any] = {**MODELO, "objetos": [OBJETO]}
+ATRIBUTOS = json.dumps({"tipo": "Camisa Polo", "cor_base": "azul"})
+
+
+def _do_objeto(id: str, tipo: str, depois: str, minuto: int = 0) -> Correcao:
+    return _c(
+        id,
+        minuto,
+        tipo=tipo,
+        item_id="o1",
+        depois=depois,
+        ancora=_ancora("objeto", "camiseta", 9_000),
+    )
+
+
+def test_atributos_do_objeto_viram_um_item_por_ocorrencia() -> None:
+    c = _do_objeto("a", "objeto.atributos", ATRIBUTOS)
+    [caso] = casos_das_correcoes(MODELO_COM_OBJETO, "v", [c])
+    # Dois itens separados: nunca um intervalo de 1000 a 9000 cobrindo o vazio.
+    assert caso.itens() == [
+        Item("objeto", "camisa polo", 1_000, 2_000),
+        Item("objeto", "camisa polo", 8_000, 9_000),
+    ]
+
+
+def test_objeto_nao_existe_nao_vira_caso_nem_valor_ilegivel(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    c = _do_objeto("n", "objeto.nao_existe", "nao_existe")
+    assert casos_das_correcoes(MODELO_COM_OBJETO, "v", [c]) == []
+    assert "ilegível" not in caplog.text
+
+
+def test_dono_e_acrescentar_saem_com_aviso_proprio(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    correcoes = [
+        _do_objeto("d", "objeto.dono", "{}"),
+        _do_objeto("x", "objeto.acrescentar", "{}"),
+    ]
+    assert casos_das_correcoes(MODELO_COM_OBJETO, "v", correcoes) == []
+    assert caplog.text.count("operação de objeto sem conversão") == 2
+    assert "ilegível" not in caplog.text
+
+
+def test_outra_correcao_do_objeto_concorda_com_o_nome_novo() -> None:
+    renomeia = _do_objeto("a", "objeto.atributos", ATRIBUTOS)
+    outra = _do_objeto("t", "objeto.atributos", ATRIBUTOS, minuto=1)
+    nomes = {
+        i.identidade
+        for caso in casos_das_correcoes(MODELO_COM_OBJETO, "v", [renomeia, outra])
+        for i in caso.itens()
+    }
+    assert nomes == {"camisa polo"}
+
+
+def test_toda_operacao_de_objeto_e_convertida_ou_declarada() -> None:
+    from api.regressao import _SEM_CONVERSAO, _SEM_ITEM
+
+    objeto = {t for t in CORRIGIVEIS if t.startswith("objeto.")}
+    assert objeto <= {"objeto.atributos"} | _SEM_ITEM | _SEM_CONVERSAO
 
 
 class Decupagens:
