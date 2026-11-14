@@ -23,7 +23,8 @@ from pydantic import (
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
-from api.jobs import ServicoIndisponivel, _confere_permissao
+from api.erros import ServicoIndisponivel
+from api.jobs import _confere_permissao
 from api.papeis import (
     PAPEIS,
     Papel,

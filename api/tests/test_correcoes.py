@@ -25,15 +25,7 @@ from api.correcoes import (
     RepositorioDeAprovacaoEmMemoria,
     RepositorioDeCorrecoesEmMemoria,
     TipoNovo,
-    aplicar,
-    corrigir,
-    descartar,
-    fila,
-    historico,
     identidade_da_pessoa,
-    pessoas_corrigidas,
-    reaplicar,
-    reconciliar,
     versao_do_modelo,
 )
 from api.eventos_de_uso import Eventos
@@ -41,6 +33,16 @@ from api.jobs import Job, RepositorioEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
+from api.regras_das_correcoes import (
+    aplicar,
+    corrigir,
+    descartar,
+    fila,
+    historico,
+    pessoas_corrigidas,
+    reaplicar,
+    reconciliar,
+)
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso
 
@@ -484,6 +486,18 @@ def test_desfazer_duas_vezes_a_mesma_correcao_da_409() -> None:
 
     assert mundo.desfazer(cid).status_code == 409
     assert len(mundo.correcoes.listar("j1")) == 2
+
+
+def test_desfazer_que_perde_a_corrida_pelo_id_da_409() -> None:
+    mundo = Mundo(["editor"])
+    cid = mundo.corrigir().json()["id"]
+
+    def ja_existe(correcao: Correcao) -> None:
+        raise CorrecaoJaExiste(correcao.id)
+
+    mundo.correcoes.acrescentar = ja_existe  # type: ignore[method-assign]
+
+    assert mundo.desfazer(cid).status_code == 409
 
 
 def test_dois_desfazer_simultaneos_gravam_um_so() -> None:

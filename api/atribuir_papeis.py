@@ -7,19 +7,14 @@ os papéis vão para o Firestore. A busca na nuvem não tem teste automático.
 import os
 import sys
 
-import google.auth
-import google.auth.transport.requests
-
 from api.bancos import cliente_da_colecao
+from api.clientes_de_nuvem import sessao_autenticada
 from api.nuvem import COLECAO_DE_PAPEIS, RepositorioDePapeisFirestore
 from api.papeis import ContaNaoEncontrada, atribuir_papeis_main
 
 
 def achar_uid(projeto: str, email: str) -> str:
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    sessao = google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
+    sessao = sessao_autenticada()
     resposta = sessao.post(
         f"https://identitytoolkit.googleapis.com/v1/projects/{projeto}/accounts:lookup",
         json={"email": [email]},

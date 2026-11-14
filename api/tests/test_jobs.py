@@ -989,3 +989,20 @@ def test_prazo_do_reprocessamento_vem_no_job_na_listagem_e_no_andamento() -> Non
         corpo = resposta.json()
         job = corpo[0] if isinstance(corpo, list) else corpo
         assert job["reprocessavel_ate"] == "2026-11-05T12:00:00Z"
+
+
+def test_subclasse_de_erro_da_correcao_sai_com_o_codigo_da_classe_do_mapa() -> None:
+    from fastapi import HTTPException
+
+    from api.correcoes import NaoNaFila
+    from api.jobs import _erros_das_correcoes
+
+    class FilaDeOutroTipo(NaoNaFila):
+        pass
+
+    with pytest.raises(HTTPException) as erro, _erros_das_correcoes():
+        raise FilaDeOutroTipo("c1")
+    assert (erro.value.status_code, erro.value.detail) == (
+        409,
+        "A correção não está mais na fila",
+    )

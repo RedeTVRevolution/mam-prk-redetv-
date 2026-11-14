@@ -17,12 +17,11 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 from typing import Any, Protocol
 
-import google.auth
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
-from google.auth.transport.requests import AuthorizedSession
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from api.clientes_de_nuvem import TransporteRest, transporte_rest
 from api.eventos_de_uso import (
     Eventos,
     EventosPubSub,
@@ -53,6 +52,7 @@ from api.webhook import (
 log = logging.getLogger(__name__)
 
 URL_BASE = "https://pubsub.googleapis.com/v1"
+ESCOPO_DO_PUBSUB = "https://www.googleapis.com/auth/pubsub"
 CAMINHO_DO_PUSH = "/interno/webhook"
 # Status do publish que passam com uma nova tentativa, e a espera antes de cada uma.
 STATUS_REPETIVEIS_DO_PUBSUB = {429, 500, 502, 503, 504}
@@ -60,9 +60,6 @@ ESPERAS_DO_PUBSUB = (1.0, 2.0)
 # O evento de uso não vale uma espera longa na ação de quem o causou.
 TEMPO_DO_EVENTO_DE_USO_S = 5.0
 FIM_DE_JOB: tuple[Estado, ...] = ("concluido", "falhou")
-
-# (método, caminho a partir de /v1, corpo) -> (status HTTP, resposta em JSON)
-Transporte = Callable[[str, str, dict[str, Any] | None], tuple[int, dict[str, Any]]]
 
 
 class MensagemDeEvento(BaseModel):
@@ -94,7 +91,7 @@ class PublicadorPubSub:
     def __init__(
         self,
         topico: str,
-        transporte: Transporte,
+        transporte: TransporteRest,
         esperar: Callable[[float], None] = time.sleep,
     ) -> None:
         # `projects/<p>/topics/<t>`
@@ -129,24 +126,8 @@ class PublicadorPubSub:
             raise ErroDoPubSub(f"Pub/Sub respondeu {status} {detalhe}".strip())
 
 
-def transporte_do_pubsub(timeout_s: float = 30) -> Transporte:
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/pubsub"]
-    )
-    sessao = AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
-
-    def transporte(
-        metodo: str, caminho: str, corpo: dict[str, Any] | None
-    ) -> tuple[int, dict[str, Any]]:
-        resposta = sessao.request(  # type: ignore[no-untyped-call]
-            metodo, f"{URL_BASE}/{caminho}", json=corpo, timeout=timeout_s
-        )
-        try:
-            return resposta.status_code, resposta.json()
-        except ValueError:
-            return resposta.status_code, {}
-
-    return transporte
+def transporte_do_pubsub(timeout_s: float = 30) -> TransporteRest:
+    return transporte_rest(URL_BASE, ESCOPO_DO_PUBSUB, timeout_s)
 
 
 def publicar_fim(
@@ -316,7 +297,7 @@ class RepositorioQueRegistraOFim:
 
 def eventos_do_ambiente(
     ambiente: Mapping[str, str],
-    transporte: Callable[[float], Transporte] = transporte_do_pubsub,
+    transporte: Callable[[float], TransporteRest] = transporte_do_pubsub,
 ) -> Eventos:
     """Com `PUBSUB_TOPICO_USO` (o Terraform a define na web e nos Jobs que terminam um
     Job), publica no tópico dos eventos de uso; sem ela, descarta."""
@@ -330,8 +311,8 @@ def repositorio_do_ambiente(
     repositorio: RepositorioDeJobs,
     webhooks: Callable[[], RepositorioDeWebhooks],
     ambiente: Mapping[str, str],
-    transporte: Callable[[], Transporte] = transporte_do_pubsub,
-    transporte_de_uso: Callable[[float], Transporte] = transporte_do_pubsub,
+    transporte: Callable[[], TransporteRest] = transporte_do_pubsub,
+    transporte_de_uso: Callable[[float], TransporteRest] = transporte_do_pubsub,
 ) -> RepositorioDeJobs:
     """Com `PUBSUB_TOPICO_EVENTOS` (o Terraform a define nos serviços e Jobs que
     terminam um Job), o repositório publica o fim para o webhook; com

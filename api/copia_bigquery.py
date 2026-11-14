@@ -13,9 +13,7 @@ from datetime import date, datetime
 from time import monotonic, sleep
 from typing import Any, Protocol
 
-import google.auth
-import google.auth.transport.requests
-
+from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import Decupagem
 from api.indice_da_busca import registros_da_decupagem
 
@@ -241,8 +239,8 @@ class CopiaBigQuery:
                     f"t.data_de_exibicao BETWEEN @inicio_{ano} AND @fim_{ano}"
                 )
                 parametros += [
-                    _parametro(f"inicio_{ano}", f"{ano:04}-01-01", "DATE"),
-                    _parametro(f"fim_{ano}", f"{ano:04}-12-31", "DATE"),
+                    parametro(f"inicio_{ano}", f"{ano:04}-01-01", "DATE"),
+                    parametro(f"fim_{ano}", f"{ano:04}-12-31", "DATE"),
                 ]
             filtro = f" AND ({' OR '.join(predicados)})"
         consulta = f"""
@@ -287,8 +285,8 @@ VALUES
                 "location": c.regiao,
                 "timeoutMs": 120_000,
                 "queryParameters": [
-                    _parametro("job_id", job_id),
-                    _parametro(
+                    parametro("job_id", job_id),
+                    parametro(
                         "linhas",
                         json.dumps(
                             [_json_da_linha(x) for x in linhas], ensure_ascii=False
@@ -330,7 +328,7 @@ VALUES
             sleep(5)
 
 
-def _parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
+def parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
     return {
         "name": nome,
         "parameterType": {"type": tipo},
@@ -340,10 +338,7 @@ def _parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
 
 def transporte_http(projeto: str) -> Transporte:
     """O transporte real: REST com as credenciais padrão (ADC) de quem roda."""
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/bigquery"]
-    )
-    sessao = google.auth.transport.requests.AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
+    sessao = sessao_autenticada("https://www.googleapis.com/auth/bigquery")
 
     def chamar(corpo: dict[str, Any]) -> dict[str, Any]:
         url = f"{URL_BASE}/projects/{projeto}/queries"

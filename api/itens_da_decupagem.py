@@ -10,7 +10,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, get_args
 
-from api.correcoes import CORRIGIVEIS, TIPOS, TipoDoItem, _itens, versao_do_modelo
+from api.correcoes import CORRIGIVEIS, TIPOS, TipoDoItem, versao_do_modelo
+from api.regras_das_correcoes import _itens
 
 
 def objeto_dos_itens(job_id: str) -> str:

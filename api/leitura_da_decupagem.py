@@ -35,23 +35,15 @@ vários Jobs decide pular e registrar.
 
 import json
 import logging
-from collections.abc import Iterable, Iterator
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from collections.abc import Iterator, Mapping
+from typing import TYPE_CHECKING, Any, Protocol
 
-from api.catalogo import PessoaDoCatalogo
-from api.catalogo_apagado import (
-    com_pessoas_fundidas,
-    ids_do_catalogo,
-    lido_em_lote,
-    sem_catalogo_apagado,
-)
-from api.correcoes import (
-    Correcao,
-    RepositorioDeCorrecoes,
-    decupagem_com_correcoes,
-    versao_do_modelo,
-)
-from api.marcas import MarcaDoCatalogo
+from api.catalogo_apagado import CATALOGO_ID, ids_do_catalogo, sem_catalogo_apagado
+from api.comparador import normalizar
+from api.correcoes import Correcao, RepositorioDeCorrecoes, versao_do_modelo
+from api.marcas import CatalogoDeMarcas
+from api.quem_conta import Destino, PessoasEmLote, QuemConta
+from api.regras_das_correcoes import decupagem_com_correcoes
 
 if TYPE_CHECKING:  # api.jobs importa este módulo
     from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs
@@ -63,18 +55,14 @@ class AbreDecupagem(Protocol):
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
 
 
+def ler_modelo(decupagens: AbreDecupagem, job_id: str) -> tuple[dict[str, Any], str]:
+    """O JSON do modelo e a versão (SHA-256 dos bytes guardados)."""
+    conteudo = b"".join(decupagens.abrir_decupagem(job_id))
+    return json.loads(conteudo), versao_do_modelo(conteudo)
+
+
 class ListaCorrecoes(Protocol):
     def listar(self, job_id: str) -> list[Correcao]: ...
-
-
-class PessoasEmLote(Protocol):
-    def obter(self, id: str) -> PessoaDoCatalogo | None: ...
-    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]: ...
-
-
-class MarcasEmLote(Protocol):
-    def obter(self, id: str) -> MarcaDoCatalogo | None: ...
-    def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]: ...
 
 
 class LeituraDaDecupagem:
@@ -83,7 +71,7 @@ class LeituraDaDecupagem:
         decupagens: AbreDecupagem,
         correcoes: ListaCorrecoes,
         pessoas: PessoasEmLote | None = None,
-        marcas: MarcasEmLote | None = None,
+        marcas: CatalogoDeMarcas | None = None,
     ) -> None:
         self._decupagens = decupagens
         self._correcoes = correcoes
@@ -94,44 +82,55 @@ class LeituraDaDecupagem:
         return self._corrigida(job_id)[0]
 
     def entregue(self, job_id: str) -> dict[str, Any]:
-        corrigida, pessoa = self._corrigida(job_id)
-        marca = (
-            lido_em_lote(
-                ids_do_catalogo(corrigida, "comerciais"),
-                cast(Any, self._marcas.obter_varios),  # dict invariante: T é a marca
-                self._marcas.obter,
-            )
-            if self._marcas is not None
-            else None
-        )
+        corrigida, quem, sem_vinculo = self._corrigida(job_id)
+        marcas = quem.marcas_vivas(ids_do_catalogo(corrigida, "comerciais"))
         return sem_catalogo_apagado(
             corrigida,
-            lambda id: (
-                pessoa is None or (p := pessoa(id)) is not None and p.lixeira is None
-            ),
-            lambda id: (
-                marca is None or (m := marca(id)) is not None and m.lixeira is None
-            ),
+            # `catalogo_id` que não é texto não é do catálogo: perde o vínculo, como antes
+            lambda p: isinstance(p[CATALOGO_ID], str) and id(p) not in sem_vinculo,
+            lambda id: id in marcas,
         )
 
-    def _corrigida(self, job_id: str) -> tuple[dict[str, Any], Any]:
-        """A leitura corrigida e o `obter` em lote das pessoas (ou `None`, sem catálogo)."""
-        conteudo = b"".join(self._decupagens.abrir_decupagem(job_id))
+    def _corrigida(self, job_id: str) -> tuple[dict[str, Any], QuemConta, set[int]]:
+        """A leitura corrigida, o Quem conta que a leu e as pessoas (por `id()` do dicionário)
+        que não contam: a `entregue` os reaproveita."""
         lida = decupagem_com_correcoes(
-            json.loads(conteudo),
-            versao_do_modelo(conteudo),
-            self._correcoes.listar(job_id),
+            *ler_modelo(self._decupagens, job_id), self._correcoes.listar(job_id)
         )
-        if self._pessoas is None:
-            return lida, None
-        # Um lote com os ids depois das Correções; o destino de uma fusão fora dele cai
-        # em `obter` uma vez, e o id ausente do lote não gera nova leitura.
-        pessoa = lido_em_lote(
-            ids_do_catalogo(lida, "pessoas"),
-            self._pessoas.obter_varios,
-            self._pessoas.obter,
-        )
-        return com_pessoas_fundidas(lida, pessoa), pessoa
+        quem = QuemConta(self._pessoas, self._marcas)
+        sem_vinculo: set[int] = set()
+        if self._pessoas is not None:
+            destinos = quem.pessoas(ids_do_catalogo(lida, "pessoas"))
+            sem_vinculo = _com_destinos(lida, destinos)
+        return lida, quem, sem_vinculo
+
+
+def _com_destinos(lida: dict[str, Any], destinos: Mapping[str, Destino]) -> set[int]:
+    """O destino no lugar da pessoa fundida (#209): `catalogo_id` e nome passam a ser os do
+    destino; o gravado não muda. Também troca o nome que a pessoa teve antes de uma
+    renomeação em todos os vídeos (#263) pelo atual; um nome que o editor corrigiu no vídeo
+    para outro fica. Destino purgado ou ciclo: vale a renomeação da origem, como antes, e a `entregue` tira
+    o vínculo.
+
+    Devolve o `id()` de cada pessoa que não conta (`Destino.conta` do id gravado, não do
+    trocado): a `entregue` tira o vínculo dela, como a busca e o tempo de tela não a contam."""
+    sem_vinculo: set[int] = set()
+    for pessoa in lida.get("pessoas") or []:
+        gravado = pessoa.get(CATALOGO_ID) if isinstance(pessoa, dict) else None
+        destino = destinos.get(gravado) if gravado is not None else None
+        if destino is None:
+            continue
+        if not destino.conta:
+            sem_vinculo.add(id(pessoa))
+        if destino.fundida and destino.pessoa is not None:
+            pessoa.update(nome=destino.pessoa.nome, catalogo_id=destino.pessoa.id)
+            continue
+        origem = destino.origem
+        if origem is not None and origem.renomeacao is not None:
+            antigos = {normalizar(n) for n in origem.renomeacao.nomes_anteriores}
+            if normalizar(str(pessoa.get("nome"))) in antigos:
+                pessoa["nome"] = origem.nome
+    return sem_vinculo
 
 
 def decupagens_dos_jobs(

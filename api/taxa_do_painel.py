@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from datetime import date
 from typing import Any, Protocol
 
-from api.copia_bigquery import Transporte, _parametro, transporte_http
+from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.relatorios import linhas_da_consulta
 from api.taxa_de_correcao import LinhaDaTaxa
 from api.taxa_diaria import ConfigDaTaxa, LinhaDiaria, TabelaDaTaxaEmMemoria
@@ -116,13 +116,13 @@ class TaxaBigQuery:
         onde = ["job_id IS NOT NULL"]
         parametros: list[dict[str, Any]] = []
         if desde is not None:
-            parametros.append(_parametro("desde", desde.isoformat(), "DATE"))
+            parametros.append(parametro("desde", desde.isoformat(), "DATE"))
             onde.append("dia >= @desde")
         if ate is not None:
-            parametros.append(_parametro("ate", ate.isoformat(), "DATE"))
+            parametros.append(parametro("ate", ate.isoformat(), "DATE"))
             onde.append("dia <= @ate")
         if programa is not None:
-            parametros.append(_parametro("programa", programa))
+            parametros.append(parametro("programa", programa))
             onde.append("programa = @programa")
         sql = (
             "WITH por_job AS (\n"

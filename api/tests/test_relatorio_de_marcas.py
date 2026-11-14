@@ -25,21 +25,15 @@ from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.relatorio_de_marcas import (
     INTERVALOS_EM_JSON,
-    LISTA_DA_MARCA_EM_SQL,
-    RANKING_EM_SQL,
     SOMA_EM_SQL,
     TIPOS_DE_INSERCAO,
     ConsultaBigQuery,
     ConsultaDeInsercoes,
     ConsultaEmMemoria,
     Insercao,
-    InsercaoNoRelatorio,
     InsercoesDaMarca,
     MarcaNoRelatorio,
     insercoes_da_marca,
-    lista_em_python,
-    pagina_do_ranking,
-    ranking_em_python,
     somar,
 )
 from api.relatorio_de_marcas import relatorio as relatorio_das_somas
@@ -492,73 +486,32 @@ def test_as_insercoes_de_uma_marca_vem_paginadas_e_com_o_nome() -> None:
         assert cliente.get(rota, params=ruim, headers=AUTORIZACAO).status_code == 422
 
 
-def test_o_ranking_e_a_lista_em_sql_dao_o_mesmo_que_em_python() -> None:
-    sorteio = random.Random(14)
-    for _ in range(100):
-        insercoes = [
-            Insercao(
-                job_id=sorteio.choice(["j1", "j2", "j3"]),
-                marca=sorteio.choice(["Ambev", "Natura", "Vivo"]),
-                tipo=sorteio.choice([*TIPOS_DE_INSERCAO, "tipo_antigo"]),
-                inicio_ms=(inicio := sorteio.randrange(0, 50)),
-                fim_ms=inicio + sorteio.randrange(0, 15),
-            )
-            for _ in range(sorteio.randrange(1, 25))
-        ]
-        banco = sqlite3.connect(":memory:")
-        banco.execute("CREATE TABLE linhas (job_id, marca, tipo, inicio_ms, fim_ms)")
-        banco.executemany(
-            "INSERT INTO linhas VALUES (?, ?, ?, ?, ?)",
-            [(i.job_id, i.marca, i.tipo, i.inicio_ms, i.fim_ms) for i in insercoes],
-        )
-        depois, limite = sorteio.randrange(0, 3), sorteio.randrange(1, 3)
-        pagina = {"posicao_de": depois, "posicao_ate": depois + limite + 1}
+class SoSomas:
+    """Uma fonte nova das somas: implementa só `somas`, como o Protocol exige."""
 
-        do_sql = pagina_do_ranking(
-            banco.execute(
-                f"WITH base AS (SELECT * FROM linhas)\n{RANKING_EM_SQL}", pagina
-            ).fetchall()
-        )
-        em_python = ranking_em_python(somar(insercoes), depois, limite)
-        if do_sql[0]:
-            assert do_sql == em_python
-        else:  # página vazia: os totais vêm zerados
-            assert em_python[0] == []
+    def __init__(self, copia: CopiaEmMemoria) -> None:
+        self._em_memoria = ConsultaEmMemoria(copia)
 
-        marca = sorteio.choice(["Ambev", "Natura"])
-        lista = [
-            InsercaoNoRelatorio(job_id=v[0], tipo=v[1], inicio_ms=v[2], fim_ms=v[3])
-            for v in banco.execute(
-                "WITH base AS (SELECT * FROM linhas WHERE marca = :marca)\n"
-                + LISTA_DA_MARCA_EM_SQL,
-                {**pagina, "marca": marca},
-            )
-        ]
-        assert lista == lista_em_python(somar(insercoes), marca, depois, limite)
+    def somas(
+        self,
+        programa: str | None,
+        desde: date | None,
+        ate: date | None,
+        tipo: str | None,
+    ) -> list[InsercoesDaMarca]:
+        return self._em_memoria.somas(programa, desde, ate, tipo)
 
 
-def test_bigquery_pede_a_pagina_e_a_marca_como_parametros() -> None:
-    transporte = Transporte({"jobComplete": True})
-    consulta = ConsultaBigQuery(CONFIG, transporte)
+def test_uma_fonte_so_com_somas_serve_ao_ranking_e_as_insercoes_da_marca() -> None:
+    nova = _cliente(consulta=SoSomas(_copia()))
+    velha = _cliente(consulta=ConsultaEmMemoria(_copia()))
 
-    assert consulta.ranking(None, None, None, "intervalo", 0, 10)[0] == []
-    assert consulta.lista_da_marca("Ambev", None, None, None, None, 4, 2) == []
-
-    def parametros(corpo: dict[str, Any]) -> dict[str, str]:
-        return {
-            p["name"]: p["parameterValue"]["value"] for p in corpo["queryParameters"]
-        }
-
-    ranking, lista = transporte.corpos
-    assert parametros(ranking) == {
-        "posicao_de": "0",
-        "posicao_ate": "11",
-        "tipo_de_insercao": "intervalo",
-    }
-    assert parametros(lista) == {
-        "marca": "Ambev",
-        "posicao_de": "4",
-        "posicao_ate": "7",
-    }
-    assert "t.marca = @marca" in lista["query"]
-    assert "Ambev" not in lista["query"]
+    casos: list[tuple[str, dict[str, Any]]] = [
+        (ROTA, {"limite": 1}),
+        (ROTA, {}),
+        (f"{ROTA}/insercoes", {"marca": "Ambev", "limite": 2}),
+    ]
+    for url, params in casos:
+        resposta = nova.get(url, params=params, headers=AUTORIZACAO)
+        assert resposta.status_code == 200
+        assert resposta.text == velha.get(url, params=params, headers=AUTORIZACAO).text

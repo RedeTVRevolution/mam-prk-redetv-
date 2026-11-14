@@ -12,7 +12,7 @@ instância.
 
 import json
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Annotated, Any, Literal, Protocol
@@ -28,12 +28,11 @@ from api.copia_bigquery import (
     ConfigDoBigQuery,
     CopiaEmMemoria,
     Transporte,
-    _parametro,
 )
 from api.csv_seguro import csv_em_texto
 from api.jobs import RepositorioDeJobs
-from api.lixeira_na_leitura import pessoas_que_contam
 from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
+from api.quem_conta import QuemConta
 from api.relatorios import (
     LIMITE_DA_PAGINA,
     PodeVerORelatorio,
@@ -42,7 +41,6 @@ from api.relatorios import (
     consultar_no_bigquery,
     linhas_da_copia,
     ou_503,
-    parametros_da_pagina,
     poe_o_nome_dos_videos,
     posicao_do_cursor,
     recorta,
@@ -90,29 +88,6 @@ class ConsultaDeMomentos(Protocol):
         self, programa: str | None, desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
         """Uma soma por pessoa e vídeo; `desde` e `ate` são datas de exibição, inclusive."""
-
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        """Até `limite + 1` pessoas a partir da posição `depois`, do maior tempo para o
-        menor (o id desempata), e os totais do período."""
-
-    def videos_da_pessoa(
-        self,
-        pessoa_id: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "list[VideoDaPessoa]":
-        """Até `limite + 1` vídeos da pessoa a partir da posição `depois`, na ordem do
-        relatório."""
 
 
 def _uniao(intervalos: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -171,34 +146,16 @@ class ConsultaEmMemoria:
     ) -> list[PessoaNoVideo]:
         return somar(self.momentos(programa, desde, ate))
 
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        return ranking_em_python(self.somas(programa, desde, ate), depois, limite)
-
-    def videos_da_pessoa(
-        self,
-        pessoa_id: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "list[VideoDaPessoa]":
-        somas = self.somas(programa, desde, ate)
-        return videos_em_python(somas, pessoa_id, depois, limite)
-
 
 def ranking_em_python(
-    somas: list[PessoaNoVideo], depois: int, limite: int
+    somas: list[PessoaNoVideo],
+    depois: int,
+    limite: int,
+    nomes: Mapping[str, str] | None = None,
 ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-    """O que `RANKING_EM_SQL` faz no BigQuery (o dublê e a referência)."""
-    pessoas = relatorio(somas)
+    """O ranking e os totais do período, a partir das somas, na ordem de `relatorio`; a
+    página vai de `depois` a `limite + 1` itens (o que passa do limite diz que há mais)."""
+    pessoas = relatorio(somas, nomes)
     total = TotalDoTempoDeTela(
         pessoas=len(pessoas),
         tempo_de_tela_ms=sum(p.tempo_de_tela_ms for p in pessoas),
@@ -207,7 +164,6 @@ def ranking_em_python(
         mencoes_na_fala=sum(p.mencoes_na_fala for p in pessoas),
         mencoes_no_texto=sum(p.mencoes_no_texto for p in pessoas),
     )
-    pessoas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.pessoa_id))
     pagina = pessoas[depois : depois + limite + 1]
     return [
         PessoaResumida(**p.model_dump(exclude={"por_video"})) for p in pagina
@@ -217,7 +173,8 @@ def ranking_em_python(
 def videos_em_python(
     somas: list[PessoaNoVideo], pessoa_id: str, depois: int, limite: int
 ) -> "list[VideoDaPessoa]":
-    """O que `VIDEOS_DA_PESSOA_EM_SQL` faz no BigQuery (o dublê e a referência)."""
+    """Os vídeos de uma pessoa, na ordem do relatório, a partir das somas; a página vai
+    de `depois` a `limite + 1` itens."""
     dela = [s for s in somas if s.pessoa_id == pessoa_id]
     por_video = relatorio(dela)[0].por_video if dela else []
     return por_video[depois : depois + limite + 1]
@@ -282,60 +239,6 @@ FROM contagens AS c
 LEFT JOIN tempo AS t ON t.job_id = c.job_id AND t.pessoa_id = c.pessoa_id"""
 SOMA_EM_SQL = f"{_CTES_DA_SOMA}\n{_SELECT_POR_VIDEO}"
 
-# A página do ranking (o relatório com `limite`): a mesma soma, agrupada por pessoa no
-# BigQuery, com o nome que mais aparece (no empate, o menor), a posição na ordem do tempo
-# (o id desempata) e os totais do período em cada linha. Só volta a página.
-RANKING_EM_SQL = f"""{_CTES_DA_SOMA},
-por_video AS (
-{_SELECT_POR_VIDEO}
-),
-por_pessoa AS (
-  SELECT pessoa_id, SUM(tempo_ms) AS tempo_ms,
-    SUM(CASE WHEN aparicoes > 0 THEN 1 ELSE 0 END) AS videos,
-    SUM(aparicoes) AS aparicoes, SUM(na_fala) AS na_fala, SUM(no_texto) AS no_texto
-  FROM por_video
-  GROUP BY pessoa_id
-),
-linhas_do_nome AS (
-  SELECT pessoa_id, nome, SUM(linhas) AS linhas FROM por_nome GROUP BY pessoa_id, nome
-),
-nome_da_pessoa AS (
-  SELECT pessoa_id, nome FROM (
-    SELECT pessoa_id, nome,
-      ROW_NUMBER() OVER (PARTITION BY pessoa_id ORDER BY linhas DESC, nome) AS ordem
-    FROM linhas_do_nome
-  ) AS nomes WHERE ordem = 1
-),
-ranking AS (
-  SELECT pessoa_id, tempo_ms, videos, aparicoes, na_fala, no_texto,
-    ROW_NUMBER() OVER (ORDER BY tempo_ms DESC, pessoa_id) AS posicao,
-    COUNT(*) OVER () AS total_pessoas, SUM(tempo_ms) OVER () AS total_tempo,
-    SUM(aparicoes) OVER () AS total_aparicoes, SUM(na_fala) OVER () AS total_na_fala,
-    SUM(no_texto) OVER () AS total_no_texto
-  FROM por_pessoa
-)
-SELECT r.pessoa_id, n.nome, r.tempo_ms, r.videos, r.aparicoes, r.na_fala, r.no_texto,
-  r.total_pessoas, r.total_tempo,
-  (SELECT COUNT(DISTINCT job_id) FROM por_video WHERE aparicoes > 0) AS total_videos,
-  r.total_aparicoes, r.total_na_fala, r.total_no_texto
-FROM ranking AS r
-JOIN nome_da_pessoa AS n ON n.pessoa_id = r.pessoa_id
-WHERE r.posicao > @posicao_de AND r.posicao <= @posicao_ate
-ORDER BY r.posicao"""
-
-# Os vídeos de uma pessoa (a base já vem só com ela), na ordem do relatório, só a página.
-VIDEOS_DA_PESSOA_EM_SQL = f"""{_CTES_DA_SOMA},
-por_video AS (
-{_SELECT_POR_VIDEO}
-)
-SELECT job_id, tempo_ms, aparicoes, na_fala, no_texto FROM (
-  SELECT job_id, tempo_ms, aparicoes, na_fala, no_texto,
-    ROW_NUMBER() OVER (ORDER BY tempo_ms DESC, job_id) AS posicao
-  FROM por_video
-) AS videos
-WHERE posicao > @posicao_de AND posicao <= @posicao_ate
-ORDER BY posicao"""
-
 
 def pessoa_no_video(v: Sequence[Any]) -> PessoaNoVideo:
     """Uma linha do `SOMA_EM_SQL`, na ordem das colunas do SELECT final."""
@@ -357,16 +260,10 @@ class ConsultaBigQuery:
         self._config = config
         self._transporte = transporte
 
-    def _consultar(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois_da_base: str,
-        condicoes: Sequence[str] = (),
-        parametros: Sequence[dict[str, Any]] = (),
-    ) -> list[list[Any]]:
-        return consultar_no_bigquery(
+    def somas(
+        self, programa: str | None, desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        linhas = consultar_no_bigquery(
             self._config,
             self._transporte,
             colunas=(
@@ -378,89 +275,10 @@ class ConsultaBigQuery:
             desde=desde,
             ate=ate,
             unnest_das_pessoas=True,
-            condicoes=["p.id IS NOT NULL", *condicoes],
-            parametros=parametros,
-            depois_da_base=depois_da_base,
+            condicoes=["p.id IS NOT NULL"],
+            depois_da_base=SOMA_EM_SQL,
         )
-
-    def somas(
-        self, programa: str | None, desde: date | None, ate: date | None
-    ) -> list[PessoaNoVideo]:
-        linhas = self._consultar(programa, desde, ate, SOMA_EM_SQL)
         return [pessoa_no_video(v) for v in linhas]
-
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        linhas = self._consultar(
-            programa,
-            desde,
-            ate,
-            RANKING_EM_SQL,
-            parametros=parametros_da_pagina(depois, limite),
-        )
-        return pagina_do_ranking(linhas)
-
-    def videos_da_pessoa(
-        self,
-        pessoa_id: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "list[VideoDaPessoa]":
-        linhas = self._consultar(
-            programa,
-            desde,
-            ate,
-            VIDEOS_DA_PESSOA_EM_SQL,
-            condicoes=["p.id = @pessoa_id"],
-            parametros=[
-                _parametro("pessoa_id", pessoa_id),
-                *parametros_da_pagina(depois, limite),
-            ],
-        )
-        return [video_da_pessoa(v) for v in linhas]
-
-
-def pagina_do_ranking(
-    linhas: Sequence[Sequence[Any]],
-) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-    """As linhas do `RANKING_EM_SQL`, na ordem das colunas do SELECT. Página vazia (um
-    cursor além do fim) não traz os totais: vêm zerados."""
-    pessoas = [
-        PessoaResumida(
-            pessoa_id=v[0],
-            nome=v[1],
-            tempo_de_tela_ms=int(v[2]),
-            videos=int(v[3]),
-            aparicoes=int(v[4]),
-            mencoes_na_fala=int(v[5]),
-            mencoes_no_texto=int(v[6]),
-        )
-        for v in linhas
-    ]
-    totais = [int(t) for t in linhas[0][7:13]] if linhas else [0] * 6
-    return pessoas, TotalDoTempoDeTela(
-        **dict(zip(TotalDoTempoDeTela.model_fields, totais, strict=True))
-    )
-
-
-def video_da_pessoa(v: Sequence[Any]) -> "VideoDaPessoa":
-    """Uma linha do `VIDEOS_DA_PESSOA_EM_SQL`, na ordem das colunas do SELECT."""
-    return VideoDaPessoa(
-        job_id=v[0],
-        tempo_de_tela_ms=int(v[1]),
-        aparicoes=int(v[2]),
-        mencoes_na_fala=int(v[3]),
-        mencoes_no_texto=int(v[4]),
-    )
 
 
 class ConsultaComCache:
@@ -480,45 +298,26 @@ class ConsultaComCache:
             lambda: self._consulta.somas(programa, desde, ate),
         )
 
-    def ranking(
-        self,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        # O ranking não é guardado pronto: sai das somas, onde a exclusão já agiu.
-        return ranking_em_python(self.somas(programa, desde, ate), depois, limite)
-
-    def videos_da_pessoa(
-        self,
-        pessoa_id: str,
-        programa: str | None,
-        desde: date | None,
-        ate: date | None,
-        depois: int,
-        limite: int,
-    ) -> "list[VideoDaPessoa]":
-        somas = self.somas(programa, desde, ate)
-        return videos_em_python(somas, pessoa_id, depois, limite)
-
 
 class SoComQuemConta:
     """A lixeira do catálogo vale na hora (#591): tira das somas, antes do ranking, dos
-    totais, das posições e da paginação, a pessoa que não conta (`pessoas_que_contam`), com o
-    catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda."""
+    totais, das posições e da paginação, a pessoa que não conta (`QuemConta`), com o
+    catálogo lido a cada consulta. A soma de baixo (e seu cache) não muda. O nome de cada
+    pessoa que conta é o atual do catálogo, o do destino no fim da cadeia se foi fundida
+    (#613), e desempata o ranking antes de cortar a página."""
 
     def __init__(self, consulta: ConsultaDeMomentos, catalogo: Catalogo) -> None:
         self._consulta = consulta
         self._catalogo = catalogo
 
-    def somas(
+    def somas_e_nomes(
         self, programa: str | None, desde: date | None, ate: date | None
-    ) -> list[PessoaNoVideo]:
+    ) -> tuple[list[PessoaNoVideo], dict[str, str]]:
+        """As somas de quem conta e o nome atual de cada um, numa leitura do catálogo."""
         somas = self._consulta.somas(programa, desde, ate)
-        contam = pessoas_que_contam(self._catalogo, {s.pessoa_id for s in somas})
-        return [s for s in somas if s.pessoa_id in contam]
+        destinos = QuemConta(self._catalogo).pessoas({s.pessoa_id for s in somas})
+        nomes = {i: d.pessoa.nome for i, d in destinos.items() if d.pessoa and d.conta}
+        return [s for s in somas if s.pessoa_id in nomes], nomes
 
     def ranking(
         self,
@@ -528,7 +327,8 @@ class SoComQuemConta:
         depois: int,
         limite: int,
     ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
-        return ranking_em_python(self.somas(programa, desde, ate), depois, limite)
+        somas, nomes = self.somas_e_nomes(programa, desde, ate)
+        return ranking_em_python(somas, depois, limite, nomes)
 
     def videos_da_pessoa(
         self,
@@ -539,11 +339,10 @@ class SoComQuemConta:
         depois: int,
         limite: int,
     ) -> "list[VideoDaPessoa]":
-        if not pessoas_que_contam(self._catalogo, [pessoa_id]):
+        if not QuemConta(self._catalogo).contam([pessoa_id]):
             return []
-        return self._consulta.videos_da_pessoa(
-            pessoa_id, programa, desde, ate, depois, limite
-        )
+        somas = self._consulta.somas(programa, desde, ate)
+        return videos_em_python(somas, pessoa_id, depois, limite)
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
@@ -604,12 +403,15 @@ class RelatorioDeTempoDeTela(BaseModel):
     pessoas: list[PessoaNoRelatorio]
 
 
-def relatorio(somas: list[PessoaNoVideo]) -> list[PessoaNoRelatorio]:
-    """Uma linha por pessoa, do maior tempo de tela para o menor.
+def relatorio(
+    somas: list[PessoaNoVideo], nomes: Mapping[str, str] | None = None
+) -> list[PessoaNoRelatorio]:
+    """Uma linha por pessoa, do maior tempo de tela para o menor e, no empate, pelo nome
+    e pelo id.
 
-    A pessoa é o id do catálogo; o nome é o que mais aparece nas linhas dela (um vídeo
-    copiado antes de uma correção de grafia não parte a pessoa em duas). A rota troca
-    esse nome pelo do catálogo (`com_nomes_do_catalogo`, #417).
+    A pessoa é o id do catálogo. O nome vem de `nomes` (o atual do catálogo, #417 e #613,
+    que tem de trazer toda pessoa das somas); sem o mapa, é o que mais aparece nas linhas
+    dela (um vídeo copiado antes de uma correção de grafia não parte a pessoa em duas).
     """
     por_pessoa: dict[str, list[PessoaNoVideo]] = defaultdict(list)
     for s in somas:
@@ -619,7 +421,11 @@ def relatorio(somas: list[PessoaNoVideo]) -> list[PessoaNoRelatorio]:
         contagem: Counter[str] = Counter()
         for s in dela:
             contagem.update(s.nomes)
-        nome = min(contagem, key=lambda n: (-contagem[n], n))
+        nome = (
+            nomes[pessoa_id]
+            if nomes is not None
+            else min(contagem, key=lambda n: (-contagem[n], n))
+        )
         videos = [
             VideoDaPessoa(
                 job_id=s.job_id,
@@ -665,24 +471,6 @@ def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
     )
 
 
-def com_nomes_do_catalogo[P: PessoaResumida](
-    pessoas: list[P], catalogo: Catalogo | None
-) -> list[P]:
-    """O nome de cada pessoa vem do catálogo, numa leitura em lote (#417): a cópia no
-    BigQuery não guarda o nome, então renomear no catálogo vale na hora. Quem o catálogo
-    não conhece fica com o que a cópia trouxe. Devolve cópias: o ranking guardado no cache
-    não muda."""
-    if catalogo is None or not pessoas:
-        return pessoas
-    do_catalogo = catalogo.obter_varios(p.pessoa_id for p in pessoas)
-    return [
-        p.model_copy(update={"nome": do_catalogo[p.pessoa_id].nome})
-        if p.pessoa_id in do_catalogo
-        else p
-        for p in pessoas
-    ]
-
-
 def criar_rotas_do_tempo_de_tela(
     consulta: ConsultaDeMomentos | None,
     repositorio: RepositorioDeJobs,
@@ -691,8 +479,7 @@ def criar_rotas_do_tempo_de_tela(
 ) -> APIRouter:
     rotas = APIRouter(prefix="/relatorios")
     no_periodo = dependencia_do_periodo(relogio)
-    if consulta is not None:
-        consulta = SoComQuemConta(consulta, catalogo)
+    com_lixeira = SoComQuemConta(consulta, catalogo) if consulta is not None else None
 
     @rotas.get(
         "/tempo-de-tela",
@@ -713,21 +500,18 @@ def criar_rotas_do_tempo_de_tela(
         inteiro."""
         programa = programa or None
         desde, ate = periodo
-        fonte = confere_o_pedido(consulta, desde, ate)
+        fonte = confere_o_pedido(com_lixeira, desde, ate)
         if limite is not None and formato == "json":
             depois = posicao_do_cursor(cursor)
             lidas, total = ou_503(
                 lambda: fonte.ranking(programa, desde, ate, depois, limite)
             )
             pagina, cabecalhos = recorta(lidas, depois, limite)
-            pagina = com_nomes_do_catalogo(pagina, catalogo)
             corpo = RankingDoTempoDeTela(
                 programa=programa, desde=desde, ate=ate, total=total, pessoas=pagina
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
-        pessoas = ou_503(lambda: relatorio(fonte.somas(programa, desde, ate)))
-        pessoas = com_nomes_do_catalogo(pessoas, catalogo)
-        pessoas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.nome, p.pessoa_id))
+        pessoas = ou_503(lambda: relatorio(*fonte.somas_e_nomes(programa, desde, ate)))
         if formato == "csv":
             return resposta_em_csv(em_csv(pessoas), "tempo-de-tela.csv")
         poe_o_nome_dos_videos((v for p in pessoas for v in p.por_video), repositorio)
@@ -748,7 +532,7 @@ def criar_rotas_do_tempo_de_tela(
         menor, uma página por vez (o cursor da próxima em `X-Proximo-Cursor`)."""
         programa = programa or None
         desde, ate = periodo
-        fonte = confere_o_pedido(consulta, desde, ate)
+        fonte = confere_o_pedido(com_lixeira, desde, ate)
         depois = posicao_do_cursor(cursor)
         lidos = ou_503(
             lambda: fonte.videos_da_pessoa(

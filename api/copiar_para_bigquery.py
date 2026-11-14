@@ -32,7 +32,6 @@ from api.indexacao import (
 )
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import CopiaNoBigQuery, EstadoDaCopia, Job, RepositorioDeJobs, agora_utc
-from api.leitura_da_decupagem import PessoasEmLote
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -43,6 +42,7 @@ from api.nuvem import (
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
 from api.programas import RepositorioDeProgramas
+from api.quem_conta import PessoasEmLote
 from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
 from api.tipos_de_objeto import TiposDeObjeto
 

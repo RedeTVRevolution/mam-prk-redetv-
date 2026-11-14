@@ -2,7 +2,7 @@
 
 A origem não é apagada: passa a apontar para o destino e sai das buscas, e o destino ganha o
 nome e os apelidos dela. A leitura das Decupagens mostra o destino onde havia a origem (veja
-`com_pessoas_fundidas`); nada gravado é reescrito. As fotos de rosto da origem saem (LGPD).
+`api.quem_conta`); nada gravado é reescrito. As fotos de rosto da origem saem (LGPD).
 """
 
 import uuid

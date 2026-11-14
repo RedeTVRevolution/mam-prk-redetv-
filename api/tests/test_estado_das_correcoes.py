@@ -3,7 +3,8 @@ from typing import Any
 
 import pytest
 
-from api.correcoes import Ancora, Correcao, estado_das
+from api.correcoes import Ancora, Correcao
+from api.regras_das_correcoes import estado_das
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 

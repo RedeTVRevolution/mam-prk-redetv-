@@ -5,9 +5,10 @@ from typing import Any
 
 import pytest
 
-from api.correcoes import decupagem_com_correcoes, versao_do_modelo
+from api.correcoes import versao_do_modelo
 from api.decupagem import Decupagem
 from api.indexacao import _so_o_esquema
+from api.regras_das_correcoes import decupagem_com_correcoes
 from api.tests.test_correcoes import Mundo
 from api.tests.test_correcoes_de_objeto import (
     _atributos,

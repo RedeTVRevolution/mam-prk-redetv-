@@ -287,14 +287,6 @@ class MomentosQueContam(TempoDeTelaEmMemoria):
         self.consultas += 1
         return super().somas(*a, **k)
 
-    def ranking(self, *a: Any, **k: Any) -> Any:
-        self.consultas += 1
-        return super().ranking(*a, **k)
-
-    def videos_da_pessoa(self, *a: Any, **k: Any) -> Any:
-        self.consultas += 1
-        return super().videos_da_pessoa(*a, **k)
-
 
 def test_trocar_de_pagina_no_tempo_de_tela_nao_consulta_de_novo() -> None:
     fonte = MomentosQueContam(tempo_de_tela._varias_pessoas())
@@ -345,9 +337,9 @@ def test_filtro_diferente_do_tempo_de_tela_consulta_de_novo() -> None:
     fonte = MomentosQueContam(tempo_de_tela._varias_pessoas())
     consulta = TempoDeTelaComCache(fonte, CacheCurto())
 
-    consulta.ranking(None, None, None, 0, 5)
-    consulta.ranking(None, date(2026, 1, 1), None, 0, 5)
-    consulta.ranking(None, None, None, 5, 5)
+    consulta.somas(None, None, None)
+    consulta.somas(None, date(2026, 1, 1), None)
+    consulta.somas(None, None, None)
 
     assert fonte.consultas == 2
 
@@ -360,14 +352,6 @@ class InsercoesQueContam(MarcasEmMemoria):
     def somas(self, *a: Any, **k: Any) -> Any:
         self.consultas += 1
         return super().somas(*a, **k)
-
-    def ranking(self, *a: Any, **k: Any) -> Any:
-        self.consultas += 1
-        return super().ranking(*a, **k)
-
-    def lista_da_marca(self, *a: Any, **k: Any) -> Any:
-        self.consultas += 1
-        return super().lista_da_marca(*a, **k)
 
 
 def test_trocar_de_pagina_nas_marcas_nao_consulta_de_novo() -> None:

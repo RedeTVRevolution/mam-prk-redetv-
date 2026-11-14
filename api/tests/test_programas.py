@@ -991,6 +991,57 @@ def test_pessoa_fundida_segue_o_destino_no_perfil_e_na_tela() -> None:
     assert leao.id in [v.pessoa_id for v in programas.obter("tv-fama").pessoas]  # type: ignore[union-attr]
 
 
+def _fundida_em(catalogo: Catalogo, origem_id: str, destino_id: str) -> None:
+    catalogo.definir_fusao(
+        origem_id,
+        FusaoDaPessoa(
+            destino_id=destino_id,
+            em=datetime(2026, 11, 6, tzinfo=UTC),
+            por_uid="u",
+            por_email="u@b.c",
+            motivo="duplicada",
+        ),
+    )
+
+
+def test_destino_purgado_ou_ciclo_de_fusao_some_do_programa_e_do_put() -> None:
+    for sabotar in ("purgado", "ciclo"):
+        cliente, programas, catalogo = _cliente(["editor"])
+        leao = catalogo.achar("Leão Lobo")[0]
+        outro = catalogo.acrescentar("Leão Lobo", "", [])
+        _fundida_em(catalogo, leao.id, outro.id)
+        if sabotar == "purgado":
+            catalogo.apagar(outro.id)
+        else:
+            _fundida_em(catalogo, outro.id, leao.id)
+
+        tela = cliente.get("/v1/admin/programas", headers=AUTORIZACAO).json()[0]
+        ids = [p["pessoa_id"] for p in tela["pessoas"]]
+        assert len(ids) == 3 and leao.id not in ids and outro.id not in ids
+        assert "Leão Lobo" not in [
+            p.nome for p in perfis_dos_programas(programas, catalogo)["TV Fama"].pessoas
+        ]
+
+        resposta = cliente.put(
+            "/v1/admin/programas/tv-fama",
+            json={
+                "nome": "TV Fama",
+                "perfil": "Novo texto",
+                "pessoas": [
+                    {"pessoa_id": p["pessoa_id"], "papel": p["papel"]}
+                    for p in tela["pessoas"]
+                ],
+            },
+            headers=AUTORIZACAO,
+        )
+        assert resposta.status_code == 200
+        # Sem pessoa nenhuma no fim da cadeia, o vínculo não é preservado (como a purga).
+        assert leao.id not in [
+            v.pessoa_id
+            for v in programas.obter("tv-fama").pessoas  # type: ignore[union-attr]
+        ]
+
+
 def test_put_preserva_o_vinculo_da_pessoa_na_lixeira_e_restaurar_devolve() -> None:
     cliente, _, catalogo = _cliente(["editor"])
     leao = catalogo.achar("Leão Lobo")[0]

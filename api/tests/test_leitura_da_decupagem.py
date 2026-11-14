@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -219,6 +219,48 @@ def test_renomeacao_troca_o_nome_antigo_pelo_atual() -> None:
     assert _nome(leitura.corrigida("j1")) == "Ana Souza Lima"
 
 
+def test_elo_na_lixeira_no_meio_da_cadeia_a_corrigida_vai_ao_ultimo_destino() -> None:
+    """A API não deixa chegar a esse estado. A corrigida segue a cadeia como antes (#612); a
+    entregue tira o vínculo, porque a busca e o tempo de tela não contam essa pessoa."""
+    catalogo = CatalogoEmMemoria()
+    a, b, c = (catalogo.acrescentar(n, "p", []) for n in ("A", "B", "C"))
+    catalogo.definir_fusao(a.id, _fundida_em(a, b.id).fundida)
+    catalogo.definir_fusao(b.id, _fundida_em(b, c.id).fundida)
+    _lixeira(catalogo, b.id)
+    leitura = _leitura(_modelo(_pessoa("pes01", "A", a.id)), catalogo)
+    corrigida, entregue = leitura.corrigida("j1"), leitura.entregue("j1")
+    assert (_nome(corrigida), _vinculo(corrigida)) == ("C", c.id)
+    assert (_nome(entregue), _vinculo(entregue)) == ("C", None)
+
+
+def test_entregue_tira_so_o_vinculo_de_quem_a_lixeira_corta_na_cadeia() -> None:
+    """A fundida em B (na lixeira), B fundida em C vivo: A não conta; D, fundida direto em C,
+    segue contando no mesmo vídeo (a decisão é do destino do id gravado, não do id trocado)."""
+    catalogo = CatalogoEmMemoria()
+    a, b, c, d = (catalogo.acrescentar(n, "p", []) for n in "ABCD")
+    catalogo.definir_fusao(a.id, _fundida_em(a, b.id).fundida)
+    catalogo.definir_fusao(b.id, _fundida_em(b, c.id).fundida)
+    catalogo.definir_fusao(d.id, _fundida_em(d, c.id).fundida)
+    _lixeira(catalogo, b.id)
+    modelo = _modelo(_pessoa("pes01", "A", a.id), _pessoa("pes02", "D", d.id))
+    leitura = _leitura(modelo, catalogo)
+    corrigida, entregue = leitura.corrigida("j1"), leitura.entregue("j1")
+    assert [_vinculo(corrigida, i) for i in ("pes01", "pes02")] == [c.id, c.id]
+    assert [_vinculo(entregue, i) for i in ("pes01", "pes02")] == [None, c.id]
+
+
+def test_destino_purgado_na_corrigida_a_renomeacao_da_origem_vale() -> None:
+    """A corrigida não muda (#612): sem destino, vale a renomeação da própria origem."""
+    catalogo = CatalogoEmMemoria()
+    a = _renomeada(catalogo, "Ana Souza", "Ana Souza Lima")
+    b = catalogo.acrescentar("Ana B", "p", [])
+    catalogo._pessoas[a.id] = _fundida_em(a, b.id)
+    catalogo.apagar(b.id)
+    leitura = _leitura(_modelo(_pessoa("pes01", "Ana Souza", a.id)), catalogo)
+    lida = leitura.corrigida("j1")
+    assert (_nome(lida), _vinculo(lida)) == ("Ana Souza Lima", a.id)
+
+
 def test_renomeacao_respeita_o_nome_corrigido_no_video() -> None:
     catalogo = CatalogoEmMemoria()
     p = _renomeada(catalogo, "Ana Souza", "Ana Souza Lima")
@@ -262,6 +304,13 @@ def test_pessoa_purgada_perde_o_vinculo_so_na_entregue() -> None:
     )
     assert _vinculo(leitura.corrigida("j1")) == "sumiu"
     assert _vinculo(leitura.entregue("j1")) is None
+
+
+def test_catalogo_id_que_nao_e_texto_perde_o_vinculo_na_entregue() -> None:
+    for catalogo in (CatalogoEmMemoria(), None):
+        modelo = _modelo(_pessoa("pes01", "Ana", cast(str, 123), fontes=["rosto"]))
+        entregue = _leitura(modelo, catalogo).entregue("j1")
+        assert (_nome(entregue), _vinculo(entregue)) == ("não identificado", None)
 
 
 def test_marca_na_lixeira_ou_purgada_mantem_o_texto_e_perde_o_vinculo_na_entregue() -> (
@@ -375,8 +424,9 @@ def test_destino_da_fusao_fora_do_lote_e_lido_uma_vez() -> None:
         _modelo(_pessoa("pes01", "A", a.id), _pessoa("pes02", "A2", a.id)), catalogo
     )
     leitura.entregue("j1")
-    assert len(catalogo.lotes) == 1 and catalogo.lotes[0] == [a.id]
-    assert catalogo.individuais == [b.id]
+    # Um lote por elo da cadeia, cada id uma vez; nada em leitura avulsa.
+    assert catalogo.lotes == [[a.id], [b.id]]
+    assert catalogo.individuais == []
 
 
 # --- Iteradores sobre os Jobs --------------------------------------------------------

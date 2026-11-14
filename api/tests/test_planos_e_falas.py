@@ -5,15 +5,8 @@ from typing import Any
 
 import pytest
 
-from api.correcoes import (
-    Ancora,
-    Correcao,
-    NovaCorrecao,
-    aplicar,
-    fila,
-    reconciliar,
-    versao_do_modelo,
-)
+from api.correcoes import Ancora, Correcao, NovaCorrecao, versao_do_modelo
+from api.regras_das_correcoes import aplicar, fila, reconciliar
 from api.tests.test_correcoes import BASE, MODELO, Mundo
 
 

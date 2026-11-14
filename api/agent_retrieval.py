@@ -26,12 +26,11 @@ from time import sleep, time
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-import google.auth
-import google.auth.transport.requests
 import requests
 
 from api.busca import RRF_K, TETO_DE_CONSULTAS_AO_INDICE, _intercalar
 from api.busca_na_nuvem import com_pool, tocar_o_host
+from api.clientes_de_nuvem import sessao_autenticada
 from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.orcamento_de_escrita import Orcamento
@@ -1275,13 +1274,7 @@ def aquecer_o_indice(transporte: Transporte, config: ConfigDaBusca) -> None:
 
 def transporte_http() -> Transporte:
     """O transporte real: REST com as credenciais padrão (ADC) de quem roda."""
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    sessao = com_pool(
-        google.auth.transport.requests.AuthorizedSession(credenciais),  # type: ignore[no-untyped-call]
-        CONEXOES_AO_INDICE,
-    )
+    sessao = com_pool(sessao_autenticada(), CONEXOES_AO_INDICE)
 
     def aquecer(host: str) -> None:
         tocar_o_host(sessao, host)

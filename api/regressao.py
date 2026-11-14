@@ -25,24 +25,25 @@ from typing import Annotated, Any, Literal, Self
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
 from api.comparador import Item, Tipo
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
 from api.correcoes import (
     CORRIGIVEIS,
     Correcao,
     RepositorioDeCorrecoes,
-    estado_das,
     tempos_de,
     versao_do_modelo,
 )
+from api.erros import ServicoIndisponivel
 from api.identidade import identidade_do_nome
-from api.jobs import RepositorioDeJobs, ServicoIndisponivel
+from api.jobs import RepositorioDeJobs
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
+from api.regras_das_correcoes import estado_das
 from api.reprocessar_versao import LeitorDeDecupagem
 
 log = logging.getLogger(__name__)

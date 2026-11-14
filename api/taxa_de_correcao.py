@@ -36,16 +36,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auth import ChamadorAutenticado, Usuario
 from api.bancos import cliente_do_firestore
-from api.comparar_objetos import FaltaNoAmbiente, exigir_do_ambiente
-from api.correcoes import (
-    CORRIGIVEIS,
-    Correcao,
-    RepositorioDeCorrecoes,
-    estado_das,
-    reconciliar,
-)
+from api.correcoes import CORRIGIVEIS, Correcao, RepositorioDeCorrecoes
 from api.csv_seguro import csv_em_texto
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
 from api.jobs import (
@@ -60,6 +54,7 @@ from api.nuvem import (
     RepositorioDeRevisaoFirestore,
     RepositorioFirestore,
 )
+from api.regras_das_correcoes import estado_das, reconciliar
 from api.reprocessar_versao import LeitorDeDecupagem
 from api.revisao import RepositorioDeRevisao
 from api.texto_como_dado import LinhaDaConsulta

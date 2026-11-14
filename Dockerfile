@@ -95,12 +95,14 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
@@ -114,6 +116,7 @@ COPY api/__init__.py \
      api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
      api/numero.py \
@@ -123,6 +126,9 @@ COPY api/__init__.py \
      api/pessoas.py \
      api/programas.py \
      api/progresso_das_janelas.py \
+     api/quem_conta.py \
+     api/registro_da_correcao.py \
+     api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \
@@ -177,12 +183,14 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
@@ -196,6 +204,7 @@ COPY api/__init__.py \
      api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
      api/mudanca_da_tela.py \
@@ -208,6 +217,9 @@ COPY api/__init__.py \
      api/programas.py \
      api/progresso_das_janelas.py \
      api/quadros.py \
+     api/quem_conta.py \
+     api/registro_da_correcao.py \
+     api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \
@@ -291,12 +303,14 @@ COPY api/__init__.py \
      api/catalogo_dos_jobs.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
+     api/clientes_de_nuvem.py \
      api/canonicos.py \
      api/comparador.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
+     api/erros.py \
      api/espera.py \
      api/eventos_de_uso.py \
      api/florence.py \
@@ -309,6 +323,7 @@ COPY api/__init__.py \
      api/leitura_da_decupagem.py \
      api/leitura_da_tela.py \
      api/lixeira.py \
+     api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
      api/numero.py \
@@ -319,6 +334,9 @@ COPY api/__init__.py \
      api/pessoas.py \
      api/programas.py \
      api/progresso_das_janelas.py \
+     api/quem_conta.py \
+     api/registro_da_correcao.py \
+     api/regras_das_correcoes.py \
      api/revisao.py \
      api/sinais.py \
      api/taxonomia_de_objetos.json \

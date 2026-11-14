@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel
 
-from api.catalogo import Catalogo, PessoaDoCatalogo, visivel
-from api.catalogo_apagado import destino_final
+from api.catalogo import Catalogo, PessoaDoCatalogo
+from api.quem_conta import QuemConta
 from api.texto_como_dado import ID_SEGURO, Linha, Texto
 
 if TYPE_CHECKING:  # `api.jobs` importa este módulo
@@ -262,22 +262,22 @@ def pessoas_do_programa(
 ) -> tuple[list[tuple[PessoaDoCatalogo, str]], list[VinculoDaPessoa]]:
     """As pessoas do programa como o catálogo está agora (#425): `(visíveis, escondidos)`.
 
-    O vínculo com pessoa fundida segue o destino na leitura (como `com_pessoas_fundidas`):
+    O vínculo com pessoa fundida segue o destino na leitura (como a Decupagem):
     nada gravado é reescrito, e a mesma pessoa vinda de dois vínculos aparece uma vez, com
     o primeiro papel. O vínculo cuja pessoa (ou o destino dela) está na lixeira fica
     escondido, mas continua gravado: o `PUT` o preserva e restaurar a pessoa o devolve.
-    Pessoa que saiu do catálogo (purga) não é nem uma coisa nem outra."""
+    Pessoa que saiu do catálogo (purga), destino purgado e ciclo de fusão não são nem uma
+    coisa nem outra (Quem conta)."""
+    destinos = QuemConta(catalogo).pessoas(v.pessoa_id for v in programa.pessoas)
     visiveis: dict[str, tuple[PessoaDoCatalogo, str]] = {}
     escondidos: list[VinculoDaPessoa] = []
     for vinculo in programa.pessoas:
-        pessoa = destino_final(vinculo.pessoa_id, catalogo.obter) or catalogo.obter(
-            vinculo.pessoa_id
-        )
-        if pessoa is None:
+        destino = destinos[vinculo.pessoa_id]
+        if destino.pessoa is None:
             continue
-        if visivel(pessoa):
-            visiveis.setdefault(pessoa.id, (pessoa, vinculo.papel))
-        elif pessoa.lixeira is not None:
+        if destino.conta:
+            visiveis.setdefault(destino.pessoa.id, (destino.pessoa, vinculo.papel))
+        else:
             escondidos.append(vinculo)
     return list(visiveis.values()), escondidos
 

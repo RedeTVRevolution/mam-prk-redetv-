@@ -12,12 +12,10 @@ import urllib.parse
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
-import google.auth
-from google.auth.transport.requests import AuthorizedSession
-
 from api.cache_curto import CacheCurto
 from api.chaves import Mac, MacSimulado
-from api.jobs import ServicoIndisponivel
+from api.clientes_de_nuvem import TransporteRest, transporte_rest
+from api.erros import ServicoIndisponivel
 
 URL_BASE = "https://cloudkms.googleapis.com/v1"
 # Quanto tempo a versão atual fica guardada: evita uma ida ao KMS por requisição.
@@ -27,9 +25,6 @@ VALIDADE_DA_VERSAO_S = 300.0
 # no KMS espera: a chave que já conferiu vale até o prazo acabar em cada instância.
 VALIDADE_DO_MAC_S = 300.0
 MAXIMO_DO_MAC = 1024
-
-# (método, caminho a partir de /v1, corpo) -> (status HTTP, resposta em JSON)
-Transporte = Callable[[str, str, dict[str, Any] | None], tuple[int, dict[str, Any]]]
 
 
 class ErroDoKms(ServicoIndisponivel):
@@ -51,7 +46,7 @@ class MacKms:
     def __init__(
         self,
         chave: str,
-        transporte: Transporte,
+        transporte: TransporteRest,
         relogio: Callable[[], float] = time.monotonic,
         validade_s: float = VALIDADE_DA_VERSAO_S,
         validade_do_mac_s: float = VALIDADE_DO_MAC_S,
@@ -135,29 +130,13 @@ class MacKms:
         return True
 
 
-def transporte_do_kms() -> Transporte:
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    sessao = AuthorizedSession(credenciais)  # type: ignore[no-untyped-call]
-
-    def transporte(
-        metodo: str, caminho: str, corpo: dict[str, Any] | None
-    ) -> tuple[int, dict[str, Any]]:
-        resposta = sessao.request(  # type: ignore[no-untyped-call]
-            metodo, f"{URL_BASE}/{caminho}", json=corpo, timeout=30
-        )
-        try:
-            return resposta.status_code, resposta.json()
-        except ValueError:
-            return resposta.status_code, {}
-
-    return transporte
+def transporte_do_kms() -> TransporteRest:
+    return transporte_rest(URL_BASE)
 
 
 def mac_do_ambiente(
     ambiente: Mapping[str, str],
-    transporte: Callable[[], Transporte] = transporte_do_kms,
+    transporte: Callable[[], TransporteRest] = transporte_do_kms,
 ) -> Mac | None:
     """Com `KMS_CHAVE_MAC` (o Terraform a define no Cloud Run), o Cloud KMS; sem ela,
     o simulado de `MAC_SIMULADO_CHAVE` (máquina local e emulador); sem as duas, nenhum."""

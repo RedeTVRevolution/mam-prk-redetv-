@@ -11,19 +11,18 @@ import logging
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol
 
-import google.auth
-from google.auth.transport.requests import AuthorizedSession
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
 from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
 from api.ciclo_de_vida import rodar_etapa
-from api.correcoes import Correcao, pares_proibidos, pessoas_corrigidas
+from api.clientes_de_nuvem import sessao_autenticada
+from api.correcoes import Correcao
 from api.decupagem import Decupagem
-from api.gemini import AnaliseFalhou, SessaoHttp, Transporte, TransporteVertex
+from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
 from api.jobs import RepositorioDeJobs
 from api.juncao_de_pessoas import juntar_sem_nome
 from api.modelo_forte import LIMITE_DE_PESSOAS, olhar_pessoas_sem_nome
@@ -38,6 +37,7 @@ from api.nuvem import (
 from api.programas import Perfis, perfis_dos_programas
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros
+from api.regras_das_correcoes import pares_proibidos, pessoas_corrigidas
 from api.sinais import imprimir
 from api.transcricao import Transcricao
 
@@ -128,11 +128,7 @@ def executar(
 def main() -> None:
     projeto = os.environ["GCP_PROJECT_ID"]
     aceitos = os.environ["BUCKET_ACEITOS"]
-    credenciais: Any
-    credenciais, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    sessao = cast(SessaoHttp, AuthorizedSession(credenciais))  # type: ignore[no-untyped-call]
+    sessao = sessao_autenticada()
     catalogo = CatalogoFirestore(cliente_do_firestore(projeto))
     executar(
         os.environ["JOB_ID"],
