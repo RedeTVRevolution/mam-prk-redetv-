@@ -389,6 +389,36 @@ test('a capa que chega na atualização entra na linha que não tinha capa', asy
   expect(linha.querySelector('img')?.getAttribute('src')).toBe('/capa-nova.jpg')
 })
 
+test('trocar o período mantém as capas e o polling do andamento não mistura as listas', async () => {
+  const andando = (id: string) => job({ id, nome: `${id}.mp4`, estado: 'analisando', etapa_atual: 'analise', capa_url: `/capa-${id}.jpg` })
+  servidor.use(
+    http.get('/v1/jobs', ({ request }) => {
+      const url = new URL(request.url)
+      consultas.push(url.search)
+      return HttpResponse.json([andando(url.searchParams.get('enviado_de') === '2026-10-01' ? 'b' : 'a')])
+    }),
+    // Como a API: o andamento não traz capa_url.
+    http.get('/v1/jobs/andamento', ({ request }) => {
+      const ids = new URL(request.url).searchParams.get('ids')!.split(',')
+      pedidos.push(ids)
+      return HttpResponse.json(ids.map((id) => ({ ...andando(id), etapa_atual: 'transcricao', capa_url: undefined })))
+    }),
+  )
+  await abrir({ endereco: '/admin/entradas?de=2026-11-01' })
+  await waitFor(() => expect(pedidos.some((p) => p.includes('a'))).toBe(true))
+
+  pedidos.length = 0
+  fireEvent.change(campo('Enviado de'), { target: { value: '2026-10-01' } })
+  const linha = await linhaDe('b.mp4')
+  await waitFor(() => expect(within(linha).getByText('Transcrição')).toBeTruthy())
+  await waitFor(() => expect(pedidos.length).toBeGreaterThan(1))
+  expect(linha.querySelector('img')?.getAttribute('src')).toBe('/capa-b.jpg')
+  expect(screen.queryByText('a.mp4')).toBeNull()
+  // Um pedido de andamento do período antigo, ainda no ar, pode cair logo após a troca: só os
+  // seguintes contam.
+  expect(pedidos.slice(1).every((p) => p.join() === 'b')).toBe(true)
+})
+
 test('a linha mostra a capa, o estado com ícone e a régua das etapas; o filtro de estado vai à API', async () => {
   jobs = [
     job({ capa_url: 'https://exemplo.invalid/capa.jpg', etapas: [{ nome: 'validacao', ...ETAPA_OK }, { nome: 'transcricao', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] }),
