@@ -238,27 +238,59 @@ def meses_do_periodo(de: date, ate: date) -> list[str]:
     return meses
 
 
+def _cabe_no_firestore(
+    filtro: FiltroDeJobs, meses: int, programas: int, datas: int = 0
+) -> bool:
+    """Se a consulta com `meses`, `programas` (0 = fora da consulta) e `datas` (as pontas
+    do período na ordem por exibição) cabe nos tetos do Firestore."""
+    disjuncoes = max(1, meses) * max(1, len(filtro.estados)) * max(1, programas)
+    filtros = (
+        (filtro.programa is not None or programas > 0)
+        + (filtro.sistema is not None)
+        + bool(filtro.estados)
+        + bool(filtro.palavras)
+        + bool(meses)
+        + datas
+    )
+    # Mais a ordem pelo campo e o desempate implícito pelo id: contar os dois deixa folga, e
+    # errar para menos faria o Firestore recusar a lista.
+    componentes = disjuncoes * (filtros + 2)
+    return disjuncoes <= MAXIMO_DE_DISJUNCOES and componentes <= MAXIMO_DE_COMPONENTES
+
+
+def plano_da_consulta(
+    filtro: FiltroDeJobs, por_mes: bool
+) -> tuple[list[str] | None, list[str]]:
+    """Os meses (`mes_exibicao in`, só na ordem por envio com `por_mes`) e os programas
+    (`programa in`) que vão ao Firestore; o que não cabe nos tetos fica em
+    `casa_com_o_filtro`. Sai primeiro o mês, depois os programas."""
+    programas = sorted(filtro.programas) if len(filtro.programas) > 1 else []
+    meses = None
+    if (
+        por_mes
+        and filtro.ordem == "enviado"
+        and filtro.exibicao_de is not None
+        and filtro.exibicao_ate is not None
+    ):
+        meses = meses_do_periodo(filtro.exibicao_de, filtro.exibicao_ate)
+        if _cabe_no_firestore(filtro, len(meses), len(programas)):
+            return meses, programas
+        meses = None
+    datas = (
+        (filtro.exibicao_de is not None) + (filtro.exibicao_ate is not None)
+        if filtro.ordem == "exibicao"
+        else 0
+    )
+    if programas and not _cabe_no_firestore(filtro, 0, len(programas), datas):
+        programas = []
+    return meses, programas
+
+
 def meses_para_o_firestore(filtro: FiltroDeJobs) -> list[str] | None:
     """Os meses do período, se a consulta com `mes_exibicao in [...]` cabe nos limites do
     Firestore; `None` se faltar uma ponta do período ou algum limite estourar (a lista cai
     então no filtro de datas em Python)."""
-    if filtro.exibicao_de is None or filtro.exibicao_ate is None:
-        return None
-    meses = meses_do_periodo(filtro.exibicao_de, filtro.exibicao_ate)
-    disjuncoes = len(meses) * max(1, len(filtro.estados))
-    filtros = (
-        (filtro.programa is not None)
-        + (filtro.sistema is not None)
-        + bool(filtro.estados)
-        + bool(filtro.palavras)
-        + 1  # mes_exibicao
-    )
-    # Mais a ordem por `criado_em` e o desempate implícito pelo id: contar os dois deixa
-    # folga, e errar para menos faria o Firestore recusar a lista.
-    componentes = disjuncoes * (filtros + 2)
-    if disjuncoes > MAXIMO_DE_DISJUNCOES or componentes > MAXIMO_DE_COMPONENTES:
-        return None
-    return meses
+    return plano_da_consulta(filtro, True)[0]
 
 
 def listagem_por_mes_do_ambiente(ambiente: Mapping[str, str]) -> bool:
@@ -398,7 +430,13 @@ class RepositorioFirestore:
         if filtro.na_lixeira is True:
             return self._consultar_a_lixeira(filtro)
         consulta: Any = self._colecao
-        if filtro.programa is not None:
+        meses, programas = plano_da_consulta(filtro, self._listagem_por_mes)
+        if programas:
+            consulta = consulta.where(filter=FieldFilter("programa", "in", programas))
+        elif len(filtro.programas) == 1:
+            (unico,) = filtro.programas
+            consulta = consulta.where(filter=FieldFilter("programa", "==", unico))
+        elif filtro.programa is not None:
             consulta = consulta.where(
                 filter=FieldFilter("programa", "==", filtro.programa)
             )
@@ -424,7 +462,7 @@ class RepositorioFirestore:
                 consulta = consulta.where(
                     filter=FieldFilter(campo, "<=", filtro.exibicao_ate.isoformat())
                 )
-        elif self._listagem_por_mes and (meses := meses_para_o_firestore(filtro)):
+        elif meses:
             # Igualdade aceita a ordem por `criado_em`; o dia exato fica em `casa_com_o_filtro`.
             consulta = consulta.where(filter=FieldFilter("mes_exibicao", "in", meses))
         return self._ordenar_e_ler(consulta, campo, filtro)

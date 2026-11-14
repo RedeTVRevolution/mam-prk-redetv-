@@ -562,6 +562,9 @@ class FiltroDeJobs:
     """Os filtros do acervo; todos opcionais e combináveis."""
 
     programa: str | None = None
+    # Vários programas (o `GET /v1/jobs` do Acervo); imutável porque o filtro é a chave do
+    # cache da lista sem capa. Vazio: todos.
+    programas: frozenset[str] = frozenset()
     estados: frozenset[Estado] = frozenset()
     exibicao_de: date | None = None
     exibicao_ate: date | None = None
@@ -615,6 +618,8 @@ def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
     ):
         return False
     if filtro.programa is not None and job.programa != filtro.programa:
+        return False
+    if filtro.programas and job.programa not in filtro.programas:
         return False
     if filtro.sistema is not None and job.sistema != filtro.sistema:
         return False
@@ -1256,7 +1261,9 @@ def criar_rotas(
     @rotas.get("", response_model=list[JobResumido])
     def listar(
         chamador: Annotated[Chamador, Depends(_exige("ler"))],
-        programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
+        programa: Annotated[
+            list[Annotated[str, Linha(100)]] | None, Query(max_length=200)
+        ] = None,
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,
         exibicao_ate: date | None = None,
@@ -1273,7 +1280,7 @@ def criar_rotas(
                 return JSONResponse([])
             sistema = chamador.sistema
         filtro = FiltroDeJobs(
-            programa=programa,
+            programas=frozenset(p for p in programa or () if p),
             estados=frozenset(estado or ()),
             exibicao_de=exibicao_de,
             exibicao_ate=exibicao_ate,
