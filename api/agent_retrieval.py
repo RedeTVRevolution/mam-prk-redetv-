@@ -50,12 +50,12 @@ CONEXOES_AO_INDICE = TETO_DE_CONSULTAS_AO_INDICE * 3
 AVISO_DO_TETO_DO_KNN = 80_000
 REGISTROS_POR_LOTE = 200
 # O `gravar` escreve até esta fração da cota de escrita da coleção (`cota_de_escrita`):
-# com 3.000 objetos por minuto, 13 lotes de 200. A folga cobre a diferença entre o
+# com 6.000 objetos por minuto, 27 lotes de 200. A folga cobre a diferença entre o
 # relógio daqui e o do serviço (#411).
 FRACAO_DA_COTA = 0.9
-# ponytail: o Job `mam-indexacao` tem `timeout` de 1800 s e o orçamento deixa passar 2.700
-# objetos por minuto (cota 3.000 x FRACAO_DA_COTA); descontadas as esperas e as chamadas,
-# o pior caso cabe em cerca de 78 mil objetos na fila juntos, ~25 vídeos de 2 h ao mesmo
+# ponytail: o Job `mam-indexacao` tem `timeout` de 1800 s e o orçamento deixa passar 5.400
+# objetos por minuto (cota 6.000 x FRACAO_DA_COTA); descontadas as esperas e as chamadas,
+# o pior caso cabe em cerca de 156 mil objetos na fila juntos, ~50 vídeos de 2 h ao mesmo
 # tempo. Se um dia não couber: pedir cota maior (`cota_de_escrita_da_busca`) ou subir o
 # `timeout` do Job.
 # As esperas, em segundos, antes de cada nova tentativa no 429 (cota esgotada): 315 s no
