@@ -1,6 +1,7 @@
 """A medição do agrupamento de objetos (#544), em dado local."""
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -128,7 +129,7 @@ def test_a_cobertura_inclui_tipo_canonico_vizinho_de_outro_no_mesmo_programa() -
 
 def test_margem_com_zero_pares_nao_divide_por_zero(tmp_path: Path) -> None:
     assert medir(_pasta(tmp_path), 0)["margem_com_essa_amostra_pontos"] is None
-    assert margem_de_confianca(0) is None
+    assert margem_de_confianca(0) == math.inf
     vazia = tmp_path / "vazia"
     vazia.mkdir()
     assert medir(vazia, 100)["margem_com_essa_amostra_pontos"] is None
@@ -139,7 +140,7 @@ def test_amostra_maior_que_a_disponivel_usa_os_pares_reais(tmp_path: Path) -> No
     pares = len(resultado["amostra_de_precisao"])
     assert 0 < pares < 1_000
     assert resultado["margem_com_essa_amostra_pontos"] == round(
-        margem_de_confianca(pares) or 0, 1
+        margem_de_confianca(pares), 1
     )
 
 

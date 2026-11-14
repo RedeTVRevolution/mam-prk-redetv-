@@ -133,10 +133,10 @@ def amostra_de_cobertura(grupos: Grupos, quantos: int) -> list[dict[str, str]]:
     ]
 
 
-def margem_de_confianca(pares: int, precisao: float = 0.95) -> float | None:
-    """A margem de 95% de confiança, em pontos percentuais; `None` sem pares."""
+def margem_de_confianca(pares: int, precisao: float = 0.95) -> float:
+    """A margem de 95% de confiança, em pontos percentuais; infinita sem pares."""
     if pares <= 0:
-        return None
+        return math.inf
     return 196 * math.sqrt(precisao * (1 - precisao) / pares)
 
 
@@ -164,7 +164,9 @@ def medir(pasta: Path, quantos: int = 100) -> dict[str, Any]:
         "amostra_de_cobertura": amostra_de_cobertura(
             grupos_por_programa(videos), quantos
         ),
-        "margem_com_essa_amostra_pontos": None if margem is None else round(margem, 1),
+        "margem_com_essa_amostra_pontos": round(margem, 1)
+        if math.isfinite(margem)
+        else None,
         "pares_para_margem_de_3_pontos": pares_para_margem(3),
     }
 
