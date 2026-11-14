@@ -73,7 +73,7 @@ def amostra(
     """Até `n` grupos juntados, na ordem do hash do id do grupo (`arquivo:pessoa`), com
     o par de origens que o hash escolhe em cada um. Os mesmos grupos caem na amostra
     antes e depois de uma mudança."""
-    achados: list[tuple[str, dict[str, str]]] = []
+    achados: list[tuple[int, dict[str, str]]] = []
     for arquivo, d in decupagens.items():
         juntada = juntadas[arquivo] if juntadas else juntar_sem_nome(d)
         for p in juntada.pessoas:
