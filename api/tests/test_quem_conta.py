@@ -263,6 +263,7 @@ def test_corte_vale_o_da_purga_mais_recente_e_um_job_ausente_conta_como_anterior
     assert not cortes.conta("nike", _dias(2))
     assert cortes.conta("nike", _dias(4))
     assert not cortes.conta("nike", None)
+    assert not cortes.conta("nike", _dias(3))  # no instante do corte ainda não conta
     assert cortes.conta("adidas", None)
 
 

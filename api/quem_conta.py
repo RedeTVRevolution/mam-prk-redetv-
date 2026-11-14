@@ -16,11 +16,7 @@ from typing import Protocol
 
 from api.catalogo import PessoaDoCatalogo
 from api.erros import lido
-from api.lixeira_na_leitura import (
-    PurgaDeMarca,
-    PurgasDeMarca,
-    conta_depois_do_corte,
-)
+from api.lixeira_na_leitura import PurgaDeMarca, PurgasDeMarca
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 
 
@@ -67,7 +63,7 @@ class Cortes:
         if nome in self.fora:
             return False
         corte = self.por_purga.get(nome)
-        return corte is None or conta_depois_do_corte(criado_em, corte)
+        return corte is None or (criado_em is not None and criado_em > corte)
 
 
 class QuemConta:
