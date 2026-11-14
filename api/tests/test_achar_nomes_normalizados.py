@@ -7,7 +7,7 @@ import pytest
 
 from api import achar_nomes
 from api.achar_nomes import LIMITE_DO_AUTOCOMPLETAR, IndiceDeNomes, achar_por_prefixo
-from api.comparador import normalizar
+from api.texto import normalizar
 
 
 class _Item:

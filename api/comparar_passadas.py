@@ -47,7 +47,6 @@ from api.comparador import (
     Item,
     Pareado,
     itens_do_modelo,
-    normalizar,
     parear,
 )
 from api.comparar_objetos import Preco, precos_do_ambiente
@@ -56,6 +55,7 @@ from api.gemini import MODELO
 from api.jobs import Job, RepositorioDeJobs, _enxerga, _exige
 from api.nuvem import DecupagensStorage, RepositorioFirestore
 from api.passadas import FORMA_DO_ID, LeituraDePassadas, Passada, PassadasStorage
+from api.texto import normalizar
 
 LADO_A = "job"
 LADO_B = "passada"

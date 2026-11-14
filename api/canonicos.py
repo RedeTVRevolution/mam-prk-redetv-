@@ -9,8 +9,8 @@ Correções). O que o dicionário não conhece cai em `indefinido` (enquadrament
 import re
 from typing import Any
 
-from api.comparador import normalizar
 from api.decupagem import Ambiente, Enquadramento
+from api.texto import normalizar
 
 # Termos que só valem como palavra inteira ("media" não casa com "mediante").
 _PALAVRA_INTEIRA = {"media"}

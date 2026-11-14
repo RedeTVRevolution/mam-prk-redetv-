@@ -47,7 +47,6 @@ from api.catalogo import (
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.clientes_de_nuvem import ESCOPO_DA_NUVEM, sessao_autenticada
-from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
 from api.florence import ObjetosDaDecupagem
@@ -89,6 +88,7 @@ from api.programas import (
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
+from api.texto import normalizar
 from api.texto_como_dado import id_conferido, tem_controle
 from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao

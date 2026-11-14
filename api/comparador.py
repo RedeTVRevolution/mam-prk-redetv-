@@ -12,13 +12,13 @@ Código de saída: 0 passou, 1 falhou, 2 entrada inválida.
 import csv
 import re
 import sys
-import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, get_args
 
 from api.decupagem import Decupagem
+from api.texto import normalizar
 
 Tipo = Literal[
     "aparicao",
@@ -82,14 +82,6 @@ class ResultadoDoClipe:
     @property
     def piores(self) -> list[Pareado]:
         return sorted(self.pareados, key=lambda p: -p.erro_ms)
-
-
-def normalizar(texto: str) -> str:
-    """Sem diferenciar maiúsculas, acentos nem espaços repetidos."""
-    sem_acento = "".join(
-        c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
-    )
-    return " ".join(sem_acento.casefold().split())
 
 
 def sobreposicao_ms(a: Item, b: Item) -> int:

@@ -27,7 +27,6 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
-from api.comparador import normalizar
 from api.entendimento_da_consulta import (
     ConsultaEntendida,
     IndiceDeNomesCitados,
@@ -60,6 +59,7 @@ from api.lixeira_na_leitura import (
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.numero import com_as_formas, mesma_palavra, singular
 from api.quem_conta import QuemConta
+from api.texto import normalizar
 
 log = logging.getLogger(__name__)
 

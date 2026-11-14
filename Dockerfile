@@ -97,7 +97,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
      api/canonicos.py \
-     api/comparador.py \
+     api/texto.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
@@ -185,7 +185,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
      api/canonicos.py \
-     api/comparador.py \
+     api/texto.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
@@ -305,7 +305,7 @@ COPY api/__init__.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
      api/canonicos.py \
-     api/comparador.py \
+     api/texto.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \

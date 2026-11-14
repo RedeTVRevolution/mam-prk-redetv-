@@ -31,9 +31,9 @@ import requests
 from api.busca import RRF_K, TETO_DE_CONSULTAS_AO_INDICE, _intercalar
 from api.busca_na_nuvem import com_pool, tocar_o_host
 from api.clientes_de_nuvem import sessao_autenticada
-from api.comparador import normalizar
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.orcamento_de_escrita import Orcamento
+from api.texto import normalizar
 
 log = logging.getLogger(__name__)
 

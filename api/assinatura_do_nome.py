@@ -9,8 +9,8 @@ dicionário de tipos e a chave residual de `outro`. A tela tem a mesma regra em
 import re
 from collections.abc import Iterable
 
-from api.comparador import normalizar
 from api.numero import singular
+from api.texto import normalizar
 
 PALAVRAS_VAZIAS = frozenset({"de", "da", "do", "das", "dos", "com", "um", "uma"})
 _PALAVRA = re.compile(r"[^\W_]+(?:-[^\W_]+)*")

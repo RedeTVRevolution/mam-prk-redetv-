@@ -13,7 +13,6 @@ from api.catalogo import (
     PessoaDoCatalogo,
     nomes_de_busca,
 )
-from api.comparador import normalizar
 from api.jobs import Job, RepositorioEmMemoria
 from api.tests.test_busca import (
     VESTIDO,
@@ -22,6 +21,7 @@ from api.tests.test_busca import (
     objeto,
     pedido,
 )
+from api.texto import normalizar
 
 AGORA = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 

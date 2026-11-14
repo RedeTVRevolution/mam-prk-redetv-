@@ -23,11 +23,11 @@ from api.catalogo import (
     prefixo_das_fotos,
 )
 from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
-from api.comparador import normalizar
 from api.correcoes import Motivo, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
 from api.leitura_da_decupagem import decupagens_corrigidas
 from api.lixeira_do_catalogo import FotosDeReferencia, LeituraDeDecupagens
+from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, LinhaDaConsulta
 
 

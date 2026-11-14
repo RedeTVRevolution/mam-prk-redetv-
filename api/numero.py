@@ -3,7 +3,7 @@
 
 import re
 
-from api.comparador import normalizar
+from api.texto import normalizar
 
 # Com e sem acento, para valer também o que se digita sem eles ("pais" é de pai, "país" fica).
 _INVARIAVEIS = {

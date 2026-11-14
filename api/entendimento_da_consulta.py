@@ -10,8 +10,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.catalogo import Catalogo, PessoaDoCatalogo
-from api.comparador import normalizar
 from api.gemini import MODO_STANDARD, Chamada, Transporte
+from api.texto import normalizar
 
 MODELO_DA_CONSULTA = "gemini-3.5-flash-lite"
 ETAPA_DA_FOTO = "descricao_da_foto"

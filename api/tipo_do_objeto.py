@@ -7,13 +7,13 @@ Agrupar por tipo é uma visão. Cada ocorrência segue gravada com os próprios 
 from collections.abc import Iterable
 
 from api.assinatura_do_nome import assinatura
-from api.comparador import normalizar
 from api.decupagem import CORES_BASE
 from api.taxonomia_de_objetos import (
     OUTRO,
     SINONIMOS_DO_TIPO,
     TIPOS_CANONICOS,
 )
+from api.texto import normalizar
 
 # O dicionário de nome livre para tipo: a assinatura do tipo e a de cada sinônimo. Vale para o
 # acervo antigo, sem reprocessar.

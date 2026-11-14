@@ -11,13 +11,13 @@ from api.comparador import (
     Item,
     ResultadoDoClipe,
     main,
-    normalizar,
     parear,
     passou,
     se_sobrepoem,
     sobreposicao_ms,
     tempo_ms,
 )
+from api.texto import normalizar
 
 tempos = st.integers(min_value=0, max_value=600_000)
 tipos = st.sampled_from(TIPOS)

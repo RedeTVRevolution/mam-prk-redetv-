@@ -9,9 +9,9 @@ from hypothesis import strategies as st
 
 from api import entendimento_da_consulta
 from api.catalogo import CatalogoEmMemoria, PessoaDoCatalogo
-from api.comparador import normalizar
 from api.entendimento_da_consulta import MAXIMO_DE_PESSOAS, entender, sanear
 from api.tests.test_busca import Mundo
+from api.texto import normalizar
 
 
 def _antigo(pessoas: list[PessoaDoCatalogo], consulta: str) -> tuple[str, ...]:

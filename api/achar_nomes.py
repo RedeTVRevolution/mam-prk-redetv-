@@ -15,7 +15,7 @@ from bisect import bisect_left
 from collections.abc import Iterable
 from typing import Protocol
 
-from api.comparador import normalizar
+from api.texto import normalizar
 
 LIMITE_DO_AUTOCOMPLETAR = 10
 TAMANHO_PARA_ACEITAR_ERRO = 5

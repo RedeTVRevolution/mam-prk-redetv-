@@ -27,8 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from api.assinatura_do_nome import assinatura
-from api.comparador import normalizar
 from api.taxonomia_de_objetos import OUTRO
+from api.texto import normalizar
 from api.tipo_do_objeto import chave_de_agrupamento, tipo_canonico_de
 
 SEM_PROGRAMA = "sem-programa"

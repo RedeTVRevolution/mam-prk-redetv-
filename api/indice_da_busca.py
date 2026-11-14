@@ -9,7 +9,6 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Literal, Protocol
 
-from api.comparador import normalizar
 from api.decupagem import (
     CategoriaDeObjeto,
     Decupagem,
@@ -18,6 +17,7 @@ from api.decupagem import (
     _Intervalo,
     id_posicional,
 )
+from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
 
 TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]

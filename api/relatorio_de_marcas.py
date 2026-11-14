@@ -21,7 +21,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from api.cache_curto import CacheCurto
-from api.comparador import normalizar
 from api.copia_bigquery import (
     ConfigDoBigQuery,
     CopiaEmMemoria,
@@ -51,6 +50,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
+from api.texto import normalizar
 from api.texto_como_dado import Linha, LinhaDaConsulta
 
 TIPOS_DE_INSERCAO: tuple[str, ...] = get_args(Comercial.model_fields["tipo"].annotation)

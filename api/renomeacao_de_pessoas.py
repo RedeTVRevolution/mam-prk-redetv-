@@ -19,11 +19,11 @@ from pydantic import BaseModel, field_validator
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, PessoaDoCatalogo, RenomeacaoDaPessoa
-from api.comparador import normalizar
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
 from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
 from api.leitura_da_decupagem import decupagens_dos_jobs
 from api.lixeira_do_catalogo import LeituraDeDecupagens
+from api.texto import normalizar
 from api.texto_como_dado import Linha
 
 

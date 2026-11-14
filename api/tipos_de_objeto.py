@@ -6,9 +6,9 @@ from typing import Annotated, Protocol, TypedDict
 from fastapi import APIRouter, Depends
 
 from api.auth import Chamador
-from api.comparador import normalizar
 from api.jobs import _exige
 from api.taxonomia_de_objetos import TIPOS_CANONICOS
+from api.texto import normalizar
 from api.texto_como_dado import LinhaDaConsulta
 
 LIMITE_PADRAO = 10

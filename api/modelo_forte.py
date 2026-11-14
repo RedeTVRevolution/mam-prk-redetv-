@@ -20,7 +20,6 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from api.catalogo import Catalogo
-from api.comparador import normalizar
 from api.decupagem import FORMATO_DO_TEMPO, Decupagem, Pessoa, Rotulo, em_mm_ss
 from api.entendimento_da_consulta import sanear
 from api.espera import sorteio_uniforme
@@ -42,6 +41,7 @@ from api.identificacao import (
 from api.programas import Perfis
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import instantes_das_aparicoes
+from api.texto import normalizar
 from api.transcricao import Transcricao
 
 MODELO_FORTE = MODELO  # o Flash-Lite, como a análise (#539)

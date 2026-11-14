@@ -27,13 +27,13 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.clientes_de_nuvem import sessao_autenticada
-from api.comparador import normalizar
 from api.comparar_objetos import DisparadorDoCloudRun
 from api.decupagem import Decupagem, ObjetoDoInventario
 from api.florence import ObjetosDaDecupagem
 from api.gemini import SessaoHttp, Transporte, TransporteVertex
 from api.inventario import Inventarios, converter_do_florence
 from api.nuvem import ObjetosStorage
+from api.texto import normalizar
 
 BASE = "hoje"
 FRACAO_MINIMA = 0.9  # do que há hoje, nos objetos de cena e em cada categoria de cena

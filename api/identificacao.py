@@ -18,10 +18,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from api.catalogo import Catalogo
-from api.comparador import normalizar
 from api.decupagem import Decupagem, FonteDoNome, Pessoa, _Intervalo
 from api.identidade import nao_identificado
 from api.programas import Perfis
+from api.texto import normalizar
 from api.transcricao import Transcricao
 
 TOLERANCIA_DA_FALA_MS = 2000  # a fala e a imagem não se alinham ao quadro

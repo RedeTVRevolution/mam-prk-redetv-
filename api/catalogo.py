@@ -13,7 +13,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
-from api.comparador import normalizar
+from api.texto import normalizar
 
 
 class Rosto(BaseModel):

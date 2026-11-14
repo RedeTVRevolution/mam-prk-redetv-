@@ -25,7 +25,6 @@ from pydantic import (
 )
 
 from api import catalogo_de_correcoes as textos
-from api.comparador import normalizar
 from api.decupagem import (
     CategoriaDeObjeto,
     Comercial,
@@ -42,6 +41,7 @@ from api.identidade import (
 )
 from api.identidade import identidade_do_nome, nao_identificado
 from api.pessoas import LISTAS
+from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, Texto
 
 TipoNovo = Literal[
