@@ -45,6 +45,7 @@ from api.nuvem import (
 from api.pareamento import Item, Tipo
 from api.regras_das_correcoes import estado_das
 from api.reprocessar_versao import LeitorDeDecupagem
+from api.texto import normalizar
 
 log = logging.getLogger(__name__)
 
@@ -228,6 +229,7 @@ _CATEGORIA_DO_ITEM: dict[str, Tipo] = {
     "plano": "plano",
     "fala": "fala",
     "texto_na_tela": "texto_na_tela",
+    "objeto": "objeto",
 }
 # O `depois` é o nome novo do item: vira a identidade esperada nesta e nas outras
 # correções do mesmo item (a renomeação e os tempos de uma pessoa não se contradizem).
@@ -236,9 +238,13 @@ _NOME_NOVO: dict[str, Callable[[str], str]] = {
     "comercial.marca": lambda depois: depois,
     "texto_na_tela.texto": lambda depois: str(json.loads(depois)["texto"]),
     "pauta.titulo": lambda depois: depois,
+    "objeto.atributos": lambda depois: normalizar(json.loads(depois)["tipo"]),
 }
 # Dizem o que a pessoa não é: não há item esperado para medir.
-_SEM_ITEM = frozenset({"pessoa.nao_e"})
+_SEM_ITEM = frozenset({"pessoa.nao_e", "objeto.nao_existe"})
+# Sem regra aprovada para o conjunto: saem com aviso próprio (a âncora juntaria as
+# ocorrências do objeto num intervalo só).
+_SEM_CONVERSAO = frozenset({"objeto.dono", "objeto.acrescentar"})
 
 
 def _nomes_novos(
@@ -290,6 +296,19 @@ def _itens_da_pessoa(
     return [Item(categoria, nome, inicio, fim) for inicio, fim in intervalos]
 
 
+def _itens_do_objeto(
+    c: Correcao, nome: str | None, modelo: Mapping[str, Any]
+) -> list[Item]:
+    """Um item por ocorrência do objeto no JSON do modelo, nunca um intervalo só."""
+    for objeto in modelo.get("objetos", []):
+        if isinstance(objeto, dict) and objeto.get("id") == c.item_id:
+            return [
+                Item("objeto", nome or c.ancora.identidade, o["inicio_ms"], o["fim_ms"])
+                for o in objeto.get("ocorrencias", [])
+            ]
+    return []
+
+
 def _itens_da_correcao(
     c: Correcao, nomes: Mapping[str, str], modelo: Mapping[str, Any]
 ) -> list[Item]:
@@ -299,6 +318,8 @@ def _itens_da_correcao(
     nome = nomes.get(f"{a.tipo_do_item}:{c.item_id}")
     if a.tipo_do_item == "pessoa":
         return _itens_da_pessoa(c, nome or a.identidade, modelo)
+    if a.tipo_do_item == "objeto":
+        return _itens_do_objeto(c, nome, modelo)
     if a.tipo_do_item == "comercial":
         # A âncora do comercial é `marca|tipo`; o comparador pareia pela marca.
         nome = nome or a.identidade.rsplit("|", 1)[0]
@@ -327,6 +348,12 @@ def casos_das_correcoes(
             continue
         if c.ancora.versao != versao:
             log.warning("correção %s de outro JSON do modelo: fora do conjunto", c.id)
+            continue
+        if c.tipo in _SEM_CONVERSAO:
+            log.warning(
+                "correção %s: operação de objeto sem conversão para o conjunto de regressão",
+                c.id,
+            )
             continue
         try:
             esperado = _itens_da_correcao(c, nomes, modelo)
