@@ -5,7 +5,7 @@ import io
 import random
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -134,8 +134,8 @@ def test_a_consulta_em_memoria_traz_so_comerciais_e_filtra_por_tipo_programa_e_p
     def jobs(*filtros: Any) -> set[str]:
         return {i.job_id for i in consulta.insercoes(*filtros)}
 
-    assert len(consulta.insercoes(None, None, None, ())) == 4  # o plano fica de fora
-    assert jobs("Fama", None, None, ()) == {"j2"}
+    assert len(consulta.insercoes((), None, None, ())) == 4  # o plano fica de fora
+    assert jobs(("Fama",), None, None, ()) == {"j2"}
     assert jobs(None, date(2026, 10, 10), date(2026, 10, 20), ()) == {"j2"}
     assert jobs(None, date(2020, 1, 1), None, ()) == {"j1", "j2"}  # sem data sai
     assert jobs(None, None, None, ("intervalo",)) == {"j1", "j3"}
@@ -182,7 +182,7 @@ def test_bigquery_pede_so_comerciais_com_marca_e_os_filtros_como_parametros() ->
     )
 
     achadas = ConsultaBigQuery(CONFIG, transporte).somas(
-        "Jornal", date(2026, 10, 1), date(2026, 10, 31), ("intervalo",)
+        ("Jornal",), date(2026, 10, 1), date(2026, 10, 31), ("intervalo",)
     )
 
     assert achadas == [
@@ -201,7 +201,7 @@ def test_bigquery_pede_so_comerciais_com_marca_e_os_filtros_como_parametros() ->
     }
     assert parametros == {
         "tipos_de_insercao": ("ARRAY", None),
-        "programa": ("STRING", "Jornal"),
+        "programas": ("ARRAY", None),
         "desde": ("DATE", "2026-10-01"),
         "ate": ("DATE", "2026-10-31"),
     }
@@ -212,11 +212,11 @@ def test_bigquery_sem_filtros_nao_leva_parametros_e_resposta_incompleta_falha_al
     None
 ):
     transporte = Transporte({"jobComplete": True})
-    assert ConsultaBigQuery(CONFIG, transporte).somas(None, None, None, ()) == []
+    assert ConsultaBigQuery(CONFIG, transporte).somas((), None, None, ()) == []
     assert transporte.corpos[0]["queryParameters"] == []
     with pytest.raises(RuntimeError):
         ConsultaBigQuery(CONFIG, Transporte({"jobComplete": False})).somas(
-            None, None, None, ()
+            (), None, None, ()
         )
 
 
@@ -259,7 +259,7 @@ def test_rota_devolve_a_tabela_por_marca_com_as_insercoes_e_o_nome_do_video() ->
 
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert (corpo["programa"], corpo["tipos"]) == ("Jornal", [])
+    assert (corpo["programas"], corpo["tipos"]) == (["Jornal"], [])
     assert [m["marca"] for m in corpo["marcas"]] == ["Ambev", "Natura"]
     ambev = corpo["marcas"][0]
     assert (ambev["insercoes"], ambev["videos"]) == (2, 2)  # j1 e j3 (sem data)
@@ -333,7 +333,7 @@ def test_programa_e_tipo_vazios_sao_todos() -> None:
     ).json()
     todos = cliente.get(ROTA, headers=AUTORIZACAO).json()
 
-    assert vazio["programa"] is None and vazio["tipos"] == []
+    assert vazio["programas"] == [] and vazio["tipos"] == []
     assert vazio["marcas"] == todos["marcas"] != []
 
 
@@ -423,7 +423,7 @@ def test_sem_limite_a_resposta_e_a_de_antes() -> None:
     assert resposta.status_code == 200  # sem `limite`, o cursor não conta
     assert "X-Proximo-Cursor" not in resposta.headers
     corpo = resposta.json()
-    assert set(corpo) == {"programa", "desde", "ate", "tipos", "marcas"}
+    assert set(corpo) == {"programas", "desde", "ate", "tipos", "marcas"}
     assert all("lista" in m for m in corpo["marcas"])
 
 
@@ -499,12 +499,12 @@ class SoSomas:
 
     def somas(
         self,
-        programa: str | None,
+        programas: Sequence[str],
         desde: date | None,
         ate: date | None,
         tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
-        return self._em_memoria.somas(programa, desde, ate, tipos)
+        return self._em_memoria.somas(programas, desde, ate, tipos)
 
 
 def test_uma_fonte_so_com_somas_serve_ao_ranking_e_as_insercoes_da_marca() -> None:
@@ -641,7 +641,7 @@ def test_bigquery_com_varios_tipos_leva_um_parametro_de_array() -> None:
     transporte = Transporte({"jobComplete": True})
 
     ConsultaBigQuery(CONFIG, transporte).somas(
-        None, None, None, ("intervalo", "testemunhal")
+        (), None, None, ("intervalo", "testemunhal")
     )
 
     (corpo,) = transporte.corpos
