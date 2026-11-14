@@ -14,17 +14,15 @@ from api.jobs import ServicoIndisponivel
 from api.qualidade_do_painel import _periodo
 from api.taxa_de_correcao import calcular
 from api.taxa_diaria import (
-    ConfigDaTaxa,
     ItensEmMemoria,
-    LinhaDiaria,
     TabelaDaTaxaBigQuery,
-    TabelaDaTaxaEmMemoria,
     atualizar,
     dias_recentes,
     linhas_do_dia,
     preencher_itens,
 )
 from api.tests.test_taxa_de_correcao import BASE, Decupagens, _c, _mundo, _pulsar
+from api.tipos_da_taxa import ConfigDaTaxa, LinhaDiaria, TabelaDaTaxaEmMemoria
 
 MAM = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
 DIA = BASE.date()

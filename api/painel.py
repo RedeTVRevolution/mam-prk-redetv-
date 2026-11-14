@@ -57,9 +57,9 @@ from api.resumos_de_uso import (
     ResumosDeUso,
     UsoDoDia,
 )
-from api.revisao_do_painel import NumerosAgregados, RevisaoAgregada
-from api.taxa_de_correcao import LinhaDaTaxa
 from api.texto_como_dado import LinhaDaConsulta
+from api.tipos_da_revisao import NumerosAgregados, RevisaoAgregada
+from api.tipos_da_taxa import LinhaDaTaxa
 from api.usuarios import ContasDeUsuario
 
 JANELA_DA_ABERTURA = timedelta(minutes=30)
