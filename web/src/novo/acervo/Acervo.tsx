@@ -173,10 +173,11 @@ export function Acervo({ filtros, permissoes = [], intervaloMs = 15_000 }: { fil
             <Faceta
               rotulo="Programa"
               Icone={IconBroadcast}
-              unico
-              opcoes={programas.map((p) => ({ valor: p, rotulo: p }))}
-              valor={filtros.programa ? [filtros.programa] : []}
-              aoMudar={([p]) => mudar({ programa: p ?? '' })}
+              tudoMarcado
+              // O programa do endereço que não está na lista (renomeado, removido) continua marcado.
+              opcoes={[...programas, ...filtros.programas.filter((p) => !programas.includes(p))].map((p) => ({ valor: p, rotulo: p }))}
+              valor={filtros.programas}
+              aoMudar={(p) => mudar({ programas: p })}
             />
             <Faceta rotulo="Estado" Icone={IconCircleDot} opcoes={ESTADOS} valor={filtros.estado} aoMudar={(estado) => mudar({ estado })} />
             <Periodo de={filtros.de} ate={filtros.ate} aoMudar={mudar} />

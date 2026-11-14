@@ -303,12 +303,14 @@ test('estado desconhecido na URL sai do filtro', async () => {
 
 test('cada filtro muda a chamada à API e a URL', async () => {
   const usuario = userEvent.setup()
+  programas = ['TV Fama', 'Bola na Rede']
   await abrir()
   await screen.findByText('Nenhum vídeo enviado ainda.')
 
-  await usuario.click(screen.getByRole('button', { name: 'Programa' }))
-  await usuario.click(await screen.findByRole('option', { name: 'TV Fama' }))
-  await waitFor(() => expect(ultimaChamada().get('programa')).toBe('TV Fama'))
+  await usuario.click(screen.getByRole('button', { name: 'Programa: Todos' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Bola na Rede' }))
+  await waitFor(() => expect(ultimaChamada().getAll('programa')).toEqual(['TV Fama']))
+  await usuario.keyboard('{Escape}')
 
   await usuario.click(screen.getByRole('button', { name: 'Exibição' }))
   fireEvent.change(await screen.findByLabelText('Exibido de'), { target: { value: '2026-10-01' } })
@@ -324,6 +326,75 @@ test('cada filtro muda a chamada à API e a URL', async () => {
   expect(screen.getByRole('option', { name: 'Falhou' }).getAttribute('aria-checked')).toBe('true')
 
   expect(location.search).toBe('?programa=TV+Fama&de=2026-10-01&ate=2026-10-31&estado=analisando&estado=falhou')
+})
+
+test('o filtro de programa abre com tudo marcado e não manda nada à API nem ao endereço', async () => {
+  const usuario = userEvent.setup()
+  programas = ['TV Fama', 'Bola na Rede']
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+
+  await usuario.click(screen.getByRole('button', { name: 'Programa: Todos' }))
+
+  for (const nome of ['Selecionar tudo', 'TV Fama', 'Bola na Rede']) {
+    expect(screen.getByRole('option', { name: nome }).getAttribute('aria-checked')).toBe('true')
+  }
+  expect(ultimaChamada().getAll('programa')).toEqual([])
+  expect(location.search).toBe('')
+})
+
+test('com alguns programas marcados, a API recebe os marcados repetidos e o endereço guarda a escolha', async () => {
+  const usuario = userEvent.setup()
+  programas = ['TV Fama', 'Bola na Rede', 'Vizinhos em Guerra']
+  await abrir()
+  await screen.findByText('Nenhum vídeo enviado ainda.')
+
+  await usuario.click(screen.getByRole('button', { name: 'Programa: Todos' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Vizinhos em Guerra' }))
+
+  await waitFor(() => expect(ultimaChamada().getAll('programa')).toEqual(['TV Fama', 'Bola na Rede']))
+  expect(location.search).toBe('?programa=TV+Fama&programa=Bola+na+Rede')
+  expect(screen.getByRole('button', { name: 'Programa: 2 de 3' })).toBeTruthy()
+
+  // Marcar de novo o que faltava volta a tudo marcado: some da API e do endereço.
+  await usuario.click(screen.getByRole('option', { name: 'Vizinhos em Guerra' }))
+  await waitFor(() => expect(location.search).toBe(''))
+  expect(ultimaChamada().getAll('programa')).toEqual([])
+})
+
+test('a escolha de programas no endereço sobrevive a recarregar a página', async () => {
+  programas = ['TV Fama', 'Bola na Rede', 'Vizinhos em Guerra']
+  await abrir({ endereco: '/acervo?programa=TV+Fama&programa=Vizinhos+em+Guerra' })
+  await screen.findByText('Nenhum vídeo com esses filtros.')
+
+  expect(ultimaChamada().getAll('programa')).toEqual(['TV Fama', 'Vizinhos em Guerra'])
+  expect(screen.getByRole('button', { name: 'Programa: 2 de 3' })).toBeTruthy()
+})
+
+test('"Limpar filtros" volta o programa a tudo marcado', async () => {
+  const usuario = userEvent.setup()
+  programas = ['TV Fama', 'Bola na Rede']
+  await abrir({ endereco: '/acervo?programa=Bola+na+Rede' })
+  await screen.findByText('Nenhum vídeo com esses filtros.')
+
+  await usuario.click(screen.getAllByRole('button', { name: 'Limpar filtros' })[0])
+
+  expect(await screen.findByText('Nenhum vídeo enviado ainda.')).toBeTruthy()
+  expect(location.search).toBe('')
+  expect(ultimaChamada().getAll('programa')).toEqual([])
+  expect(screen.getByRole('button', { name: 'Programa: Todos' })).toBeTruthy()
+})
+
+test('um programa do endereço que não está na lista entra nas opções e continua marcado', async () => {
+  const usuario = userEvent.setup()
+  programas = ['TV Fama', 'Bola na Rede']
+  await abrir({ endereco: '/acervo?programa=Programa+Antigo' })
+  await screen.findByText('Nenhum vídeo com esses filtros.')
+
+  expect(ultimaChamada().getAll('programa')).toEqual(['Programa Antigo'])
+  await usuario.click(screen.getByRole('button', { name: 'Programa: Programa Antigo' }))
+  expect(screen.getByRole('option', { name: 'Programa Antigo' }).getAttribute('aria-checked')).toBe('true')
+  expect(screen.getByRole('option', { name: 'TV Fama' }).getAttribute('aria-checked')).toBe('false')
 })
 
 test('um filtro curto, sem campo de busca, se escolhe só pelo teclado', async () => {
@@ -342,7 +413,7 @@ test('abrir a URL com filtros restaura a tela', async () => {
   await screen.findByText('Nenhum vídeo com esses filtros.')
 
   const p = ultimaChamada()
-  expect([p.get('q'), p.get('programa'), p.get('exibicao_de'), p.get('exibicao_ate'), p.get('ordem')]).toEqual(['fama', 'TV Fama', '2026-10-01', '2026-10-31', 'exibicao'])
+  expect([p.get('q'), p.getAll('programa'), p.get('exibicao_de'), p.get('exibicao_ate'), p.get('ordem')]).toEqual(['fama', ['TV Fama'], '2026-10-01', '2026-10-31', 'exibicao'])
   expect(p.getAll('estado')).toEqual(['falhou'])
   expect((screen.getByLabelText('Buscar por nome') as HTMLInputElement).value).toBe('fama')
   expect(screen.getByRole('button', { name: 'Programa: TV Fama' })).toBeTruthy()
