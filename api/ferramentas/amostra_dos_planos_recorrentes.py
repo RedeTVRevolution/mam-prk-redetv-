@@ -16,11 +16,8 @@ from pathlib import Path
 from PIL import Image
 
 from api.decupagem import Decupagem, Plano
-from api.medir_agrupamento_de_objetos import (
-    _hash,
-    margem_de_confianca,
-    pares_para_margem,
-)
+from api.ferramentas.comum import hash_estavel
+from api.medir_agrupamento_de_objetos import margem_de_confianca, pares_para_margem
 from api.planos_recorrentes import (
     Sinal,
     _quadro_chave,
@@ -77,10 +74,10 @@ def amostra_de_precisao(
             grupos[(p.programa, p.video, p.grupo)].append(p.plano)
     por_programa: dict[str, list[dict[str, str]]] = defaultdict(list)
     for (programa, video, grupo), ids in sorted(
-        grupos.items(), key=lambda g: _hash("/".join(g[0]))
+        grupos.items(), key=lambda g: hash_estavel("/".join(g[0]), 12)
     ):
         if len(ids) >= 2:
-            a, b = sorted(ids, key=lambda i: _hash(f"{video}/{i}"))[:2]
+            a, b = sorted(ids, key=lambda i: hash_estavel(f"{video}/{i}", 12))[:2]
             por_programa[programa].append(
                 {
                     "programa": programa,
@@ -126,7 +123,9 @@ def amostra_de_cobertura(
                 menor, maior = sorted((a.plano, b.plano))
                 pares.add((programa, video, menor, maior))
     por_programa: dict[str, list[dict[str, str]]] = defaultdict(list)
-    for programa, video, id_a, id_b in sorted(pares, key=lambda p: _hash("|".join(p))):
+    for programa, video, id_a, id_b in sorted(
+        pares, key=lambda p: hash_estavel("|".join(p), 12)
+    ):
         por_programa[programa].append(
             {"programa": programa, "video": video, "plano_a": id_a, "plano_b": id_b}
         )

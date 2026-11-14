@@ -3,7 +3,7 @@
 Casos de teste da decupagem, sem vídeo: cada caso aponta o vídeo pelo SHA-256 do bloco `video` da Decupagem, o do arquivo enviado (o vídeo fica no bucket).
 O formato e as regras estão em `api/regressao.py`.
 
-- `casos/*.json`: um caso por arquivo. O esperado usa os tipos do `api/comparador.py` (`aparicao`, `mencao`, `pauta`, `comercial`, `plano`, `fala`, `texto_na_tela`, `objeto`, `bloco`).
+- `casos/*.json`: um caso por arquivo. O esperado usa os tipos do `api/pareamento.py` (`aparicao`, `mencao`, `pauta`, `comercial`, `plano`, `fala`, `texto_na_tela`, `objeto`, `bloco`).
 - `metas.json`: a meta (de 0 a 1) de cada requisito, `{"requisito": 0.95}`. O #252 preenche.
 - `make importar-gabarito [GABARITO=evals/gabarito] [PASTA=...]` (#353, `api/importar_gabarito.py`): grava um caso `anotado` por CSV de `evals/gabarito/` (formato no README de lá). O id vem do vídeo e do trecho, então rodar de novo não duplica.
 - `reservado`: os reservados só entram na avaliação final, nunca no ajuste de instrução. O sorteio vem do id do caso (20%), então o caso fica sempre do mesmo lado; o formato recusa um valor diferente do sorteio.

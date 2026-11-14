@@ -190,7 +190,6 @@ def main(
 
 
 def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
-
     from api.bancos import cliente_da_colecao
     from api.nuvem import (
         COLECAO_DA_AUDITORIA,

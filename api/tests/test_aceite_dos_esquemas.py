@@ -235,3 +235,17 @@ def test_guarda_pega_esquema_novo_em_modulo_ja_registrado() -> None:
     fontes["inventario"] += "\n_novo = esquema_obrigatorio(RespostaNova)\n"
 
     assert _faltam_no_aceite(fontes) == {"esquema_obrigatorio(RespostaNova)"}
+
+
+def test_falha_ao_gerar_um_esquema_da_saida_2_e_nao_1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GCP_PROJECT_ID", "p")
+    monkeypatch.setattr(aceite, "sessao_autenticada", lambda **_: object())
+    monkeypatch.setattr(aceite, "TransporteVertex", lambda *_, **__: object())
+
+    def quebra() -> dict[str, object]:
+        raise ValueError("esquema não gera")
+
+    monkeypatch.setattr(aceite, "_esquemas", quebra)
+    assert aceite.main() == 2

@@ -104,11 +104,12 @@ def main() -> int:
             ),
             etapa="aceite_dos_esquemas",
         )
+        # `aceitar` só deixa escapar o que vem antes da primeira chamada (gerar um esquema).
+        resultados = aceitar(transporte)
     except Exception as e:  # noqa: BLE001
         # Antes da primeira chamada: não prova nada sobre o esquema.
         print(f"sem prova: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         return 2
-    resultados = aceitar(transporte)
     for r in resultados:
         print(f"{r.nome}: {r.veredito} {r.detalhe}".rstrip(), flush=True)
     return codigo_de_saida(resultados)

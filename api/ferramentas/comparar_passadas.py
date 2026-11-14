@@ -9,7 +9,7 @@ um Markdown e um JSON.
 
 Por requisito (famosos, menções, pautas, B-roll, comerciais) o relatório traz os itens que
 só um lado tem, os que os dois têm com diferença (nome, tipo, marca ou tempo fora da
-tolerância do `api/comparador.py`) e as contagens; o pareamento é o do comparador. O lado A
+tolerância do `api/pareamento.py`) e as contagens; o pareamento é o mesmo. O lado A
 é a decupagem do Job e o B, a passada. Timecode é o erro de início e de fim dos itens
 pareados, inclusive os de nome trocado (média e p95 sobre os erros de início e de fim
 juntos; fora da tolerância conta o par pelo maior dos dois). O custo é por hora de vídeo e

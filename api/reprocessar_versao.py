@@ -25,7 +25,7 @@ from google.cloud.storage import Client as ClienteStorage
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RepositorioDeAuditoria
 from api.bancos import cliente_da_colecao, cliente_do_firestore
-from api.ciclo_de_vida import PRAZO_DO_REPROCESSAMENTO, NaoReprocessavel
+from api.ciclo_de_vida import NaoReprocessavel, prazo_vencido
 from api.ferramentas.comum import (
     TAMANHO_DA_PAGINA,
     custo_por_hora_do_ambiente,
@@ -105,7 +105,7 @@ def escolher(
     )
     escolhidos: list[Candidato] = []
     for job in concluidos:
-        if agora - job.criado_em >= PRAZO_DO_REPROCESSAMENTO:
+        if prazo_vencido(job, agora):
             continue
         if limite is not None and len(escolhidos) >= limite:
             break
