@@ -3,9 +3,13 @@
 import unicodedata
 
 
-def normalizar(texto: str) -> str:
-    """Sem diferenciar maiúsculas, acentos nem espaços repetidos."""
-    sem_acento = "".join(
+def sem_acento(texto: str) -> str:
+    """Tira só as marcas de acento (NFKD); o resto do texto fica como está."""
+    return "".join(
         c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
     )
-    return " ".join(sem_acento.casefold().split())
+
+
+def normalizar(texto: str) -> str:
+    """Sem diferenciar maiúsculas, acentos nem espaços repetidos."""
+    return " ".join(sem_acento(texto).casefold().split())

@@ -4,7 +4,6 @@ Diagnóstico sobre pastas locais por vídeo e as amostras de precisão e de cobe
 `python -m api.ferramentas.amostra_dos_planos_recorrentes [--amostra=N] PASTA [PASTA...]`.
 """
 
-import hashlib
 import json
 import sys
 from collections import defaultdict
@@ -17,6 +16,7 @@ from pathlib import Path
 from PIL import Image
 
 from api.decupagem import Decupagem, Plano
+from api.ferramentas.comum import hash_estavel
 from api.medir_agrupamento_de_objetos import margem_de_confianca, pares_para_margem
 from api.planos_recorrentes import (
     Sinal,
@@ -50,7 +50,7 @@ class PlanoDaAmostra:
 
 
 def _hash(chave: str) -> int:
-    return int(hashlib.sha256(chave.encode()).hexdigest()[:12], 16)
+    return hash_estavel(chave, 12)
 
 
 def _por_programa(

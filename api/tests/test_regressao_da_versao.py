@@ -201,6 +201,26 @@ def test_sem_confirmar_so_estima_o_custo(tmp_path: Path) -> None:
     assert custo_estimado(casos, 0.28) == 0.28 * 180 / 3600
 
 
+def test_custo_por_hora_zero_sai_zero_e_nao_nd(tmp_path: Path) -> None:
+    casos, transporte = _tres_casos()
+    pasta = tmp_path / "casos"
+    for c in casos:
+        gravar_caso(pasta, c)
+    metas = tmp_path / "metas.json"
+    metas.write_text("{}")
+    saidas: list[str] = []
+
+    main(
+        [NOVA, "", str(tmp_path / "s")],
+        {"CASOS": str(pasta), "METAS": str(metas), "CUSTO_POR_HORA_USD": "0"},
+        transporte,
+        APROVADA,
+        escrever=saidas.append,
+    )
+
+    assert "Custo estimado: US$ 0.00" in saidas
+
+
 def test_relatorios_dizem_o_que_mudou() -> None:
     casos, transporte = _tres_casos()
     r = avaliar(transporte, casos, NOVA, APROVADA, {"famosos": 0.9})

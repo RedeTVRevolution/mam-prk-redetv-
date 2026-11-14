@@ -3,8 +3,9 @@ from dataclasses import replace
 
 import pytest
 
+from api.ferramentas.comum import percentil
 from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
-from api.medir_busca import medir, percentil, tabela
+from api.medir_busca import medir, tabela
 
 
 def test_percentil_por_posicao_mais_proxima() -> None:

@@ -55,11 +55,12 @@ from api.comparacao_de_passadas import (
     tempo_do_job,
 )
 from api.decupagem import Decupagem
+from api.ferramentas.comum import dolar
 from api.gemini import MODELO
 from api.jobs import RepositorioDeJobs
 from api.nuvem import DecupagensStorage, RepositorioFirestore
 from api.passadas import LeituraDePassadas, Passada, PassadasStorage
-from api.precos_dos_modelos import Preco, precos_do_ambiente
+from api.precos_dos_modelos import Preco, lista_de_pares, precos_do_ambiente
 
 
 def custo_do_job(
@@ -78,15 +79,7 @@ def custo_do_job(
 
 def tokens_do_job(texto: str) -> dict[str, tuple[int, int]]:
     """`TOKENS_DO_JOB`: `job=entrada:saida`, separados por vírgula."""
-    tokens: dict[str, tuple[int, int]] = {}
-    for item in filter(None, (p.strip() for p in texto.split(","))):
-        job, _, valores = item.partition("=")
-        entrada, _, saida = valores.partition(":")
-        try:
-            tokens[job] = (int(entrada), int(saida))
-        except ValueError as e:
-            raise FaltaNoAmbiente(f"tokens inválidos em TOKENS_DO_JOB: {item!r}") from e
-    return tokens
+    return lista_de_pares(texto, int, "tokens inválidos em TOKENS_DO_JOB")
 
 
 def escolher_passada(
@@ -202,7 +195,7 @@ def _linha(e: Entrada) -> str:
 
 
 def _usd(valor: float | None) -> str:
-    return f"US$ {valor:.4f}" if valor is not None else "n/d"
+    return dolar(valor, casas=4, ptbr=False) if valor is not None else "n/d"
 
 
 def _custo(lado: LadoDoResultado, duracao_ms: int) -> str:

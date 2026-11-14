@@ -10,12 +10,12 @@ com o tempo do Gemini e `medido=False`, e conta como dúvida no escalonamento.
 """
 
 import re
-import unicodedata
 from collections import defaultdict
 from difflib import SequenceMatcher
 
 from api.decupagem import Decupagem, TextoNaTela
 from api.leitura_da_tela import LeituraDaTela, LinhaLida
+from api.texto import sem_acento
 
 LIMIAR_DE_SEMELHANCA_DO_OCR = 0.8
 TOLERANCIA_DE_QUADROS = 1
@@ -26,10 +26,7 @@ _Aparicao = tuple[int, int]
 
 
 def _normalizar(texto: str) -> str:
-    sem_acento = "".join(
-        c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
-    )
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", sem_acento.lower()).split())
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", sem_acento(texto).lower()).split())
 
 
 def _candidatos(linhas: list[LinhaLida]) -> list[str]:

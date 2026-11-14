@@ -12,7 +12,6 @@ Com `--amostra N`, sorteia até N grupos juntados (um par por grupo, estável pe
 do id do grupo, como `reservado_pelo_sorteio`) para a pessoa conferir a precisão.
 """
 
-import hashlib
 import json
 import sys
 from collections.abc import Sequence
@@ -20,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from api.decupagem import Decupagem
+from api.ferramentas.comum import hash_estavel
 from api.juncao_de_pessoas import (
     LIMITE_DE_PARES,
     juntar_sem_nome,
@@ -73,7 +73,7 @@ def amostra(
     """Até `n` grupos juntados, na ordem do hash do id do grupo (`arquivo:pessoa`), com
     o par de origens que o hash escolhe em cada um. Os mesmos grupos caem na amostra
     antes e depois de uma mudança."""
-    achados: list[tuple[str, dict[str, str]]] = []
+    achados: list[tuple[int, dict[str, str]]] = []
     for arquivo, d in decupagens.items():
         juntada = juntadas[arquivo] if juntadas else juntar_sem_nome(d)
         for p in juntada.pessoas:
@@ -82,11 +82,11 @@ def amostra(
             grupo = f"{arquivo}:{p.id}"
             a, b = sorted(
                 p.origens,
-                key=lambda o: hashlib.sha256(f"{grupo}:{o.id}".encode()).hexdigest(),
+                key=lambda o: hash_estavel(f"{grupo}:{o.id}", 64),
             )[:2]
             achados.append(
                 (
-                    hashlib.sha256(grupo.encode()).hexdigest(),
+                    hash_estavel(grupo, 64),
                     {"grupo": grupo, "a": a.chave, "b": b.chave},
                 )
             )

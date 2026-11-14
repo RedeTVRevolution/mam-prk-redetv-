@@ -16,9 +16,9 @@ from api.carga_dev import (
     Transporte,
     Usuario,
     consultas_da_sonda,
-    percentil,
     rodar,
 )
+from api.ferramentas.comum import percentil
 from api.teste_de_carga import CABECALHO_DE_TESTE
 
 

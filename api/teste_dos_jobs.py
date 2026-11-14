@@ -14,11 +14,11 @@ pegar a biblioteca ou o modelo quebrado antes da publicação.
 
 import logging
 import os
-import unicodedata
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from api.dispositivo import Dispositivo, ler_dispositivo
+from api.texto import sem_acento
 
 log = logging.getLogger(__name__)
 
@@ -42,8 +42,8 @@ def ativo(ambiente: Mapping[str, str] | None = None) -> bool:
 
 def normalizar(texto: str) -> str:
     """Minúsculas, sem acento nem pontuação, com um espaço entre as palavras."""
-    sem_acento = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
-    letras = "".join(c if c.isalnum() else " " for c in sem_acento.lower())
+    ascii_ = sem_acento(texto).encode("ascii", "ignore").decode()
+    letras = "".join(c if c.isalnum() else " " for c in ascii_.lower())
     return " ".join(letras.split())
 
 

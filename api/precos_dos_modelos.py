@@ -15,18 +15,25 @@ class Preco:
     saida: float
 
 
-def precos_do_ambiente(texto: str) -> dict[str, Preco]:
-    precos: dict[str, Preco] = {}
+def lista_de_pares[T: (int, float)](
+    texto: str, tipo: type[T], mensagem: str
+) -> dict[str, tuple[T, T]]:
+    """`chave=a:b` separados por vírgula; `tipo` lê os dois valores. O item inválido levanta
+    `FaltaNoAmbiente` com `mensagem: 'item'`."""
+    lidos: dict[str, tuple[T, T]] = {}
     for item in filter(None, (p.strip() for p in texto.split(","))):
-        modelo, _, valores = item.partition("=")
-        entrada, _, saida = valores.partition(":")
+        chave, _, valores = item.partition("=")
+        a, _, b = valores.partition(":")
         try:
-            precos[modelo] = Preco(float(entrada), float(saida))
+            lidos[chave] = (tipo(a), tipo(b))
         except ValueError as e:
-            raise FaltaNoAmbiente(
-                f"preço inválido em PRECOS_DOS_MODELOS: {item!r}"
-            ) from e
-    return precos
+            raise FaltaNoAmbiente(f"{mensagem}: {item!r}") from e
+    return lidos
+
+
+def precos_do_ambiente(texto: str) -> dict[str, Preco]:
+    lidos = lista_de_pares(texto, float, "preço inválido em PRECOS_DOS_MODELOS")
+    return {modelo: Preco(*valores) for modelo, valores in lidos.items()}
 
 
 def tokens_do_transporte(transporte: Transporte) -> tuple[int, int]:

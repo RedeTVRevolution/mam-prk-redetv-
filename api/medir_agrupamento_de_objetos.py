@@ -16,7 +16,6 @@ qualidade: a pessoa escolhe vídeos de outros programas.
 """
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -27,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from api.assinatura_do_nome import assinatura
+from api.ferramentas.comum import hash_estavel
 from api.taxonomia_de_objetos import OUTRO
 from api.texto import normalizar
 from api.tipo_do_objeto import chave_de_agrupamento, tipo_canonico_de
@@ -72,7 +72,7 @@ def diagnostico(videos: Iterable[dict[str, Any]]) -> dict[str, int]:
 
 
 def _hash(chave: str) -> int:
-    return int(hashlib.sha256(chave.encode()).hexdigest()[:12], 16)
+    return hash_estavel(chave, 12)
 
 
 def grupos_por_programa(videos_por_programa: dict[str, list[dict[str, Any]]]) -> Grupos:
