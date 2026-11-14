@@ -1,4 +1,4 @@
-"""Aceite dos três esquemas de resposta do Gemini contra o Vertex (#617).
+"""Aceite dos cinco esquemas de resposta do Gemini contra o Vertex (#617).
 
 O CI usa cassete e não fala com o Vertex, então um esquema que o serviço recusa (400) só
 aparecia num vídeo de verdade. Este módulo manda cada esquema, gerado do código que vai ao
@@ -9,8 +9,9 @@ Fica fora do `make verificar` e do CI: lá não há credenciais.
 Uso: `make aceitar-esquemas` ou `python -m api.aceite_dos_esquemas`. Ambiente: `GCP_PROJECT_ID`
 e, para falar como a mam-terraform, `GOOGLE_IMPERSONATE_SERVICE_ACCOUNT`.
 Saída: 0 aceito (ou só 429/5xx, passageiros), 1 algum 400 (esquema recusado: derruba o
-deploy), 2 outro erro (sem prova: acesso ainda não propagado no primeiro deploy, modelo, rede:
-o deploy só avisa e segue).
+deploy), 2 sem prova (falha antes da primeira chamada, ou outra exceção sem nenhum 400:
+acesso ainda não propagado no primeiro deploy, modelo, rede: o deploy só avisa e segue).
+Todos os esquemas são tentados e o 400 colhido nunca se perde por erro numa chamada seguinte.
 """
 
 import os
@@ -21,6 +22,7 @@ from typing import Any, Literal
 from api import gemini
 from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import esquema_do_modelo
+from api.entendimento_da_consulta import MODELO_DA_CONSULTA, esquema_do_termo_da_foto
 from api.gemini import (
     MODO_STANDARD,
     Chamada,
@@ -30,6 +32,7 @@ from api.gemini import (
     repetivel,
 )
 from api.inventario import RespostaConvertida, RespostaVista, esquema_obrigatorio
+from api.modelo_forte import MODELO_FORTE, esquema_da_resposta
 
 Veredito = Literal["aceito", "recusado", "passageiro", "sem_prova"]
 
@@ -41,19 +44,25 @@ class Resultado:
     detalhe: str = ""
 
 
-def _esquemas() -> dict[str, dict[str, Any]]:
+def _esquemas() -> dict[str, tuple[str, dict[str, Any]]]:
+    """Nome -> (modelo, esquema), cada um como a produção o manda."""
     return {
-        "analise": esquema_do_modelo(),
-        "inventario_convertido": esquema_obrigatorio(RespostaConvertida),
-        "inventario_visto": esquema_obrigatorio(RespostaVista),
+        "analise": (gemini.MODELO, esquema_do_modelo()),
+        "inventario_convertido": (
+            gemini.MODELO,
+            esquema_obrigatorio(RespostaConvertida),
+        ),
+        "inventario_visto": (gemini.MODELO, esquema_obrigatorio(RespostaVista)),
+        "identificacao": (MODELO_FORTE, esquema_da_resposta()),
+        "busca_por_foto": (MODELO_DA_CONSULTA, esquema_do_termo_da_foto()),
     }
 
 
 def aceitar(transporte: Transporte) -> list[Resultado]:
     resultados = []
-    for nome, esquema in _esquemas().items():
+    for nome, (modelo, esquema) in _esquemas().items():
         chamada = Chamada(
-            modelo=gemini.MODELO,
+            modelo=modelo,
             instrucao="Responda ao esquema com o mínimo possível.",
             video_uri="",
             esquema=esquema,
@@ -75,6 +84,9 @@ def aceitar(transporte: Transporte) -> list[Resultado]:
             else:
                 veredito = "sem_prova"
             resultados.append(Resultado(nome, veredito, str(e)))
+        except Exception as e:  # noqa: BLE001
+            # Token, rede, JSON: não prova nada, mas não pode jogar fora um 400 já colhido.
+            resultados.append(Resultado(nome, "sem_prova", f"{type(e).__name__}: {e}"))
     return resultados
 
 
@@ -92,11 +104,11 @@ def main() -> int:
             ),
             etapa="aceite_dos_esquemas",
         )
-        resultados = aceitar(transporte)
     except Exception as e:  # noqa: BLE001
-        # Autenticação ou rede: não prova nada sobre o esquema. Só o 400 dá saída 1.
+        # Antes da primeira chamada: não prova nada sobre o esquema.
         print(f"sem prova: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         return 2
+    resultados = aceitar(transporte)
     for r in resultados:
         print(f"{r.nome}: {r.veredito} {r.detalhe}".rstrip(), flush=True)
     return codigo_de_saida(resultados)
