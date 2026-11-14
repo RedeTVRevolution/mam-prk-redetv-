@@ -22,7 +22,6 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
@@ -401,8 +400,7 @@ def exportar(
 def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int:
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
-        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        decupagens = DecupagensStorage.do_ambiente(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -410,7 +408,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     banco = cliente_do_firestore(projeto)
     exportar(
         RepositorioFirestore(banco),
-        DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        decupagens,
         RepositorioDeCorrecoesFirestore(banco),
         pasta,
     )

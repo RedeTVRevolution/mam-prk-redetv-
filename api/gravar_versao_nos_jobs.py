@@ -15,8 +15,7 @@ import sys
 from itertools import batched
 from typing import Any
 
-from google.cloud.storage import Client as ClienteStorage
-
+from api.ambiente import FaltaNoAmbiente
 from api.bancos import cliente_do_firestore
 from api.jobs import Job
 from api.leitura_da_decupagem import AbreDecupagem
@@ -55,13 +54,12 @@ def gravar(colecao: Any, cliente: Any, decupagens: AbreDecupagem) -> dict[str, i
 
 
 def main() -> int:
-    projeto = os.environ["GCP_PROJECT_ID"]
-    cliente = cliente_do_firestore(projeto)
-    decupagens = DecupagensStorage(
-        ClienteStorage(project=projeto),
-        os.environ["BUCKET_ACEITOS"],
-        os.environ["BUCKET_DECUPAGENS"],
-    )
+    try:
+        decupagens = DecupagensStorage.do_ambiente()
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    cliente = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
     contagem = gravar(cliente.collection(COLECAO_DE_JOBS), cliente, decupagens)
     for nome, quantos in contagem.items():
         print(f"{nome}: {quantos}")

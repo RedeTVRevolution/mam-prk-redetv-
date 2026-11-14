@@ -11,8 +11,7 @@ import sys
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from google.cloud.storage import Client as ClienteStorage
-
+from api.ambiente import FaltaNoAmbiente
 from api.bancos import cliente_do_firestore
 from api.leitura_da_decupagem import LeituraDaDecupagem
 from api.marcas import carregar_marcas
@@ -42,17 +41,17 @@ def decupagens_dos_jobs(
 
 
 def main() -> int:
-    projeto = os.environ.get("GCP_PROJECT_ID") or sys.exit("defina GCP_PROJECT_ID")
-    cliente = cliente_do_firestore(projeto)
+    try:
+        decupagens = DecupagensStorage.do_ambiente()
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    cliente = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
     entraram = carregar_marcas(
         CatalogoDeMarcasFirestore(cliente),
         decupagens_dos_jobs(
             RepositorioFirestore(cliente).listar(),
-            DecupagensStorage(
-                ClienteStorage(project=projeto),
-                os.environ["BUCKET_ACEITOS"],
-                os.environ["BUCKET_DECUPAGENS"],
-            ),
+            decupagens,
             RepositorioDeCorrecoesFirestore(cliente),
         ),
     )

@@ -12,9 +12,8 @@ from collections.abc import Callable
 from datetime import datetime
 from functools import partial
 
-from google.cloud.storage import Client as ClienteStorage
-
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.ambiente import FaltaNoAmbiente
 from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import fechar_a_rodada, tomar_a_rodada
 from api.copia_bigquery import (
@@ -200,16 +199,16 @@ def main(argv: list[str]) -> int:
     if copia is None:
         print("BIGQUERY_DATASET não definido", file=sys.stderr)
         return 2
-    projeto = os.environ["GCP_PROJECT_ID"]
-    firestore_ = cliente_do_firestore(projeto)
+    try:
+        decupagens = DecupagensStorage.do_ambiente()
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    firestore_ = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
     resultado = copiar_jobs(
         argv or None,
         RepositorioFirestore(firestore_),
-        DecupagensStorage(
-            ClienteStorage(project=projeto),
-            os.environ["BUCKET_ACEITOS"],
-            os.environ["BUCKET_DECUPAGENS"],
-        ),
+        decupagens,
         RepositorioDeCorrecoesFirestore(firestore_),
         copia,
         pessoas=CatalogoFirestore(firestore_),

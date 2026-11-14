@@ -202,7 +202,8 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        cliente = ClienteStorage(project=projeto)
+        decupagens = DecupagensStorage.do_ambiente(ambiente, cliente)
         regiao = exigir_do_ambiente(ambiente, "WORKFLOW_REGIAO")
         workflow = exigir_do_ambiente(ambiente, "WORKFLOW_VALIDACAO")
         de = argumentos[0] if argumentos and argumentos[0] else None
@@ -215,10 +216,9 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
         print(f"erro: {e}", file=sys.stderr)
         return 2
     banco = cliente_do_firestore(projeto, ambiente)
-    cliente = ClienteStorage(project=projeto)
     reprocessar_versao(
         RepositorioFirestore(banco),
-        DecupagensStorage(cliente, aceitos, decupagens),
+        decupagens,
         RepositorioDeAuditoriaFirestore(
             cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
         ),

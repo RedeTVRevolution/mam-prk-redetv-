@@ -84,6 +84,7 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/a
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
 COPY api/__init__.py \
+     api/ambiente.py \
      api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
@@ -172,6 +173,7 @@ RUN uv sync --locked --no-dev --group ocr-gpu --compile-bytecode
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
 COPY api/__init__.py \
+     api/ambiente.py \
      api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
@@ -293,6 +295,7 @@ RUN uv sync --locked --no-dev --group objetos --compile-bytecode
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
 COPY api/__init__.py \
+     api/ambiente.py \
      api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \

@@ -33,7 +33,6 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
@@ -342,8 +341,7 @@ def main(
     """Argumentos: `DESDE`, `ATE` (dias ISO, inclusive) e `PROGRAMA`, todos opcionais."""
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
-        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        decupagens = DecupagensStorage.do_ambiente(ambiente)
         pedidos = [*argumentos, "", "", ""][:3]
         inicio, fim = _periodo(
             date.fromisoformat(pedidos[0]) if pedidos[0] else None,
@@ -355,7 +353,7 @@ def main(
     banco = cliente_do_firestore(projeto)
     linhas = calcular(
         RepositorioFirestore(banco),
-        DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        decupagens,
         RepositorioDeCorrecoesFirestore(banco),
         RepositorioDeRevisaoFirestore(banco),
         inicio,

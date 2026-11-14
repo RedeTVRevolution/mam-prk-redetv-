@@ -28,7 +28,7 @@ def _codigo(chamar: Callable[[], Any]) -> int:
     try:
         resultado = chamar()
     except SystemExit as e:
-        return int(e.code or 0)  # type: ignore[call-overload]
+        return int(e.code or 0)
     return int(resultado)
 
 

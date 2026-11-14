@@ -33,6 +33,7 @@ from google.api_core.exceptions import NotFound
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.correcoes import RepositorioDeCorrecoes
@@ -371,14 +372,18 @@ def main(argumentos: list[str]) -> int:
         if preenchendo
         else DIAS_RECENTES
     )
+    try:
+        cliente = ClienteStorage(
+            project=exigir_do_ambiente(os.environ, "GCP_PROJECT_ID")
+        )
+        decupagens = DecupagensStorage.do_ambiente(os.environ, cliente)
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
     config = ConfigDaTaxa.do_ambiente(os.environ)
-    cliente = ClienteStorage(project=config.projeto)
     banco = cliente_do_firestore(config.projeto)
     jobs = RepositorioFirestore(banco)
     itens = ItensNoStorage(cliente, os.environ["BUCKET_DECUPAGENS"])
-    decupagens = DecupagensStorage(
-        cliente, os.environ["BUCKET_ACEITOS"], os.environ["BUCKET_DECUPAGENS"]
-    )
     if preenchendo:
         print(f"{preencher_itens(jobs, decupagens, itens)} contagens gravadas")
     gravadas = atualizar(

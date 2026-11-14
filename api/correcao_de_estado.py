@@ -190,7 +190,6 @@ def main(
 
 
 def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
-    from google.cloud.storage import Client as ClienteStorage
 
     from api.bancos import cliente_da_colecao
     from api.nuvem import (
@@ -202,8 +201,7 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
 
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
-        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        decupagens = DecupagensStorage.do_ambiente(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -214,7 +212,7 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
         RepositorioDeAuditoriaFirestore(
             cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
         ),
-        DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        decupagens,
     )
 
 

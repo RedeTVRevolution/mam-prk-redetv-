@@ -19,11 +19,11 @@ from datetime import datetime
 from functools import partial
 from typing import Any, NamedTuple, get_args
 
-from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.ambiente import FaltaNoAmbiente
 from api.bancos import cliente_do_firestore
 from api.catalogo_dos_jobs import gravar_catalogo_do_job
 from api.ciclo_de_vida import fechar_a_rodada, tomar_a_rodada
@@ -438,13 +438,12 @@ def reindexar_jobs(
 
 
 def main(argv: list[str]) -> int:
-    projeto = os.environ["GCP_PROJECT_ID"]
-    firestore_ = cliente_do_firestore(projeto)
-    decupagens = DecupagensStorage(
-        ClienteStorage(project=projeto),
-        os.environ["BUCKET_ACEITOS"],
-        os.environ["BUCKET_DECUPAGENS"],
-    )
+    try:
+        decupagens = DecupagensStorage.do_ambiente()
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    firestore_ = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
     busca = ConfigDaBusca.do_ambiente(os.environ)
     # O sinal por programa só vale para o vídeo que acabou de concluir (o Workflows passa
     # JOB_ID); reindexar todos os vídeos de uma vez não o avalia, para não alertar o passado.

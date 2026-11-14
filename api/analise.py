@@ -12,6 +12,7 @@ as janelas já concluídas (`api/progresso_das_janelas.py`).
 
 import logging
 import os
+import sys
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -20,6 +21,7 @@ from typing import Protocol
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
+from api.ambiente import FaltaNoAmbiente
 from api.analise_por_janelas import analisar_video
 from api.bancos import cliente_do_firestore
 from api.catalogo import Catalogo
@@ -166,6 +168,11 @@ def executar(
 
 
 def main() -> None:
+    try:
+        decupagens = DecupagensStorage.do_ambiente()
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        sys.exit(2)
     projeto = os.environ["GCP_PROJECT_ID"]
     aceitos = os.environ["BUCKET_ACEITOS"]
     sessao = sessao_autenticada()
@@ -173,9 +180,7 @@ def main() -> None:
     executar(
         os.environ["JOB_ID"],
         jobs_do_ambiente(cliente_do_firestore(projeto)),
-        DecupagensStorage(
-            ClienteStorage(project=projeto), aceitos, os.environ["BUCKET_DECUPAGENS"]
-        ),
+        decupagens,
         TransporteVertex(projeto, sessao, imprimir),
         TranscricoesStorage(ClienteStorage(project=projeto), aceitos),
         LeiturasStorage(ClienteStorage(project=projeto), aceitos),
