@@ -27,3 +27,5 @@ CATEGORIA_DO_TIPO: dict[str, str] = {t["tipo"]: t["categoria"] for t in TAXONOMI
 SINONIMOS_DO_TIPO: dict[str, list[str]] = {
     t["tipo"]: list(t["sinonimos"]) for t in TAXONOMIA
 }
+# Para o texto das instruções: o esquema não leva o enum, o Vertex recusa (#617).
+TEXTO_DOS_TIPOS: str = ", ".join(TIPOS_CANONICOS)

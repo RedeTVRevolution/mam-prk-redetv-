@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from api.taxonomia_de_objetos import OPCOES_DE_TIPO, OUTRO
+from api.taxonomia_de_objetos import OUTRO
 
 VersaoEsquema = Literal["1.2", "1.3", "1.4", "1.5"]
 VERSAO_ESQUEMA: VersaoEsquema = "1.5"  # o mypy cobra se o tipo mudar sozinho
@@ -225,13 +225,13 @@ RELACOES_DO_OBJETO = get_args(RelacaoDoObjeto)
 
 
 # O tipo canônico do objeto (#544), de uma lista fechada (`api/taxonomia_de_objetos.json`). O
-# esquema do modelo leva o enum; a leitura aceita qualquer texto, para uma lista que mude depois
-# não derrubar uma Decupagem já gravada: o que não está na lista vale `outro`.
+# esquema do modelo NÃO leva o enum (o Vertex recusa 278 valores, #617): a lista vai no texto da
+# instrução. A leitura aceita qualquer texto, para uma lista que mude depois não derrubar uma
+# Decupagem já gravada: o que não está na lista vale `outro`.
 TipoCanonico = Annotated[
     str,
     Field(
         max_length=100,
-        json_schema_extra={"enum": OPCOES_DE_TIPO},
         description="O tipo da lista que melhor descreve o objeto, ao lado do nome "
         "livre; `outro` só quando nenhum servir.",
     ),

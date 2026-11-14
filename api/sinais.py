@@ -84,6 +84,24 @@ def registro_da_resposta_fora_do_esquema(modelo: str, motivo: str) -> str:
     )
 
 
+def registro_do_erro_http(
+    status: int, codigo: str, mensagem: str, modelo: str, etapa: str | None = None
+) -> str:
+    """Uma linha por resposta de erro do Vertex (#617): o que o serviço disse, com a mensagem
+    limitada. Nunca o pedido, a credencial nem o vídeo."""
+    registro: dict[str, object] = {
+        "severity": "ERROR" if status < 500 and status != 429 else "WARNING",
+        "evento": "erro_http_do_modelo",
+        "status": status,
+        "codigo": codigo,
+        "mensagem": mensagem[:300],
+        "modelo": modelo,
+    }
+    if etapa:
+        registro["etapa"] = etapa
+    return json.dumps(registro, ensure_ascii=False)
+
+
 def registro_das_pessoas_fora_da_pauta(pautas: dict[str, list[str]]) -> str:
     """Uma linha por resposta corrigida: os ids que o modelo citou na pauta sem declará-los
     em `pessoas` e que saíram dela (pauta -> ids). Evento próprio: não conta no alerta."""

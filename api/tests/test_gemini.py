@@ -794,3 +794,59 @@ def test_instrucao_diz_que_arroba_e_nome_de_pessoa_nao_sao_marca() -> None:
         "description"
     ]
     assert "nunca é marca" in descricao
+
+
+def test_erro_http_do_vertex_leva_status_codigo_e_mensagem() -> None:
+    corpo = {
+        "error": {
+            "code": 400,
+            "message": "Request contains an invalid argument.",
+            "status": "INVALID_ARGUMENT",
+        }
+    }
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaFalsa(400, corpo)))
+
+    with pytest.raises(ErroHttp) as e:
+        transporte.gerar(_chamada())
+
+    assert e.value.status == 400
+    assert (
+        str(e.value)
+        == "HTTP 400 INVALID_ARGUMENT: Request contains an invalid argument."
+    )
+
+
+def test_erro_http_vai_ao_log_com_modelo_e_etapa_sem_pedido_nem_credencial() -> None:
+    corpo = {"error": {"status": "INVALID_ARGUMENT", "message": "x" * 1000}}
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p",
+        SessaoFalsa(RespostaFalsa(400, corpo)),
+        registrar=linhas.append,
+        etapa="busca",
+    )
+
+    with pytest.raises(ErroHttp):
+        transporte.gerar(_chamada())
+
+    [registro] = [json.loads(linha) for linha in linhas]
+    assert registro["evento"] == "erro_http_do_modelo"
+    assert (registro["status"], registro["codigo"]) == (400, "INVALID_ARGUMENT")
+    assert (registro["modelo"], registro["etapa"]) == ("gemini-3.5-flash-lite", "busca")
+    assert len(registro["mensagem"]) <= 300
+    assert "Decupe." not in json.dumps(registro) and VIDEO not in json.dumps(registro)
+
+
+def test_erro_http_sem_corpo_json_ainda_leva_o_status() -> None:
+    transporte = TransporteVertex("p", SessaoFalsa(RespostaSemJson(502)))
+
+    with pytest.raises(ErroHttp) as e:
+        transporte.gerar(_chamada())
+
+    assert (e.value.status, e.value.codigo, e.value.mensagem) == (502, "", "")
+
+
+def test_analise_falhou_leva_o_erro_http_do_servico() -> None:
+    t = TransporteFalso(ErroHttp(400, "INVALID_ARGUMENT", "esquema recusado"))
+    with pytest.raises(AnaliseFalhou, match="400 INVALID_ARGUMENT: esquema recusado"):
+        _rodar(t)
