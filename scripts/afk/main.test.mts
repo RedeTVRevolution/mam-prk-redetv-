@@ -118,8 +118,9 @@ case $acao in
 esac
 `);
 
-// gh falso: serve $FAKE/issues.json e registra edições e comentários em $FAKE/gh.log. Os PRs vão no
-// mesmo arquivo, com o estado em "pr" (pr(9, "MERGED")): a consulta das issues não os vê.
+// gh falso: serve $FAKE/issues.json e registra consultas, edições e comentários em $FAKE/gh.log. Os PRs
+// vão no mesmo arquivo, com o estado em "pr" (pr(9, "MERGED")): a consulta das abertas não os vê, e a
+// consulta por número (issueOrPullRequest) devolve issue ou PR, ou falha se o número não existe.
 writeFileSync(join(bin, "gh"), String.raw`#!/usr/bin/env bash
 set -euo pipefail
 case "$1 $2" in
@@ -128,18 +129,29 @@ case "$1 $2" in
     if [ -s "$FAKE/graphql-falha" ] && [ "$(cat "$FAKE/graphql-falha")" -gt 0 ]; then
       echo $(($(cat "$FAKE/graphql-falha") - 1)) > "$FAKE/graphql-falha"; echo "gh falso: falha de rede" >&2; exit 1
     fi
-    jq '[{data: {repository: {issues: {nodes: map(select(.pr == null)), pageInfo: {hasNextPage: false}}}}}]' "$FAKE/issues.json" ;;
-  "pr list")
-    echo "pr list" >> "$FAKE/gh.log"
-    # Um PR com estado SEM_PERMISSAO faz a leitura falhar, como um token sem "Pull requests: leitura".
-    if jq -e 'any(.[]; .pr == "SEM_PERMISSAO")' "$FAKE/issues.json" > /dev/null; then
-      echo "GraphQL: Resource not accessible by personal access token (repository.pullRequests)" >&2; exit 1
-    fi
-    # $FAKE/pr-falha: quantas leituras dos PRs ainda falham por rede.
-    if [ -s "$FAKE/pr-falha" ] && [ "$(cat "$FAKE/pr-falha")" -gt 0 ]; then
-      echo $(($(cat "$FAKE/pr-falha") - 1)) > "$FAKE/pr-falha"; echo "gh falso: falha de rede" >&2; exit 1
-    fi
-    jq '[.[] | select(.pr == "MERGED") | {number}]' "$FAKE/issues.json" ;;
+    # Cada consulta fica no gh.log: "abertas OPEN" (só as abertas), "abertas TODAS" ou "numero N".
+    if [[ "$*" == *issueOrPullRequest* ]]; then
+      n=$(grep -o 'number=[0-9]*' <<< "$*" | cut -d= -f2)
+      echo "numero $n" >> "$FAKE/gh.log"
+      # $FAKE/pr-falha: quantas consultas por número ainda falham por rede.
+      if [ -s "$FAKE/pr-falha" ] && [ "$(cat "$FAKE/pr-falha")" -gt 0 ]; then
+        echo $(($(cat "$FAKE/pr-falha") - 1)) > "$FAKE/pr-falha"; echo "gh falso: falha de rede" >&2; exit 1
+      fi
+      # Um PR com estado SEM_PERMISSAO falha como um token sem "Pull requests: leitura".
+      if jq -e --argjson n "$n" 'any(.[]; .number == $n and .pr == "SEM_PERMISSAO")' "$FAKE/issues.json" > /dev/null; then
+        echo "GraphQL: Resource not accessible by personal access token (repository.issueOrPullRequest)" >&2; exit 1
+      fi
+      jq -e --argjson n "$n" '[.[] | select(.number == $n)] | first // empty | if .pr == null
+        then {data: {repository: {issueOrPullRequest: {__typename: "Issue", state}}}}
+        else {data: {repository: {issueOrPullRequest: {__typename: "PullRequest", state: (if .pr == "MERGED" then "MERGED" else .pr end), merged: (.pr == "MERGED")}}}} end' "$FAKE/issues.json" ||
+        { echo "GraphQL: Could not resolve to an issue or pull request with the number of $n." >&2; exit 1; }
+    elif [[ "$*" == *"states: OPEN"* ]]; then
+      echo "abertas OPEN" >> "$FAKE/gh.log"
+      jq '[{data: {repository: {issues: {nodes: map(select(.pr == null and .state == "OPEN")), pageInfo: {hasNextPage: false}}}}}]' "$FAKE/issues.json"
+    else
+      echo "abertas TODAS" >> "$FAKE/gh.log"
+      jq '[{data: {repository: {issues: {nodes: map(select(.pr == null)), pageInfo: {hasNextPage: false}}}}}]' "$FAKE/issues.json"
+    fi ;;
   "issue comment")
     echo "comment $3" >> "$FAKE/gh.log"
     if [ -s "$FAKE/gh-falha" ] && [[ "$*" == *"$(cat "$FAKE/gh-falha")"* ]]; then echo "gh falso: falha de rede" >&2; exit 1; fi ;;
@@ -494,50 +506,82 @@ test("fila sem tickets elegíveis", async () => {
   assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#1\tespera #2\n#3\tespera #2\n");
 });
 
-test("bloqueio por PR: mesclado libera, aberto ou fechado sem merge segura (#87)", async () => {
+const consultas = (log: string, prefixo: string) => log.split("\n").filter((l) => l.startsWith(prefixo));
+
+test("a consulta das issues pede só as abertas", async () => {
+  const r = await roda(5, [issue(1, "OPEN", "ready-for-agent"), issue(5, "CLOSED", "ready-for-agent")], ["feito 1", "revisa 1"]);
+  assert.equal(r.feitos(), "1");
+  assert.ok(consultas(r.ghLog(), "abertas OPEN").length >= 1);
+  assert.equal(consultas(r.ghLog(), "abertas TODAS").length, 0);
+});
+
+test("bloqueador que é issue fechada libera o ticket e não é consultado de novo na rodada", async () => {
+  const r = await roda(5, [
+    issue(1, "OPEN", "ready-for-agent", [5]),
+    issue(2, "OPEN", "ready-for-agent", [], "Bloqueado por: #5"),
+    issue(5, "CLOSED", ""),
+  ], ["feito 1", "revisa 1", "feito 2", "revisa 2"]);
+  assert.equal(r.saida, 0);
+  assert.equal(r.feitos(), "1 2");
+  assert.deepEqual(consultas(r.ghLog(), "numero"), ["numero 5"], "uma consulta só, apesar de várias vagas");
+});
+
+test("bloqueador que é issue aberta sem a label de pronto segura, sem consulta por número", async () => {
+  const r = await roda(5, [
+    issue(1, "OPEN", "ready-for-agent", [6]),
+    issue(2, "OPEN", "ready-for-agent"),
+    issue(6, "OPEN", "ready-for-human"),
+  ], ["feito 2", "revisa 2"]);
+  assert.equal(r.feitos(), "2");
+  assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#1\tespera #6\n");
+  assert.equal(consultas(r.ghLog(), "numero").length, 0);
+});
+
+test("bloqueio por PR: mesclado libera; aberto, fechado sem merge e inexistente seguram (#87)", async () => {
   const r = await roda(5, [
     issue(1, "OPEN", "ready-for-agent", [], "Bloqueado por: #7"),
     issue(2, "OPEN", "ready-for-agent", [], "Bloqueado por: #8"),
     issue(3, "OPEN", "ready-for-agent", [], "Blocked by: #9"),
     issue(4, "OPEN", "ready-for-agent", [6]),
+    issue(10, "OPEN", "ready-for-agent", [], "Bloqueado por: #99"),
     issue(6, "OPEN", "ready-for-human"),
     pr(7, "MERGED"), pr(8, "OPEN"), pr(9, "CLOSED"),
   ], ["feito 1", "revisa 1"]);
   assert.equal(r.saida, 0);
   assert.equal(r.feitos(), "1");
-  assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#2\tespera #8\n#3\tespera #9\n#4\tespera #6\n");
+  assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#2\tespera #8\n#3\tespera #9\n#4\tespera #6\n#10\tespera #99\n");
 });
 
-test("bloqueio por PR sem permissão para ler PRs: anota uma vez e segue com o resto (#87)", async () => {
+test("bloqueio por PR sem permissão para ler PRs: anota uma vez; quem espera issue fechada segue liberado (#87)", async () => {
   const r = await roda(5, [
     issue(1, "OPEN", "ready-for-agent", [], "Bloqueado por: #7"),
-    issue(2, "OPEN", "ready-for-agent"),
-    issue(3, "OPEN", "ready-for-agent"),
-    pr(7, "MERGED"), pr(8, "SEM_PERMISSAO"),
-  ], ["feito 2", "revisa 2", "feito 3", "revisa 3"]);
+    issue(2, "OPEN", "ready-for-agent", [], "Bloqueado por: #5"),
+    issue(3, "OPEN", "ready-for-agent", [], "Bloqueado por: #7"),
+    issue(5, "CLOSED", ""),
+    pr(7, "SEM_PERMISSAO"),
+  ], ["feito 2", "revisa 2"]);
   assert.equal(r.saida, 0);
-  assert.equal(r.feitos(), "2 3");
-  assert.equal(r.notas().split("não li os PRs mesclados").length - 1, 1, "anota uma vez só");
-  assert.equal(r.ghLog().split("\n").filter((l) => l === "pr list").length, 1, "falta de permissão não repete");
+  assert.equal(r.feitos(), "2");
+  assert.equal(r.notas().split("não li os PRs").length - 1, 1, "anota uma vez só");
   assert.doesNotMatch(r.notas(), /nova tentativa/);
   assert.match(r.notas(), /Resource not accessible by personal access token/);
-  assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#1\tespera #7\n");
+  assert.equal(readFileSync(join(r.repo, ".afk", "fila"), "utf8"), "#1\tespera #7\n#3\tespera #7\n");
 });
 
-test("bloqueio por PR com falha de rede ao ler os PRs: repete e libera (#87)", async () => {
+test("bloqueio com falha de rede na consulta por número: repete e libera (#87)", async () => {
   const r = await roda(5, [issue(1, "OPEN", "ready-for-agent", [], "Bloqueado por: #7"), pr(7, "MERGED")],
     ["feito 1", "revisa 1"], {}, "", { "pr-falha": "1" });
   assert.equal(r.feitos(), "1");
-  assert.equal(r.ghLog().split("\n").filter((l) => l === "pr list").length, 2);
-  assert.match(r.notas(), /gh pr list: gh falso: falha de rede; nova tentativa/);
-  assert.doesNotMatch(r.notas(), /não li os PRs mesclados/);
+  assert.equal(consultas(r.ghLog(), "numero").length, 2);
+  assert.match(r.notas(), /gh api graphql: gh falso: falha de rede; nova tentativa/);
+  assert.doesNotMatch(r.notas(), /não li os PRs/);
 });
 
-test("sem bloqueio fora das issues, os PRs não são lidos (#87)", async () => {
+test("sem bloqueio fora das abertas, nenhum número é consultado (#87)", async () => {
   const r = await roda(5, [issue(1, "OPEN", "ready-for-agent"), issue(2, "OPEN", "ready-for-agent", [1])],
     ["feito 1", "revisa 1", "feito 2", "revisa 2"]);
   assert.equal(r.feitos(), "1 2");
-  assert.doesNotMatch(r.ghLog(), /pr list/);
+  assert.equal(consultas(r.ghLog(), "numero").length, 0);
 });
 
 test("PR anterior sem merge", async () => {
