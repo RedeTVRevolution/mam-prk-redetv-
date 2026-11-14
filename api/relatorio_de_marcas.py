@@ -18,7 +18,7 @@ from typing import Annotated, Any, Literal, Protocol, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 
 from api.cache_curto import CacheCurto
 from api.comparador import normalizar
@@ -50,7 +50,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
-from api.texto_como_dado import LinhaDaConsulta
+from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta
 
 TIPOS_DE_INSERCAO: tuple[str, ...] = get_args(Comercial.model_fields["tipo"].annotation)
 COLUNAS_DO_CSV = ("marca", "tipo", "insercoes", "tempo_ms", "videos")
@@ -423,6 +423,10 @@ class RelatorioDeMarcas(BaseModel):
     marcas: list[MarcaNoRelatorio]
 
 
+# Cada `tipo` repetido é uma linha só, com tamanho máximo.
+TipoDoPedido = Annotated[str, StringConstraints(max_length=40, pattern=PADRAO_DA_LINHA)]
+
+
 def tipos_do_pedido(tipo: list[str] | None) -> tuple[str, ...]:
     """Os tipos marcados do `tipo` repetido, na ordem de `TIPOS_DE_INSERCAO` e sem repetir;
     vazio ou ausente é "todos" (tupla vazia). Valor fora da lista: 422."""
@@ -515,7 +519,7 @@ def criar_rotas_das_marcas(
         _pessoa: PodeVerORelatorio,
         periodo: Annotated[Periodo, Depends(no_periodo)],
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
-        tipo: Annotated[list[str] | None, Query()] = None,
+        tipo: Annotated[list[TipoDoPedido] | None, Query()] = None,
         formato: Literal["json", "csv"] = "json",
         limite: Annotated[int | None, Query(ge=1, le=LIMITE_DA_PAGINA)] = None,
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
@@ -558,7 +562,7 @@ def criar_rotas_das_marcas(
         periodo: Annotated[Periodo, Depends(no_periodo)],
         marca: Annotated[str, LinhaDaConsulta(200, min_length=1)],
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
-        tipo: Annotated[list[str] | None, Query()] = None,
+        tipo: Annotated[list[TipoDoPedido] | None, Query()] = None,
         limite: Annotated[int, Query(ge=1, le=LIMITE_DA_PAGINA)] = 25,
         cursor: Annotated[str | None, LinhaDaConsulta(500)] = None,
     ) -> JSONResponse:
