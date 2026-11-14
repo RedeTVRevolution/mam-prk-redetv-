@@ -1,8 +1,10 @@
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import requests
 
 from api import caos_dev
 
@@ -20,20 +22,20 @@ def test_envio_do_arquivo_falho_encerra_sem_esperar_o_job(
     clipe = tmp_path / "clipe.mp4"
     clipe.write_bytes(b"dados")
     monkeypatch.setattr(
-        caos_dev.requests,
+        requests,
         "post",
         lambda *a, **k: SimpleNamespace(
             status_code=200, headers={"Location": "http://destino"}
         ),
     )
     monkeypatch.setattr(
-        caos_dev.requests, "put", lambda *a, **k: SimpleNamespace(status_code=403)
+        requests, "put", lambda *a, **k: SimpleNamespace(status_code=403)
     )
 
     def sem_espera(_: float) -> None:
         raise AssertionError("não deve esperar")
 
-    monkeypatch.setattr(caos_dev.time, "sleep", sem_espera)
+    monkeypatch.setattr(time, "sleep", sem_espera)
 
     relatorio = caos_dev.enviar_clipe(_ApiFalsa(), "A", clipe)  # type: ignore[arg-type]
 
