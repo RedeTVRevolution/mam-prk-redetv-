@@ -18,8 +18,9 @@ from api.chaves import (
 )
 from api.ciclo_de_vida import reprocessar
 from api.correcao_de_estado import main as comando
-from api.jobs import Etapa, Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Etapa, Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_decupagem import decupagem_valida

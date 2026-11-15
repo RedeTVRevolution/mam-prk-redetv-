@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict
 
 from api.espera import espera_com_jitter, sorteio_uniforme
-from api.jobs import CodigoDeFalha, Job
+from api.modelo_do_job import CodigoDeFalha, Job
 
 REENTREGAS = 8  # novas tentativas depois da primeira
 ESPERA_BASE_S = 5.0

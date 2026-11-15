@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 
-from api.jobs import Estado, Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Estado, Job
 from api.transcricao import Palavra, Transcricao, TranscricoesEmMemoria
 from api.transcricao_job import executar
 from api.whisper import TranscritorFasterWhisper

@@ -31,8 +31,8 @@ from api.decupagem import Video
 from api.eventos_do_job import jobs_do_ambiente
 from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
 from api.identificacao import TOLERANCIA_DA_FALA_MS
-from api.jobs import RepositorioDeJobs, agora_utc
 from api.leitura_da_tela import LeituraDaTela
+from api.modelo_do_job import RepositorioDeJobs, agora_utc
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,

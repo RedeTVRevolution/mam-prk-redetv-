@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from api import validador
-from api.jobs import CodigoDeFalha
+from api.modelo_do_job import CodigoDeFalha
 from api.validador import Recusa, validar
 
 # Sem ffmpeg na máquina (o CI), os testes rodam na imagem do Job: make testar-na-imagem.

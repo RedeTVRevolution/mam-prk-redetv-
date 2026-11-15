@@ -35,8 +35,8 @@ from api.correcoes import (
 from api.erros import ServicoIndisponivel
 from api.ferramentas.comum import hash_estavel
 from api.identidade import identidade_do_nome
-from api.jobs import RepositorioDeJobs
 from api.leitura_da_decupagem import AbreDecupagem
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,

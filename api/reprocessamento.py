@@ -22,13 +22,9 @@ from api.ciclo_de_vida import (
     desfazer_reprocessamento,
     reprocessar,
 )
-from api.jobs import (
-    Job,
-    JobPublico,
-    NomeDaEtapa,
-    RepositorioDeJobs,
-    ServicoIndisponivel,
-)
+from api.erros import ServicoIndisponivel
+from api.jobs import JobPublico
+from api.modelo_do_job import Job, NomeDaEtapa, RepositorioDeJobs
 from api.permissoes import confere_permissao, exige_pessoa
 from api.progresso_das_janelas import JanelasDoJob
 from api.texto_como_dado import Linha, Texto

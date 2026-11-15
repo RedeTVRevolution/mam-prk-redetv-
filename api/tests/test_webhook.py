@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from api.jobs import Job
+from api.modelo_do_job import Job
 from api.webhook import (
     CofreEmMemoria,
     RepositorioDeWebhooksEmMemoria,

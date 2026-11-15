@@ -19,7 +19,7 @@ from google.cloud import firestore
 from google.cloud.storage import Bucket
 from google.cloud.storage import Client as ClienteStorage
 
-from api.jobs import Estado, Job
+from api.modelo_do_job import Estado, Job
 from api.nuvem import RepositorioFirestore
 from api.validacao_job import executar
 

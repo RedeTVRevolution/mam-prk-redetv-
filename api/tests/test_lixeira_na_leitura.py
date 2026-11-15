@@ -25,7 +25,7 @@ from api.catalogo import (
     PessoaDoCatalogo,
 )
 from api.copia_bigquery import CopiaEmMemoria, LinhaDoMomento, PessoaDoMomento
-from api.jobs import RepositorioEmMemoria, agora_utc
+from api.jobs import RepositorioEmMemoria
 from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.lixeira_na_leitura import (
     PurgaDeMarca,
@@ -38,6 +38,7 @@ from api.lixeira_na_leitura import (
 )
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
+from api.modelo_do_job import agora_utc
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.relatorio_de_marcas import ConsultaBigQuery as MarcasBigQuery
 from api.relatorio_de_marcas import ConsultaComCache as MarcasComCache

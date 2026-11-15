@@ -20,9 +20,11 @@ from api.correcoes import (
     RepositorioDeCorrecoesEmMemoria,
     versao_do_modelo,
 )
+from api.erros import ServicoIndisponivel
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
-from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.revisao import Pulso, RepositorioDeRevisaoEmMemoria
 from api.taxa_de_correcao import COLUNAS_DO_CSV, calcular, em_csv, main

@@ -16,9 +16,7 @@ from pydantic import AwareDatetime, BaseModel
 
 from api.auth import Usuario
 from api.csv_seguro import csv_em_texto
-from api.jobs import (
-    RepositorioDeJobs,
-)
+from api.modelo_do_job import RepositorioDeJobs
 from api.permissoes import exige, exige_uma_de
 
 LIMITE_DE_INATIVIDADE_S = 300.0

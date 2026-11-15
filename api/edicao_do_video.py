@@ -17,13 +17,8 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
-from api.jobs import (
-    FUSO_DA_EMISSORA,
-    DisparoDaIndexacao,
-    Indexacao,
-    JobPublico,
-    RepositorioDeJobs,
-)
+from api.jobs import FUSO_DA_EMISSORA, DisparoDaIndexacao, JobPublico
+from api.modelo_do_job import Indexacao, RepositorioDeJobs
 from api.permissoes import exige
 from api.programas import RepositorioDeProgramas
 from api.texto_como_dado import Linha

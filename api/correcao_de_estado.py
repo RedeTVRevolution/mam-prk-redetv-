@@ -31,14 +31,10 @@ from api.ciclo_de_vida import (
     desfazer_correcao,
 )
 from api.decupagem import Decupagem
-from api.jobs import (
-    Job,
-    JobPublico,
-    RepositorioDeJobs,
-    ServicoIndisponivel,
-    agora_utc,
-)
+from api.erros import ServicoIndisponivel
+from api.jobs import JobPublico
 from api.leitura_da_decupagem import AbreDecupagem
+from api.modelo_do_job import Job, RepositorioDeJobs, agora_utc
 from api.permissoes import exige
 from api.texto_como_dado import Texto
 

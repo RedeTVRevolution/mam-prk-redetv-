@@ -27,14 +27,7 @@ from api.bancos import cliente_da_colecao, cliente_do_firestore
 from api.correcoes import RepositorioDeCorrecoes
 from api.dados_da_purga import dados_do_ambiente
 from api.indice_da_busca import IndiceDaBusca
-from api.jobs import (
-    Armazenamento,
-    FiltroDeJobs,
-    Job,
-    RepositorioDeJobs,
-    agora_utc,
-    expirar_uploads,
-)
+from api.jobs import Armazenamento, expirar_uploads
 from api.lixeira import (
     PRAZO_DA_PURGA,
     ArquivosDoJob,
@@ -44,6 +37,7 @@ from api.lixeira import (
 )
 from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.lixeira_na_leitura import PurgasDeMarcaFirestore, VersaoDaLixeiraFirestore
+from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs, agora_utc
 from api.nuvem import (
     COLECAO_DA_AUDITORIA,
     ArmazenamentoStorage,

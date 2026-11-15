@@ -1,8 +1,8 @@
-import fonteDaApi from '../../api/jobs.py?raw'
+import fonteDaApi from '../../api/modelo_do_job.py?raw'
 import { expect, test } from 'vitest'
 import { FRASES_DE_FALHA, fraseDaFalha } from './falhas.ts'
 
-// Os códigos saem do `CodigoDeFalha` de api/jobs.py: um código novo sem frase quebra aqui.
+// Os códigos saem do `CodigoDeFalha` de api/modelo_do_job.py: um código novo sem frase quebra aqui.
 function codigosDaApi(): string[] {
   const bloco = /^CodigoDeFalha = Literal\[([^\]]*)\]/m.exec(fonteDaApi)?.[1] ?? ''
   return [...bloco.matchAll(/"([a-z_]+)"/g)].map((m) => m[1])

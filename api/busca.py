@@ -42,14 +42,7 @@ from api.indice_da_busca import (
     Registro,
     TipoDeRegistro,
 )
-from api.jobs import (
-    VALIDADE_DA_IMAGEM,
-    VALIDADE_INFORMADA_DA_IMAGEM,
-    Armazenamento,
-    CursorInvalido,
-    Job,
-    RepositorioDeJobs,
-)
+from api.jobs import VALIDADE_DA_IMAGEM, VALIDADE_INFORMADA_DA_IMAGEM, Armazenamento
 from api.lixeira_na_leitura import (
     PurgasDeMarca,
     PurgasDeMarcaEmMemoria,
@@ -57,6 +50,7 @@ from api.lixeira_na_leitura import (
     VersaoDaLixeiraEmMemoria,
 )
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
+from api.modelo_do_job import CursorInvalido, Job, RepositorioDeJobs
 from api.numero import com_as_formas, mesma_palavra, singular
 from api.quem_conta import QuemConta
 from api.texto import normalizar

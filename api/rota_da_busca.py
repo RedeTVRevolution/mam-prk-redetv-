@@ -35,7 +35,7 @@ from api.imagens_hostis import (
     recodificar,
 )
 from api.indice_da_busca import TipoDeRegistro
-from api.jobs import CursorInvalido
+from api.modelo_do_job import CursorInvalido
 from api.permissoes import exige_escopo
 from api.teste_de_carga import CABECALHO_DE_TESTE, VALOR_DO_CABECALHO
 from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta

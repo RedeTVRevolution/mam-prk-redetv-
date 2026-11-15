@@ -8,15 +8,11 @@ from fastapi.testclient import TestClient
 
 from api.auth import TokenInvalido, Usuario
 from api.correcoes import versao_do_modelo
+from api.erros import ServicoIndisponivel
 from api.idempotencia import RepositorioDeIdempotenciaEmMemoria
-from api.jobs import (
-    Estado,
-    Job,
-    RepositorioEmMemoria,
-    ServicoIndisponivel,
-    expirar_uploads,
-)
+from api.jobs import RepositorioEmMemoria, expirar_uploads
 from api.main import criar_app
+from api.modelo_do_job import Estado, Job
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.programas_de_teste import cadastro_com_tv_fama
 
@@ -860,7 +856,8 @@ def test_lista_e_detalhe_sem_decupagem_ver_dao_403_sem_assinar_a_capa() -> None:
 def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() -> None:
     from datetime import UTC, datetime
 
-    from api.jobs import Etapa, EtapaPublica
+    from api.jobs import EtapaPublica
+    from api.modelo_do_job import Etapa
 
     agora = datetime(2026, 11, 2, tzinfo=UTC)
 

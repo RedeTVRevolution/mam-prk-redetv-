@@ -29,8 +29,14 @@ from api.indexacao import (
     reindexar,
 )
 from api.indice_da_busca import IndiceDaBusca
-from api.jobs import CopiaNoBigQuery, EstadoDaCopia, Job, RepositorioDeJobs, agora_utc
 from api.leitura_da_decupagem import AbreDecupagem
+from api.modelo_do_job import (
+    CopiaNoBigQuery,
+    EstadoDaCopia,
+    Job,
+    RepositorioDeJobs,
+    agora_utc,
+)
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,

@@ -120,3 +120,49 @@ def test_leitura_do_painel_nao_puxa_os_modulos_de_lote() -> None:
     lote = {"taxa_diaria", "taxa_de_correcao", "revisao_do_painel"}
     for modulo in ("taxa_do_painel", "qualidade_do_painel"):
         assert not _fecho(modulo) & lote, (modulo, _fecho(modulo) & lote)
+
+
+def _importa(codigo: str, modulo: str) -> bool:
+    """Se o código importa `modulo` (`api.jobs`), em qualquer ponto: topo, função ou `TYPE_CHECKING`."""
+    pacote, _, nome = modulo.rpartition(".")
+    for no in ast.walk(ast.parse(codigo)):
+        if isinstance(no, ast.Import) and any(a.name == modulo for a in no.names):
+            return True
+        if (
+            isinstance(no, ast.ImportFrom)
+            and no.level == 0
+            and (
+                no.module == modulo
+                or (no.module == pacote and any(a.name == nome for a in no.names))
+            )
+        ):
+            return True
+    return False
+
+
+# Quem importa o módulo à direita volta ao ciclo que o modelo do Job (#661) desfez.
+SEM_IMPORTAR = {
+    "ciclo_de_vida": "api.jobs",
+    "leitura_da_decupagem": "api.jobs",
+    "catalogo_dos_jobs": "api.jobs",
+    "chaves": "api.jobs",
+    "catalogo_de_correcoes": "api.correcoes",
+}
+
+
+def test_modulos_do_modelo_nao_voltam_ao_ciclo_com_as_rotas() -> None:
+    for modulo, proibido in SEM_IMPORTAR.items():
+        codigo = (API / f"{modulo}.py").read_text()
+        assert not _importa(codigo, proibido), f"{modulo} importa {proibido}"
+
+
+def test_pega_import_de_jobs_no_topo_em_funcao_e_em_type_checking() -> None:
+    for codigo in (
+        "from api.jobs import Job\n",
+        "def f():\n    from api.jobs import Job\n",
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from api.jobs import Job\n",
+        "from api import jobs\n",
+        "import api.jobs\n",
+    ):
+        assert _importa(codigo, "api.jobs"), codigo
+    assert not _importa("from api.modelo_do_job import Job\n", "api.jobs")

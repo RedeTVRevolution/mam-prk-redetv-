@@ -36,17 +36,15 @@ vários Jobs decide pular e registrar.
 import json
 import logging
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 from api.catalogo_apagado import CATALOGO_ID, ids_do_catalogo, sem_catalogo_apagado
 from api.correcoes import Correcao, RepositorioDeCorrecoes, versao_do_modelo
 from api.marcas import CatalogoDeMarcas
+from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs
 from api.quem_conta import Destino, PessoasEmLote, QuemConta
 from api.regras_das_correcoes import decupagem_com_correcoes
 from api.texto import normalizar
-
-if TYPE_CHECKING:  # api.jobs importa este módulo
-    from api.jobs import FiltroDeJobs, Job, RepositorioDeJobs
 
 log = logging.getLogger(__name__)
 
@@ -142,8 +140,6 @@ def decupagens_dos_jobs(
 ) -> Iterator[tuple["Job", dict[str, Any]]]:
     """Cada vídeo concluído fora da lixeira (e que casa com `filtro`) com a Decupagem
     corrigida; a que não lê é pulada, com log."""
-    from api.jobs import FiltroDeJobs  # local: api.jobs importa este módulo
-
     leitura = LeituraDaDecupagem(decupagens, correcoes, pessoas)
     for job in repositorio.consultar(filtro or FiltroDeJobs()).jobs:
         if job.estado != "concluido":

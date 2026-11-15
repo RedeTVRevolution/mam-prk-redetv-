@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.ciclo_de_vida import transitar
+from api.erros import ServicoIndisponivel
 from api.eventos_do_job import (
     CAMINHO_DO_PUSH,
     ErroDoPubSub,
@@ -21,7 +22,8 @@ from api.eventos_do_job import (
     criar_rotas_do_push,
     repositorio_do_ambiente,
 )
-from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.webhook import (
     CofreEmMemoria,
     RepositorioDeWebhooksEmMemoria,

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from api.jobs import FiltroDeJobs, Job
+from api.modelo_do_job import FiltroDeJobs, Job
 from api.nuvem import RepositorioFirestore
 
 LIXEIRA = {

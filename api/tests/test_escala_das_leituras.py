@@ -13,9 +13,10 @@ from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira, PessoaDoCatalogo
 from api.catalogo_apagado import lido_em_lote
 from api.correcoes import RepositorioDeAprovacaoEmMemoria
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria, MarcaDoCatalogo
+from api.modelo_do_job import Job
 from api.nuvem import AssinaturaPeloIam
 from api.papeis import DocumentoDePapeis, RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso

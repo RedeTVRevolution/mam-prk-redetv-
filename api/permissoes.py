@@ -5,11 +5,11 @@ Um caso novo de permissão nasce aqui, não numa cópia de `isinstance` + 403 de
 """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
 
 from api.auth import Chamador, ChamadorAutenticado, Escopo, Sistema, Usuario
+from api.modelo_do_job import Job
 from api.papeis import (
     DocumentoDePapeis,
     Papel,
@@ -18,9 +18,6 @@ from api.papeis import (
     papeis_do_usuario,
     permissoes_de,
 )
-
-if TYPE_CHECKING:  # ponytail: ciclo com api.jobs até o modelo do Job sair dele (#661)
-    from api.jobs import Job
 
 # Permissão que a pessoa precisa para cada escopo de chave. Cancelar exige a de enviar.
 PERMISSAO_DO_ESCOPO: dict[Escopo, Permissao] = {

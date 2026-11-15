@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, parametro, transporte_http
-from api.jobs import Job, RepositorioDeJobs
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
 
 log = logging.getLogger(__name__)

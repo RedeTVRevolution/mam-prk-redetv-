@@ -11,8 +11,9 @@ from api.ambiente import FaltaNoAmbiente
 from api.auth import Usuario
 from api.decupagem import Decupagem
 from api.gemini import Chamada
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.passadas import (
     ETAPA_DE_CUSTO,

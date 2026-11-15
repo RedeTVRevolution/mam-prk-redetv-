@@ -41,8 +41,9 @@ from api.entendimento_da_consulta import (
 from api.eventos_de_uso import Eventos, EventosEmMemoria
 from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
-from api.jobs import CursorInvalido, Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import CursorInvalido, Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.programas import Programa, ProgramasEmMemoria
 from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem

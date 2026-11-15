@@ -5,8 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job
 from api.papeis import Papel, Permissao, RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_jobs import ArmazenamentoFalso

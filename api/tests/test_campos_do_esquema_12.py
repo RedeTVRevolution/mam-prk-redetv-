@@ -533,7 +533,7 @@ def test_acrescentar_pauta_invalida_e_422() -> None:
 
 
 def test_pauta_acrescentada_aparece_no_catalogo() -> None:
-    from api.catalogo_de_correcoes import catalogo
+    from api.correcoes import catalogo
 
     assert "pauta.acrescentar" in {t.valor for t in catalogo().tipos}
 

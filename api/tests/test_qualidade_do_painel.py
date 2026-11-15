@@ -4,7 +4,8 @@ e a taxa de correção lida da tabela diária (#468)."""
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.qualidade_do_painel import QualidadeReal
 from api.revisao import Pulso, RepositorioDeRevisaoEmMemoria
 from api.revisao_do_painel import RevisaoEmMemoria

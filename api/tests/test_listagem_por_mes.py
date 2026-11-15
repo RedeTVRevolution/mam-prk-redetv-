@@ -9,7 +9,7 @@ from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
 
 from api.gravar_mes_nos_jobs import gravar
-from api.jobs import FiltroDeJobs, Job, PaginaDeJobs
+from api.modelo_do_job import FiltroDeJobs, Job, PaginaDeJobs
 from api.nuvem import (
     RepositorioFirestore,
     listagem_por_mes_do_ambiente,

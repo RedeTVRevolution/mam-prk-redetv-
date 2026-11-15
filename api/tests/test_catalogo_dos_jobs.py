@@ -7,8 +7,9 @@ from typing import Any
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.catalogo_dos_jobs import ids_do_catalogo
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.jobs import FiltroDeJobs, Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.leitura_da_decupagem import LeituraDaDecupagem
+from api.modelo_do_job import FiltroDeJobs, Job
 from api.preencher_catalogo_dos_jobs import preencher
 from api.tests.test_correcoes import Mundo
 from api.tests.test_jobs import ArmazenamentoFalso

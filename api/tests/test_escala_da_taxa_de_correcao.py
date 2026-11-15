@@ -10,7 +10,8 @@ from datetime import timedelta
 from typing import Any
 
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.revisao import RepositorioDeRevisaoEmMemoria
 from api.taxa_de_correcao import _em_vigor_no_periodo, calcular
 from api.tests.test_taxa_de_correcao import (

@@ -22,6 +22,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.clientes_de_nuvem import TransporteRest, transporte_rest
+from api.erros import ServicoIndisponivel
 from api.eventos_de_uso import (
     Eventos,
     EventosPubSub,
@@ -29,13 +30,12 @@ from api.eventos_de_uso import (
     SemEventos,
     registrar,
 )
-from api.jobs import (
+from api.modelo_do_job import (
     Estado,
     FiltroDeJobs,
     Job,
     PaginaDeJobs,
     RepositorioDeJobs,
-    ServicoIndisponivel,
     agora_utc,
 )
 from api.webhook import (

@@ -20,8 +20,9 @@ from api.chaves import (
     emitir_chave,
 )
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, LinhaDoMomento
-from api.jobs import Job, RepositorioEmMemoria, agora_utc
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job, agora_utc
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.relatorio_de_marcas import (
     INTERVALOS_EM_JSON,

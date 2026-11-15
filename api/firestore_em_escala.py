@@ -35,7 +35,7 @@ from google.cloud.firestore_v1.query_profile import ExplainOptions
 
 from api import log_estruturado
 from api.bancos import cliente_do_firestore
-from api.jobs import CodigoDeFalha, FiltroDeJobs, Job, palavras_do_nome
+from api.modelo_do_job import CodigoDeFalha, FiltroDeJobs, Job, palavras_do_nome
 from api.nuvem import (
     COLECAO_DE_JOBS,
     RepositorioFirestore,

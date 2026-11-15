@@ -38,11 +38,8 @@ from api.catalogo import Catalogo, CatalogoEmMemoria
 from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import Decupagem, Video
 from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
-from api.jobs import (
-    RepositorioDeJobs,
-    agora_utc,
-)
 from api.leitura_da_tela import LeituraDaTela
+from api.modelo_do_job import RepositorioDeJobs, agora_utc
 from api.nuvem import (
     CatalogoFirestore,
     LeiturasStorage,

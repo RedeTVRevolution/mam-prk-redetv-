@@ -21,8 +21,9 @@ from api.analise import executar
 from api.auth import Usuario
 from api.decupagem import Decupagem, Video
 from api.gemini import Chamada, ErroHttp
-from api.jobs import Job, RepositorioDeJobs, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app as criar_app_web
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.nuvem import ArmazenamentoStorage, DecupagensStorage, RepositorioFirestore
 from api.tests.programas_de_teste import perfis_da_tv_fama
 from api.tests.test_gemini import BOA, TransporteFalso, resposta_em_mm_ss

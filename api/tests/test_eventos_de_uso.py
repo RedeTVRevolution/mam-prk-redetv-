@@ -32,8 +32,9 @@ from api.eventos_do_job import (
     eventos_do_ambiente,
     repositorio_do_ambiente,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_aprovacao import CURADOR

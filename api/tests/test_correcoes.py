@@ -29,9 +29,10 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.eventos_de_uso import Eventos
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
+from api.modelo_do_job import Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.regras_das_correcoes import (
     aplicar,

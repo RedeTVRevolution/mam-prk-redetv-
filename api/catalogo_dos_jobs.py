@@ -6,12 +6,10 @@ Correções, a fusão de pessoas) regrava os dois campos; só grava se mudaram.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from api.leitura_da_decupagem import LeituraDaDecupagem
-
-if TYPE_CHECKING:
-    from api.jobs import Job, RepositorioDeJobs
+from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +76,6 @@ def passar_pessoa_nos_jobs(
     """Na fusão, os vídeos da origem (até os da lixeira) passam a listar o destino. Nunca
     levanta: o Job que falha fica com a origem, e a carga (`make preencher-catalogo-dos-jobs`)
     o conserta."""
-    from api.jobs import FiltroDeJobs
 
     def trocar(job: "Job") -> dict[str, Any] | None:
         if origem_id not in job.pessoas_do_catalogo:

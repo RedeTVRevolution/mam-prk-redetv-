@@ -20,11 +20,12 @@ from api.auditoria import RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.busca import Ajustes, Busca, ListasDaBuscaEmMemoria, RankingEmOrdem
 from api.catalogo import CopiaCurta, EnvioParaLixeira
+from api.erros import ServicoIndisponivel
 from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
-from api.jobs import CursorInvalido, ServicoIndisponivel, agora_utc
 from api.lixeira_na_leitura import PurgasDeMarcaEmMemoria, VersaoDaLixeiraEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
+from api.modelo_do_job import CursorInvalido, agora_utc
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_agent_retrieval import SEM_INDICES
 from api.tests.test_auth import VerificadorFalso

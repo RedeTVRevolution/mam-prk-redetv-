@@ -22,6 +22,7 @@ from api.correcoes import (
     RepositorioDeCorrecoesEmMemoria,
     versao_do_modelo,
 )
+from api.erros import ServicoIndisponivel
 from api.ferramentas.exemplos_da_busca import EXEMPLOS, SABRINA
 from api.indexacao import reindexar, reindexar_jobs
 from api.indice_da_busca import (
@@ -31,8 +32,9 @@ from api.indice_da_busca import (
     Registro,
     registros_da_decupagem,
 )
-from api.jobs import Indexacao, Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Indexacao, Job
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_correcoes import BASE
 from api.tests.test_jobs import ArmazenamentoFalso

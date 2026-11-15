@@ -26,6 +26,9 @@ from pydantic import (
 
 from api import catalogo_de_correcoes as textos
 from api.decupagem import (
+    CATEGORIAS_DE_OBJETO,
+    CORES_BASE,
+    RELACOES_DO_OBJETO,
     CategoriaDeObjeto,
     Comercial,
     CorBase,
@@ -40,6 +43,7 @@ from api.identidade import (
     identidade_do_comercial as _identidade_do_comercial,
 )
 from api.identidade import identidade_do_nome, nao_identificado
+from api.indice_da_busca import NOME_DA_CATEGORIA
 from api.pessoas import LISTAS
 from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, Texto
@@ -2500,3 +2504,31 @@ def rotulos_dos_tipos() -> list[textos.Opcao]:
     """Todo tipo de Correção com o rótulo: os da tabela e os das decisões."""
     rotulos = {t: e.rotulo for t, e in TIPOS.items()} | ROTULOS_DAS_DECISOES
     return [textos.Opcao(valor=t, rotulo=r) for t, r in rotulos.items()]
+
+
+def catalogo() -> textos.CatalogoDeCorrecoes:
+    return textos.CatalogoDeCorrecoes(
+        tipos=rotulos_dos_tipos(),
+        tipos_de_comercial=textos.opcoes(
+            get_args(Comercial.model_fields["tipo"].annotation), {}
+        ),
+        tipos_de_texto_na_tela=textos.opcoes(
+            get_args(TextoNaTela.model_fields["tipo"].annotation), {}
+        ),
+        tons_da_pauta=textos.opcoes(get_args(TomDaPauta), textos.ROTULOS_DOS_TONS),
+        fontes_do_nome=textos.opcoes(get_args(FonteDoNome), textos.ROTULOS_DAS_FONTES),
+        categorias_de_objeto=textos.opcoes(CATEGORIAS_DE_OBJETO, NOME_DA_CATEGORIA),
+        cores_base=textos.opcoes(CORES_BASE, {}),
+        relacoes_do_objeto=textos.opcoes(
+            RELACOES_DO_OBJETO, textos.ROTULOS_DAS_RELACOES
+        ),
+        limites=textos.Limites(
+            nome=LIMITE_DO_NOME,
+            texto=LIMITE_DO_TEXTO,
+            motivo=LIMITE_DO_MOTIVO,
+        ),
+        prefixos=textos.Prefixos(
+            acrescentado=PREFIXO_ACRESCENTADO,
+            nao_identificado=PREFIXO_NAO_IDENTIFICADO,
+        ),
+    )

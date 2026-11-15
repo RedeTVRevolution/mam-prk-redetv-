@@ -36,11 +36,8 @@ from api.auth import Usuario
 from api.catalogo import Catalogo, visivel
 from api.ciclo_de_vida import pedir_indexacao
 from api.correcoes import _sem_controle
-from api.jobs import (
-    DisparoDaIndexacao,
-    FiltroDeJobs,
-    RepositorioDeJobs,
-)
+from api.jobs import DisparoDaIndexacao
+from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
 from api.programas import (
     NomeDoPrograma,

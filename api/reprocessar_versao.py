@@ -26,19 +26,15 @@ from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RepositorioDeAuditoria
 from api.bancos import cliente_da_colecao, cliente_do_firestore
 from api.ciclo_de_vida import NaoReprocessavel, prazo_vencido
+from api.erros import ServicoIndisponivel
 from api.ferramentas.comum import (
     TAMANHO_DA_PAGINA,
     custo_por_hora_do_ambiente,
     dolar,
     jobs_concluidos,
 )
-from api.jobs import (
-    Job,
-    RepositorioDeJobs,
-    ServicoIndisponivel,
-    agora_utc,
-)
 from api.leitura_da_decupagem import AbreDecupagem
+from api.modelo_do_job import Job, RepositorioDeJobs, agora_utc
 from api.nuvem import (
     COLECAO_DA_AUDITORIA,
     DecupagensStorage,

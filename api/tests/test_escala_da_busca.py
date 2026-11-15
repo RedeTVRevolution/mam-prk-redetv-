@@ -13,7 +13,8 @@ from api.catalogo import (
     PessoaDoCatalogo,
     nomes_de_busca,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.tests.test_busca import (
     VESTIDO,
     Mundo,

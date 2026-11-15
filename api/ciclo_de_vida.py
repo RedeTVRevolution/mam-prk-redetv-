@@ -10,21 +10,21 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import Any, Literal, get_args
 
+from api.modelo_do_job import (
+    CodigoDeFalha,
+    Estado,
+    Etapa,
+    Indexacao,
+    Job,
+    NomeDaEtapa,
+    RepositorioDeJobs,
+    ResultadoDaEtapa,
+    RodadaDaIndexacao,
+    agora_utc,
+)
 from api.sinais import Registrar, imprimir, registro_da_falha_de_etapa
-
-# `api.jobs` usa este módulo nas rotas; aqui os tipos só servem à checagem.
-if TYPE_CHECKING:
-    from api.jobs import (
-        CodigoDeFalha,
-        Estado,
-        Indexacao,
-        Job,
-        NomeDaEtapa,
-        RepositorioDeJobs,
-        ResultadoDaEtapa,
-    )
 
 TRANSICOES: dict[Estado, frozenset[Estado]] = {
     "aguardando_upload": frozenset({"validando", "falhou", "cancelado"}),
@@ -79,8 +79,6 @@ def transitar(
     mudancas: dict[str, Any] = {"estado": para, "atualizado_em": agora}
     if para == "concluido":
         # Quem indexa (api.indexacao) troca este estado ao terminar.
-        from api.jobs import Indexacao
-
         mudancas["indexacao"] = Indexacao(estado="pendente", em=agora)
     if codigo_falha is not None:
         mudancas["codigo_falha"] = codigo_falha
@@ -139,8 +137,6 @@ def iniciar_etapa(
     agora: datetime,
 ) -> Job | None:
     """Abre a etapa (refazê-la, como no reprocessar, recomeça o relógio dela)."""
-    from api.jobs import Etapa
-
     return _gravar_etapa(
         repositorio,
         job_id,
@@ -194,8 +190,6 @@ def rodar_etapa(
 
     Qualquer outro resultado, ou uma exceção (que segue adiante), deixa a etapa `falhou`.
     """
-    from api.jobs import agora_utc
-
     iniciar_etapa(repositorio, job_id, etapa, agora_utc())
     try:
         resultado = trabalho()
@@ -253,8 +247,6 @@ class NaoReprocessavel(Exception):
 
 
 def _ordem_das_etapas() -> tuple[NomeDaEtapa, ...]:
-    from api.jobs import NomeDaEtapa
-
     return get_args(NomeDaEtapa)
 
 
@@ -340,8 +332,6 @@ def reprocessar(
     volta a `analisando` (a Decupagem antiga some até a nova análise terminar); com as
     outras continua `concluido`.
     """
-    from api.jobs import Etapa, Indexacao
-
     lido: list[Job] = []
 
     def mudar(job: Job) -> dict[str, Any]:
@@ -513,8 +503,6 @@ def pedir_indexacao(
     """
 
     def mudar(job: Job) -> dict[str, Any] | None:
-        from api.jobs import Indexacao
-
         if job.estado != "concluido":
             return None
         return {
@@ -544,8 +532,6 @@ def tomar_a_rodada(
     """
 
     def mudar(job: Job) -> dict[str, Any] | None:
-        from api.jobs import RodadaDaIndexacao
-
         if job.estado != "concluido":
             return None
         r = job.rodada_da_indexacao
@@ -587,8 +573,6 @@ def fechar_a_rodada(
     """
 
     def mudar(job: Job) -> dict[str, Any] | None:
-        from api.jobs import RodadaDaIndexacao
-
         r = job.rodada_da_indexacao
         if r is None or r.id != rodada_id:
             return None

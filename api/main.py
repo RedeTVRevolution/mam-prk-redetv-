@@ -55,7 +55,6 @@ from api.busca_na_nuvem import adaptadores_da_busca, aquecer_na_partida
 from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CatalogoEmMemoria, CopiaCurta
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
-from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.chaves import (
     Mac,
     RepositorioDeChaves,
@@ -70,10 +69,14 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     RepositorioDeCorrecoesEmMemoria,
 )
+from api.correcoes import (
+    catalogo as catalogo_de_correcoes,
+)
 from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
 from api.dados_da_purga import dados_do_ambiente
 from api.decupagem import Decupagem
 from api.edicao_do_video import criar_rotas_da_edicao
+from api.erros import ServicoIndisponivel
 from api.eventos_de_uso import (
     Eventos,
     SemEventos,
@@ -91,12 +94,9 @@ from api.jobs import (
     ArmazenamentoIndisponivel,
     DisparoDaIndexacao,
     DisparoDaIndexacaoIndisponivel,
-    RepositorioDeJobs,
     RepositorioIndisponivel,
-    ServicoIndisponivel,
     TipoNaoSuportado,
     aceita_gzip,
-    agora_utc,
     criar_rotas,
 )
 from api.lixeira import (
@@ -121,6 +121,7 @@ from api.lixeira_na_leitura import (
 from api.log_estruturado import configurar as configurar_o_log
 from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
+from api.modelo_do_job import RepositorioDeJobs, agora_utc
 from api.nuvem import (
     COLECAO_DA_AUDITORIA,
     COLECAO_DE_CHAVES,

@@ -12,7 +12,7 @@ from itertools import batched
 from typing import Any
 
 from api.bancos import cliente_do_firestore
-from api.jobs import Job
+from api.modelo_do_job import Job
 from api.nuvem import COLECAO_DE_JOBS
 
 LOTE = 400  # o limite do Firestore é 500 gravações por lote

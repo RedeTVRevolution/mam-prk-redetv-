@@ -9,16 +9,14 @@ import uuid
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel
 
 from api.catalogo import Catalogo, PessoaDoCatalogo
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.quem_conta import QuemConta
 from api.texto_como_dado import ID_SEGURO, Linha, Texto
-
-if TYPE_CHECKING:  # `api.jobs` importa este módulo
-    from api.jobs import Job, RepositorioDeJobs
 
 LIMITE_DO_NOME_DO_PROGRAMA = 100
 LIMITE_DO_PERFIL = 4000
@@ -150,7 +148,7 @@ class RepositorioDeProgramas(Protocol):
         ...
 
     def levar_o_nome_ao_job(
-        self, programa_id: str, troca_id: str, job_id: str, jobs: "RepositorioDeJobs"
+        self, programa_id: str, troca_id: str, job_id: str, jobs: RepositorioDeJobs
     ) -> "Job | None":
         """Grava no Job o nome do programa, lido junto com o Job (na mesma transação),
         se a troca `troca_id` ainda está em andamento nele, e devolve o Job; `None` se o
@@ -201,9 +199,9 @@ class ProgramasEmMemoria:
         return novo
 
     def levar_o_nome_ao_job(
-        self, programa_id: str, troca_id: str, job_id: str, jobs: "RepositorioDeJobs"
+        self, programa_id: str, troca_id: str, job_id: str, jobs: RepositorioDeJobs
     ) -> "Job | None":
-        def mudar(job: "Job") -> dict[str, Any] | None:
+        def mudar(job: Job) -> dict[str, Any] | None:
             # Lido na hora de gravar o Job, como na transação do Firestore.
             programa = self._programas.get(programa_id)
             if programa is None or not troca_vale(programa, troca_id):

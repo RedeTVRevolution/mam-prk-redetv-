@@ -9,8 +9,9 @@ import pytest
 from PIL import Image, ImageDraw
 
 from api import ocr_job
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.leitura_da_tela import Caixa, LeiturasEmMemoria, LinhaLida
+from api.modelo_do_job import Job
 from api.mudanca_da_tela import LIMIAR_PADRAO, MudancaDaTela, limiar_do_ambiente
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)

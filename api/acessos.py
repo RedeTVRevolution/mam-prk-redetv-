@@ -13,7 +13,9 @@ from typing import Any, Literal
 
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Chamador, Sistema
-from api.jobs import AcaoDeDownload, Job, ServicoIndisponivel
+from api.erros import ServicoIndisponivel
+from api.jobs import AcaoDeDownload
+from api.modelo_do_job import Job
 
 JANELA_DA_ABERTURA = timedelta(minutes=30)
 

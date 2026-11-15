@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 
 from api.auth import Usuario
-from api.jobs import CursorInvalido
+from api.modelo_do_job import CursorInvalido
 from api.permissoes import exige
 from api.texto_como_dado import LinhaDaConsulta
 

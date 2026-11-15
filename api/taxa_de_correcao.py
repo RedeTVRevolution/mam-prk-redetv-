@@ -40,12 +40,10 @@ from api.auth import Usuario
 from api.bancos import cliente_do_firestore
 from api.correcoes import CORRIGIVEIS, Correcao, RepositorioDeCorrecoes
 from api.csv_seguro import csv_em_texto
+from api.erros import ServicoIndisponivel
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
-from api.jobs import (
-    RepositorioDeJobs,
-    ServicoIndisponivel,
-)
 from api.leitura_da_decupagem import AbreDecupagem
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,

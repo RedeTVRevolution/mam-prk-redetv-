@@ -15,7 +15,8 @@ from typing import Protocol, cast
 from pydantic import BaseModel, ConfigDict
 
 from api.auth import ESCOPOS, ChaveInvalida, Escopo, Sistema
-from api.jobs import ServicoIndisponivel, agora_utc
+from api.erros import ServicoIndisponivel
+from api.modelo_do_job import agora_utc
 
 
 class Mac(Protocol):

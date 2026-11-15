@@ -10,7 +10,7 @@ autoria e o mapa das exceções para HTTP. Não importa `api.jobs` (que importa 
 """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from api.catalogo import Catalogo
 from api.catalogo_dos_jobs import atualizar_catalogo_do_job
@@ -27,6 +27,7 @@ from api.correcoes import (
 from api.eventos_de_uso import Eventos, registrar
 from api.leitura_da_decupagem import AbreDecupagem, LeituraDaDecupagem, ler_modelo
 from api.marcas import CatalogoDeMarcas
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.regras_das_correcoes import (
     corrigir,
     decidir,
@@ -34,9 +35,6 @@ from api.regras_das_correcoes import (
     desfazer,
     reaplicar,
 )
-
-if TYPE_CHECKING:  # api.jobs importa este módulo
-    from api.jobs import Job, RepositorioDeJobs
 
 
 class RegistroDaCorrecao:
@@ -46,7 +44,7 @@ class RegistroDaCorrecao:
         correcoes: RepositorioDeCorrecoes,
         catalogo: Catalogo,
         marcas: CatalogoDeMarcas,
-        jobs: "RepositorioDeJobs",
+        jobs: RepositorioDeJobs,
         publicador: Eventos,
     ) -> None:
         self._decupagens = decupagens
@@ -59,7 +57,7 @@ class RegistroDaCorrecao:
 
     def corrigir(
         self,
-        job: "Job",
+        job: Job,
         novo: NovaCorrecao,
         autoria: Autoria,
         *,
@@ -82,7 +80,7 @@ class RegistroDaCorrecao:
         return correcao, versao
 
     def desfazer(
-        self, job: "Job", alvo_id: str, motivo: str, autoria: Autoria
+        self, job: Job, alvo_id: str, motivo: str, autoria: Autoria
     ) -> Correcao:
         return self._sobre_o_modelo(
             job,
@@ -92,7 +90,7 @@ class RegistroDaCorrecao:
         )
 
     def reaplicar(
-        self, job: "Job", alvo_id: str, item_id: str, motivo: str, autoria: Autoria
+        self, job: Job, alvo_id: str, item_id: str, motivo: str, autoria: Autoria
     ) -> Correcao:
         return self._sobre_o_modelo(
             job,
@@ -104,7 +102,7 @@ class RegistroDaCorrecao:
         )
 
     def descartar(
-        self, job: "Job", alvo_id: str, motivo: str, autoria: Autoria
+        self, job: Job, alvo_id: str, motivo: str, autoria: Autoria
     ) -> Correcao:
         return self._sobre_o_modelo(
             job,
@@ -116,7 +114,7 @@ class RegistroDaCorrecao:
         )
 
     def decidir(
-        self, job: "Job", alvo_id: str, aprovada: bool, motivo: str, autoria: Autoria
+        self, job: Job, alvo_id: str, aprovada: bool, motivo: str, autoria: Autoria
     ) -> Correcao:
         """Aprova ou recusa uma Correção pendente; não lê a Decupagem antes de gravar."""
         registro = decidir(
@@ -131,7 +129,7 @@ class RegistroDaCorrecao:
 
     def _sobre_o_modelo(
         self,
-        job: "Job",
+        job: Job,
         regra: Callable[[dict[str, Any], str, list[Correcao]], Correcao],
         autoria: Autoria,
         se_ja_existe: type[Exception],
@@ -148,7 +146,7 @@ class RegistroDaCorrecao:
     # se o web passar a repetir.
     def _gravar(
         self,
-        job: "Job",
+        job: Job,
         registro: Correcao,
         autoria: Autoria,
         se_ja_existe: type[Exception] | None = None,

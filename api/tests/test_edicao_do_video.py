@@ -12,8 +12,10 @@ from api.chaves import (
     VerificadorDeChaveDeApi,
     emitir_chave,
 )
-from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.erros import ServicoIndisponivel
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.programas import Programa, ProgramasEmMemoria
 from api.tests.test_auth import VerificadorFalso

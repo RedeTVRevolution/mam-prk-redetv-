@@ -19,7 +19,7 @@ from typing import Any, Protocol
 
 from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, parametro, transporte_http
-from api.jobs import RepositorioDeJobs
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import RepositorioDeRevisaoFirestore
 from api.relatorios import linhas_da_consulta
 from api.revisao import Medida, Pulso, RepositorioDeRevisao

@@ -51,6 +51,7 @@ from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.clientes_de_nuvem import ESCOPO_DA_NUVEM, sessao_autenticada
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
+from api.erros import ServicoIndisponivel
 from api.florence import ObjetosDaDecupagem
 from api.idempotencia import (
     Reserva,
@@ -62,8 +63,14 @@ from api.itens_da_decupagem import contar_itens, objeto_dos_itens
 from api.jobs import (
     JANELA_DA_URL_DO_QUADRO,
     PRAZO_DA_URL_DE_UPLOAD,
-    SAO_PAULO,
     TETO_DE_CANDIDATOS,
+    disposicao_do_nome,
+)
+from api.leitura_da_tela import LeituraDaTela
+from api.lixeira import ArquivosContados
+from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
+from api.modelo_do_job import (
+    SAO_PAULO,
     CursorInvalido,
     Estado,
     FiltroDeJobs,
@@ -71,14 +78,9 @@ from api.jobs import (
     NomeDaEtapa,
     PaginaDeJobs,
     RepositorioDeJobs,
-    ServicoIndisponivel,
     casa_com_o_filtro,
-    disposicao_do_nome,
     paginar_em_python,
 )
-from api.leitura_da_tela import LeituraDaTela
-from api.lixeira import ArquivosContados
-from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
 from api.papeis import PAPEIS, DocumentoDePapeis, Papel
 from api.programas import (
     NomeEmUso,

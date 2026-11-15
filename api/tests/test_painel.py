@@ -11,7 +11,7 @@ from api.auditoria import (
     RepositorioDeAuditoriaEmMemoria,
 )
 from api.auth import Sistema, Usuario
-from api.jobs import ServicoIndisponivel
+from api.erros import ServicoIndisponivel
 from api.painel import AcessosAoPainel, FiltroDoPainel
 from api.papeis import Papel
 from api.permissoes import exige

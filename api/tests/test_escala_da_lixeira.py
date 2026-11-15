@@ -9,8 +9,9 @@ from datetime import timedelta
 
 from api.catalogo import EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.jobs import FiltroDeJobs, PaginaDeJobs, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.lixeira import ArquivosEmMemoria, calcular_impacto
+from api.modelo_do_job import FiltroDeJobs, PaginaDeJobs
 from api.purga import purgar_vencidas
 from api.tests.test_lixeira import ADMIN, LIXEIRA, Mundo, _job
 from api.tests.test_purga import AGORA

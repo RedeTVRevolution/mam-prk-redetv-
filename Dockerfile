@@ -120,6 +120,7 @@ COPY api/__init__.py \
      api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
+     api/modelo_do_job.py \
      api/numero.py \
      api/nuvem.py \
      api/paddle.py \
@@ -210,6 +211,7 @@ COPY api/__init__.py \
      api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
+     api/modelo_do_job.py \
      api/mudanca_da_tela.py \
      api/numero.py \
      api/nuvem.py \
@@ -331,6 +333,7 @@ COPY api/__init__.py \
      api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
+     api/modelo_do_job.py \
      api/numero.py \
      api/nuvem.py \
      api/objetos_job.py \

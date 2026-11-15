@@ -36,17 +36,11 @@ from api.busca import (
 from api.catalogo import EnvioParaLixeira, FusaoDaPessoa, PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
+from api.erros import ServicoIndisponivel
 from api.idempotencia import nova_reserva
-from api.jobs import (
-    JANELA_DA_URL_DO_QUADRO,
-    VALIDADE_DA_IMAGEM,
-    CursorInvalido,
-    FiltroDeJobs,
-    Job,
-    ServicoIndisponivel,
-    palavras_do_nome,
-)
+from api.jobs import JANELA_DA_URL_DO_QUADRO, VALIDADE_DA_IMAGEM
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, carregar_marcas
+from api.modelo_do_job import CursorInvalido, FiltroDeJobs, Job, palavras_do_nome
 from api.nuvem import (
     TENTATIVAS_SOB_DISPUTA,
     ArmazenamentoStorage,

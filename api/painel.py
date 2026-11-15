@@ -33,14 +33,9 @@ from api.custo_do_painel import (
     linhas_do_csv_de_custo,
     relatorio_de_custo,
 )
-from api.jobs import (
-    Estado,
-    FiltroDeJobs,
-    Job,
-    RepositorioDeJobs,
-    ServicoIndisponivel,
-    espera_da_gpu,
-)
+from api.erros import ServicoIndisponivel
+from api.jobs import espera_da_gpu
+from api.modelo_do_job import Estado, FiltroDeJobs, Job, RepositorioDeJobs
 from api.periodo_padrao import Periodo, dependencia_do_periodo
 from api.permissoes import exige
 from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel

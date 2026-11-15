@@ -31,7 +31,8 @@ from api.copia_bigquery import CopiaDosMomentos, copia_do_ambiente, linhas_da_de
 from api.correcoes import RepositorioDeCorrecoes
 from api.decupagem import Decupagem
 from api.indice_da_busca import IndiceDaBusca, registros_da_decupagem
-from api.jobs import (
+from api.leitura_da_decupagem import AbreDecupagem, LeituraDaDecupagem
+from api.modelo_do_job import (
     CopiaNoBigQuery,
     EstadoDaCopia,
     EstadoDaIndexacao,
@@ -40,7 +41,6 @@ from api.jobs import (
     RepositorioDeJobs,
     agora_utc,
 )
-from api.leitura_da_decupagem import AbreDecupagem, LeituraDaDecupagem
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,

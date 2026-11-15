@@ -18,7 +18,8 @@ from api.analise_por_janelas import analisar_video
 from api.decupagem import Decupagem, Video
 from api.gemini import AnaliseFalhou, Chamada, ErroHttp
 from api.janelas import LIMITE_DE_TENTATIVAS
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.progresso_das_janelas import JanelasEmMemoria
 from api.tests.test_analise import DecupagensEmMemoria
 from api.tests.test_gemini import BOA, TransporteFalso

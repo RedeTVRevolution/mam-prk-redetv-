@@ -27,10 +27,7 @@ from api.copia_bigquery import (
     transporte_http,
 )
 from api.erros import lido
-from api.jobs import (
-    FiltroDeJobs,
-    RepositorioDeJobs,
-)
+from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
 from api.texto_como_dado import Linha
 

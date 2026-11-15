@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from api.auth import Chamador
 from api.decupagem import Decupagem
 from api.gemini import MODELO
-from api.jobs import Job, RepositorioDeJobs
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.pareamento import (
     TIPOS_COM_IDENTIDADE,
     TOLERANCIA_MS,

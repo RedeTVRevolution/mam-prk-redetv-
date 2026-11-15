@@ -21,7 +21,8 @@ from api.custo_do_painel import (
     FiltroDeCusto,
     relatorio_de_custo,
 )
-from api.jobs import Estado, Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Estado, Job
 from api.tests.test_rotas_do_painel import Mundo
 
 

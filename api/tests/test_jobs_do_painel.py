@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from api.eventos_de_uso import EventoDeUso
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.jobs_do_painel import (
     ConfigDaTabelaDeJobs,
     LinhaDoJob,
@@ -19,6 +19,7 @@ from api.jobs_do_painel import (
     linha_do_job,
     preencher,
 )
+from api.modelo_do_job import Job
 
 MODULO = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
 SQL = (MODULO / "jobs_do_painel.sql").read_text()

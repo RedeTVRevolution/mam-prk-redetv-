@@ -6,8 +6,9 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
-from api.jobs import Job, RepositorioEmMemoria, palavras_do_nome
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job, palavras_do_nome
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_escopos import Mundo
 from api.tests.test_jobs import (

@@ -20,8 +20,8 @@ from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
 from api.catalogo import Catalogo, PessoaDoCatalogo, RenomeacaoDaPessoa
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
-from api.jobs import FiltroDeJobs, RepositorioDeJobs
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_dos_jobs
+from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
 from api.texto import normalizar
 from api.texto_como_dado import Linha

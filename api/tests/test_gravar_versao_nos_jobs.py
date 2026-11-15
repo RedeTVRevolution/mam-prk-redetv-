@@ -7,8 +7,9 @@ from typing import Any
 
 import pytest
 
+from api.erros import ServicoIndisponivel
 from api.gravar_versao_nos_jobs import gravar
-from api.jobs import Job, ServicoIndisponivel
+from api.modelo_do_job import Job
 
 AGORA = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
 

@@ -25,7 +25,6 @@ from api.catalogo import (
 )
 from api.catalogo_apagado import so_o_rosto
 from api.correcoes import RepositorioDeCorrecoes
-from api.jobs import FiltroDeJobs, RepositorioDeJobs
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.lixeira import (
     PRAZO_DA_PURGA,
@@ -41,6 +40,7 @@ from api.marcas import (
     MarcaInexistente,
     nomes_de_busca_da_marca,
 )
+from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
 from api.relatorio_de_marcas import ConsultaDeInsercoes, SoMarcasQueContam
 from api.relatorios import ou_503

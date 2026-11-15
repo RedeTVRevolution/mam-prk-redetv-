@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 from api.eventos_de_uso import EventosEmMemoria
 from api.eventos_do_job import PublicadorEmMemoria
 from api.fim_do_job import avisar_o_fim, main
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.webhook import (
     CofreEmMemoria,
     RepositorioDeWebhooksEmMemoria,

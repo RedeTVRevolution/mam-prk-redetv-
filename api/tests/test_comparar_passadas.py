@@ -27,7 +27,8 @@ from api.ferramentas.comparar_passadas import (
     relatorio_em_markdown,
     tokens_do_job,
 )
-from api.jobs import Etapa, Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Etapa, Job
 from api.pareamento import TOLERANCIA_MS
 from api.passadas import Custo as CustoDaPassada
 from api.passadas import Etapa as EtapaDaPassada

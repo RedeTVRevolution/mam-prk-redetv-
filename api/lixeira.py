@@ -19,12 +19,8 @@ from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoes
 from api.indice_da_busca import IndiceDaBusca
-from api.jobs import (
-    FiltroDeJobs,
-    Job,
-    RepositorioDeJobs,
-)
 from api.marcas import CatalogoDeMarcas
+from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs
 from api.permissoes import exige, tem_permissao
 from api.texto_como_dado import Texto
 

@@ -17,8 +17,10 @@ from api.chaves import (
     emitir_chave,
 )
 from api.ciclo_de_vida import NaoReprocessavel, etapa_de_partida, reprocessar
-from api.jobs import Etapa, Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.erros import ServicoIndisponivel
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Etapa, Job
 from api.nuvem import DisparoDaIndexacaoNoCloudRun, DisparoPeloWorkflows
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.progresso_das_janelas import JanelaGravada, JanelasEmMemoria

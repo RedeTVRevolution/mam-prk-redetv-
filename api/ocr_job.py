@@ -17,8 +17,6 @@ from api import log_estruturado, teste_dos_jobs
 from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import transitar
 from api.eventos_do_job import jobs_do_ambiente
-from api.jobs import RepositorioDeJobs
-from api.jobs import agora_utc as agora
 from api.leitura_da_tela import (
     LeitorDeQuadro,
     LeituraDaTela,
@@ -26,6 +24,8 @@ from api.leitura_da_tela import (
     LinhaLida,
     QuadroLido,
 )
+from api.modelo_do_job import RepositorioDeJobs
+from api.modelo_do_job import agora_utc as agora
 from api.mudanca_da_tela import MudancaDaTela, limiar_do_ambiente
 from api.nuvem import LeiturasStorage
 from api.paddle import LeitorPaddle, nome_do_modelo

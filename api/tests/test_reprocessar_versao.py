@@ -8,7 +8,9 @@ from typing import Any
 import pytest
 
 from api.auditoria import RepositorioDeAuditoriaEmMemoria
-from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.erros import ServicoIndisponivel
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.progresso_das_janelas import JanelasEmMemoria
 from api.reprocessamento import DisparoEmMemoria
 from api.reprocessar_versao import escolher, main, reprocessar_versao

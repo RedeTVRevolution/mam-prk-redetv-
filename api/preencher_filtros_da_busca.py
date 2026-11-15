@@ -18,7 +18,7 @@ from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.bancos import cliente_do_firestore
 from api.ferramentas.comum import TAMANHO_DA_PAGINA, jobs_concluidos
 from api.indice_da_busca import IndiceDaBusca
-from api.jobs import RepositorioDeJobs
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
 from api.orcamento_de_escrita import OrcamentoFirestore
 

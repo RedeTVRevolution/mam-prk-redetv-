@@ -5,7 +5,7 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
-from api.jobs import Job
+from api.modelo_do_job import Job
 from api.tests.test_jobs import ArmazenamentoFalso
 from api.tests.test_lixeira import ADMIN, EDITOR, Mundo, _job
 

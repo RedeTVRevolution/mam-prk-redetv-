@@ -23,7 +23,7 @@ from api.chaves import (
     emitir_chave,
     revogar_chave,
 )
-from api.jobs import ServicoIndisponivel
+from api.erros import ServicoIndisponivel
 from api.permissoes import exige
 from api.texto_como_dado import Linha
 
