@@ -39,7 +39,6 @@ from api.lixeira import (
     PRAZO_DA_PURGA,
     ArquivosDoJob,
     ImpactoDoVideo,
-    _exige_gerir,
     calcular_impacto,
     login_recente_ou_403,
 )
@@ -56,6 +55,7 @@ from api.nuvem import (
     RepositorioFirestore,
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
+from api.permissoes import exige
 from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
@@ -170,7 +170,10 @@ def criar_rotas_da_purga(
     def purgar(
         id_do_video: str,
         pedido: PedidoDePurga,
-        pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> VideoPurgado:
         login_recente_ou_403(pessoa, relogio(), login_recente)
         job = repositorio.obter(id_do_video)

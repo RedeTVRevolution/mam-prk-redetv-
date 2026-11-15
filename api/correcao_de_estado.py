@@ -17,12 +17,12 @@ from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Annotated, cast, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import (
     DestinoDaCorrecao,
@@ -36,10 +36,10 @@ from api.jobs import (
     JobPublico,
     RepositorioDeJobs,
     ServicoIndisponivel,
-    _confere_permissao,
     agora_utc,
 )
 from api.leitura_da_decupagem import AbreDecupagem
+from api.permissoes import exige
 from api.texto_como_dado import Texto
 
 SISTEMA = "corrigir-estado"
@@ -106,14 +106,6 @@ class PedidoDeCorrecao(BaseModel):
     motivo: Annotated[str, Texto(MOTIVO_MAXIMO, min_length=1, strip=True)]
 
 
-def _exige_corrigir_estado(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `job.corrigir_estado` (o Administrador)."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não corrige o estado")
-    _confere_permissao(request, chamador, "job.corrigir_estado")
-    return chamador
-
-
 def criar_rotas_da_correcao_de_estado(
     repositorio: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
@@ -126,7 +118,12 @@ def criar_rotas_da_correcao_de_estado(
     def corrigir(
         job_id: str,
         pedido: PedidoDeCorrecao,
-        pessoa: Annotated[Usuario, Depends(_exige_corrigir_estado)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige("job.corrigir_estado", "Chave de sistema não corrige o estado")
+            ),
+        ],
     ) -> JobPublico:
         try:
             job = corrigir_estado_com_rastro(

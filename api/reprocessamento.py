@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.ciclo_de_vida import (
     NaoReprocessavel,
     desfazer_reprocessamento,
@@ -28,8 +28,8 @@ from api.jobs import (
     NomeDaEtapa,
     RepositorioDeJobs,
     ServicoIndisponivel,
-    _confere_permissao,
 )
+from api.permissoes import confere_permissao, exige_pessoa
 from api.progresso_das_janelas import JanelasDoJob
 from api.texto_como_dado import Linha, Texto
 
@@ -61,13 +61,6 @@ class PedidoDeReprocessamento(BaseModel):
     motivo: Annotated[str, Texto(500, strip=True)] | None = None
     # Só num Job concluído; a lista das etapas permitidas é do ciclo de vida (409).
     etapa: Annotated[str, Linha(40)] | None = None
-
-
-def _exige_pessoa(chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: chave de sistema não reprocessa."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não reprocessa")
-    return chamador
 
 
 def reprocessar_com_rastro(
@@ -132,12 +125,14 @@ def criar_rotas_do_reprocessamento(
     def reprocessar_job(
         job_id: str,
         request: Request,
-        pessoa: Annotated[Usuario, Depends(_exige_pessoa)],
+        pessoa: Annotated[
+            Usuario, Depends(exige_pessoa("Chave de sistema não reprocessa"))
+        ],
         pedido: PedidoDeReprocessamento | None = None,
     ) -> JobPublico:
         escolhida = pedido.etapa if pedido else None
         # `video.reprocessar` refaz o que falhou; refazer um vídeo bom é do Curador.
-        _confere_permissao(
+        confere_permissao(
             request,
             pessoa,
             "video.reprocessar" if escolhida is None else "video.reprocessar_etapa",

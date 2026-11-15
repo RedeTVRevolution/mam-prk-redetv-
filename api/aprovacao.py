@@ -10,13 +10,13 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.correcoes import CORRIGIVEIS, RepositorioDeAprovacao, rotulos_dos_tipos
-from api.jobs import _confere_permissao
+from api.permissoes import exige
 from api.texto_como_dado import Linha
 
 
@@ -46,14 +46,6 @@ def _regras(exigem: frozenset[str]) -> list[RegraDeAprovacao]:
     ]
 
 
-def _exige_definir(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `aprovacao.definir`; chave de sistema não muda regras."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não muda as regras de aprovação")
-    _confere_permissao(request, chamador, "aprovacao.definir")
-    return chamador
-
-
 def criar_rotas_da_aprovacao(
     repositorio: RepositorioDeAprovacao,
     auditoria: RepositorioDeAuditoria,
@@ -63,13 +55,30 @@ def criar_rotas_da_aprovacao(
 
     @rotas.get("")
     def listar(
-        _pessoa: Annotated[Usuario, Depends(_exige_definir)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige(
+                    "aprovacao.definir",
+                    "Chave de sistema não muda as regras de aprovação",
+                )
+            ),
+        ],
     ) -> list[RegraDeAprovacao]:
         return _regras(repositorio.tipos())
 
     @rotas.put("")
     def mudar(
-        pedido: MudancaDaRegra, pessoa: Annotated[Usuario, Depends(_exige_definir)]
+        pedido: MudancaDaRegra,
+        pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige(
+                    "aprovacao.definir",
+                    "Chave de sistema não muda as regras de aprovação",
+                )
+            ),
+        ],
     ) -> list[RegraDeAprovacao]:
         if pedido.tipo not in CORRIGIVEIS:
             raise HTTPException(422, f"Tipo de correção desconhecido: {pedido.tipo}")

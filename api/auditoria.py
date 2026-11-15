@@ -8,12 +8,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 
-from api.auth import ChamadorAutenticado, Usuario
-from api.jobs import CursorInvalido, _confere_permissao
+from api.auth import Usuario
+from api.jobs import CursorInvalido
+from api.permissoes import exige
 from api.texto_como_dado import LinhaDaConsulta
 
 # Cada ticket que grava uma ação nova a acrescenta a esta lista.
@@ -164,20 +165,17 @@ def pagina_de(registros: Any, limite: int | None) -> PaginaDeAuditoria:
     return PaginaDeAuditoria(pagina, pagina[-1].id)
 
 
-def _exige_ver(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `auditoria.ver`; chave de sistema não consulta."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não consulta a auditoria")
-    _confere_permissao(request, chamador, "auditoria.ver")
-    return chamador
-
-
 def criar_rotas_da_auditoria(repositorio: RepositorioDeAuditoria) -> APIRouter:
     rotas = APIRouter(prefix="/admin/auditoria")
 
     @rotas.get("")
     def listar(
-        _pessoa: Annotated[Usuario, Depends(_exige_ver)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige("auditoria.ver", "Chave de sistema não consulta a auditoria")
+            ),
+        ],
         pessoa: Annotated[str | None, LinhaDaConsulta(254)] = None,
         alvo: Annotated[str | None, LinhaDaConsulta(200)] = None,
         acao: Annotated[list[Acao] | None, Query()] = None,

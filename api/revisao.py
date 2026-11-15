@@ -11,17 +11,15 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import AwareDatetime, BaseModel
 
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.csv_seguro import csv_em_texto
 from api.jobs import (
     RepositorioDeJobs,
-    _confere_permissao,
-    _exige_editar,
-    _tem_permissao,
 )
+from api.permissoes import exige, exige_uma_de
 
 LIMITE_DE_INATIVIDADE_S = 300.0
 
@@ -166,15 +164,6 @@ def _linha_da_pessoa(medida: Medida, duracao_s: float | None) -> PessoaNaRevisao
     )
 
 
-def _exige_ver_a_revisao(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: pessoa com `correcao.aprovar` ou `auditoria.ver`; sistema não consulta."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não consulta o tempo de revisão")
-    if not _tem_permissao(request, chamador, "correcao.aprovar"):
-        _confere_permissao(request, chamador, "auditoria.ver")
-    return chamador
-
-
 def criar_rotas_da_revisao(
     jobs: RepositorioDeJobs,
     revisao: RepositorioDeRevisao,
@@ -187,7 +176,12 @@ def criar_rotas_da_revisao(
     def pulso(
         job_id: str,
         corpo: CorpoDoPulso,
-        pessoa: Annotated[Usuario, Depends(_exige_editar)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
     ) -> Response:
         job = jobs.obter(job_id)
         if job is None:
@@ -208,7 +202,16 @@ def criar_rotas_da_revisao(
     @rotas.get("/{job_id}/revisao")
     def total(
         job_id: str,
-        _pessoa: Annotated[Usuario, Depends(_exige_ver_a_revisao)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige_uma_de(
+                    "correcao.aprovar",
+                    "auditoria.ver",
+                    "Chave de sistema não consulta o tempo de revisão",
+                )
+            ),
+        ],
     ) -> RevisaoDoVideo:
         job = jobs.obter(job_id)
         if job is None:

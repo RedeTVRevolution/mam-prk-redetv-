@@ -23,8 +23,8 @@ from api.jobs import (
     Indexacao,
     JobPublico,
     RepositorioDeJobs,
-    _exige_editar,
 )
+from api.permissoes import exige
 from api.programas import RepositorioDeProgramas
 from api.texto_como_dado import Linha
 
@@ -63,7 +63,12 @@ def criar_rotas_da_edicao(
     def editar(
         job_id: str,
         pedido: EdicaoDoVideo,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
     ) -> JobPublico:
         job = repositorio.obter(job_id)
         if job is None:

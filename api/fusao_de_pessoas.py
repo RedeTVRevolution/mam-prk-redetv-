@@ -10,11 +10,11 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.catalogo import (
     Catalogo,
     FusaoDaPessoa,
@@ -24,9 +24,10 @@ from api.catalogo import (
 )
 from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
 from api.correcoes import Motivo, RepositorioDeCorrecoes, _sem_controle
-from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
+from api.jobs import FiltroDeJobs, RepositorioDeJobs
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.lixeira_do_catalogo import FotosDeReferencia
+from api.permissoes import exige
 from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, LinhaDaConsulta
 
@@ -53,14 +54,6 @@ class Fundida(BaseModel):
     destino_nome: str
     videos: int
     aparicoes: int
-
-
-def _exige_fundir(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `catalogo.fundir`; chave de sistema não mexe no catálogo."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não mexe no catálogo")
-    _confere_permissao(request, chamador, "catalogo.fundir")
-    return chamador
 
 
 def criar_rotas_da_fusao(
@@ -121,7 +114,10 @@ def criar_rotas_da_fusao(
     def impacto(
         id_da_pessoa: str,
         destino_id: Annotated[str, LinhaDaConsulta(64, min_length=1)],
-        _autor: Annotated[Usuario, Depends(_exige_fundir)],
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("catalogo.fundir", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> ImpactoDaFusao:
         origem, destino = origem_e_destino(id_da_pessoa, destino_id)
         videos, aparicoes = contar(origem.id)
@@ -137,7 +133,10 @@ def criar_rotas_da_fusao(
     def fundir(
         id_da_pessoa: str,
         pedido: PedidoDeFusao,
-        autor: Annotated[Usuario, Depends(_exige_fundir)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("catalogo.fundir", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> Fundida:
         origem, destino = origem_e_destino(id_da_pessoa, pedido.destino_id)
         videos, aparicoes = contar(origem.id)

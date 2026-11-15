@@ -35,7 +35,8 @@ from api.imagens_hostis import (
     recodificar,
 )
 from api.indice_da_busca import TipoDeRegistro
-from api.jobs import CursorInvalido, _exige
+from api.jobs import CursorInvalido
+from api.permissoes import exige_escopo
 from api.teste_de_carga import CABECALHO_DE_TESTE, VALOR_DO_CABECALHO
 from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta
 
@@ -177,7 +178,7 @@ def criar_rotas_da_busca(
     @rotas.get("/busca", description=f"Busca por texto. {NOTA_DO_QUADRO}")
     def buscar(
         resposta: Response,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
         q: Annotated[str, LinhaDaConsulta(TAMANHO_DA_CONSULTA, min_length=1)],
         ordem: Ordem = "relevancia",
         evidencias: Annotated[list[EvidenciaDaBusca] | None, Query(alias="ev")] = None,
@@ -291,7 +292,7 @@ def criar_rotas_da_busca(
     @rotas.post("/busca/imagem", description=f"Busca por imagem. {NOTA_DO_QUADRO}")
     def buscar_por_imagem(
         resposta: Response,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
         dados: Annotated[bytes, Depends(foto_enviada)],
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,

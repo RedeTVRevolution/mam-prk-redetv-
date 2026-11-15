@@ -13,15 +13,16 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.catalogo import Catalogo, PessoaDoCatalogo, RenomeacaoDaPessoa
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
-from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
+from api.jobs import FiltroDeJobs, RepositorioDeJobs
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_dos_jobs
+from api.permissoes import exige
 from api.texto import normalizar
 from api.texto_como_dado import Linha
 
@@ -49,14 +50,6 @@ class AndamentoDaRenomeacao(BaseModel):
     total: int
     nome_antigo: str
     nome_novo: str
-
-
-def _exige_aprovar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `correcao.aprovar` (Curador); chave de sistema não mexe no catálogo."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não mexe no catálogo")
-    _confere_permissao(request, chamador, "correcao.aprovar")
-    return chamador
 
 
 def _andamento(r: RenomeacaoDaPessoa) -> AndamentoDaRenomeacao:
@@ -125,7 +118,10 @@ def criar_rotas_da_renomeacao(
     def renomear(
         id_da_pessoa: str,
         pedido: PedidoDeRenomeacao,
-        autor: Annotated[Usuario, Depends(_exige_aprovar)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("correcao.aprovar", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> ImpactoDaRenomeacao:
         pessoa = viva(id_da_pessoa)
         if pessoa.renomeacao is not None and pessoa.renomeacao.estado != "concluida":
@@ -206,7 +202,10 @@ def criar_rotas_da_renomeacao(
     @rotas.get("/pessoas/{id_da_pessoa}/renomear/andamento")
     def andamento(
         id_da_pessoa: str,
-        _autor: Annotated[Usuario, Depends(_exige_aprovar)],
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("correcao.aprovar", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> AndamentoDaRenomeacao:
         pessoa = pessoas.obter(id_da_pessoa)
         if pessoa is None or pessoa.renomeacao is None:
@@ -216,7 +215,10 @@ def criar_rotas_da_renomeacao(
     @rotas.post("/pessoas/{id_da_pessoa}/renomear/retomar")
     def retomar(
         id_da_pessoa: str,
-        _autor: Annotated[Usuario, Depends(_exige_aprovar)],
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("correcao.aprovar", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> AndamentoDaRenomeacao:
         """Fecha uma renomeação que ficou em andamento antes de o índice largar o nome:
         não há mais o que reindexar."""

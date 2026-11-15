@@ -10,11 +10,11 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Escopo, Usuario
+from api.auth import Escopo, Usuario
 from api.chaves import (
     LimiteDeChavesAtivas,
     Mac,
@@ -23,7 +23,8 @@ from api.chaves import (
     emitir_chave,
     revogar_chave,
 )
-from api.jobs import ServicoIndisponivel, _confere_permissao
+from api.jobs import ServicoIndisponivel
+from api.permissoes import exige
 from api.texto_como_dado import Linha
 
 SISTEMA_MAXIMO = 100
@@ -92,14 +93,6 @@ def _da_lista(registro: RegistroDeChave) -> ChaveDaLista:
     )
 
 
-def _exige_gerir(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `chaves.gerir`; chave de sistema não gere chaves."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não gere chaves")
-    _confere_permissao(request, chamador, "chaves.gerir")
-    return chamador
-
-
 def criar_rotas_das_chaves(
     repositorio: RepositorioDeChaves,
     mac: Mac,
@@ -125,13 +118,18 @@ def criar_rotas_das_chaves(
 
     @rotas.get("")
     def listar(
-        _pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        _pessoa: Annotated[
+            Usuario, Depends(exige("chaves.gerir", "Chave de sistema não gere chaves"))
+        ],
     ) -> list[ChaveDaLista]:
         return [_da_lista(r) for r in repositorio.listar()]
 
     @rotas.post("", status_code=201)
     def emitir(
-        pedido: NovaChave, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        pedido: NovaChave,
+        pessoa: Annotated[
+            Usuario, Depends(exige("chaves.gerir", "Chave de sistema não gere chaves"))
+        ],
     ) -> ChaveEmitidaNaResposta:
         try:
             emitida = emitir_chave(
@@ -153,7 +151,10 @@ def criar_rotas_das_chaves(
 
     @rotas.post("/{chave_id}/revogar")
     def revogar(
-        chave_id: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        chave_id: str,
+        pessoa: Annotated[
+            Usuario, Depends(exige("chaves.gerir", "Chave de sistema não gere chaves"))
+        ],
     ) -> ChaveDaLista:
         antes = repositorio.obter(chave_id)
         if antes is None:

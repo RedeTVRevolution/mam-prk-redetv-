@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import (
     AfterValidator,
     AwareDatetime,
@@ -22,9 +22,8 @@ from pydantic import (
 )
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.erros import ServicoIndisponivel
-from api.jobs import _confere_permissao
 from api.papeis import (
     PAPEIS,
     Papel,
@@ -32,6 +31,7 @@ from api.papeis import (
     papeis_do_usuario,
     papeis_efetivos,
 )
+from api.permissoes import exige
 from api.texto_como_dado import Linha
 
 NOME_MAXIMO = 200
@@ -166,14 +166,6 @@ class PapeisDoUsuario(BaseModel):
     papeis: PapeisPedidos
 
 
-def _exige_gerir(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `usuarios.gerir`; chave de sistema não gere usuários."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não gere usuários")
-    _confere_permissao(request, chamador, "usuarios.gerir")
-    return chamador
-
-
 def criar_rotas_dos_usuarios(
     contas: ContasDeUsuario,
     papeis: RepositorioDePapeis,
@@ -230,7 +222,10 @@ def criar_rotas_dos_usuarios(
 
     @rotas.get("")
     def listar(
-        _pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> list[UsuarioDaLista]:
         return sorted(
             (da_lista(c) for c in contas.listar()), key=lambda u: u.email.lower()
@@ -238,7 +233,11 @@ def criar_rotas_dos_usuarios(
 
     @rotas.post("", status_code=201)
     def criar(
-        pedido: NovoUsuario, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        pedido: NovoUsuario,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> UsuarioDaLista:
         try:
             conta = contas.criar(pedido.email, pedido.nome)
@@ -253,7 +252,11 @@ def criar_rotas_dos_usuarios(
 
     @rotas.post("/{uid}/link-de-senha")
     def reenviar_link(
-        uid: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        uid: str,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> dict[str, bool]:
         conta = achar(uid)
         contas.enviar_link_de_senha(conta.email)
@@ -264,7 +267,10 @@ def criar_rotas_dos_usuarios(
     def trocar_papeis(
         uid: str,
         pedido: PapeisDoUsuario,
-        pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> UsuarioDaLista:
         conta = achar(uid)
         guardados = papeis.obter(uid)
@@ -297,7 +303,11 @@ def criar_rotas_dos_usuarios(
 
     @rotas.post("/{uid}/desativar")
     def desativar(
-        uid: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        uid: str,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> UsuarioDaLista:
         if uid == pessoa.uid:
             raise HTTPException(409, "Você não pode desativar a própria conta")
@@ -316,7 +326,11 @@ def criar_rotas_dos_usuarios(
 
     @rotas.post("/{uid}/reativar")
     def reativar(
-        uid: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        uid: str,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> UsuarioDaLista:
         conta = achar(uid)
         contas.bloquear(uid, False)

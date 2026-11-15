@@ -27,13 +27,12 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
-    Request,
     Response,
 )
 from pydantic import BaseModel, field_validator
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.catalogo import Catalogo, visivel
 from api.ciclo_de_vida import pedir_indexacao
 from api.correcoes import _sem_controle
@@ -41,8 +40,8 @@ from api.jobs import (
     DisparoDaIndexacao,
     FiltroDeJobs,
     RepositorioDeJobs,
-    _confere_permissao,
 )
+from api.permissoes import exige
 from api.programas import (
     NomeDoPrograma,
     NomeEmUso,
@@ -133,14 +132,6 @@ class NovaPessoaDoPrograma(BaseModel):
 
 class ImpactoDoPrograma(BaseModel):
     videos: int
-
-
-def _exige_editar_programas(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `programas.editar`; chave de sistema não edita."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não edita programas")
-    _confere_permissao(request, chamador, "programas.editar")
-    return chamador
 
 
 def criar_rotas_dos_programas(
@@ -324,14 +315,20 @@ def criar_rotas_dos_programas(
 
     @rotas.get("")
     def listar(
-        _autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> list[ProgramaPublico]:
         return [publico(p) for p in programas.listar()]
 
     @rotas.post("", status_code=201)
     def criar(
         dados: DadosDoPrograma,
-        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> ProgramaPublico:
         conferir_pessoas(dados)
         programa = Programa(id=novo_id(), **dados.model_dump())
@@ -351,7 +348,10 @@ def criar_rotas_dos_programas(
         id: str,
         dados: DadosDoPrograma,
         segundo_plano: BackgroundTasks,
-        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> ProgramaPublico:
         antes = programas.obter(id)
         if antes is None:
@@ -450,7 +450,10 @@ def criar_rotas_dos_programas(
     def retomar(
         id: str,
         segundo_plano: BackgroundTasks,
-        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> ProgramaPublico:
         programa = programas.obter(id)
         if programa is None or programa.renomeacao is None:
@@ -504,7 +507,11 @@ def criar_rotas_dos_programas(
 
     @rotas.get("/{id}/impacto")
     def impacto(
-        id: str, _autor: Annotated[Usuario, Depends(_exige_editar_programas)]
+        id: str,
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> ImpactoDoPrograma:
         programa = programas.obter(id)
         if programa is None:
@@ -514,7 +521,11 @@ def criar_rotas_dos_programas(
 
     @rotas.delete("/{id}", status_code=204)
     def apagar(
-        id: str, autor: Annotated[Usuario, Depends(_exige_editar_programas)]
+        id: str,
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> Response:
         antes = programas.obter(id)
         if antes is None:
@@ -538,7 +549,10 @@ def criar_rotas_dos_programas(
     @rotas.post("/pessoas", status_code=201)
     def criar_pessoa(
         dados: NovaPessoaDoPrograma,
-        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> PessoaNoProgramaPublica:
         """A pessoa que ainda não está no catálogo, criada ali mesmo (sem papel: o
         papel é do vínculo com o programa)."""

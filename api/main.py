@@ -95,11 +95,9 @@ from api.jobs import (
     RepositorioIndisponivel,
     ServicoIndisponivel,
     TipoNaoSuportado,
-    _chave_com_algum,
     aceita_gzip,
     agora_utc,
     criar_rotas,
-    papeis_da_pessoa,
 )
 from api.lixeira import (
     ArquivosDoJob,
@@ -165,6 +163,7 @@ from api.passadas import (
     PassadasStorage,
     criar_rotas_das_passadas,
 )
+from api.permissoes import chave_com_algum, papeis_da_pessoa
 from api.programas import (
     NomesDosProgramas,
     ProgramasEmMemoria,
@@ -518,7 +517,7 @@ def criar_app(
     # nome do parâmetro de `criar_app`).
     @v1.get(
         "/programas",
-        dependencies=[Depends(_chave_com_algum("criar", "ler"))],
+        dependencies=[Depends(chave_com_algum("criar", "ler"))],
         operation_id="programas_v1_programas_get",
     )
     def lista_de_programas() -> list[str]:

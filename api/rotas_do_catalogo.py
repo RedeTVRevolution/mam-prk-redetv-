@@ -17,8 +17,8 @@ from api.achar_nomes import IndiceDeNomes, achar_por_prefixo
 from api.auth import Usuario
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.correcoes import LIMITE_DO_NOME, _sem_controle
-from api.jobs import _exige, _exige_editar
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
+from api.permissoes import exige, exige_escopo
 from api.texto_como_dado import Linha, LinhaDaConsulta
 
 Nome = Annotated[
@@ -88,7 +88,7 @@ def criar_rotas_do_catalogo(
     def marca_achada(m: MarcaDoCatalogo) -> MarcaAchada:
         return MarcaAchada(id=m.id, nome=m.nome, a_revisar=m.a_revisar)
 
-    @rotas.get("/pessoas", dependencies=[Depends(_exige("ler"))])
+    @rotas.get("/pessoas", dependencies=[Depends(exige_escopo("ler"))])
     def achar_pessoas(
         q: Annotated[str, LinhaDaConsulta(LIMITE_DO_NOME)],
     ) -> list[PessoaAchada]:
@@ -99,7 +99,12 @@ def criar_rotas_do_catalogo(
     def acrescentar_pessoa(
         nova: NovaPessoa,
         resposta: Response,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
     ) -> PessoaAchada:
         existentes = pessoas.achar(nova.nome)
         if existentes:
@@ -115,7 +120,7 @@ def criar_rotas_do_catalogo(
         copia_das_pessoas.descartar()
         return pessoa_achada(criada)
 
-    @rotas.get("/marcas", dependencies=[Depends(_exige("ler"))])
+    @rotas.get("/marcas", dependencies=[Depends(exige_escopo("ler"))])
     def achar_marcas(
         q: Annotated[str, LinhaDaConsulta(LIMITE_DO_NOME)],
     ) -> list[MarcaAchada]:
@@ -126,7 +131,12 @@ def criar_rotas_do_catalogo(
     def acrescentar_marca(
         nova: NovaMarca,
         resposta: Response,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
     ) -> MarcaAchada:
         existentes = marcas.achar(nova.nome)
         if existentes:

@@ -40,8 +40,6 @@ from api.decupagem import Decupagem, Video
 from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
 from api.jobs import (
     RepositorioDeJobs,
-    _enxerga,
-    _exige,
     agora_utc,
 )
 from api.leitura_da_tela import LeituraDaTela
@@ -53,6 +51,7 @@ from api.nuvem import (
     TranscricoesStorage,
     objeto_do_proxy,
 )
+from api.permissoes import enxerga, exige_escopo
 from api.precos_dos_modelos import Preco, precos_do_ambiente, tokens_do_transporte
 from api.programas import Perfis, perfis_dos_programas
 from api.transcricao import Transcricao
@@ -291,18 +290,18 @@ def criar_rotas_das_passadas(
 
     @rotas.get("/{job_id}/passadas")
     def listar(
-        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+        job_id: str, chamador: Annotated[Chamador, Depends(exige_escopo("ler"))]
     ) -> list[ResumoDaPassada]:
-        job = _enxerga(chamador, repositorio.obter(job_id))
+        job = enxerga(chamador, repositorio.obter(job_id))
         return passadas.listar_passadas(job.id)
 
     @rotas.get("/{job_id}/passadas/{passada_id}")
     def ler(
         job_id: str,
         passada_id: Annotated[str, Path(pattern=FORMA_DO_ID)],
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
     ) -> Passada:
-        job = _enxerga(chamador, repositorio.obter(job_id))
+        job = enxerga(chamador, repositorio.obter(job_id))
         passada = passadas.ler_passada(job.id, passada_id)
         if passada is None:
             raise HTTPException(404, "Passada não encontrada")

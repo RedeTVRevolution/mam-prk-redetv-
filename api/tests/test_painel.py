@@ -12,13 +12,16 @@ from api.auditoria import (
 )
 from api.auth import Sistema, Usuario
 from api.jobs import ServicoIndisponivel
-from api.painel import AcessosAoPainel, FiltroDoPainel, exige_painel
+from api.painel import AcessosAoPainel, FiltroDoPainel
 from api.papeis import Papel
+from api.permissoes import exige
 from api.tests.test_auth import VerificadorFalso
 
 AGORA = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
 ANA = Usuario(uid="ana", email="Ana@RedeTV.com.br")
 CABECALHO = {"Authorization": "Bearer ana"}
+
+PODE_VER = exige("painel.ver", "Chave de sistema não vê o painel")
 
 
 def test_abrir_o_painel_grava_quem_quando_e_o_filtro() -> None:
@@ -60,7 +63,7 @@ def test_chave_de_sistema_nao_ve_o_painel() -> None:
     sistema = Sistema(sistema="playout", escopos=["ler"])
 
     with pytest.raises(HTTPException) as erro:
-        exige_painel(cast(Request, None), sistema)
+        PODE_VER(cast(Request, None), sistema)
 
     assert erro.value.status_code == 403
 
@@ -73,7 +76,7 @@ def _cliente(papeis: list[Papel]) -> TestClient:
     repo.salvar("ana", papeis)
     app: FastAPI = criar_app(verificador=VerificadorFalso({"ana": ANA}), papeis=repo)
 
-    def _rota(_: Annotated[Usuario, Depends(exige_painel)]) -> dict[str, str]:
+    def _rota(_: Annotated[Usuario, Depends(PODE_VER)]) -> dict[str, str]:
         return {"ok": "sim"}
 
     app.add_api_route("/v1/_painel_teste", _rota)

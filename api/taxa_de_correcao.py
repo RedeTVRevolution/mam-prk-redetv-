@@ -32,11 +32,11 @@ from collections.abc import Set as AbstractSet
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.bancos import cliente_do_firestore
 from api.correcoes import CORRIGIVEIS, Correcao, RepositorioDeCorrecoes
 from api.csv_seguro import csv_em_texto
@@ -44,8 +44,6 @@ from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
 from api.jobs import (
     RepositorioDeJobs,
     ServicoIndisponivel,
-    _confere_permissao,
-    _tem_permissao,
 )
 from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
@@ -54,6 +52,7 @@ from api.nuvem import (
     RepositorioDeRevisaoFirestore,
     RepositorioFirestore,
 )
+from api.permissoes import exige_uma_de
 from api.regras_das_correcoes import estado_das, reconciliar
 from api.revisao import RepositorioDeRevisao
 from api.texto_como_dado import LinhaDaConsulta
@@ -277,15 +276,6 @@ def _periodo(
     )
 
 
-def _exige_ver_a_taxa(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: pessoa com `correcao.aprovar` ou `auditoria.ver`; sistema não consulta."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não consulta a taxa de correção")
-    if not _tem_permissao(request, chamador, "correcao.aprovar"):
-        _confere_permissao(request, chamador, "auditoria.ver")
-    return chamador
-
-
 class TaxaDeCorrecao(BaseModel):
     desde: date | None
     ate: date | None
@@ -303,7 +293,16 @@ def criar_rotas_da_qualidade(
 
     @rotas.get("/taxa-de-correcao")
     def taxa_de_correcao(
-        _pessoa: Annotated[Usuario, Depends(_exige_ver_a_taxa)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige_uma_de(
+                    "correcao.aprovar",
+                    "auditoria.ver",
+                    "Chave de sistema não consulta a taxa de correção",
+                )
+            ),
+        ],
         desde: date | None = None,
         ate: date | None = None,
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,

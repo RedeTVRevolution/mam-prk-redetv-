@@ -23,10 +23,9 @@ from api.jobs import (
     FiltroDeJobs,
     Job,
     RepositorioDeJobs,
-    _confere_permissao,
-    _tem_permissao,
 )
 from api.marcas import CatalogoDeMarcas
+from api.permissoes import exige, tem_permissao
 from api.texto_como_dado import Texto
 
 log = logging.getLogger(__name__)
@@ -121,21 +120,13 @@ def sem_job_na_lixeira(
         request.state.job_lido = job
         if job is None or job.lixeira is None:
             return
-        if isinstance(chamador, Usuario) and _tem_permissao(
+        if isinstance(chamador, Usuario) and tem_permissao(
             request, chamador, "lixeira.gerir"
         ):
             return
         raise HTTPException(404, "Job não encontrado")
 
     return verificar
-
-
-def _exige_gerir(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `lixeira.gerir`; chave de sistema não mexe na lixeira."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não mexe na lixeira")
-    _confere_permissao(request, chamador, "lixeira.gerir")
-    return chamador
 
 
 def _quem_enviou(job: Job) -> str:
@@ -278,7 +269,10 @@ def criar_rotas_da_lixeira(
 
     @rotas.get("")
     def listar(
-        _pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> list[ItemDaLixeira]:
         agora = relogio()
         itens = [
@@ -300,7 +294,11 @@ def criar_rotas_da_lixeira(
 
     @rotas.get("/videos/{id_do_video}/impacto")
     def impacto(
-        id_do_video: str, _pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        id_do_video: str,
+        _pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> ImpactoDoVideo:
         return impacto_de(achar(id_do_video))
 
@@ -308,7 +306,10 @@ def criar_rotas_da_lixeira(
     def enviar(
         id_do_video: str,
         pedido: Envio,
-        pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> ItemDaLixeira:
         job = achar(id_do_video)
         if job.estado not in ESTADOS_QUE_VAO_PARA_A_LIXEIRA:
@@ -351,7 +352,11 @@ def criar_rotas_da_lixeira(
 
     @rotas.post("/videos/{id_do_video}/restaurar")
     def restaurar(
-        id_do_video: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        id_do_video: str,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> JobRestaurado:
         job = achar(id_do_video)
         envio = job.lixeira
