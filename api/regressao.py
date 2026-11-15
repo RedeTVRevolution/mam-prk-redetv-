@@ -1,7 +1,7 @@
 """Conjunto de regressão (#253): trechos de vídeo com o esperado por categoria.
 
 Cada caso é um JSON em `evals/regressao/casos/`, sem vídeo: aponta o vídeo pelo SHA-256 do
-bloco `video` da Decupagem (o do arquivo enviado, o mesmo do gabarito do comparador). O esperado usa os `Item` e os tipos do `api/comparador.py`, então o
+bloco `video` da Decupagem (o do arquivo enviado, o mesmo do gabarito do comparador). O esperado usa os `Item` e os tipos do `api/pareamento.py`, então o
 comparador mede um caso como mede um gabarito. Duas origens: `anotado` (o CSV do gabarito,
 #252) e `correcao` (uma correção em vigor, com o Job, o trecho e a versão do pipeline que
 errou). Cada caso tem `reservado`: os reservados só entram na avaliação final e nunca no
@@ -13,7 +13,6 @@ correções em vigor (aprovadas, ou de tipo que não exige aprovação, e não d
 Ambiente: `GCP_PROJECT_ID`, `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`.
 """
 
-import hashlib
 import json
 import logging
 import os
@@ -22,12 +21,10 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
-from api.comparador import Item, Tipo
 from api.correcoes import (
     CORRIGIVEIS,
     Correcao,
@@ -36,15 +33,18 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.erros import ServicoIndisponivel
+from api.ferramentas.comum import hash_estavel
 from api.identidade import identidade_do_nome
 from api.jobs import RepositorioDeJobs
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
+from api.pareamento import Item, Tipo
 from api.regras_das_correcoes import estado_das
-from api.reprocessar_versao import LeitorDeDecupagem
+from api.texto import normalizar
 
 log = logging.getLogger(__name__)
 
@@ -71,9 +71,7 @@ __all__ = [
 
 def reservado_pelo_sorteio(id: str) -> bool:
     """Estável: depende só do id do caso, nunca da ordem nem do que já existe."""
-    return int(hashlib.sha256(id.encode()).hexdigest()[:8], 16) % 100 < (
-        PERCENTUAL_RESERVADO
-    )
+    return hash_estavel(id, 8) % 100 < PERCENTUAL_RESERVADO
 
 
 class ItemEsperado(BaseModel):
@@ -228,6 +226,7 @@ _CATEGORIA_DO_ITEM: dict[str, Tipo] = {
     "plano": "plano",
     "fala": "fala",
     "texto_na_tela": "texto_na_tela",
+    "objeto": "objeto",
 }
 # O `depois` é o nome novo do item: vira a identidade esperada nesta e nas outras
 # correções do mesmo item (a renomeação e os tempos de uma pessoa não se contradizem).
@@ -236,9 +235,13 @@ _NOME_NOVO: dict[str, Callable[[str], str]] = {
     "comercial.marca": lambda depois: depois,
     "texto_na_tela.texto": lambda depois: str(json.loads(depois)["texto"]),
     "pauta.titulo": lambda depois: depois,
+    "objeto.atributos": lambda depois: normalizar(json.loads(depois)["tipo"]),
 }
 # Dizem o que a pessoa não é: não há item esperado para medir.
-_SEM_ITEM = frozenset({"pessoa.nao_e"})
+_SEM_ITEM = frozenset({"pessoa.nao_e", "objeto.nao_existe"})
+# Sem regra aprovada para o conjunto: saem com aviso próprio (a âncora juntaria as
+# ocorrências do objeto num intervalo só).
+_SEM_CONVERSAO = frozenset({"objeto.dono", "objeto.acrescentar"})
 
 
 def _nomes_novos(
@@ -290,6 +293,19 @@ def _itens_da_pessoa(
     return [Item(categoria, nome, inicio, fim) for inicio, fim in intervalos]
 
 
+def _itens_do_objeto(
+    c: Correcao, nome: str | None, modelo: Mapping[str, Any]
+) -> list[Item]:
+    """Um item por ocorrência do objeto no JSON do modelo, nunca um intervalo só."""
+    for objeto in modelo.get("objetos", []):
+        if isinstance(objeto, dict) and objeto.get("id") == c.item_id:
+            return [
+                Item("objeto", nome or c.ancora.identidade, o["inicio_ms"], o["fim_ms"])
+                for o in objeto.get("ocorrencias", [])
+            ]
+    return []
+
+
 def _itens_da_correcao(
     c: Correcao, nomes: Mapping[str, str], modelo: Mapping[str, Any]
 ) -> list[Item]:
@@ -299,6 +315,8 @@ def _itens_da_correcao(
     nome = nomes.get(f"{a.tipo_do_item}:{c.item_id}")
     if a.tipo_do_item == "pessoa":
         return _itens_da_pessoa(c, nome or a.identidade, modelo)
+    if a.tipo_do_item == "objeto":
+        return _itens_do_objeto(c, nome, modelo)
     if a.tipo_do_item == "comercial":
         # A âncora do comercial é `marca|tipo`; o comparador pareia pela marca.
         nome = nome or a.identidade.rsplit("|", 1)[0]
@@ -327,6 +345,12 @@ def casos_das_correcoes(
             continue
         if c.ancora.versao != versao:
             log.warning("correção %s de outro JSON do modelo: fora do conjunto", c.id)
+            continue
+        if c.tipo in _SEM_CONVERSAO:
+            log.warning(
+                "correção %s: operação de objeto sem conversão para o conjunto de regressão",
+                c.id,
+            )
             continue
         try:
             esperado = _itens_da_correcao(c, nomes, modelo)
@@ -360,7 +384,7 @@ def casos_das_correcoes(
 
 def exportar(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pasta: Path,
     escrever: Callable[[str], None] = print,
@@ -369,8 +393,9 @@ def exportar(
     arquivo. O caso de uma correção deste JSON que deixou de valer (desfeita,
     recusada) sai da pasta; o de uma correção de outro JSON fica como está."""
     gravados: list[Caso] = []
+    com_correcao = correcoes.jobs_com_correcao()
     for job in sorted(repositorio.listar(), key=lambda j: (j.criado_em, j.id)):
-        if job.estado != "concluido":
+        if job.estado != "concluido" or job.id not in com_correcao:
             continue
         feitas = correcoes.listar(job.id)
         if not feitas:
@@ -401,8 +426,7 @@ def exportar(
 def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int:
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
-        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        decupagens = DecupagensStorage.do_ambiente(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -410,7 +434,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     banco = cliente_do_firestore(projeto)
     exportar(
         RepositorioFirestore(banco),
-        DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        decupagens,
         RepositorioDeCorrecoesFirestore(banco),
         pasta,
     )

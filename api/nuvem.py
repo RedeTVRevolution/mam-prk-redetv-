@@ -3,6 +3,7 @@
 import functools
 import json
 import logging
+import os
 import random
 import secrets
 import threading
@@ -10,7 +11,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from urllib.parse import quote
 
 import google.auth
@@ -21,6 +22,7 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
 
+from api.ambiente import exigir_do_ambiente
 from api.auditoria import (
     FiltroDeAuditoria,
     PaginaDeAuditoria,
@@ -47,7 +49,6 @@ from api.catalogo import (
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.clientes_de_nuvem import ESCOPO_DA_NUVEM, sessao_autenticada
-from api.comparador import normalizar
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
 from api.florence import ObjetosDaDecupagem
@@ -89,6 +90,7 @@ from api.programas import (
 from api.progresso_das_janelas import JanelaGravada, ler_janela_gravada
 from api.revisao import Medida, Pulso
 from api.revisao import aplicar as aplicar_o_pulso
+from api.texto import normalizar
 from api.texto_como_dado import id_conferido, tem_controle
 from api.tipos_de_objeto import LIMITE_PADRAO, TipoDeObjeto, somar_por_chave
 from api.transcricao import Transcricao
@@ -1549,6 +1551,18 @@ class DecupagensStorage:
         self._cliente = cliente
         self._aceitos = bucket_de_aceitos
         self._decupagens = bucket_de_decupagens
+
+    @classmethod
+    def do_ambiente(
+        cls,
+        ambiente: Mapping[str, str] = os.environ,
+        cliente: ClienteStorage | None = None,
+    ) -> Self:
+        """O leitor de `GCP_PROJECT_ID`, `BUCKET_ACEITOS` e `BUCKET_DECUPAGENS`; `cliente` reaproveita um já criado."""
+        projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
+        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
+        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        return cls(cliente or ClienteStorage(project=projeto), aceitos, decupagens)
 
     def uri_do_proxy(self, job_id: str) -> str:
         return f"gs://{self._aceitos}/{objeto_do_proxy(job_id)}"

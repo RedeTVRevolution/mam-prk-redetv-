@@ -16,7 +16,6 @@ qualidade: a pessoa escolhe vídeos de outros programas.
 """
 
 import argparse
-import hashlib
 import json
 import math
 import sys
@@ -27,8 +26,9 @@ from pathlib import Path
 from typing import Any
 
 from api.assinatura_do_nome import assinatura
-from api.comparador import normalizar
+from api.ferramentas.comum import hash_estavel
 from api.taxonomia_de_objetos import OUTRO
+from api.texto import normalizar
 from api.tipo_do_objeto import chave_de_agrupamento, tipo_canonico_de
 
 SEM_PROGRAMA = "sem-programa"
@@ -72,7 +72,7 @@ def diagnostico(videos: Iterable[dict[str, Any]]) -> dict[str, int]:
 
 
 def _hash(chave: str) -> int:
-    return int(hashlib.sha256(chave.encode()).hexdigest()[:12], 16)
+    return hash_estavel(chave, 12)
 
 
 def grupos_por_programa(videos_por_programa: dict[str, list[dict[str, Any]]]) -> Grupos:
@@ -134,7 +134,9 @@ def amostra_de_cobertura(grupos: Grupos, quantos: int) -> list[dict[str, str]]:
 
 
 def margem_de_confianca(pares: int, precisao: float = 0.95) -> float:
-    """A margem de 95% de confiança, em pontos percentuais."""
+    """A margem de 95% de confiança, em pontos percentuais; infinita sem pares."""
+    if pares <= 0:
+        return math.inf
     return 196 * math.sqrt(precisao * (1 - precisao) / pares)
 
 
@@ -153,16 +155,17 @@ def _ler(pasta: Path) -> dict[str, list[dict[str, Any]]]:
 def medir(pasta: Path, quantos: int = 100) -> dict[str, Any]:
     videos = _ler(pasta)
     todos = [v for lista in videos.values() for v in lista]
+    grupos = grupos_por_programa(videos)
+    precisao = amostra_de_precisao(grupos, quantos)
+    margem = margem_de_confianca(len(precisao))
     return {
         "videos": len(todos),
         "diagnostico": diagnostico(todos),
-        "amostra_de_precisao": amostra_de_precisao(
-            grupos_por_programa(videos), quantos
-        ),
-        "amostra_de_cobertura": amostra_de_cobertura(
-            grupos_por_programa(videos), quantos
-        ),
-        "margem_com_essa_amostra_pontos": round(margem_de_confianca(quantos), 1),
+        "amostra_de_precisao": precisao,
+        "amostra_de_cobertura": amostra_de_cobertura(grupos, quantos),
+        "margem_com_essa_amostra_pontos": round(margem, 1)
+        if math.isfinite(margem)
+        else None,
         "pares_para_margem_de_3_pontos": pares_para_margem(3),
     }
 

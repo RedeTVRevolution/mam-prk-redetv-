@@ -27,7 +27,7 @@ from api.decupagem import (
     MencaoNoTexto,
     Pessoa,
 )
-from api.exemplos_da_busca import EXEMPLOS
+from api.ferramentas.exemplos_da_busca import EXEMPLOS
 from api.indexacao import reindexar
 from api.jobs import CopiaNoBigQuery, Indexacao, Job
 from api.tests.test_correcoes import BASE

@@ -9,13 +9,12 @@ import pytest
 from api.ambiente import FaltaNoAmbiente
 from api.comparar_objetos import (
     DisparadorDoCloudRun,
-    Preco,
     comparar,
     destino_do_florence,
     main,
-    precos_do_ambiente,
 )
 from api.gemini import Chamada
+from api.precos_dos_modelos import Preco
 from api.tests.test_inventario_job import CONVERTIDO, VISTO, _armazem
 
 PRECOS = {"flash-lite": Preco(0.10, 0.40), "flash": Preco(1.0, 4.0)}
@@ -182,15 +181,6 @@ def test_sem_decupagem_o_erro_e_claro(tmp_path: Path) -> None:
             modelos=["flash-lite"],
             precos=PRECOS,
         )
-
-
-def test_precos_do_ambiente() -> None:
-    assert precos_do_ambiente("a=0.1:0.4, b=1:4") == {
-        "a": Preco(0.1, 0.4),
-        "b": Preco(1.0, 4.0),
-    }
-    with pytest.raises(FaltaNoAmbiente):
-        precos_do_ambiente("a=caro")
 
 
 def test_main_sem_argumentos_ou_sem_ambiente_nao_toca_a_nuvem(

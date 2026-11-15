@@ -79,9 +79,20 @@ const emSerie = () => {
 
 const CONSULTA = `query($owner: String!, $name: String!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
-    issues(first: 100, after: $endCursor) {
+    issues(first: 100, after: $endCursor, states: OPEN) {
       nodes { number state body labels(first: 20) { nodes { name } } blockedBy(first: 50) { nodes { number } } }
       pageInfo { hasNextPage endCursor }
+    }
+  }
+}`;
+
+// Um número que não está entre as abertas: issue ou PR, e em que estado.
+const CONSULTA_NUMERO = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issueOrPullRequest(number: $number) {
+      __typename
+      ... on Issue { state }
+      ... on PullRequest { state merged }
     }
   }
 }`;
@@ -131,23 +142,29 @@ export async function loop(c: Config): Promise<number> {
     return 2;
   }
 
-  // Os PRs mesclados resolvem um "Bloqueado por: #N" (#87): a consulta das issues não traz PRs, e as
-  // dependências nativas do GitHub só aceitam issues. PR aberto ou fechado sem merge segue bloqueando.
-  // A leitura pede "Pull requests: leitura" no token; sem ela, falha uma vez na rodada, fica anotado e
-  // quem espera um PR segue esperando, como antes.
+  // Um bloqueador que não está entre as abertas é consultado pelo número: issue fechada e PR mesclado
+  // liberam o ticket (#87); issue aberta, PR aberto ou fechado sem merge e número inexistente seguram.
+  // O que já se sabe resolvido fica guardado na rodada; o resto é consultado de novo a cada vaga, pois
+  // pode ter sido mesclado no meio dela. Ler PRs pede "Pull requests: leitura" no token; sem ela a
+  // consulta falha, fica anotada uma vez na rodada e só atrasa quem espera um PR, nunca uma issue fechada.
+  const resolvidos = new Set<number>();
   let semPRs = false;
-  const prsMesclados = async (): Promise<number[]> => {
-    if (semPRs) return [];
+  const resolveNumero = async (n: number): Promise<boolean> => {
+    if (resolvidos.has(n)) return true;
     try {
-      return (JSON.parse(await gh("pr", "list", "--state", "merged", "--limit", "10000", "--json", "number")) as { number: number }[]).map((p) => p.number);
+      const r = JSON.parse(await gh("api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${n}`, "-f", `query=${CONSULTA_NUMERO}`)).data.repository.issueOrPullRequest;
+      if (r?.__typename === "Issue" ? r.state === "CLOSED" : r?.merged === true) resolvidos.add(n);
     } catch (e) {
+      const m = String((e as Error)?.message ?? e);
+      if (/Could not resolve to/i.test(m)) return false;
+      if (!/Resource not accessible|HTTP 403/i.test(m) || /rate limit|abuse/i.test(m)) throw e;
+      if (!semPRs) anota(`não li os PRs (${m}); nesta rodada, quem espera um PR segue esperando`);
       semPRs = true;
-      anota(`não li os PRs mesclados (${String((e as Error)?.message ?? e)}); nesta rodada, quem espera um PR segue esperando`);
-      return [];
     }
+    return resolvidos.has(n);
   };
 
-  // Todas as issues, com os bloqueios nativos somados aos da linha "Bloqueado por: #N".
+  // As issues abertas, com os bloqueios nativos somados aos da linha "Bloqueado por: #N".
   const issues = async () =>
     (JSON.parse(await gh("api", "graphql", "--paginate", "--slurp", "-F", "owner={owner}", "-F", "name={repo}", "-f", `query=${CONSULTA}`)) as any[])
       .flatMap((p) => p.data.repository.issues.nodes)
@@ -180,15 +197,16 @@ export async function loop(c: Config): Promise<number> {
   // spec de um ticket numa vaga. O primeiro livre é o próximo. Grava em .afk/fila, para quem acompanha.
   const proximoTicket = async () => {
     const todas = await issues();
-    const resolvido = new Set(todas.filter((i) => i.state === "CLOSED" || i.labels.includes("afk-feito") || feitos.has(i.number)).map((i) => i.number));
+    const resolvido = new Set(todas.filter((i) => i.labels.includes("afk-feito")).map((i) => i.number));
+    for (const n of feitos) resolvido.add(n);
     const specs = new Set([...emAndamento.values()].map((t) => t.spec).filter(Boolean));
     const candidatos = todas
-      .filter((i) => i.state === "OPEN" && i.labels.includes("ready-for-agent") && !i.labels.includes("afk-feito"))
+      .filter((i) => i.labels.includes("ready-for-agent") && !i.labels.includes("afk-feito"))
       .filter((i) => !saidos.has(String(i.number)));
-    // Um bloqueador que não é issue é PR (ou não existe): só então os PRs mesclados são lidos.
-    const issuesDaFila = new Set(todas.map((i) => i.number));
-    if (candidatos.some((i) => i.bloqueios.some((b) => !issuesDaFila.has(b)))) {
-      for (const n of await prsMesclados()) resolvido.add(n);
+    // Fora das abertas: fechada ou mesclado liberam; só estes são consultados.
+    const abertas = new Set(todas.map((i) => i.number));
+    for (const n of new Set(candidatos.flatMap((i) => i.bloqueios))) {
+      if (!abertas.has(n) && !resolvido.has(n) && (await resolveNumero(n))) resolvido.add(n);
     }
     const fila = candidatos
       .sort((a, b) => a.number - b.number)

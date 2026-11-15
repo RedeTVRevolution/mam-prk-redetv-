@@ -19,11 +19,11 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Literal
 
-from api.comparador import normalizar
 from api.correcoes import identidade_da_pessoa
 from api.decupagem import Aparicao, Decupagem, Objeto, OrigemDaJuncao, Pauta, Pessoa
 from api.identidade import nao_identificado
 from api.pessoas import LISTAS, _em_ordem
+from api.texto import normalizar
 
 # ponytail: pesos e limiares ainda sem calibração (o conjunto de calibração é
 # separado do da avaliação); `medir_juncao.py` mostra a distribuição das pontuações.

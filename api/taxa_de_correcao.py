@@ -33,7 +33,6 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
@@ -48,6 +47,7 @@ from api.jobs import (
     _confere_permissao,
     _tem_permissao,
 )
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
@@ -55,9 +55,9 @@ from api.nuvem import (
     RepositorioFirestore,
 )
 from api.regras_das_correcoes import estado_das, reconciliar
-from api.reprocessar_versao import LeitorDeDecupagem
 from api.revisao import RepositorioDeRevisao
 from api.texto_como_dado import LinhaDaConsulta
+from api.tipos_da_taxa import LinhaDaTaxa
 
 log = logging.getLogger(__name__)
 
@@ -81,31 +81,22 @@ COLUNAS_DO_CSV = (
 )
 
 
-class LinhaDaTaxa(BaseModel):
-    programa: str | None
-    versao_pipeline: str | None
-    tipo: str
-    correcoes: int
-    itens: int
-    taxa_de_correcao: float | None
-
-
 def _no_periodo(quando: datetime, desde: datetime | None, ate: datetime | None) -> bool:
     return (desde is None or quando >= desde) and (ate is None or quando < ate)
 
 
-def _itens_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> ItensDaDecupagem:
+def _itens_da_decupagem(decupagens: AbreDecupagem, job_id: str) -> ItensDaDecupagem:
     """A contagem tirada da decupagem inteira (o caminho de hoje do painel)."""
     return contar_itens(b"".join(decupagens.abrir_decupagem(job_id)))
 
 
-def modelo_da_decupagem(decupagens: LeitorDeDecupagem, job_id: str) -> dict[str, Any]:
+def modelo_da_decupagem(decupagens: AbreDecupagem, job_id: str) -> dict[str, Any]:
     return json.loads(b"".join(decupagens.abrir_decupagem(job_id)))  # type: ignore[no-any-return]
 
 
 def calcular(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     revisao: RepositorioDeRevisao,
     desde: datetime | None = None,
@@ -304,7 +295,7 @@ class TaxaDeCorrecao(BaseModel):
 
 def criar_rotas_da_qualidade(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     revisao: RepositorioDeRevisao,
 ) -> APIRouter:
@@ -342,8 +333,7 @@ def main(
     """Argumentos: `DESDE`, `ATE` (dias ISO, inclusive) e `PROGRAMA`, todos opcionais."""
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
-        aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
-        decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        decupagens = DecupagensStorage.do_ambiente(ambiente)
         pedidos = [*argumentos, "", "", ""][:3]
         inicio, fim = _periodo(
             date.fromisoformat(pedidos[0]) if pedidos[0] else None,
@@ -355,7 +345,7 @@ def main(
     banco = cliente_do_firestore(projeto)
     linhas = calcular(
         RepositorioFirestore(banco),
-        DecupagensStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        decupagens,
         RepositorioDeCorrecoesFirestore(banco),
         RepositorioDeRevisaoFirestore(banco),
         inicio,

@@ -22,13 +22,13 @@ from api.relatorio_de_marcas import em_csv as marcas_em_csv
 from api.resumos_de_uso import ConfigDosResumos, ResumosBigQuery
 from api.revisao import Medida, relatorio_em_csv
 from api.sinal_do_programa import EVENTOS, HistoricoBigQuery
-from api.taxa_de_correcao import LinhaDaTaxa
 from api.taxa_de_correcao import em_csv as taxa_em_csv
 from api.tempo_de_tela import (
     ConsultaBigQuery as TempoDeTelaBigQuery,
 )
 from api.tempo_de_tela import PessoaNoRelatorio
 from api.tempo_de_tela import em_csv as pessoas_em_csv
+from api.tipos_da_taxa import LinhaDaTaxa
 
 # Um texto com aspas, `;`, comentário e `@x`: se chegasse ao SQL, quebraria a consulta.
 HOSTIL = "=x'; DROP TABLE t; -- @x"

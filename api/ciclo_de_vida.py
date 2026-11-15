@@ -40,6 +40,11 @@ FINAIS = frozenset(e for e, destinos in TRANSICOES.items() if not destinos)
 PRAZO_DO_REPROCESSAMENTO = timedelta(days=7)
 
 
+def prazo_vencido(job: Job, agora: datetime) -> bool:
+    """O Job passou do prazo de reprocessamento (a cópia limpa e o áudio já foram apagados)."""
+    return agora - job.criado_em >= PRAZO_DO_REPROCESSAMENTO
+
+
 class TransicaoProibida(Exception):
     def __init__(self, de: Estado, para: Estado) -> None:
         super().__init__(f"Transição fora da tabela: {de} → {para}")
@@ -341,7 +346,7 @@ def reprocessar(
 
     def mudar(job: Job) -> dict[str, Any]:
         lido[:] = [job]
-        if agora - job.criado_em >= PRAZO_DO_REPROCESSAMENTO:
+        if prazo_vencido(job, agora):
             raise NaoReprocessavel(
                 "O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou: "
                 "a cópia em alta resolução e o áudio não ficam guardados no MAM. "

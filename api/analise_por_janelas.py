@@ -27,7 +27,6 @@ from functools import partial
 from threading import Event
 
 from api.catalogo import Catalogo
-from api.comparador import normalizar
 from api.consolidacao import consolidar
 from api.decupagem import Decupagem, Video
 from api.escalonamento import janelas_a_escalonar
@@ -52,6 +51,7 @@ from api.programas import Perfis
 from api.progresso_das_janelas import JanelaGravada, JanelasDoJob
 from api.sinais import ContagemDaAnalise
 from api.tempos import aplicar_regra_de_tempos
+from api.texto import normalizar
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA
 

@@ -14,16 +14,16 @@ import os
 import sys
 import uuid
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from functools import partial
-from typing import Any, NamedTuple, Protocol, get_args
+from typing import Any, NamedTuple, get_args
 
-from google.cloud.storage import Client as ClienteStorage
 from pydantic import BaseModel
 
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
+from api.ambiente import FaltaNoAmbiente
 from api.bancos import cliente_do_firestore
 from api.catalogo_dos_jobs import gravar_catalogo_do_job
 from api.ciclo_de_vida import fechar_a_rodada, tomar_a_rodada
@@ -40,7 +40,7 @@ from api.jobs import (
     RepositorioDeJobs,
     agora_utc,
 )
-from api.leitura_da_decupagem import LeituraDaDecupagem
+from api.leitura_da_decupagem import AbreDecupagem, LeituraDaDecupagem
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -57,10 +57,6 @@ from api.sinal_do_programa import SinalDoPrograma, sinal_do_ambiente
 from api.tipos_de_objeto import TiposDeObjeto
 
 log = logging.getLogger(__name__)
-
-
-class LeitorDeDecupagem(Protocol):
-    def abrir_decupagem(self, job_id: str) -> Iterator[bytes]: ...
 
 
 def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, Any]:
@@ -94,7 +90,7 @@ def _so_o_esquema(modelo: type[BaseModel], dados: dict[str, Any]) -> dict[str, A
     return podado
 
 
-def _registrar(
+def registrar(
     repositorio: RepositorioDeJobs,
     job_id: str,
     campo: str,
@@ -144,7 +140,7 @@ def _registrar(
 
 def decupagem_do_job(
     job: Job,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     pessoas: PessoasEmLote | None = None,
 ) -> Decupagem:
@@ -162,7 +158,7 @@ class _Resultado(NamedTuple):
 def _uma_rodada(
     job: Job,
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     relogio: Callable[[], datetime],
@@ -175,12 +171,10 @@ def _uma_rodada(
     da indexação: quem fecha a rodada o grava. Nunca levanta por falha do índice ou da cópia."""
     inicio = relogio()
     ultima_copia = job.copia_bigquery or CopiaNoBigQuery(estado="pendente", em=inicio)
-    _registrar(
-        repositorio, job.id, "indexacao", Indexacao(estado="pendente", em=inicio)
-    )
+    registrar(repositorio, job.id, "indexacao", Indexacao(estado="pendente", em=inicio))
     pendente = None
     if copia:
-        pendente = _registrar(
+        pendente = registrar(
             repositorio,
             job.id,
             "copia_bigquery",
@@ -250,7 +244,7 @@ def _uma_rodada(
                         log.exception("sinal por programa falhou para %s", job.id)
     fim = relogio()
     if copia:
-        _registrar(
+        registrar(
             repositorio,
             job.id,
             "copia_bigquery",
@@ -267,7 +261,7 @@ def _uma_rodada(
 def reindexar(
     job: Job,
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     relogio: Callable[[], datetime] = agora_utc,
@@ -341,7 +335,7 @@ def reindexar(
     if programas is not None:
         # Sem a segunda tentativa, uma queda passageira deixaria o vídeo pendente (a tela
         # só o resolve com o `retomar`).
-        _duas_tentativas(
+        duas_tentativas(
             lambda: terminar_o_pendente(
                 programas, job.id, atual.programa, resultado.completo
             ),
@@ -360,7 +354,7 @@ def _tentar_duas_vezes[T](acao: Callable[[], T], falha: str) -> tuple[bool, T | 
     return False, None
 
 
-def _duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
+def duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
     """`acao()` com duas tentativas; `None` se as duas falham."""
     return _tentar_duas_vezes(acao, falha)[1]
 
@@ -387,7 +381,7 @@ def registrar_falhas_da_api(
 def reindexar_jobs(
     ids: list[str] | None,
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     correcoes: RepositorioDeCorrecoes,
     indice: IndiceDaBusca,
     copia: CopiaDosMomentos | None = None,
@@ -442,13 +436,12 @@ def reindexar_jobs(
 
 
 def main(argv: list[str]) -> int:
-    projeto = os.environ["GCP_PROJECT_ID"]
-    firestore_ = cliente_do_firestore(projeto)
-    decupagens = DecupagensStorage(
-        ClienteStorage(project=projeto),
-        os.environ["BUCKET_ACEITOS"],
-        os.environ["BUCKET_DECUPAGENS"],
-    )
+    try:
+        decupagens = DecupagensStorage.do_ambiente()
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
+    firestore_ = cliente_do_firestore(os.environ["GCP_PROJECT_ID"])
     busca = ConfigDaBusca.do_ambiente(os.environ)
     # O sinal por programa só vale para o vídeo que acabou de concluir (o Workflows passa
     # JOB_ID); reindexar todos os vídeos de uma vez não o avalia, para não alertar o passado.

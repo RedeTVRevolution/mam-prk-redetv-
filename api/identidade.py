@@ -4,7 +4,7 @@ A consolidação (#42, #45) e as correções (`api/correcoes.py`) casam itens po
 estas funções: mudar a regra num lado e não no outro desalinha as correções.
 """
 
-from api.comparador import normalizar
+from api.texto import normalizar
 
 _NAO_IDENTIFICADO = normalizar("não identificado")
 

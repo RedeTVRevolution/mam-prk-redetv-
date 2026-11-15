@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
@@ -33,6 +33,7 @@ from google.api_core.exceptions import NotFound
 from google.cloud.storage import Client as ClienteStorage
 
 from api import log_estruturado
+from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.correcoes import RepositorioDeCorrecoes
@@ -42,15 +43,16 @@ from api.itens_da_decupagem import (
     objeto_dos_itens,
 )
 from api.jobs import RepositorioDeJobs, ServicoIndisponivel
+from api.leitura_da_decupagem import AbreDecupagem
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioDeRevisaoFirestore,
     RepositorioFirestore,
 )
-from api.reprocessar_versao import LeitorDeDecupagem
 from api.revisao import RepositorioDeRevisao
 from api.taxa_de_correcao import calcular_com_itens, modelo_da_decupagem
+from api.tipos_da_taxa import ConfigDaTaxa, LinhaDiaria
 
 log = logging.getLogger(__name__)
 
@@ -62,29 +64,15 @@ DIAS_DA_CARGA_INICIAL = 365
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 __all__ = [
-    "ConfigDaTaxa",
     "ItensEmMemoria",
     "ItensNoStorage",
-    "LinhaDiaria",
     "TabelaDaTaxaBigQuery",
-    "TabelaDaTaxaEmMemoria",
     "atualizar",
     "dias_recentes",
     "linhas_do_dia",
     "main",
     "preencher_itens",
 ]
-
-
-@dataclass(frozen=True)
-class LinhaDiaria:
-    dia: date
-    job_id: str
-    programa: str | None
-    versao_pipeline: str | None
-    tipo: str
-    correcoes: int
-    itens: int
 
 
 class LeitorDeItens(Protocol):
@@ -136,14 +124,6 @@ class TabelaDaTaxa(Protocol):
     def substituir(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
         """Troca tudo o que a tabela tem desses dias pelas `linhas` (dias sem linha ficam
         vazios). Os outros dias não mudam; repetir dá o mesmo resultado."""
-
-
-class TabelaDaTaxaEmMemoria:
-    def __init__(self) -> None:
-        self.linhas: list[LinhaDiaria] = []
-
-    def substituir(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
-        self.linhas = [x for x in self.linhas if x.dia not in dias] + linhas
 
 
 def _periodo_do_dia(dia: date) -> tuple[datetime, datetime]:
@@ -211,7 +191,7 @@ def dias_recentes(hoje: date, quantos: int) -> list[date]:
 
 def preencher_itens(
     repositorio: RepositorioDeJobs,
-    decupagens: LeitorDeDecupagem,
+    decupagens: AbreDecupagem,
     itens: GravadorDeItens,
 ) -> int:
     """Grava a contagem das decupagens de Jobs concluídos que não a têm (as anteriores ao
@@ -233,23 +213,6 @@ def preencher_itens(
         itens.gravar_itens(job.id, contagem)
         gravados += 1
     return gravados
-
-
-@dataclass(frozen=True)
-class ConfigDaTaxa:
-    projeto: str
-    dataset: str
-    regiao: str
-    tabela: str
-
-    @classmethod
-    def do_ambiente(cls, ambiente: Any) -> "ConfigDaTaxa":
-        return cls(
-            projeto=ambiente["GCP_PROJECT_ID"],
-            dataset=ambiente["BIGQUERY_DATASET"],
-            regiao=ambiente["BIGQUERY_REGIAO"],
-            tabela=ambiente["BIGQUERY_TABELA_DA_TAXA"],
-        )
 
 
 def _json_da_linha(linha: LinhaDiaria) -> dict[str, Any]:
@@ -371,14 +334,18 @@ def main(argumentos: list[str]) -> int:
         if preenchendo
         else DIAS_RECENTES
     )
+    try:
+        cliente = ClienteStorage(
+            project=exigir_do_ambiente(os.environ, "GCP_PROJECT_ID")
+        )
+        decupagens = DecupagensStorage.do_ambiente(os.environ, cliente)
+    except FaltaNoAmbiente as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 2
     config = ConfigDaTaxa.do_ambiente(os.environ)
-    cliente = ClienteStorage(project=config.projeto)
     banco = cliente_do_firestore(config.projeto)
     jobs = RepositorioFirestore(banco)
     itens = ItensNoStorage(cliente, os.environ["BUCKET_DECUPAGENS"])
-    decupagens = DecupagensStorage(
-        cliente, os.environ["BUCKET_ACEITOS"], os.environ["BUCKET_DECUPAGENS"]
-    )
     if preenchendo:
         print(f"{preencher_itens(jobs, decupagens, itens)} contagens gravadas")
     gravadas = atualizar(

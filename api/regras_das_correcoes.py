@@ -13,7 +13,6 @@ from typing import Any, cast
 
 from api.canonicos import com_os_canonicos
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
-from api.comparador import normalizar
 from api.correcoes import (
     CORRIGIVEIS,
     PREFIXO_ACRESCENTADO,
@@ -66,6 +65,7 @@ from api.decupagem import (
 from api.identidade import identidade_do_nome, nao_identificado
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
 from api.pessoas import LISTAS
+from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
 
 

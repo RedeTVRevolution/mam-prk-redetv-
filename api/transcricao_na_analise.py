@@ -10,7 +10,6 @@ registradas. O texto original do Whisper fica ao lado do corrigido.
 from collections.abc import Sequence
 from difflib import SequenceMatcher
 
-from api.comparador import normalizar
 from api.decupagem import (
     CorrecaoDaTranscricao,
     CorrecaoDescartada,
@@ -19,6 +18,7 @@ from api.decupagem import (
     MencaoNaFala,
     MotivoDaRecusa,
 )
+from api.texto import normalizar
 from api.transcricao import Palavra, Transcricao
 
 # Pelo "Corassa"/"Corazza" (0,71); "aí"/"Nelson" dá 0.

@@ -12,7 +12,7 @@ from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, RenomeacaoDaPessoa
 from api.catalogo_dos_jobs import ids_do_catalogo, passar_pessoa_nos_jobs
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.exemplos_da_busca import EXEMPLOS
+from api.ferramentas.exemplos_da_busca import EXEMPLOS
 from api.indexacao import reindexar_jobs
 from api.indice_da_busca import IndiceEmMemoria, Registro
 from api.jobs import RepositorioEmMemoria

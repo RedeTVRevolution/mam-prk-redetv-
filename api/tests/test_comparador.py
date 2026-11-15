@@ -5,19 +5,16 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from api.comparador import (
+from api.comparador import ResultadoDoClipe, main, passou, tempo_ms
+from api.pareamento import (
     TIPOS,
     TOLERANCIA_MS,
     Item,
-    ResultadoDoClipe,
-    main,
-    normalizar,
     parear,
-    passou,
     se_sobrepoem,
     sobreposicao_ms,
-    tempo_ms,
 )
+from api.texto import normalizar
 
 tempos = st.integers(min_value=0, max_value=600_000)
 tipos = st.sampled_from(TIPOS)

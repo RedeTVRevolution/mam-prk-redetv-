@@ -29,7 +29,8 @@ from api.agent_retrieval import (
     criar_colecao,
     transporte_http,
 )
-from api.exemplos_da_busca import EXEMPLOS, OUTRA, SABRINA
+from api.ferramentas.comum import percentil
+from api.ferramentas.exemplos_da_busca import EXEMPLOS, OUTRA, SABRINA
 from api.indice_da_busca import Consulta, Filtros, IndiceDaBusca
 
 CONSULTA = "Sabrina Sato no estúdio"
@@ -51,13 +52,6 @@ class Medicao:
     @property
     def p95_s(self) -> float:
         return percentil(self.tempos_s, 95)
-
-
-def percentil(tempos: list[float], p: int) -> float:
-    """O valor na posição mais próxima do percentil (sem interpolar)."""
-    ordenados = sorted(tempos)
-    posicao = max(1, -(-len(ordenados) * p // 100))
-    return ordenados[posicao - 1]
 
 
 def _consulta(pessoa: str = SABRINA, significado: str = CONSULTA) -> Consulta:

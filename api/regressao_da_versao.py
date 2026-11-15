@@ -5,7 +5,7 @@
 Para cada caso do conjunto (`api/regressao.py`), pede ao transporte os itens da `VERSAO`
 e os da versão aprovada (a `VERSAO_PIPELINE` de hoje, ou `VERSAO_APROVADA`) no trecho do
 caso e mede os dois contra o esperado com o pareamento e a tolerância do
-`api/comparador.py`: um item esperado é acerto quando tem par dentro da tolerância. Por
+`api/pareamento.py`: um item esperado é acerto quando tem par dentro da tolerância. Por
 requisito, o relatório conta os acertos de cada versão, diz por caso se melhorou, piorou ou
 ficou igual e confere a meta (`metas.json`). Grava Markdown e JSON em `PASTA`
 (`regressao-da-versao`). Saída 1 se algum requisito com meta fica abaixo dela (o portão
@@ -30,8 +30,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
-from api.comparador import Item, itens_do_modelo, parear, se_sobrepoem
 from api.decupagem import Decupagem
+from api.ferramentas.comum import custo_por_hora_do_ambiente, dolar
+from api.pareamento import Item, itens_do_modelo, parear, se_sobrepoem
 from api.regressao import (
     ARQUIVO_DE_METAS,
     PASTA_DOS_CASOS,
@@ -45,7 +46,7 @@ from api.versao_pipeline import VERSAO_PIPELINE
 
 PASTA_DO_RELATORIO = Path("regressao-da-versao")
 
-# O requisito de cada tipo de item: os nomes do `api/comparar_passadas.py` onde existem.
+# O requisito de cada tipo de item: os nomes do `api/comparacao_de_passadas.py` onde existem.
 REQUISITO_DO_TIPO: dict[str, str] = {
     "aparicao": "famosos",
     "mencao": "mencoes",
@@ -192,7 +193,7 @@ def avaliar(
 
 def custo_estimado(casos: list[Caso], custo_por_hora: float) -> float:
     segundos = sum(c.fim_ms - c.inicio_ms for c in casos) / 1000
-    return custo_por_hora * segundos / 3600
+    return segundos / 3600 * custo_por_hora
 
 
 def relatorio_em_json(r: Relatorio) -> str:
@@ -293,7 +294,7 @@ def main(
             raise ValueError(
                 f"a VERSAO {versao} é a aprovada: diga a aprovada em VERSAO_APROVADA"
             )
-        custo = ambiente.get("CUSTO_POR_HORA_USD")
+        custo = custo_por_hora_do_ambiente(ambiente)
         casos = selecionar(
             ler_casos(Path(ambiente.get("CASOS") or PASTA_DOS_CASOS)), so_reservados
         )
@@ -304,8 +305,8 @@ def main(
             f"{len(casos)} casos ({'reservados' if so_reservados else 'de ajuste'}), "
             f"versão {versao} contra {aprovada}."
         )
-        estimado = (
-            "n/d" if not custo else f"US$ {custo_estimado(casos, float(custo)):.2f}"
+        estimado = dolar(
+            None if custo is None else custo_estimado(casos, custo), ptbr=False
         )
         escrever(f"Custo estimado: {estimado}")
         if ambiente.get("CONFIRMAR") != "1":

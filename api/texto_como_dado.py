@@ -7,6 +7,7 @@ Storage (`conferir_ids_e_consultas` confere os parâmetros de toda rota).
 """
 
 import re
+import unicodedata
 from typing import Any
 
 from fastapi import HTTPException, Query, Request
@@ -21,6 +22,7 @@ _CONTROLE_DO_TEXTO = re.compile(f"[{_CONTROLE_SALVO_QUEBRA}]")
 PADRAO_DA_LINHA = f"^[^{_CONTROLE}]*$"
 PADRAO_DO_TEXTO = f"^[^{_CONTROLE_SALVO_QUEBRA}]*$"
 
+MAXIMO_DE_CARACTERES = 300
 TAMANHO_MAXIMO_DO_ID = 200
 # Teto de qualquer parâmetro de consulta; cada um tem o seu, bem menor (a lista de ids do
 # andamento é a maior).
@@ -110,3 +112,14 @@ def id_conferido(valor: str) -> str:
 
 # Para o id que vem no corpo e vira documento ou objeto: `Annotated[str, Linha(64, min_length=1), ID_SEGURO]`.
 ID_SEGURO = AfterValidator(id_conferido)
+
+
+def sanear(consulta: str, maximo: int = MAXIMO_DE_CARACTERES) -> str:
+    """NFKC, sem caracteres de controle nem `<` e `>` (que fechariam o delimitador), com
+    os espaços colapsados e no máximo `maximo` caracteres."""
+    texto = unicodedata.normalize("NFKC", consulta)
+    texto = "".join(
+        " " if unicodedata.category(c).startswith("C") else c for c in texto
+    )
+    texto = texto.replace("<", " ").replace(">", " ")
+    return " ".join(texto.split())[:maximo].strip()

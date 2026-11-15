@@ -8,8 +8,9 @@ from typing import Any
 
 import pytest
 
-from api.comparador import TIPOS, Item, itens_do_modelo, ler_gabarito, parear
+from api.comparador import ler_gabarito
 from api.correcoes import (
+    CORRIGIVEIS,
     Ancora,
     Correcao,
     Ocorrencia,
@@ -19,6 +20,7 @@ from api.correcoes import (
 )
 from api.decupagem import Decupagem
 from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.pareamento import TIPOS, Item, itens_do_modelo, parear
 from api.regressao import (
     PERCENTUAL_RESERVADO,
     Caso,
@@ -342,6 +344,77 @@ def test_correcao_com_tempos_ilegiveis_fica_de_fora() -> None:
     assert casos_das_correcoes(MODELO, "v", [c]) == []
 
 
+OBJETO: dict[str, Any] = {
+    "id": "o1",
+    "tipo": "camiseta",
+    "ocorrencias": [
+        {"inicio_ms": 1_000, "fim_ms": 2_000},
+        {"inicio_ms": 8_000, "fim_ms": 9_000},
+    ],
+}
+MODELO_COM_OBJETO: dict[str, Any] = {**MODELO, "objetos": [OBJETO]}
+ATRIBUTOS = json.dumps({"tipo": "Camisa Polo", "cor_base": "azul"})
+
+
+def _do_objeto(id: str, tipo: str, depois: str, minuto: int = 0) -> Correcao:
+    return _c(
+        id,
+        minuto,
+        tipo=tipo,
+        item_id="o1",
+        depois=depois,
+        ancora=_ancora("objeto", "camiseta", 9_000),
+    )
+
+
+def test_atributos_do_objeto_viram_um_item_por_ocorrencia() -> None:
+    c = _do_objeto("a", "objeto.atributos", ATRIBUTOS)
+    [caso] = casos_das_correcoes(MODELO_COM_OBJETO, "v", [c])
+    # Dois itens separados: nunca um intervalo de 1000 a 9000 cobrindo o vazio.
+    assert caso.itens() == [
+        Item("objeto", "camisa polo", 1_000, 2_000),
+        Item("objeto", "camisa polo", 8_000, 9_000),
+    ]
+
+
+def test_objeto_nao_existe_nao_vira_caso_nem_valor_ilegivel(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    c = _do_objeto("n", "objeto.nao_existe", "nao_existe")
+    assert casos_das_correcoes(MODELO_COM_OBJETO, "v", [c]) == []
+    assert "ilegível" not in caplog.text
+
+
+def test_dono_e_acrescentar_saem_com_aviso_proprio(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    correcoes = [
+        _do_objeto("d", "objeto.dono", "{}"),
+        _do_objeto("x", "objeto.acrescentar", "{}"),
+    ]
+    assert casos_das_correcoes(MODELO_COM_OBJETO, "v", correcoes) == []
+    assert caplog.text.count("operação de objeto sem conversão") == 2
+    assert "ilegível" not in caplog.text
+
+
+def test_outra_correcao_do_objeto_concorda_com_o_nome_novo() -> None:
+    renomeia = _do_objeto("a", "objeto.atributos", ATRIBUTOS)
+    outra = _do_objeto("t", "objeto.atributos", ATRIBUTOS, minuto=1)
+    nomes = {
+        i.identidade
+        for caso in casos_das_correcoes(MODELO_COM_OBJETO, "v", [renomeia, outra])
+        for i in caso.itens()
+    }
+    assert nomes == {"camisa polo"}
+
+
+def test_toda_operacao_de_objeto_e_convertida_ou_declarada() -> None:
+    from api.regressao import _SEM_CONVERSAO, _SEM_ITEM
+
+    objeto = {t for t in CORRIGIVEIS if t.startswith("objeto.")}
+    assert objeto <= {"objeto.atributos"} | _SEM_ITEM | _SEM_CONVERSAO
+
+
 class Decupagens:
     def __init__(self, dados: dict[str, dict[str, Any]]) -> None:
         self._dados = dados
@@ -403,3 +476,46 @@ def test_exportar_grava_um_arquivo_por_caso_e_e_idempotente(tmp_path: Path) -> N
 def test_comando_sem_ambiente_sai_com_2(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([], {}) == 2
     assert "erro:" in capsys.readouterr().err
+
+
+class _CorrecoesContadas(RepositorioDeCorrecoesEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.listados: list[str] = []
+
+    def listar(self, job_id: str) -> list[Correcao]:
+        self.listados.append(job_id)
+        return super().listar(job_id)
+
+
+def test_exportar_le_so_os_jobs_com_correcao_na_ordem_de_antes(tmp_path: Path) -> None:
+    jobs = RepositorioEmMemoria()
+    for i, j in enumerate(("j1", "j2", "j3", "j4", "j5")):
+        jobs.salvar(
+            _job(j, "falhou" if j == "j3" else "concluido").model_copy(
+                update={"criado_em": BASE - timedelta(hours=i)}
+            )
+        )
+    versao = versao_do_modelo(_bytes(MODELO))
+    ancora = _ancora("pessoa", "ana", 5_000).model_copy(update={"versao": versao})
+    correcoes = _CorrecoesContadas()
+    for job in (
+        "j1",
+        "j2",
+        "j3",
+        "j9",
+    ):  # j4 e j5 sem correção; j9 não é Job; j3 falhou
+        correcoes.acrescentar(_c(f"{job}-c", job_id=job, ancora=ancora))
+    decupagens = Decupagens({j: MODELO for j in ("j1", "j2", "j3", "j4", "j5")})
+
+    gravados = exportar(jobs, decupagens, correcoes, tmp_path, lambda _: None)
+
+    assert correcoes.listados == [
+        "j2",
+        "j1",
+    ]  # criado_em crescente; só concluído com correção
+    assert [c.job_id for c in gravados] == ["j2", "j1"]
+    assert sorted(p.name for p in tmp_path.glob("*.json")) == [
+        "correcao-j1-c.json",
+        "correcao-j2-c.json",
+    ]

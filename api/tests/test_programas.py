@@ -23,7 +23,7 @@ from api.catalogo import (
 from api.copia_bigquery import ConfigDoBigQuery, CopiaBigQuery, CopiaEmMemoria
 from api.copiar_para_bigquery import copiar_jobs
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.exemplos_da_busca import EXEMPLOS
+from api.ferramentas.exemplos_da_busca import EXEMPLOS
 from api.indexacao import reindexar
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import RepositorioEmMemoria

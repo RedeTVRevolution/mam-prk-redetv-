@@ -3,8 +3,9 @@ from dataclasses import replace
 
 import pytest
 
+from api.ferramentas.comum import percentil
 from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
-from api.medir_busca import medir, percentil, tabela
+from api.medir_busca import medir, tabela
 
 
 def test_percentil_por_posicao_mais_proxima() -> None:
@@ -106,7 +107,7 @@ def test_medida_temporaria_nao_escreve_nem_apaga_na_colecao_de_texto(
 ) -> None:
     from typing import Any
 
-    from api.exemplos_da_busca import EXEMPLOS
+    from api.ferramentas.exemplos_da_busca import EXEMPLOS
     from api.medir_busca import main
     from api.tests.test_agent_retrieval import CONFIG, _ColecaoEmMemoria, _lido
 

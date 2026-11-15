@@ -180,7 +180,7 @@ def test_job_com_a_versao_gravada_nao_abre_a_decupagem() -> None:
     mundo = _mundo()
     _com_a_versao_no_job(mundo)
 
-    escolhidos = escolher(mundo.jobs, mundo.decupagens, None, None)
+    escolhidos = escolher(mundo.jobs, mundo.decupagens, None, None, agora=BASE)
 
     assert [c.job_id for c in escolhidos] == ["antigo", "outra", "sem-campo"]
     assert [c.versao for c in escolhidos] == ["2026.10.1", "2026.10.2", "anterior"]
@@ -198,7 +198,7 @@ def test_job_sem_o_campo_nao_some_e_a_versao_vem_da_decupagem() -> None:
         )
     mundo.decupagens.abertas.clear()
 
-    escolhidos = escolher(mundo.jobs, mundo.decupagens, None, None)
+    escolhidos = escolher(mundo.jobs, mundo.decupagens, None, None, agora=BASE)
 
     assert [c.job_id for c in escolhidos] == ["antigo", "outra", "sem-campo"]
     assert sorted(mundo.decupagens.abertas) == ["outra", "sem-campo"]
@@ -212,7 +212,7 @@ def test_a_lista_dos_jobs_vem_em_paginas_e_sem_lixeira() -> None:
         mundo.jobs.salvar(j.model_copy(update={"versao_pipeline": "2026.10.1"}))
 
     escolhidos = escolher(
-        mundo.jobs, mundo.decupagens, "2026.10.1", None, tamanho_da_pagina=2
+        mundo.jobs, mundo.decupagens, "2026.10.1", None, tamanho_da_pagina=2, agora=BASE
     )
 
     assert [c.job_id for c in escolhidos] == ["antigo"] + [f"x{i}" for i in range(5)]
@@ -220,9 +220,9 @@ def test_a_lista_dos_jobs_vem_em_paginas_e_sem_lixeira() -> None:
 
 def test_escolher_nao_muda_a_ordem_nem_passa_do_limite() -> None:
     mundo = _mundo()
-    assert [c.job_id for c in escolher(mundo.jobs, mundo.decupagens, None, 1)] == [
-        "antigo"
-    ]
+    assert [
+        c.job_id for c in escolher(mundo.jobs, mundo.decupagens, None, 1, agora=BASE)
+    ] == ["antigo"]
 
 
 def test_o_comando_pede_o_ambiente(capsys: pytest.CaptureFixture[str]) -> None:
@@ -261,7 +261,7 @@ def test_job_sem_duracao_fica_fora_do_custo_e_e_avisado() -> None:
     assert "1 Jobs sem duração" in texto
 
 
-def test_job_com_sete_dias_e_contado_como_ignorado_sem_disparo() -> None:
+def test_job_com_sete_dias_fica_fora_da_lista_e_nao_dispara() -> None:
     mundo = Mundo(
         [_job("velho", dia=-7), _job("recente")], {"velho": None, "recente": None}
     )
@@ -269,5 +269,56 @@ def test_job_com_sete_dias_e_contado_como_ignorado_sem_disparo() -> None:
     texto = "\n".join(mundo.rodar(confirmar=True))
 
     assert mundo.disparo.disparos == [("recente", "analise")]
-    assert sum("ignorado (" in linha for linha in texto.splitlines()) == 1
-    assert "O prazo de reprocessamento" in texto
+    assert "velho" not in texto
+
+
+def test_job_que_vence_entre_a_previa_e_a_confirmacao_e_ignorado() -> None:
+    mundo = Mundo([_job("quase", dia=-6)], {"quase": None})
+    horas = iter([BASE, BASE + timedelta(days=2)])  # a lista, depois a confirmação
+    saida: list[str] = []
+
+    reprocessar_versao(
+        mundo.jobs,
+        mundo.decupagens,
+        mundo.auditoria,
+        mundo.disparo,
+        mundo.janelas,
+        confirmar=True,
+        relogio=lambda: next(horas),
+        dormir=mundo.pausas.append,
+        escrever=saida.append,
+    )
+
+    assert mundo.disparo.disparos == []
+    assert any("ignorado (" in linha for linha in saida)
+
+
+def _mundo_com_vencidos() -> Mundo:
+    # relogio = BASE; criado_em = BASE + dia → dia -8..-10 vencidos, -1..0 recentes.
+    jobs = [_job(f"velho{i}", dia=-10 + i) for i in range(3)]
+    jobs += [_job("novo1", dia=-1), _job("novo2", dia=0)]
+    return Mundo(jobs, {j.id: "2026.10.1" for j in jobs})
+
+
+def test_o_limite_pula_os_vencidos_e_pega_os_recentes() -> None:
+    mundo = _mundo_com_vencidos()
+
+    saida = mundo.rodar(limite=2, custo_por_hora=2.5)
+
+    assert [
+        c.job_id for c in escolher(mundo.jobs, mundo.decupagens, None, 2, agora=BASE)
+    ] == [
+        "novo1",
+        "novo2",
+    ]
+    assert "2 Jobs" in "\n".join(saida) and "US$ 5,00" in "\n".join(saida)
+    assert not any(a.startswith("velho") for a in mundo.decupagens.abertas)
+
+
+def test_exatamente_sete_dias_ja_e_recusado() -> None:
+    jobs = [_job("no-limite", dia=-7), _job("quase", dia=-6)]
+    mundo = Mundo(jobs, {"no-limite": "2026.10.1", "quase": "2026.10.1"})
+
+    escolhidos = escolher(mundo.jobs, mundo.decupagens, None, None, agora=BASE)
+
+    assert [c.job_id for c in escolhidos] == ["quase"]

@@ -10,13 +10,13 @@ from api.entendimento_da_consulta import (
     TEMPO_DA_CONSULTA_S,
     ConsultaEntendida,
     entender,
-    sanear,
     separar_aspas,
     termo_da_foto,
 )
 from api.gemini import ErroHttp
 from api.tests.test_busca import Mundo
 from api.tests.test_gemini import TransporteFalso
+from api.texto_como_dado import sanear
 
 
 def catalogo() -> tuple[CatalogoEmMemoria, str]:

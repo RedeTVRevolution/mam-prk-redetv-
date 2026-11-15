@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from api.catalogo import EnvioParaLixeira, novo_id
-from api.comparador import normalizar
+from api.texto import normalizar
 
 
 class MarcaDoCatalogo(BaseModel):

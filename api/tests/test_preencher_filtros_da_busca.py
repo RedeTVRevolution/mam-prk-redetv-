@@ -23,7 +23,7 @@ def test_a_carga_da_a_cada_video_o_valor_do_job_e_repetir_nao_muda_nada() -> Non
     for i in ("a", "b"):
         indice.gravar(i, [_registro(i)])
 
-    assert preencher(jobs, indice, por_lote=1) == {
+    assert preencher(jobs, indice, tamanho_da_pagina=1) == {
         "videos": 1,  # `b` não tem sistema e a lixeira falsa já é o padrão do registro
         "objetos": 1,
         "falhou": 0,

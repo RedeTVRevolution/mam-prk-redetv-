@@ -10,16 +10,11 @@ from api.painel import taxa_no_painel
 from api.qualidade_do_painel import QualidadeReal, _periodo
 from api.revisao_do_painel import RevisaoEmMemoria
 from api.taxa_de_correcao import calcular, em_csv
-from api.taxa_diaria import (
-    ConfigDaTaxa,
-    LinhaDiaria,
-    TabelaDaTaxaEmMemoria,
-    atualizar,
-    dias_recentes,
-)
+from api.taxa_diaria import atualizar, dias_recentes
 from api.taxa_do_painel import TaxaBigQuery, TaxaEmMemoria, taxa_do_ambiente
 from api.tests.test_rotas_do_painel import Mundo
 from api.tests.test_taxa_diaria import DIA, _caso_de_hoje
+from api.tipos_da_taxa import ConfigDaTaxa, LinhaDiaria, TabelaDaTaxaEmMemoria
 
 MAM = Path(__file__).parents[2] / "infra" / "modulos" / "mam"
 CONFIG = ConfigDaTaxa("proj", "decupagens", "regiao-x", "taxa")

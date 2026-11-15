@@ -23,13 +23,12 @@ from google.cloud.storage import Client as ClienteStorage
 from api import log_estruturado
 from api.bancos import cliente_do_firestore
 from api.decupagem import Decupagem
-from api.jobs import FiltroDeJobs, RepositorioDeJobs
+from api.ferramentas.comum import TAMANHO_DA_PAGINA, jobs_concluidos
+from api.jobs import RepositorioDeJobs
 from api.nuvem import ObjetosStorage, RepositorioFirestore
 from api.planos_recorrentes import com_os_planos_recorrentes, contagem
 
 log = logging.getLogger(__name__)
-
-POR_PAGINA = 500
 
 
 class ArmazenamentoDosGrupos(Protocol):
@@ -45,7 +44,7 @@ def preencher(
     armazenamento: ArmazenamentoDosGrupos,
     *,
     gravar: bool,
-    por_pagina: int = POR_PAGINA,
+    tamanho_da_pagina: int = TAMANHO_DA_PAGINA,
 ) -> dict[str, int]:
     """Devolve, do acervo lido, os `planos` e `grupos` antes e depois, os `videos` lidos, os
     que `mudam` (ou mudaram, com `gravar`) e os que `falhou` (ficam para a próxima rodada)."""
@@ -61,40 +60,33 @@ def preencher(
         ),
         0,
     )
-    cursor: str | None = None
-    while True:
-        pagina = repositorio.consultar(
-            FiltroDeJobs(na_lixeira=None, limite=por_pagina, cursor=cursor)
-        )
-        for job in pagina.jobs:
-            if job.estado != "concluido":
-                continue
-            try:
-                antes = armazenamento.ler_decupagem(job.id)
-                if antes is None:
-                    raise RuntimeError("sem Decupagem no bucket")
-                depois = com_os_planos_recorrentes(
-                    antes, partial(armazenamento.ler_quadro, job.id)
-                )
-                mudou = [p.plano_recorrente for p in antes.planos] != [
-                    p.plano_recorrente for p in depois.planos
-                ]
-                if mudou and gravar:
-                    armazenamento.gravar_decupagem(job.id, depois.model_dump_json())
-            except Exception:
-                log.exception("planos recorrentes não preenchidos para %s", job.id)
-                total["falhou"] += 1
-                continue
-            c_antes, c_depois = contagem(antes), contagem(depois)
-            total["videos"] += 1
-            total["mudam"] += mudou
-            total["planos_antes"] += c_antes["planos"]
-            total["grupos_antes"] += c_antes["grupos"]
-            total["planos_depois"] += c_depois["planos"]
-            total["grupos_depois"] += c_depois["grupos"]
-        cursor = pagina.proximo_cursor
-        if cursor is None:
-            return total
+    for job in jobs_concluidos(
+        repositorio, na_lixeira=None, tamanho_da_pagina=tamanho_da_pagina
+    ):
+        try:
+            antes = armazenamento.ler_decupagem(job.id)
+            if antes is None:
+                raise RuntimeError("sem Decupagem no bucket")
+            depois = com_os_planos_recorrentes(
+                antes, partial(armazenamento.ler_quadro, job.id)
+            )
+            mudou = [p.plano_recorrente for p in antes.planos] != [
+                p.plano_recorrente for p in depois.planos
+            ]
+            if mudou and gravar:
+                armazenamento.gravar_decupagem(job.id, depois.model_dump_json())
+        except Exception:
+            log.exception("planos recorrentes não preenchidos para %s", job.id)
+            total["falhou"] += 1
+            continue
+        c_antes, c_depois = contagem(antes), contagem(depois)
+        total["videos"] += 1
+        total["mudam"] += mudou
+        total["planos_antes"] += c_antes["planos"]
+        total["grupos_antes"] += c_antes["grupos"]
+        total["planos_depois"] += c_depois["planos"]
+        total["grupos_depois"] += c_depois["grupos"]
+    return total
 
 
 def main(argumentos: list[str]) -> int:

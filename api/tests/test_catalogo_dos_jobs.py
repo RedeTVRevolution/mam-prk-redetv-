@@ -227,7 +227,7 @@ def test_a_reconciliacao_le_em_paginas_e_acha_o_job_sem_o_campo() -> None:
             LeituraDaDecupagem(
                 armazenamento, RepositorioDeCorrecoesEmMemoria(), catalogo
             ),
-            por_lote=2,
+            tamanho_da_pagina=2,
         )
 
     assert rodar() == {"gravados": 5, "iguais": 0, "falhou": 0}

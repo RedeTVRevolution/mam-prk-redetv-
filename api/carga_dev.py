@@ -14,7 +14,6 @@ Para o teste, suba o limite e ligue a chave pelo Terraform; depois volte a 30 e 
 Sai com 0 se nenhum pedido falhou, 1 se algum falhou e 2 se faltou configuração.
 """
 
-import math
 import os
 import random
 import sys
@@ -28,6 +27,7 @@ from typing import Any, Protocol
 
 import requests
 
+from api.ferramentas.comum import percentil
 from api.teste_de_carga import CABECALHO_DE_TESTE, VALOR_DO_CABECALHO
 
 CONSULTAS = Path(__file__).with_name("consultas_da_sonda.toml")
@@ -75,11 +75,6 @@ def transporte_http(url: str, token: str) -> Transporte:
             return r.status_code, None
 
     return chamar
-
-
-def percentil(ordenados: list[float], p: float) -> float:
-    """Posto mais próximo; `ordenados` não pode ser vazio."""
-    return ordenados[max(0, math.ceil(p / 100 * len(ordenados)) - 1)]
 
 
 class Medidas:

@@ -3,7 +3,7 @@ from dataclasses import asdict
 from typing import Any
 
 from api.decupagem import CATEGORIAS_DE_OBJETO, Decupagem, ObjetoDoInventario
-from api.exemplos_da_busca import (
+from api.ferramentas.exemplos_da_busca import (
     EXEMPLOS,
     OUTRA,
     SABRINA,

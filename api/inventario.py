@@ -13,7 +13,6 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from api.assinatura_do_nome import assinatura
-from api.comparador import normalizar
 from api.decupagem import (
     CaixaDoQuadro,
     CategoriaDeObjeto,
@@ -30,6 +29,7 @@ from api.florence import ObjetosDaDecupagem
 from api.gemini import Chamada, Transporte, gerar_validado
 from api.leitura_da_tela import Caixa
 from api.taxonomia_de_objetos import OUTRO, TEXTO_DOS_TIPOS
+from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
 
 # Regra do destaque (1 a 3), por caixa; o objeto fica com o maior destaque das suas
