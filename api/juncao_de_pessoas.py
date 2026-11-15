@@ -22,7 +22,7 @@ from typing import Literal
 from api.correcoes import identidade_da_pessoa
 from api.decupagem import Aparicao, Decupagem, Objeto, OrigemDaJuncao, Pauta, Pessoa
 from api.identidade import nao_identificado
-from api.pessoas import LISTAS, _em_ordem
+from api.pessoas import LISTAS, em_ordem
 from api.texto import normalizar
 
 # ponytail: pesos e limiares ainda sem calibração (o conjunto de calibração é
@@ -270,7 +270,7 @@ def _aplicar(
             for o in _origens(p, decupagem, None if k == 0 else motivo_de.get(p.id))
         ]
         juntas = {
-            campo: _em_ordem([i for p in grupo for i in getattr(p, campo)])
+            campo: em_ordem([i for p in grupo for i in getattr(p, campo)])
             for campo in LISTAS
         }
         novas[base.id] = base.model_copy(

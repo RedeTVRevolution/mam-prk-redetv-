@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, get_args
 
 from api.correcoes import CORRIGIVEIS, TIPOS, TipoDoItem, versao_do_modelo
-from api.regras_das_correcoes import _itens
+from api.regras_das_correcoes import itens
 
 
 def objeto_dos_itens(job_id: str) -> str:
@@ -22,7 +22,7 @@ def itens_do_tipo(modelo: dict[str, Any], tipo: str) -> int:
     """Quantos itens do tipo do item que a correção do `tipo` corrige."""
     do_item = TIPOS[tipo].tipo_do_item
     tipos = get_args(TipoDoItem) if do_item is None else (do_item,)
-    return sum(len(_itens(modelo, t)) for t in tipos)
+    return sum(len(itens(modelo, t)) for t in tipos)
 
 
 @dataclass(frozen=True)

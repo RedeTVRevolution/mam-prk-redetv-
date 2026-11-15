@@ -16,7 +16,7 @@ from pydantic import BaseModel, field_validator
 from api.achar_nomes import IndiceDeNomes, achar_por_prefixo
 from api.auth import Usuario
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
-from api.correcoes import LIMITE_DO_NOME, _sem_controle
+from api.correcoes import LIMITE_DO_NOME, sem_controle
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
 from api.permissoes import exige, exige_escopo
 from api.texto_como_dado import Linha, LinhaDaConsulta
@@ -46,13 +46,13 @@ class NovaPessoa(BaseModel):
     nome: Nome
     papel: Annotated[str, Linha(LIMITE_DO_NOME, strip=True)] = ""
 
-    _sem_controle_no_nome = field_validator("nome", "papel")(_sem_controle)
+    _sem_controle_no_nome = field_validator("nome", "papel")(sem_controle)
 
 
 class NovaMarca(BaseModel):
     nome: Nome
 
-    _sem_controle_no_nome = field_validator("nome")(_sem_controle)
+    _sem_controle_no_nome = field_validator("nome")(sem_controle)
 
 
 def _rotulo(nome: str, papel: str) -> str:

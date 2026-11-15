@@ -35,7 +35,7 @@ from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
 from api.catalogo import Catalogo, visivel
 from api.ciclo_de_vida import pedir_indexacao
-from api.correcoes import _sem_controle
+from api.correcoes import sem_controle
 from api.jobs import DisparoDaIndexacao
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
@@ -92,13 +92,13 @@ class DadosDoPrograma(BaseModel):
     perfil: PerfilEmTexto = ""
     pessoas: list[VinculoDaPessoa] = []
 
-    _sem_controle_no_nome = field_validator("nome")(_sem_controle)
+    _sem_controle_no_nome = field_validator("nome")(sem_controle)
 
     @field_validator("perfil")
     @classmethod
     def _perfil_sem_controle(cls, perfil: str) -> str:
         # Várias linhas, como o texto que o modelo lê.
-        return _sem_controle(perfil.replace("\r\n", "\n"), permitidos="\n")
+        return sem_controle(perfil.replace("\r\n", "\n"), permitidos="\n")
 
     @field_validator("pessoas")
     @classmethod
@@ -109,7 +109,7 @@ class DadosDoPrograma(BaseModel):
         if len(set(ids)) != len(ids):
             raise ValueError("a mesma pessoa duas vezes no programa")
         for p in pessoas:
-            _sem_controle(p.papel)
+            sem_controle(p.papel)
         return pessoas
 
 
@@ -117,14 +117,14 @@ class NovaPessoaDoPrograma(BaseModel):
     nome: NomeDoPrograma
     apelidos: list[Apelido] = []
 
-    _sem_controle_no_nome = field_validator("nome")(_sem_controle)
+    _sem_controle_no_nome = field_validator("nome")(sem_controle)
 
     @field_validator("apelidos")
     @classmethod
     def _apelidos_validos(cls, apelidos: list[str]) -> list[str]:
         if len(apelidos) > LIMITE_DE_APELIDOS:
             raise ValueError("apelidos demais")
-        return [_sem_controle(a) for a in apelidos]
+        return [sem_controle(a) for a in apelidos]
 
 
 class ImpactoDoPrograma(BaseModel):

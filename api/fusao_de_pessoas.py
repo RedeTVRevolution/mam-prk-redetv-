@@ -23,7 +23,7 @@ from api.catalogo import (
     prefixo_das_fotos,
 )
 from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
-from api.correcoes import Motivo, RepositorioDeCorrecoes, _sem_controle
+from api.correcoes import Motivo, RepositorioDeCorrecoes, sem_controle
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.lixeira_do_catalogo import FotosDeReferencia
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
@@ -36,7 +36,7 @@ class PedidoDeFusao(BaseModel):
     destino_id: Annotated[str, Linha(64, min_length=1), ID_SEGURO]
     motivo: Motivo
 
-    _sem_controle_no_motivo = field_validator("motivo")(_sem_controle)
+    _sem_controle_no_motivo = field_validator("motivo")(sem_controle)
 
 
 class ImpactoDaFusao(BaseModel):

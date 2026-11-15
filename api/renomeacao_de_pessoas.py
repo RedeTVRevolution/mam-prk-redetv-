@@ -19,7 +19,7 @@ from pydantic import BaseModel, field_validator
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
 from api.catalogo import Catalogo, PessoaDoCatalogo, RenomeacaoDaPessoa
-from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, _sem_controle
+from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, sem_controle
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_dos_jobs
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
@@ -31,7 +31,7 @@ class PedidoDeRenomeacao(BaseModel):
     nome: Annotated[str, Linha(LIMITE_DO_NOME, min_length=1, strip=True)]
     previa: bool = False
 
-    _sem_controle_no_nome = field_validator("nome")(_sem_controle)
+    _sem_controle_no_nome = field_validator("nome")(sem_controle)
 
 
 class ImpactoDaRenomeacao(BaseModel):
