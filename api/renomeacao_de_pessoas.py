@@ -11,14 +11,20 @@ busca e o relatório de tempo de tela leem o nome novo do catálogo.
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
-from api.catalogo import Catalogo, PessoaDoCatalogo, RenomeacaoDaPessoa
+from api.catalogo import (
+    AndamentoDaRenomeacao,
+    Catalogo,
+    PessoaDoCatalogo,
+    RenomeacaoDaPessoa,
+    andamento_da_renomeacao,
+)
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, sem_controle
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_dos_jobs
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
@@ -42,24 +48,6 @@ class ImpactoDaRenomeacao(BaseModel):
     videos: int
     momentos_afetados: int
     previa: bool
-
-
-class AndamentoDaRenomeacao(BaseModel):
-    estado: Literal["em_andamento", "concluida", "falhou"]
-    feitos: int
-    total: int
-    nome_antigo: str
-    nome_novo: str
-
-
-def _andamento(r: RenomeacaoDaPessoa) -> AndamentoDaRenomeacao:
-    return AndamentoDaRenomeacao(
-        estado=r.estado,
-        feitos=r.total - len(r.pendentes),
-        total=r.total,
-        nome_antigo=r.nome_antigo,
-        nome_novo=r.nome_novo,
-    )
 
 
 def criar_rotas_da_renomeacao(
@@ -210,7 +198,7 @@ def criar_rotas_da_renomeacao(
         pessoa = pessoas.obter(id_da_pessoa)
         if pessoa is None or pessoa.renomeacao is None:
             raise HTTPException(404, "Nenhuma renomeação desta pessoa")
-        return _andamento(pessoa.renomeacao)
+        return andamento_da_renomeacao(pessoa.renomeacao)
 
     @rotas.post("/pessoas/{id_da_pessoa}/renomear/retomar")
     def retomar(
@@ -229,6 +217,6 @@ def criar_rotas_da_renomeacao(
         if r.estado != "concluida":
             r = r.model_copy(update={"estado": "concluida", "pendentes": []})
             pessoas.definir_renomeacao(pessoa.id, r)
-        return _andamento(r)
+        return andamento_da_renomeacao(r)
 
     return rotas

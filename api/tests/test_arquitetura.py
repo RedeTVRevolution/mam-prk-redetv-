@@ -166,3 +166,63 @@ def test_pega_import_de_jobs_no_topo_em_funcao_e_em_type_checking() -> None:
     ):
         assert _importa(codigo, "api.jobs"), codigo
     assert not _importa("from api.modelo_do_job import Job\n", "api.jobs")
+
+
+# Nomes que deixaram de ser privados (#662): importar o `_` antigo de outro módulo volta ao nome escondido.
+# Ficam de fora os de outras áreas (`api.busca._intercalar`, `api.indexacao._registrar`, ...).
+NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS = {
+    "api.correcoes": {
+        "_acha_ocorrencia",
+        "_ancora_do_item",
+        "_ids_das_pessoas",
+        "_intervalo_da_pauta",
+        "_intervalo_da_pessoa",
+        "_intervalo_do_item",
+        "_intervalo_do_objeto",
+        "_itens_com_o_id",
+        "_objetos",
+        "_pautas",
+        "_pessoas",
+        "_por_inicio",
+        "_sobrepoe",
+        "_sobrepoe_de_verdade",
+        "_sobrepoe_metade",
+        "_valor_do_item",
+        "_sem_controle",
+    },
+    "api.regras_das_correcoes": {"_itens"},
+    "api.pessoas": {"_em_ordem"},
+    "api.decupagem": {"_Intervalo"},
+}
+
+
+def _importes_do_nome_antigo(codigo: str, proibidos: dict[str, set[str]]) -> set[str]:
+    return {
+        f"{no.module}.{a.name}"
+        for no in ast.walk(ast.parse(codigo))
+        if isinstance(no, ast.ImportFrom) and no.level == 0 and no.module in proibidos
+        for a in no.names
+        if a.name in proibidos[no.module]
+    }
+
+
+def test_ninguem_importa_o_nome_com_o_underscore_antigo() -> None:
+    achados = {
+        (arquivo.relative_to(API).as_posix(), nome)
+        for arquivo in API.rglob("*.py")
+        for nome in _importes_do_nome_antigo(
+            arquivo.read_text(), NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS
+        )
+    }
+    assert not achados, f"importa o nome que deixou de ser privado: {sorted(achados)}"
+
+
+def test_pega_import_do_nome_antigo() -> None:
+    codigo = "def f():\n    from api.correcoes import LIMITE_DO_NOME, _sem_controle\n"
+    assert _importes_do_nome_antigo(codigo, NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS) == {
+        "api.correcoes._sem_controle"
+    }
+    assert not _importes_do_nome_antigo(
+        "from api.correcoes import sem_controle\nfrom api.busca import _intercalar\n",
+        NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS,
+    )

@@ -24,8 +24,8 @@ from api.catalogo import (
 )
 from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
 from api.correcoes import Motivo, RepositorioDeCorrecoes, sem_controle
+from api.fotos_de_referencia import FotosDeReferencia
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
-from api.lixeira_do_catalogo import FotosDeReferencia
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
 from api.texto import normalizar

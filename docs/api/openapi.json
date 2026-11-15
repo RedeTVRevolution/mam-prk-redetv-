@@ -4806,6 +4806,51 @@
         "title": "Indexacao",
         "description": "Onde o Job está no índice da busca; uma falha dela não muda o `estado` do Job."
       },
+      "Intervalo": {
+        "properties": {
+          "inicio_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inicio Ms"
+          },
+          "fim_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fim Ms"
+          },
+          "inicio_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Modelo Ms"
+          },
+          "fim_modelo_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Modelo Ms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "inicio_ms",
+          "fim_ms"
+        ],
+        "title": "Intervalo"
+      },
       "ItemMarcado": {
         "properties": {
           "identidade": {
@@ -5987,7 +6032,7 @@
           },
           "ocorrencias": {
             "items": {
-              "$ref": "#/components/schemas/_Intervalo"
+              "$ref": "#/components/schemas/Intervalo"
             },
             "type": "array",
             "minItems": 1,
@@ -7394,51 +7439,6 @@
           "momentos"
         ],
         "title": "VideoDoResultado"
-      },
-      "_Intervalo": {
-        "properties": {
-          "inicio_ms": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Inicio Ms"
-          },
-          "fim_ms": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Fim Ms"
-          },
-          "inicio_modelo_ms": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inicio Modelo Ms"
-          },
-          "fim_modelo_ms": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fim Modelo Ms"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "inicio_ms",
-          "fim_ms"
-        ],
-        "title": "_Intervalo"
       }
     },
     "securitySchemes": {

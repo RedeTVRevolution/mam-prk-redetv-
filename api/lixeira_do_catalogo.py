@@ -10,7 +10,7 @@ import logging
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
@@ -25,6 +25,7 @@ from api.catalogo import (
 )
 from api.catalogo_apagado import so_o_rosto
 from api.correcoes import RepositorioDeCorrecoes
+from api.fotos_de_referencia import FotosDeReferencia
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.lixeira import (
     PRAZO_DA_PURGA,
@@ -49,25 +50,6 @@ from api.texto_como_dado import Linha
 log = logging.getLogger(__name__)
 
 SISTEMA_DA_PURGA = "Purga automática"
-
-
-class FotosDeReferencia(Protocol):
-    """Porta para o bucket das referências; os testes usam a versão em memória."""
-
-    def apagar(self, objeto: str) -> None: ...
-
-    def apagar_prefixo(self, prefixo: str) -> None: ...
-
-
-class FotosEmMemoria:
-    def __init__(self, objetos: set[str] | None = None) -> None:
-        self.objetos = objetos if objetos is not None else set()
-
-    def apagar(self, objeto: str) -> None:
-        self.objetos.discard(objeto)
-
-    def apagar_prefixo(self, prefixo: str) -> None:
-        self.objetos = {o for o in self.objetos if not o.startswith(prefixo)}
 
 
 class ImpactoDaPessoa(BaseModel):

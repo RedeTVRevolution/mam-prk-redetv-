@@ -84,6 +84,7 @@ from api.eventos_de_uso import (
     registrar,
 )
 from api.eventos_do_job import eventos_do_ambiente
+from api.fotos_de_referencia import FotosDeReferencia, FotosEmMemoria
 from api.fusao_de_pessoas import criar_rotas_da_fusao
 from api.gemini import Chamada, ErroHttp, Transporte
 from api.idempotencia import RepositorioDeIdempotencia
@@ -105,11 +106,7 @@ from api.lixeira import (
     criar_rotas_da_lixeira,
     sem_job_na_lixeira,
 )
-from api.lixeira_do_catalogo import (
-    FotosDeReferencia,
-    FotosEmMemoria,
-    criar_rotas_da_lixeira_do_catalogo,
-)
+from api.lixeira_do_catalogo import criar_rotas_da_lixeira_do_catalogo
 from api.lixeira_na_leitura import (
     PurgasDeMarca,
     PurgasDeMarcaEmMemoria,

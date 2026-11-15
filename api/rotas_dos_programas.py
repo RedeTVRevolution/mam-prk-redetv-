@@ -33,7 +33,12 @@ from pydantic import BaseModel, field_validator
 
 from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
-from api.catalogo import Catalogo, visivel
+from api.catalogo import (
+    AndamentoDaRenomeacao,
+    Catalogo,
+    andamento_da_renomeacao,
+    visivel,
+)
 from api.ciclo_de_vida import pedir_indexacao
 from api.correcoes import sem_controle
 from api.jobs import DisparoDaIndexacao
@@ -53,7 +58,6 @@ from api.programas import (
     pessoas_do_programa,
     troca_vale,
 )
-from api.renomeacao_de_pessoas import AndamentoDaRenomeacao
 from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
@@ -163,14 +167,7 @@ def criar_rotas_dos_programas(
             pessoas=pessoas,
             renomeacao=None
             if r is None
-            else AndamentoDaRenomeacao(
-                # Para quem lê, a troca que espera a auditoria já está em andamento.
-                estado="em_andamento" if r.estado == "confirmando" else r.estado,
-                feitos=r.total - len(r.pendentes),
-                total=r.total,
-                nome_antigo=r.nome_antigo,
-                nome_novo=r.nome_novo,
-            ),
+            else andamento_da_renomeacao(r, confirmando_conta_como_em_andamento=True),
         )
 
     def conferir_pessoas(dados: DadosDoPrograma) -> None:
