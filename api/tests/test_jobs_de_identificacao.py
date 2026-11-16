@@ -14,7 +14,7 @@ import pytest
 from api import identificacao_job
 from api.catalogo import CatalogoEmMemoria
 from api.correcoes import Ancora, Correcao
-from api.decupagem import Decupagem
+from api.decupagem import Comercial, Decupagem
 from api.gemini import ErroHttp
 from api.jobs import RepositorioEmMemoria
 from api.juncao_de_pessoas import chave_da_pessoa
@@ -50,8 +50,11 @@ class DecupagensEmMemoria:
 
 
 class TranscricoesEmMemoria:
+    def __init__(self, transcricao: Any = None) -> None:
+        self.transcricao = transcricao or whisper(("oi", 1.0))
+
     def ler_transcricao(self, job_id: str) -> Any:
-        return whisper(("oi", 1.0))
+        return self.transcricao
 
 
 def repositorio(estado: str = "concluido") -> RepositorioEmMemoria:
@@ -95,6 +98,8 @@ def identificar(
     tmp_path: Path,
     repo: RepositorioEmMemoria | None = None,
     correcoes: Any = None,
+    transcricao: Any = None,
+    tolerancia_ms: int = 2000,
 ) -> tuple[str, DecupagensEmMemoria]:
     decupagens = DecupagensEmMemoria(d, com_copia)
     resultado = identificacao_job.executar(
@@ -102,10 +107,11 @@ def identificar(
         repo or repositorio(estado),
         decupagens,
         TransporteFalso(*respostas),
-        TranscricoesEmMemoria(),
+        TranscricoesEmMemoria(transcricao),
         CatalogoEmMemoria(),
         tmp_path,
         correcoes=correcoes,
+        tolerancia_ms=tolerancia_ms,
     )
     return resultado, decupagens
 
@@ -420,3 +426,66 @@ def test_lista_as_correcoes_uma_vez_so(tmp_path: Path) -> None:
     )
 
     assert chamadas == ["job-1"]
+
+
+def _com_comercial_de_marca(marca: str) -> Decupagem:
+    d = com_gc()
+    comercial = {
+        "marca": marca,
+        "tipo": "intervalo",
+        "evidencias": ["logo"],
+        "inicio_ms": 200_000,
+        "fim_ms": 210_000,
+    }
+    return d.model_copy(update={"comerciais": [Comercial.model_validate(comercial)]})
+
+
+def test_comercial_com_a_marca_do_nome_dado_pelo_modelo_forte_sai(
+    tmp_path: Path,
+) -> None:
+    d = _com_comercial_de_marca("Leão Lobo")
+
+    _, decupagens = identificar(d, nome_do_modelo_forte(), tmp_path=tmp_path)
+
+    assert decupagens.gravada is not None
+    assert decupagens.gravada.pessoas[0].nome == "Leão Lobo"
+    assert decupagens.gravada.comerciais == []
+
+
+def test_sem_nome_dado_pelo_modelo_forte_a_decupagem_volta_igual(
+    tmp_path: Path,
+) -> None:
+    d = _com_comercial_de_marca("Leão Lobo")
+    nao_identificado = json.dumps(
+        {
+            "resultado": "nao_identificado",
+            "nome": None,
+            "prova": None,
+            "tempo_da_prova": None,
+        }
+    )
+
+    _, decupagens = identificar(d, nao_identificado, tmp_path=tmp_path)
+
+    assert decupagens.gravada == d
+
+
+def test_a_tolerancia_da_fala_chega_a_identificacao(tmp_path: Path) -> None:
+    # A fala vem 2,5 s depois de a pessoa sair da imagem: só 3000 ms provam o nome.
+    d = decupagem([pessoa("pes01", BARBA, [(100_000, 110_000)], fontes_do_nome=[])])
+    fala = whisper(("Leão", 112.5), ("Lobo", 113.0))
+
+    _, padrao = identificar(
+        d, nome_do_modelo_forte(), tmp_path=tmp_path, transcricao=fala
+    )
+    _, larga = identificar(
+        d,
+        nome_do_modelo_forte(),
+        tmp_path=tmp_path,
+        transcricao=fala,
+        tolerancia_ms=3000,
+    )
+
+    assert padrao.gravada is not None and larga.gravada is not None
+    assert padrao.gravada.pessoas[0].estado_do_nome == "palpite"
+    assert larga.gravada.pessoas[0].estado_do_nome == "confirmado"

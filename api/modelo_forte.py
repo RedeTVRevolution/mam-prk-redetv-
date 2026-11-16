@@ -36,7 +36,7 @@ from api.identificacao import (
     TOLERANCIA_DA_FALA_MS,
     Candidato,
     candidatos_do_video,
-    identificar,
+    identificar_e_pos_processar,
 )
 from api.programas import Perfis
 from api.quadros import FalhaNosQuadros
@@ -290,7 +290,7 @@ def olhar_pessoas_sem_nome(
             ]
         }
     )
-    return identificar(
+    return identificar_e_pos_processar(
         renomeada,
         candidatos=candidatos,
         transcricao=transcricao,

@@ -3,10 +3,17 @@
 import json
 from typing import Any
 
+import pytest
+
 from api.analise_por_janelas import analisar_video
 from api.catalogo import CatalogoEmMemoria
 from api.decupagem import Decupagem, Video
-from api.identificacao import Candidato, candidatos_do_video, identificar
+from api.identificacao import (
+    Candidato,
+    candidatos_do_video,
+    identificar,
+    tolerancia_da_fala_do_ambiente,
+)
 from api.programas import PerfilDoPrograma, PessoaDoPerfil, perfis_dos_programas
 from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_correcoes import Mundo
@@ -491,3 +498,15 @@ def test_monta_o_fluxo_de_palavras_uma_vez_com_varias_pessoas() -> None:
 
     assert leituras == 1
     assert [p.estado_do_nome for p in r.pessoas] == ["confirmado", "confirmado"]
+
+
+def test_tolerancia_da_fala_vem_do_ambiente_e_o_padrao_e_2000() -> None:
+    assert tolerancia_da_fala_do_ambiente({}) == 2000
+    assert tolerancia_da_fala_do_ambiente({"TOLERANCIA_DA_FALA_MS": "3500"}) == 3500
+    assert tolerancia_da_fala_do_ambiente({"TOLERANCIA_DA_FALA_MS": "0"}) == 0
+
+
+@pytest.mark.parametrize("valor", ["-1", "abc", "1.5", ""])
+def test_tolerancia_da_fala_invalida_e_recusada(valor: str) -> None:
+    with pytest.raises(ValueError, match="TOLERANCIA_DA_FALA_MS"):
+        tolerancia_da_fala_do_ambiente({"TOLERANCIA_DA_FALA_MS": valor})

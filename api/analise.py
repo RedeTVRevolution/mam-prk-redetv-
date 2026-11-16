@@ -30,7 +30,7 @@ from api.clientes_de_nuvem import sessao_autenticada
 from api.decupagem import Video
 from api.eventos_do_job import jobs_do_ambiente
 from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
-from api.identificacao import TOLERANCIA_DA_FALA_MS
+from api.identificacao import TOLERANCIA_DA_FALA_MS, tolerancia_da_fala_do_ambiente
 from api.leitura_da_tela import LeituraDaTela
 from api.modelo_do_job import RepositorioDeJobs, agora_utc
 from api.nuvem import (
@@ -190,9 +190,7 @@ def main() -> None:
         perfis=perfis_dos_programas(
             ProgramasFirestore(cliente_do_firestore(projeto)), catalogo
         ),
-        tolerancia_da_fala_ms=int(
-            os.environ.get("TOLERANCIA_DA_FALA_MS", TOLERANCIA_DA_FALA_MS)
-        ),
+        tolerancia_da_fala_ms=tolerancia_da_fala_do_ambiente(),
     )
 
 

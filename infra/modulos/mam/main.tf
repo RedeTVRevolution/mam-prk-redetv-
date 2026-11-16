@@ -2092,6 +2092,10 @@ resource "google_cloud_run_v2_job" "identificacao" {
           value = tostring(var.limite_de_pessoas_do_modelo_forte)
         }
         env {
+          name  = "TOLERANCIA_DA_FALA_MS"
+          value = tostring(var.tolerancia_da_fala_ms)
+        }
+        env {
           name  = "TMPDIR"
           value = "/saida"
         }
