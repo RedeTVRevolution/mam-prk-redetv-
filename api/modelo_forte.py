@@ -157,6 +157,12 @@ def agrupar(decupagem: Decupagem) -> list[Grupo]:
     return sorted(achados, key=lambda g: g.na_imagem_ms, reverse=True)
 
 
+def grupos_a_olhar(decupagem: Decupagem, limite_de_pessoas: int) -> list[Grupo]:
+    """Os grupos de pessoas sem nome que o modelo forte olha: os `limite_de_pessoas`
+    com mais tempo na imagem."""
+    return agrupar(decupagem)[: max(limite_de_pessoas, 0)]
+
+
 def _preencher(modelo: str, valores: dict[str, str]) -> str:
     # `str.replace` e não `format`: a transcrição e os textos da tela têm chaves à vontade.
     texto = modelo
@@ -252,7 +258,7 @@ def olhar_pessoas_sem_nome(
     instrucao = _instrucao(decupagem, programa, candidatos, transcricao, perfis)
     nomes: dict[str, str] = {}
     grupo_de: dict[str, str] = {}
-    for grupo in agrupar(decupagem)[: max(limite_de_pessoas, 0)]:
+    for grupo in grupos_a_olhar(decupagem, limite_de_pessoas):
         instantes = instantes_das_aparicoes(
             [a for p in grupo.pessoas for a in p.na_imagem]
         )

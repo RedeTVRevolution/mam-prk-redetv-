@@ -28,7 +28,7 @@ from api.gemini import Transporte, TransporteVertex
 from api.identificacao import TOLERANCIA_DA_FALA_MS, tolerancia_da_fala_do_ambiente
 from api.juncao_de_pessoas import juntar_sem_nome
 from api.modelo_do_job import RepositorioDeJobs
-from api.modelo_forte import LIMITE_DE_PESSOAS, agrupar, olhar_pessoas_sem_nome
+from api.modelo_forte import LIMITE_DE_PESSOAS, grupos_a_olhar, olhar_pessoas_sem_nome
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -92,7 +92,7 @@ def executar(
             return "sem_alteracao"
         # Decide antes de baixar: sem pessoa sem nome a olhar, a cópia limpa só precisa
         # existir (`identificado` é o que conclui a etapa; sem a cópia, ela falha).
-        if agrupar(decupagem)[: max(limite_de_pessoas, 0)]:
+        if grupos_a_olhar(decupagem, limite_de_pessoas):
             if not decupagens.baixar_copia_limpa(job_id, copia):
                 return "sem_alteracao"
         elif not decupagens.copia_limpa_existe(job_id):
