@@ -1666,6 +1666,12 @@ class DecupagensStorage:
             self._cliente, self._aceitos, objeto_da_copia_limpa(job_id), destino
         )
 
+    def copia_limpa_existe(self, job_id: str) -> bool:
+        """Só consulta o objeto, sem baixar o conteúdo."""
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
+        existe: bool = blob.exists()
+        return existe
+
 
 class TranscricoesStorage:
     """O áudio e a transcrição, ao lado do proxy no bucket de aceitos."""

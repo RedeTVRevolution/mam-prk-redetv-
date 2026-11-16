@@ -7,7 +7,6 @@ texto em português.
 import copy
 import time
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Annotated, Any
 
@@ -29,6 +28,7 @@ from api.espera import sorteio_uniforme
 from api.florence import ObjetosDaDecupagem
 from api.gemini import Chamada, Transporte, gerar_validado, validar_json
 from api.leitura_da_tela import Caixa
+from api.paralelo import em_paralelo
 from api.taxonomia_de_objetos import OUTRO, TEXTO_DOS_TIPOS
 from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
@@ -175,19 +175,6 @@ def _lotes[T](itens: Sequence[T], tamanho: int) -> list[list[T]]:
     return [list(itens[i : i + tamanho]) for i in range(0, len(itens), max(tamanho, 1))]
 
 
-def _em_paralelo[T, R](
-    itens: Sequence[T], chamar: Callable[[T], R], paralelismo: int
-) -> list[R]:
-    """`chamar` em cada item, até `paralelismo` ao mesmo tempo, na ordem dos itens. Na
-    primeira falha, os itens que ainda não começaram são cancelados (cada um custaria até
-    um prazo inteiro do Flex) e a falha sobe depois de as chamadas em andamento terminarem."""
-    pool = ThreadPoolExecutor(max_workers=max(paralelismo, 1))
-    try:
-        return list(pool.map(chamar, itens))
-    finally:
-        pool.shutdown(wait=True, cancel_futures=True)
-
-
 def _gravar_plano(inventarios: Inventarios, plano: int, itens: list[Any]) -> None:
     """O final comum dos dois motores: os itens não vazios do plano, com os repetidos unidos."""
     inventarios[plano] = unir_repetidos([i for i in itens if i])
@@ -328,7 +315,7 @@ def converter_do_florence(
     lotes = _lotes(
         [i for i in range(len(decupagem.planos)) if i in por_plano], planos_por_lote
     )
-    respostas = _em_paralelo(
+    respostas = em_paralelo(
         lotes,
         lambda lote: gerar_validado(
             transporte,
@@ -423,7 +410,7 @@ def olhar_com_gemini(
 
     lotes = _lotes(com_quadros, planos_por_lote)
     for lote, resposta in zip(
-        lotes, _em_paralelo(lotes, olhar, paralelismo), strict=True
+        lotes, em_paralelo(lotes, olhar, paralelismo), strict=True
     ):
         for do_plano in resposta.planos:
             if do_plano.plano not in lote:

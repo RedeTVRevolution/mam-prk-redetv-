@@ -21,10 +21,8 @@ refez).
 
 import time
 from collections.abc import Callable, Sequence
-from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from threading import Event
 
 from api.catalogo import Catalogo
 from api.consolidacao import consolidar
@@ -47,6 +45,7 @@ from api.medicao_dos_textos import (
     TOLERANCIA_DE_QUADROS,
     MedicaoDosTextos,
 )
+from api.paralelo import em_paralelo
 from api.programas import Perfis
 from api.progresso_das_janelas import JanelaGravada, JanelasDoJob
 from api.sinais import ContagemDaAnalise
@@ -54,30 +53,6 @@ from api.tempos import aplicar_regra_de_tempos
 from api.texto import normalizar
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA
-
-
-def _em_paralelo[T](tarefas: Sequence[Callable[[], T]], maximo: int) -> list[T]:
-    """Roda as tarefas, no máximo `maximo` ao mesmo tempo; devolve os resultados na
-    ordem. Depois da primeira falha, as que ainda não começaram não começam."""
-    falhou = Event()
-
-    def rodar(tarefa: Callable[[], T]) -> T:
-        if falhou.is_set():
-            raise CancelledError
-        try:
-            return tarefa()
-        except BaseException:
-            falhou.set()
-            raise
-
-    with ThreadPoolExecutor(max_workers=maximo) as pool:
-        futuros = [pool.submit(rodar, t) for t in tarefas]
-        erros = [f.exception() for f in futuros]
-    # A falha de verdade é a primeira que não é um cancelamento.
-    for erro in erros:
-        if erro and not isinstance(erro, CancelledError):
-            raise erro
-    return [f.result() for f in futuros]
 
 
 def sem_comercial_de_pessoa(decupagem: Decupagem) -> Decupagem:
@@ -246,7 +221,11 @@ def analisar_video(
             partial(decupar, janelas[i], resultados[i] if escalonar else None)
             for i in indices
         ]
-        return dict(zip(indices, _em_paralelo(tarefas, max_paralelas), strict=True))
+        return dict(
+            zip(
+                indices, em_paralelo(tarefas, lambda t: t(), max_paralelas), strict=True
+            )
+        )
 
     with etapa("janelas"):
         resultados = decupar_em_paralelo([j.indice for j in janelas])
