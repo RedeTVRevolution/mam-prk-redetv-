@@ -4,6 +4,7 @@ Sem `FIRESTORE_EMULATOR_HOST` / `STORAGE_EMULATOR_HOST`, os testes são pulados;
 no CI os emuladores sobem antes do pytest.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api.modelo_do_job import Estado, Job
 from api.nuvem import RepositorioFirestore
+from api.tests.test_falhas_com_causa import COMPORTAMENTOS, _trocar_ffmpeg
 from api.validacao_job import executar
 
 EMULADOR_FIRESTORE = os.environ.get("FIRESTORE_EMULATOR_HOST")
@@ -287,3 +289,37 @@ def test_cancelamento_depois_da_ultima_leitura_nao_e_sobrescrito(
 
     ambiente.repositorio.__class__ = RepositorioFirestore
     assert ambiente.job("j6").estado == "cancelado"
+
+
+@pytest.mark.parametrize(
+    ("causa", "codigo"),
+    [
+        ("tempo_esgotado", "processamento_demorou_demais"),
+        ("ffmpeg_saiu_com_erro", "arquivo_corrompido"),
+    ],
+)
+def test_recusa_grava_o_codigo_e_registra_a_causa_em_evento_proprio(
+    ambiente: Ambiente,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    causa: str,
+    codigo: str,
+) -> None:
+    ambiente.enviar("j-causa", _mp4(tmp_path / "v.mp4"))
+    _trocar_ffmpeg(monkeypatch, tmp_path, COMPORTAMENTOS[causa], so_cortes=True)
+
+    ambiente.executar("j-causa")
+
+    job = ambiente.job("j-causa")
+    assert (job.estado, job.codigo_falha) == ("falhou", codigo)
+    assert "Invalid data" not in job.model_dump_json()
+    assert not ambiente.quarentena.blob("j-causa").exists()
+    (linha,) = [json.loads(x) for x in capsys.readouterr().out.splitlines() if x]
+    assert linha["evento"] == "recusa_da_validacao"  # não alimenta mam_falhas_por_etapa
+    assert (linha["job_id"], linha["codigo"], linha["causa"]) == (
+        "j-causa",
+        codigo,
+        causa,
+    )
+    assert ("Invalid data" in linha["stderr"]) == (causa == "ffmpeg_saiu_com_erro")
