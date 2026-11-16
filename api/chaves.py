@@ -12,6 +12,7 @@ from datetime import datetime
 from hashlib import sha256
 from typing import Protocol, cast
 
+from google.api_core.exceptions import GoogleAPIError
 from pydantic import BaseModel, ConfigDict
 
 from api.auth import ESCOPOS, ChaveInvalida, Escopo, Sistema
@@ -201,7 +202,7 @@ class VerificadorDeChaveDeApi:
                         }
                     )
                 )
-        except ServicoIndisponivel:
+        except (ServicoIndisponivel, GoogleAPIError):
             pass
         return Sistema(sistema=registro.sistema, escopos=registro.escopos)
 

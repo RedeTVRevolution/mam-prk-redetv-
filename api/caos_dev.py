@@ -17,8 +17,8 @@ from typing import Any
 import requests
 
 from api.caos import CORPO, Relatorio, roteiro
+from api.modelo_do_job import FIM_OU_CANCELADO
 
-ESTADOS_FINAIS = {"concluido", "falhou", "rejeitado", "cancelado"}
 ESPERA_MAXIMA_S = 3600
 
 
@@ -93,7 +93,7 @@ def enviar_clipe(api: ApiNoAr, sistema: str, clipe: Path) -> Relatorio:
     while time.monotonic() < limite:
         _, lido = api.requisitar("GET", f"/jobs/{job['id']}", sistema=sistema)
         estado = (lido or {}).get("estado", "")
-        if estado in ESTADOS_FINAIS:
+        if estado in FIM_OU_CANCELADO:
             break
         time.sleep(15)
     relatorio.conferir(
