@@ -237,12 +237,29 @@ def criar_rotas_dos_usuarios(
     ) -> UsuarioDaLista:
         try:
             conta = contas.criar(pedido.email, pedido.nome)
+            # Pendente até o registro: sem ele a conta não fica ativa nem sem rastro.
+            papeis.marcar_pendente(conta.uid, True)
         except EmailJaCadastrado:
-            raise HTTPException(409, "Já existe uma conta com esse e-mail") from None
+            # A conta pendente (criação que falhou no registro) é concluída aqui.
+            pendente = next(
+                (
+                    c
+                    for c in contas.listar()
+                    if c.email.lower() == pedido.email.lower()
+                    and papeis.ler(c.uid).pendente
+                ),
+                None,
+            )
+            if pendente is None:
+                raise HTTPException(
+                    409, "Já existe uma conta com esse e-mail"
+                ) from None
+            conta = pendente
         papeis.salvar(conta.uid, pedido.papeis)
         # O registro antes do link: se o envio falha, a conta já tem rastro e o
-        # link pode ser reenviado.
+        # link pode ser reenviado. Se o registro falha, a conta segue pendente.
         registrar(pessoa, "conta.criada", conta, {"papeis": pedido.papeis})
+        papeis.marcar_pendente(conta.uid, False)
         contas.enviar_link_de_senha(conta.email)
         return da_lista(conta)
 

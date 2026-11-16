@@ -100,6 +100,8 @@ class DocumentoDePapeis:
     uid: str
     desativada: bool
     papeis: list[Papel] | None
+    # Conta criada cuja auditoria falhou: sempre junto com `desativada`.
+    pendente: bool = False
 
 
 class RepositorioDePapeis(Protocol):
@@ -121,14 +123,22 @@ class RepositorioDePapeis(Protocol):
         """Liga ou desliga a marca sem tocar nos papéis (nem criar papéis)."""
         ...
 
+    def marcar_pendente(self, uid: str, pendente: bool) -> None:
+        """Liga ou desliga, numa gravação só, `pendente` e `desativada` (a criação
+        de conta sem registro na auditoria não deixa acesso)."""
+        ...
+
 
 class RepositorioDePapeisEmMemoria:
     def __init__(self) -> None:
         self._papeis: dict[str, list[Papel]] = {}
         self._desativadas: set[str] = set()
+        self._pendentes: set[str] = set()
 
     def ler(self, uid: str) -> DocumentoDePapeis:
-        return DocumentoDePapeis(uid, self.desativada(uid), self.obter(uid))
+        return DocumentoDePapeis(
+            uid, self.desativada(uid), self.obter(uid), uid in self._pendentes
+        )
 
     def obter(self, uid: str) -> list[Papel] | None:
         return self._papeis.get(uid)
@@ -141,6 +151,10 @@ class RepositorioDePapeisEmMemoria:
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         (self._desativadas.add if desativada else self._desativadas.discard)(uid)
+
+    def marcar_pendente(self, uid: str, pendente: bool) -> None:
+        (self._pendentes.add if pendente else self._pendentes.discard)(uid)
+        self.marcar_desativada(uid, pendente)
 
 
 class ContaNaoEncontrada(Exception):

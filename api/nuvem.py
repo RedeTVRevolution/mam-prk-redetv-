@@ -751,7 +751,12 @@ class RepositorioDePapeisFirestore:
         # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
         if "papeis" in dados:
             papeis = papeis_em_ordem(dados["papeis"])
-        return DocumentoDePapeis(uid, dados.get("desativada") is True, papeis)
+        return DocumentoDePapeis(
+            uid,
+            dados.get("desativada") is True,
+            papeis,
+            dados.get("pendente") is True,
+        )
 
     def obter(self, uid: str) -> list[Papel] | None:
         return self.ler(uid).papeis
@@ -765,6 +770,11 @@ class RepositorioDePapeisFirestore:
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         _documento(self._colecao, uid).set({"desativada": desativada}, merge=True)
+
+    def marcar_pendente(self, uid: str, pendente: bool) -> None:
+        _documento(self._colecao, uid).set(
+            {"pendente": pendente, "desativada": pendente}, merge=True
+        )
 
 
 class ContasIdentityPlatform:

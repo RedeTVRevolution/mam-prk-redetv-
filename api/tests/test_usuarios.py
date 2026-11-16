@@ -529,3 +529,63 @@ def test_contas_do_identity_platform_repassa_outras_falhas() -> None:
 
     with pytest.raises(requests.HTTPError):
         ContasIdentityPlatform("proj", sessao).enviar_link_de_senha("a@x.y")
+
+
+NOVA = {"email": "cris@redetv.com", "nome": "Cris", "papeis": ["editor"]}
+
+
+class AuditoriaQueFalhaUmaVez(RepositorioDeAuditoriaEmMemoria):
+    def __init__(self) -> None:
+        super().__init__()
+        self.falhar = True
+
+    def acrescentar(self, registro: RegistroDeAuditoria) -> None:
+        if self.falhar:
+            raise RuntimeError("Firestore fora")
+        super().acrescentar(registro)
+
+
+def test_sem_auditoria_a_conta_criada_fica_desativada_e_pendente() -> None:
+    mundo = Mundo(auditoria=AuditoriaQueFalha())
+
+    with pytest.raises(RuntimeError):
+        mundo.cliente.post(ROTA, json=NOVA, headers=ADMIN)
+
+    (cris,) = [c for c in mundo.contas.listar() if c.email == NOVA["email"]]
+    documento = mundo.papeis.ler(cris.uid)
+    assert documento.desativada
+    assert documento.pendente
+
+
+def test_pedido_repetido_conclui_a_conta_pendente() -> None:
+    auditoria = AuditoriaQueFalhaUmaVez()
+    mundo = Mundo(auditoria=auditoria)
+    with pytest.raises(RuntimeError):
+        mundo.cliente.post(ROTA, json=NOVA, headers=ADMIN)
+    auditoria.falhar = False
+
+    resposta = mundo.cliente.post(
+        ROTA, json={**NOVA, "papeis": ["curador"]}, headers=ADMIN
+    )
+
+    assert resposta.status_code == 201
+    assert resposta.json()["situacao"] == "ativa"
+    uid = resposta.json()["uid"]
+    documento = mundo.papeis.ler(uid)
+    assert not documento.desativada
+    assert not documento.pendente
+    assert documento.papeis == ["curador"]
+    (registro,) = mundo.registros()
+    assert (registro.acao, registro.alvo_id) == ("conta.criada", uid)
+    assert mundo.contas.links_enviados == [NOVA["email"]]
+    assert len([c for c in mundo.contas.listar() if c.email == NOVA["email"]]) == 1
+
+
+def test_conta_existente_sem_a_marca_continua_409() -> None:
+    mundo = Mundo()
+
+    resposta = mundo.cliente.post(
+        ROTA, json={**NOVA, "email": "bia@redetv.com"}, headers=ADMIN
+    )
+
+    assert resposta.status_code == 409
