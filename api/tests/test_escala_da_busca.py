@@ -37,10 +37,12 @@ class JobsContados(RepositorioEmMemoria):
         self.um_a_um += 1
         return super().obter(job_id)
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
         ids = list(job_ids)
         self.lotes.append(ids)
-        return super().obter_varios(ids)
+        return super().obter_varios(ids, so_a_lista)
 
 
 class CatalogoContado(CatalogoEmMemoria):

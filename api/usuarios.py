@@ -194,12 +194,13 @@ def criar_rotas_dos_usuarios(
         )
 
     def da_lista(conta: ContaDoIdentityPlatform) -> UsuarioDaLista:
-        desativada = conta.bloqueada or papeis.desativada(conta.uid)
+        documento = papeis.ler(conta.uid)
+        desativada = conta.bloqueada or documento.desativada
         return UsuarioDaLista(
             uid=conta.uid,
             email=conta.email,
             nome=conta.nome,
-            papeis=efetivos(conta, papeis.obter(conta.uid)),
+            papeis=efetivos(conta, documento.papeis),
             criada_em=conta.criada_em,
             ultimo_acesso=conta.ultimo_acesso,
             situacao="desativada" if desativada else "ativa",

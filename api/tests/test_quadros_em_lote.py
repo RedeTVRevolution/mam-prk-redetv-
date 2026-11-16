@@ -28,10 +28,10 @@ def _contar_leituras(mundo: Mundo) -> list[str]:
         lidos.append(job_id)
         return obter(job_id)
 
-    def varios_contando(job_ids: Iterable[str]) -> list[Job]:
+    def varios_contando(job_ids: Iterable[str], so_a_lista: bool = False) -> list[Job]:
         ids = list(job_ids)
         lidos.extend(ids)
-        return varios(ids)
+        return varios(ids, so_a_lista)
 
     mundo.jobs.obter = obter_contando  # type: ignore[method-assign]
     mundo.jobs.obter_varios = varios_contando  # type: ignore[method-assign]

@@ -169,8 +169,10 @@ class _RepositorioQueRepassa:
     def obter_fila_gpu(self) -> dict[str, Any]:
         return self._repositorio.obter_fila_gpu()
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        return self._repositorio.obter_varios(job_ids)
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
+        return self._repositorio.obter_varios(job_ids, so_a_lista)
 
     def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
         self._repositorio.acrescentar_ano_da_copia(job_id, ano)

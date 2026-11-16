@@ -873,11 +873,11 @@ class JobsEspiao(RepositorioEmMemoria):
         self.falha = False
         self.erro: Exception = RuntimeError("Firestore fora")
 
-    def obter_varios(self, job_ids: Any) -> Any:
+    def obter_varios(self, job_ids: Any, so_a_lista: bool = False) -> Any:
         if self.falha:
             raise self.erro
         self.lotes.append(list(job_ids))
-        return super().obter_varios(self.lotes[-1])
+        return super().obter_varios(self.lotes[-1], so_a_lista)
 
 
 def _job_criado_em(id: str, quando: datetime) -> Any:

@@ -73,6 +73,7 @@ from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
 from api.modelo_do_job import (
+    CAMPOS_DA_LISTA,
     SAO_PAULO,
     CursorInvalido,
     Estado,
@@ -104,17 +105,6 @@ from api.usuarios import ContaDoIdentityPlatform, EmailJaCadastrado
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
-# O que a lista do acervo lê do Job: os campos do `JobResumido` (menos `enviado_por`, que vem
-# de `sistema` e `criado_por_email`), os obrigatórios do `Job` e os que `casa_com_o_filtro`
-# confere (#480). Fica de fora o que pesa: `cortes_ms`, os catálogos e o `sha256`.
-_CAMPOS_DA_LISTA = frozenset(
-    {
-        "id", "nome", "tamanho_bytes", "estado", "criado_por", "criado_em", "atualizado_em",
-        "codigo_falha", "duracao_s", "timecode_origem", "taxa_de_quadros", "capa", "programa",
-        "data_exibicao", "indexacao", "copia_bigquery", "etapa_atual", "etapas",
-        "reprocessamentos", "inicio_da_passada", "criado_por_email", "sistema", "palavras", "lixeira",
-    }
-)  # fmt: skip
 # Candidatos mínimos por leitura quando a página já está cheia e falta achar o próximo aprovado.
 LOTE_MINIMO_DE_CANDIDATOS = 25
 COLECAO_DE_CHAVES = "chaves_de_api"
@@ -165,13 +155,20 @@ def apagar_objetos(cliente: ClienteStorage, blobs: Iterable[Any]) -> None:
                 raise from_http_response(resposta)  # type: ignore[no-untyped-call]
 
 
-def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:
+def _lidos_em_lote(
+    cliente: Any, colecao: Any, ids: Iterable[str], campos: list[str] | None = None
+) -> Iterator[Any]:
     """Os documentos que existem entre os `ids` (sem repetir), lidos em lotes de
-    `_LOTE_DE_LEITURA` com `get_all`."""
+    `_LOTE_DE_LEITURA` com `get_all`; `campos` limita o que vem em cada um."""
     referencias = [_documento(colecao, i) for i in dict.fromkeys(ids)]
     for inicio in range(0, len(referencias), _LOTE_DE_LEITURA):
         lote = referencias[inicio : inicio + _LOTE_DE_LEITURA]
-        yield from (d for d in cliente.get_all(lote) if d.exists)
+        lidos = (
+            cliente.get_all(lote)
+            if campos is None
+            else cliente.get_all(lote, field_paths=campos)
+        )
+        yield from (d for d in lidos if d.exists)
 
 
 def objeto_do_proxy(job_id: str) -> str:
@@ -439,12 +436,16 @@ class RepositorioFirestore:
         doc = self._cliente.collection("fila_gpu").document("vagas").get()
         return doc.to_dict() or {}
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
         # Em lotes: sem período, a taxa pede todos os vídeos revisados do acervo, e
         # um pedido só com dezenas de milhares de referências arrisca o prazo.
+        # `so_a_lista`: só os campos da lista, sem `cortes_ms` e catálogos (quem regrava o Job não liga).
+        campos = sorted(CAMPOS_DA_LISTA) if so_a_lista else None
         return [
             Job(**(doc.to_dict() or {}))
-            for doc in _lidos_em_lote(self._cliente, self._colecao, job_ids)
+            for doc in _lidos_em_lote(self._cliente, self._colecao, job_ids, campos)
         ]
 
     def listar(self) -> list[Job]:
@@ -532,7 +533,7 @@ class RepositorioFirestore:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
         if filtro.so_os_da_lista:
-            consulta = consulta.select(sorted(_CAMPOS_DA_LISTA | {campo.split(".")[0]}))
+            consulta = consulta.select(sorted(CAMPOS_DA_LISTA | {campo.split(".")[0]}))
         if filtro.limite is None:
             # Lista inteira: o consumidor interno não segue cursor, então não há teto.
             jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())

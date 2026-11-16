@@ -41,10 +41,12 @@ class JobsQueCaem(RepositorioEmMemoria):
             raise _fora()
         return super().obter(job_id)
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
         if self.fora:
             raise _fora()
-        return super().obter_varios(job_ids)
+        return super().obter_varios(job_ids, so_a_lista)
 
     def consultar(self, filtro: Any) -> Any:
         if self.fora:

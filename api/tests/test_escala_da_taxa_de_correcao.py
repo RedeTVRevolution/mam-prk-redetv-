@@ -38,8 +38,10 @@ class JobsQueConta(RepositorioEmMemoria):
         self.listagens += 1
         return super().listar()
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        achados = super().obter_varios(job_ids)
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
+        achados = super().obter_varios(job_ids, so_a_lista)
         self.lidos += [j.id for j in achados]
         return achados
 

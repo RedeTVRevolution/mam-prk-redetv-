@@ -328,9 +328,11 @@ def test_relatorio_le_o_nome_dos_videos_numa_leitura_em_lote() -> None:
         def obter(self, job_id: str) -> Job | None:
             raise AssertionError("um Job por vez")
 
-        def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+        def obter_varios(
+            self, job_ids: Iterable[str], so_a_lista: bool = False
+        ) -> list[Job]:
             self.em_lote.append(set(job_ids))
-            return super().obter_varios(job_ids)
+            return super().obter_varios(job_ids, so_a_lista)
 
     jobs = Contador()
     jobs.salvar(_job("j1", nome="um.mp4"))

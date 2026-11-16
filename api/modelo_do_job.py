@@ -115,6 +115,19 @@ class Etapa(BaseModel):
     tentativas_gpu: int | None = None
 
 
+# O que a lista do acervo lê do Job: os campos do `JobResumido` (menos `enviado_por`, que vem
+# de `sistema` e `criado_por_email`), os obrigatórios do `Job` e os que `casa_com_o_filtro`
+# confere (#480). Fica de fora o que pesa: `cortes_ms`, os catálogos e o `sha256`.
+CAMPOS_DA_LISTA = frozenset(
+    {
+        "id", "nome", "tamanho_bytes", "estado", "criado_por", "criado_em", "atualizado_em",
+        "codigo_falha", "duracao_s", "timecode_origem", "taxa_de_quadros", "capa", "programa",
+        "data_exibicao", "indexacao", "copia_bigquery", "etapa_atual", "etapas",
+        "reprocessamentos", "inicio_da_passada", "criado_por_email", "sistema", "palavras", "lixeira",
+    }
+)  # fmt: skip
+
+
 class Job(BaseModel):
     id: str
     nome: str
@@ -355,8 +368,12 @@ class RepositorioDeJobs(Protocol):
         """O documento `fila_gpu/vagas`; vazio quando ainda não existe."""
         ...
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        """Os Jobs que existem entre `job_ids`, numa leitura em lote, em qualquer ordem."""
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
+        """Os Jobs que existem entre `job_ids`, numa leitura em lote, em qualquer ordem.
+        `so_a_lista` lê só `CAMPOS_DA_LISTA` (sem `cortes_ms` e catálogos): só para quem
+        não regrava o Job."""
         ...
 
     def transitar(

@@ -77,6 +77,7 @@ from api.idempotencia import (
 from api.leitura_da_decupagem import LeituraDaDecupagem, ler_modelo
 from api.marcas import CatalogoDeMarcas
 from api.modelo_do_job import (
+    CAMPOS_DA_LISTA,
     CodigoDeFalha,
     CopiaNoBigQuery,
     CursorInvalido,
@@ -422,8 +423,13 @@ class RepositorioEmMemoria:
     def obter_fila_gpu(self) -> dict[str, Any]:
         return {}
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        return [self._jobs[i] for i in dict.fromkeys(job_ids) if i in self._jobs]
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
+        achados = [self._jobs[i] for i in dict.fromkeys(job_ids) if i in self._jobs]
+        if so_a_lista:
+            return [Job(**j.model_dump(include=set(CAMPOS_DA_LISTA))) for j in achados]
+        return achados
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
@@ -490,7 +496,9 @@ class RepositorioIndisponivel:
     def obter_fila_gpu(self) -> dict[str, Any]:
         raise ServicoIndisponivel
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
         raise ServicoIndisponivel
 
     def transitar(
@@ -909,7 +917,7 @@ def criar_rotas(
         if len(pedidos) > LIMITE_DO_ANDAMENTO:
             raise HTTPException(422, f"No máximo {LIMITE_DO_ANDAMENTO} ids")
         posicao = {id_: n for n, id_ in enumerate(dict.fromkeys(pedidos))}
-        jobs = repositorio.obter_varios(posicao)
+        jobs = repositorio.obter_varios(posicao, so_a_lista=True)
         pode_ver_lixeira = isinstance(chamador, Usuario) and tem_permissao(
             request, chamador, "lixeira.gerir"
         )
@@ -999,7 +1007,7 @@ def criar_rotas(
         jobs = {
             j.id: j
             for j in repositorio.obter_varios(
-                dict.fromkeys(p.job for p in pedido.quadros)
+                dict.fromkeys(p.job for p in pedido.quadros), so_a_lista=True
             )
         }
         expira_em = relogio() + VALIDADE_INFORMADA_DA_IMAGEM
