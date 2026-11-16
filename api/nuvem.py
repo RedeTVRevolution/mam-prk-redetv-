@@ -1668,11 +1668,9 @@ class DecupagensStorage:
 
     def copia_limpa_existe(self, job_id: str) -> bool:
         """Só consulta o objeto, sem baixar o conteúdo."""
-        return (
-            self._cliente.bucket(self._aceitos)
-            .blob(objeto_da_copia_limpa(job_id))
-            .exists()
-        )
+        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
+        existe: bool = blob.exists()
+        return existe
 
 
 class TranscricoesStorage:
