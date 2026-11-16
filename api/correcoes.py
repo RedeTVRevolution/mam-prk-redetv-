@@ -1407,9 +1407,8 @@ class Tipo:
     identidades: Callable[[Correcao], set[str]] = _so_a_ancora
     # Pessoa: casa também pelo nome novo; ou longe do que ela já tem.
     casa_pelo_nome_novo: bool = False
-    # O nome novo é procurado no catálogo e, se casa com uma só pessoa, grava o id.
-    acha_no_catalogo: bool = False
-    # O catálogo cujo id a correção pode trazer (`NovaCorrecao.catalogo_id`).
+    # O catálogo cujo id a correção pode trazer (`NovaCorrecao.catalogo_id`). Em "pessoas",
+    # o nome novo também é procurado lá e, se casa com uma só pessoa, grava o id.
     catalogo_de: Literal["pessoas", "marcas"] | None = None
     casa_longe: bool = False
     acrescenta: Acrescenta | None = None
@@ -2226,7 +2225,6 @@ TIPOS: dict[str, Tipo] = {
         atender_na_pessoa=_manter_o_nome_do_modelo,
         ja_traz=_traz_o_nome,
         casa_pelo_nome_novo=True,
-        acha_no_catalogo=True,
         catalogo_de="pessoas",
     ),
     "pauta.titulo": Tipo(

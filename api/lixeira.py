@@ -133,7 +133,9 @@ def _quem_enviou(job: Job) -> str:
     return job.sistema or job.criado_por_email or job.criado_por
 
 
-class JobRestaurado(BaseModel):
+class IdENome(BaseModel):
+    """Resposta de restaurar (vídeo, pessoa, marca) e de purgar um vídeo."""
+
     id: str
     nome: str
 
@@ -355,7 +357,7 @@ def criar_rotas_da_lixeira(
             Usuario,
             Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
         ],
-    ) -> JobRestaurado:
+    ) -> IdENome:
         job = achar(id_do_video)
         envio = job.lixeira
         if envio is None:
@@ -379,6 +381,6 @@ def criar_rotas_da_lixeira(
             repositorio.trocar(job.id, lambda _: {"lixeira": envio})
             desmarcar_no_indice(job.id, True)
             raise
-        return JobRestaurado(id=job.id, nome=job.nome)
+        return IdENome(id=job.id, nome=job.nome)
 
     return rotas

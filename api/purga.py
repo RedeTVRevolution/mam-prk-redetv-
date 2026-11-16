@@ -15,7 +15,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.cloud.storage import Client as ClienteStorage
-from pydantic import BaseModel
 
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
@@ -31,6 +30,7 @@ from api.lixeira import (
     PRAZO_DA_PURGA,
     SISTEMA_DA_PURGA,
     ArquivosDoJob,
+    IdENome,
     ImpactoDoVideo,
     PedidoDePurga,
     calcular_impacto,
@@ -133,11 +133,6 @@ def purgar_vencidas(
     return purgados
 
 
-class VideoPurgado(BaseModel):
-    id: str
-    nome: str
-
-
 def criar_rotas_da_purga(
     purga: Purga,
     repositorio: RepositorioDeJobs,
@@ -155,7 +150,7 @@ def criar_rotas_da_purga(
             Usuario,
             Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
         ],
-    ) -> VideoPurgado:
+    ) -> IdENome:
         login_recente_ou_403(pessoa, relogio(), login_recente)
         job = repositorio.obter(id_do_video)
         if job is None:
@@ -168,7 +163,7 @@ def criar_rotas_da_purga(
             purga.purgar(job.id, pessoa)
         except NaoEstaNaLixeira:
             raise HTTPException(409, "O vídeo saiu da lixeira") from None
-        return VideoPurgado(id=job.id, nome=job.nome)
+        return IdENome(id=job.id, nome=job.nome)
 
     return rotas
 
