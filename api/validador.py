@@ -1,7 +1,8 @@
 """Validador da quarentena: camadas 4 a 7 de Entradas hostis.
 
 Devolve a cópia limpa, o proxy de reprodução e o SHA-256, ou levanta `Recusa`
-com um código. A saída das ferramentas nunca sai daqui.
+com um código. A saída das ferramentas (stderr resumido) vai só para o log: a `Recusa`
+a leva em `stderr`, e o Job de validação a registra; ela nunca chega ao Job nem ao cliente.
 """
 
 import hashlib
@@ -12,7 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from api.cortes import LIMIAR_PADRAO, DeteccaoFalhou, detectar_cortes
+from api.cortes import (
+    LIMIAR_PADRAO,
+    TEMPO_LIMITE_S,
+    CausaDaFalha,
+    DeteccaoFalhou,
+    detectar_cortes,
+    resumir_stderr,
+)
 from api.modelo_do_job import CodigoDeFalha
 
 MARCAS_PERMITIDAS = {b"isom", b"mp41", b"mp42", b"avc1"}
@@ -21,7 +29,6 @@ LADO_CURTO_MAXIMO = 1080  # 1080p, também em retrato
 LADO_LONGO_MAXIMO = 1920
 DURACAO_MINIMA_S = 1.0
 DURACAO_MAXIMA_S = 4 * 3600.0
-TEMPO_LIMITE_S = 7200
 NOME_DO_AUDIO = "audio.wav"
 DEMUXERS_ACEITOS = "mov,mp4,m4a,3gp,3g2,mj2"
 TAXA_DO_AUDIO_HZ = 16_000
@@ -30,9 +37,24 @@ FORMATO_DO_TIMECODE = re.compile(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d[:;]\d{2}")
 
 
 class Recusa(Exception):
-    def __init__(self, codigo: CodigoDeFalha) -> None:
+    """A mensagem é só o código; `causa` e `stderr` são para o log."""
+
+    def __init__(
+        self,
+        codigo: CodigoDeFalha,
+        causa: CausaDaFalha | None = None,
+        stderr: str = "",
+    ) -> None:
         super().__init__(codigo)
         self.codigo = codigo
+        self.causa = causa
+        self.stderr = stderr
+
+
+def _saiu_com_erro(r: subprocess.CompletedProcess[bytes]) -> Recusa:
+    return Recusa(
+        "arquivo_corrompido", "ffmpeg_saiu_com_erro", resumir_stderr(r.stderr)
+    )
 
 
 @dataclass(frozen=True)
@@ -56,8 +78,11 @@ def _executar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
             stdin=subprocess.DEVNULL,
             timeout=TEMPO_LIMITE_S,
         )
-    except subprocess.TimeoutExpired:
-        raise Recusa("arquivo_corrompido") from None
+    except subprocess.TimeoutExpired as e:
+        # Estourar o tempo não é defeito do arquivo: pede novo envio, sem exportar.
+        raise Recusa(
+            "processamento_demorou_demais", "tempo_esgotado", resumir_stderr(e.stderr)
+        ) from e
 
 
 def _sha256(arquivo: Path) -> str:
@@ -91,7 +116,7 @@ def _sondar(entrada: Path) -> dict[str, Any]:
         ]
     )  # fmt: skip
     if resultado.returncode != 0:
-        raise Recusa("arquivo_corrompido")
+        raise _saiu_com_erro(resultado)
     try:
         sondagem: dict[str, Any] = json.loads(resultado.stdout)
     except ValueError:
@@ -199,18 +224,29 @@ def validar(
             "-movflags", "+faststart", str(proxy),
         ]
     )  # fmt: skip
-    if regravar.returncode != 0 or gerar_proxy.returncode != 0:
-        raise _corrompido(copia, proxy)
+    for feito in (regravar, gerar_proxy):
+        if feito.returncode != 0:
+            _apagar(copia, proxy)
+            raise _saiu_com_erro(feito)
     audio = None
     # A cópia limpa leva as mesmas faixas da entrada: a sondagem dela basta.
     if any(f.get("codec_type") == "audio" for f in sondagem.get("streams", [])):
-        audio = _separar_audio(copia, saida)
-        if audio is None:
-            raise _corrompido(copia, proxy)
+        try:
+            audio = _separar_audio(copia, saida)
+        except Recusa:
+            _apagar(copia, proxy)
+            raise
     try:
         cortes = detectar_cortes(copia, limiar_de_cortes)
-    except DeteccaoFalhou:
-        raise _corrompido(copia, proxy, audio) from None
+    except DeteccaoFalhou as e:
+        _apagar(copia, proxy, audio)
+        raise Recusa(
+            "processamento_demorou_demais"
+            if e.causa == "tempo_esgotado"
+            else "arquivo_corrompido",
+            e.causa,
+            e.stderr,
+        ) from e
     return Aceito(
         copia_limpa=copia,
         proxy=proxy,
@@ -223,16 +259,15 @@ def validar(
     )
 
 
-def _corrompido(*gerados: Path | None) -> Recusa:
-    """Apaga o que a validação já gravou e devolve a recusa."""
+def _apagar(*gerados: Path | None) -> None:
+    """Apaga o que a validação já gravou."""
     for arquivo in gerados:
         if arquivo is not None:
             arquivo.unlink(missing_ok=True)
-    return Recusa("arquivo_corrompido")
 
 
-def _separar_audio(copia: Path, saida: Path) -> Path | None:
-    """O áudio da cópia limpa em mono e 16 kHz, ao lado dela; `None` se o ffmpeg falha."""
+def _separar_audio(copia: Path, saida: Path) -> Path:
+    """O áudio da cópia limpa em mono e 16 kHz, ao lado dela; `Recusa` se o ffmpeg falha."""
     audio = saida / NOME_DO_AUDIO
     extrair = _executar(
         [
@@ -244,5 +279,5 @@ def _separar_audio(copia: Path, saida: Path) -> Path | None:
     )  # fmt: skip
     if extrair.returncode != 0:
         audio.unlink(missing_ok=True)
-        return None
+        raise _saiu_com_erro(extrair)
     return audio

@@ -2,13 +2,30 @@
 
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 LIMIAR_PADRAO = 0.3
+# Também o tempo de cada chamada ao ffmpeg/ffprobe do validador (`api/validador.py`).
 TEMPO_LIMITE_S = 7200
+TAMANHO_DO_STDERR = 300
+
+CausaDaFalha = Literal["tempo_esgotado", "ffmpeg_saiu_com_erro"]
+
+
+def resumir_stderr(bruto: bytes | str | None) -> str:
+    """O fim do stderr da ferramenta (onde ela diz o erro), curto: só para o log."""
+    if isinstance(bruto, bytes):
+        bruto = bruto.decode(errors="replace")
+    return (bruto or "").strip()[-TAMANHO_DO_STDERR:]
 
 
 class DeteccaoFalhou(Exception):
-    pass
+    """A causa e o stderr resumido (que só vai para o log) vão na mensagem."""
+
+    def __init__(self, causa: CausaDaFalha, stderr: str = "") -> None:
+        super().__init__(f"{causa}: {stderr}" if stderr else causa)
+        self.causa = causa
+        self.stderr = stderr
 
 
 def detectar_cortes(video: Path, limiar: float = LIMIAR_PADRAO) -> list[int]:
@@ -27,10 +44,10 @@ def detectar_cortes(video: Path, limiar: float = LIMIAR_PADRAO) -> list[int]:
             timeout=TEMPO_LIMITE_S,
             text=True,
         )  # fmt: skip
-    except subprocess.TimeoutExpired:
-        raise DeteccaoFalhou from None
+    except subprocess.TimeoutExpired as e:
+        raise DeteccaoFalhou("tempo_esgotado", resumir_stderr(e.stderr)) from e
     if r.returncode != 0:
-        raise DeteccaoFalhou
+        raise DeteccaoFalhou("ffmpeg_saiu_com_erro", resumir_stderr(r.stderr))
     cortes: set[int] = set()
     for linha in r.stdout.splitlines():
         # "frame:0    pts:10240   pts_time:1"
