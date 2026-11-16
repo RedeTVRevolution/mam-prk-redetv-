@@ -225,7 +225,7 @@ def criar_rotas_dos_usuarios(
                 alvo_tipo="usuario",
                 alvo_id=conta.uid,
                 alvo_nome=conta.email,
-                detalhes=detalhes or {},
+                detalhes=detalhes,
             )
         )
 

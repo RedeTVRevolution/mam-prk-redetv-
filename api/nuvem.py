@@ -1849,14 +1849,14 @@ class ArquivosNoStorage:
     def apagar(self, job_id: str) -> None:
         # A regra de 7 dias do bucket pode apagar a cópia limpa ou o áudio entre a
         # listagem e o `delete()`: o objeto que sumiu já está apagado (#502).
-        for bucket in (self._aceitos, self._decupagens):
-            apagar_objetos(
-                self._cliente, self._cliente.list_blobs(bucket, prefix=f"{job_id}/")
-            )
+        apagar_objetos(
+            self._cliente, self._cliente.list_blobs(self._aceitos, prefix=f"{job_id}/")
+        )
         bucket = self._cliente.bucket(self._decupagens)
         apagar_objetos(
             self._cliente,
             [
+                *self._cliente.list_blobs(self._decupagens, prefix=f"{job_id}/"),
                 bucket.blob(objeto_da_decupagem(job_id)),
                 bucket.blob(f"{job_id}.comparacao.json"),
             ],
