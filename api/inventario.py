@@ -6,7 +6,7 @@ texto em português.
 
 import copy
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from functools import partial
 from typing import Annotated, Any
 
@@ -68,16 +68,6 @@ PARALELISMO_DO_INVENTARIO = 8
 
 
 Inventarios = dict[int, list[ObjetoDoInventario]]
-
-
-class _ComFaltas(Inventarios):
-    """O que os dois motores devolvem: `nao_inventariados` são os planos que o modelo pulou
-    mesmo depois de pedidos de novo (#692): têm lista vazia, mas não são "sem objetos".
-    Quem lê só vê um `Inventarios`; `aplicar_inventario` olha o atributo, se houver."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.nao_inventariados: set[int] = set()
 
 
 class _Estrito(BaseModel):
@@ -192,13 +182,13 @@ def _pedir_com_uma_rodada_extra[R: BaseModel](
     """Os planos da resposta do lote; o que o modelo omitiu é pedido de novo, só ele, uma
     vez (#692). Devolve os planos respondidos e os que seguem ausentes."""
 
-    def respondidos(r: R) -> list[Any]:
-        return [p for p in r.planos if p.plano in lote]  # type: ignore[attr-defined]
+    def respondidos(r: R, pedidos: list[int]) -> list[Any]:
+        return [p for p in r.planos if p.plano in pedidos]  # type: ignore[attr-defined]
 
-    planos = respondidos(chamar(lote))
+    planos = respondidos(chamar(lote), lote)
     faltam = [i for i in lote if i not in {p.plano for p in planos}]
     if faltam:
-        planos += respondidos(chamar(faltam))
+        planos += respondidos(chamar(faltam), faltam)
         faltam = [i for i in lote if i not in {p.plano for p in planos}]
     return planos, faltam
 
@@ -331,14 +321,18 @@ def converter_do_florence(
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    nao_inventariados: set[int] | None = None,
 ) -> Inventarios:
     """O resultado bruto do Florence-2 em inventário em português: uma chamada só de
     texto (sem imagem) por lote de planos. As caixas vêm das detecções que o modelo cita
-    pelo id. Qualquer lote que esgote as tentativas levanta `AnaliseFalhou`."""
+    pelo id. Qualquer lote que esgote as tentativas levanta `AnaliseFalhou`. Os planos que
+    o modelo segue omitindo depois da rodada extra entram em `nao_inventariados` (#692)."""
     por_plano: dict[int, list[Any]] = {}
     for q in bruto.quadros:
         por_plano.setdefault(q.plano, []).append(q)
-    inventarios = _ComFaltas({i: [] for i in range(len(decupagem.planos))})
+    inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
+    if nao_inventariados is None:
+        nao_inventariados = set()
     esquema = esquema_obrigatorio(RespostaConvertida)
     lotes = _lotes(
         [i for i in range(len(decupagem.planos)) if i in por_plano], planos_por_lote
@@ -364,7 +358,7 @@ def converter_do_florence(
         lotes, lambda lote: _pedir_com_uma_rodada_extra(lote, converter), paralelismo
     )
     for planos, faltam in respostas:
-        inventarios.nao_inventariados.update(faltam)
+        nao_inventariados.update(faltam)
         for do_plano in planos:
             caixas_por_id: dict[str, CaixaDoQuadro] = {}
             for k, q in enumerate(por_plano[do_plano.plano]):
@@ -403,10 +397,14 @@ def olhar_com_gemini(
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    nao_inventariados: set[int] | None = None,
 ) -> Inventarios:
     """Motor `gemini`: o modelo olha os quadros-chave (resolução cheia, sem redução) e
-    devolve o mesmo inventário, com as caixas. `quadro_de` lê o JPEG pelo caminho."""
-    inventarios = _ComFaltas({i: [] for i in range(len(decupagem.planos))})
+    devolve o mesmo inventário, com as caixas. `quadro_de` lê o JPEG pelo caminho.
+    `nao_inventariados` recebe os planos que o modelo segue omitindo (#692)."""
+    inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
+    if nao_inventariados is None:
+        nao_inventariados = set()
     esquema = esquema_obrigatorio(RespostaVista)
     com_quadros = [i for i, p in enumerate(decupagem.planos) if p.quadros]
 
@@ -442,7 +440,7 @@ def olhar_com_gemini(
         lotes, lambda lote: _pedir_com_uma_rodada_extra(lote, olhar), paralelismo
     )
     for planos, faltam in respostas:
-        inventarios.nao_inventariados.update(faltam)
+        nao_inventariados.update(faltam)
         for do_plano in planos:
             quadros = decupagem.planos[do_plano.plano].quadros
             itens = [
@@ -464,14 +462,20 @@ def olhar_com_gemini(
 
 
 def aplicar_inventario(
-    decupagem: Decupagem, inventarios: Inventarios, *, motor: str, modelo: str
+    decupagem: Decupagem,
+    inventarios: Inventarios,
+    *,
+    motor: str,
+    modelo: str,
+    nao_inventariados: Collection[int] = (),
 ) -> Decupagem:
-    """A Decupagem com o inventário de cada plano no lugar do anterior."""
+    """A Decupagem com o inventário de cada plano no lugar do anterior; os planos em
+    `nao_inventariados` (o modelo os omitiu, #692) ficam marcados."""
     planos = [
         p.model_copy(
             update={
                 "inventario": inventarios.get(i, []),
-                "inventariado": i not in getattr(inventarios, "nao_inventariados", ()),
+                "inventariado": i not in nao_inventariados,
             }
         )
         for i, p in enumerate(decupagem.planos)

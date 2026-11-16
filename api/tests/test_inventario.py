@@ -561,13 +561,21 @@ def test_florence_plano_ainda_omitido_fica_marcado_com_uma_rodada_extra() -> Non
     transporte = TransporteFalso(resposta(_vaso(0)), resposta(), resposta(_vaso(1)))
     d = decupagem(["q/0.jpg"], ["q/1.jpg"])
 
+    faltas: set[int] = set()
     inventarios = converter_do_florence(
-        d, DOIS_PLANOS_FLORENCE, transporte=transporte, modelo="m", job_id="j1"
+        d,
+        DOIS_PLANOS_FLORENCE,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+        nao_inventariados=faltas,
     )
 
     assert len(transporte.chamadas) == 2  # a terceira resposta nunca é pedida
     assert inventarios[1] == []
-    nova = aplicar_inventario(d, inventarios, motor="florence", modelo="m")
+    nova = aplicar_inventario(
+        d, inventarios, motor="florence", modelo="m", nao_inventariados=faltas
+    )
     assert [p.inventariado for p in nova.planos] == [True, False]
 
 
@@ -599,12 +607,20 @@ def test_gemini_plano_ainda_omitido_fica_marcado() -> None:
         resposta({"plano": 0, "objetos": [visto("vaso", 0)]}), resposta()
     )
 
+    faltas: set[int] = set()
     inventarios = olhar_com_gemini(
-        d, transporte=transporte, modelo="m", job_id="j1", quadro_de=lambda c: b"x"
+        d,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+        quadro_de=lambda c: b"x",
+        nao_inventariados=faltas,
     )
 
     assert len(transporte.chamadas) == 2
-    nova = aplicar_inventario(d, inventarios, motor="gemini", modelo="m")
+    nova = aplicar_inventario(
+        d, inventarios, motor="gemini", modelo="m", nao_inventariados=faltas
+    )
     assert [p.inventariado for p in nova.planos] == [True, False]
 
 
@@ -614,12 +630,20 @@ def test_plano_sem_objetos_na_resposta_nao_e_omitido() -> None:
     )
     d = decupagem(["q/0.jpg"], ["q/1.jpg"])
 
+    faltas: set[int] = set()
     inventarios = converter_do_florence(
-        d, DOIS_PLANOS_FLORENCE, transporte=transporte, modelo="m", job_id="j1"
+        d,
+        DOIS_PLANOS_FLORENCE,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+        nao_inventariados=faltas,
     )
 
     assert len(transporte.chamadas) == 1
-    nova = aplicar_inventario(d, inventarios, motor="florence", modelo="m")
+    nova = aplicar_inventario(
+        d, inventarios, motor="florence", modelo="m", nao_inventariados=faltas
+    )
     assert all(p.inventariado for p in nova.planos)
 
 
@@ -630,3 +654,36 @@ def test_o_campo_do_servidor_fica_fora_do_esquema_do_modelo() -> None:
     assert Plano.model_validate(
         plano(0, []).model_dump(exclude={"inventariado"})
     ).inventariado
+
+
+def test_florence_rodada_extra_nao_apaga_o_plano_ja_respondido() -> None:
+    transporte = TransporteFalso(
+        resposta(_vaso(0)), resposta({"plano": 0, "objetos": []}, _vaso(1))
+    )
+
+    inventarios = converter_do_florence(
+        decupagem(["q/0.jpg"], ["q/1.jpg"]),
+        DOIS_PLANOS_FLORENCE,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+    )
+
+    assert [len(inventarios[i]) for i in (0, 1)] == [1, 1]
+
+
+def test_gemini_rodada_extra_nao_apaga_o_plano_ja_respondido() -> None:
+    transporte = TransporteFalso(
+        resposta({"plano": 0, "objetos": [visto("vaso", 0)]}),
+        resposta({"plano": 0, "objetos": []}, {"plano": 1, "objetos": [visto("x", 0)]}),
+    )
+
+    inventarios = olhar_com_gemini(
+        decupagem(["q/a.jpg"], ["q/b.jpg"]),
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+        quadro_de=lambda c: b"x",
+    )
+
+    assert [len(inventarios[i]) for i in (0, 1)] == [1, 1]
