@@ -132,31 +132,35 @@ def com_os_planos_recorrentes(
     """
     planos = sorted(decupagem.planos, key=lambda p: p.inicio_ms)
 
-    lidos: dict[str, Sinal | None] = {}
+    def ler(caminho: str) -> Sinal | None:
+        try:
+            return sinal_do_quadro(Image.open(BytesIO(ler_quadro(caminho))))
+        except Exception:  # noqa: BLE001 - quadro que falta ou não abre só tira o plano do grupo
+            log.warning("quadro %s não abriu; o plano fica sem grupo", caminho)
+            return None
+
+    # Cada quadro é lido uma vez (o do meio de um plano é, no plano de um quadro só, o das
+    # duas bordas), todos em paralelo; o cálculo abaixo só consulta o que já foi lido.
+    # `ler` não levanta (quadro que não abre vira None), então nada cancela as outras leituras.
+    caminhos = sorted(
+        {
+            c
+            for p in planos
+            for c in (
+                _quadro_chave(p),
+                *quadros_do_plano(p)[:1],
+                *quadros_do_plano(p)[-1:],
+            )
+            if c
+        }
+    )
+    lidos = dict(
+        zip(caminhos, em_paralelo(caminhos, ler, VAGAS_DE_LEITURA), strict=True)
+    )
 
     def sinal(caminho: str | None) -> Sinal | None:
-        """Cada quadro é lido uma vez: o do meio de um plano é, no plano de um quadro só, o
-        das duas bordas."""
-        if caminho is None:
-            return None
-        if caminho not in lidos:
-            try:
-                lidos[caminho] = sinal_do_quadro(
-                    Image.open(BytesIO(ler_quadro(caminho)))
-                )
-            except Exception:  # noqa: BLE001 - quadro que falta ou não abre só tira o plano do grupo
-                log.warning("quadro %s não abriu; o plano fica sem grupo", caminho)
-                lidos[caminho] = None
-        return lidos[caminho]
+        return None if caminho is None else lidos.get(caminho)
 
-    # Lê todos os quadros de uma vez, em paralelo; o cálculo abaixo usa só o que já foi lido.
-    # `sinal` não levanta (quadro que não abre vira None), então nada cancela as outras leituras.
-    caminhos = {
-        c
-        for p in planos
-        for c in (_quadro_chave(p), *quadros_do_plano(p)[:1], *quadros_do_plano(p)[-1:])
-    }
-    em_paralelo(sorted(c for c in caminhos if c), sinal, VAGAS_DE_LEITURA)
     sinais = [sinal(_quadro_chave(p)) for p in planos]
     reais: list[bool] = []
     for a, b in pairwise(planos):
