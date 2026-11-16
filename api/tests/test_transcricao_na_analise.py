@@ -30,7 +30,7 @@ def transcricao(*itens: tuple[str, float, float]) -> Transcricao:
 
 def modelo_responde(**campos: Any) -> str:
     base: dict[str, Any] = {
-        "programa": {"resumo": "", "blocos": []},
+        "programa": {"blocos": []},
         "pautas": [],
         "pessoas": [],
         "planos": [],

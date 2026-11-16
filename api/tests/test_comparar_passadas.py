@@ -90,7 +90,7 @@ def _decupagem(**partes: list[dict[str, Any]]) -> Decupagem:
         {
             "versao_esquema": "1.4",
             "video": {"sha256": SHA, "duracao_ms": 3_600_000},
-            "programa": {"resumo": "r", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": partes.get("pautas", []),
             "pessoas": partes.get("pessoas", []),
             "planos": partes.get("planos", []),

@@ -1211,7 +1211,6 @@
                     "duracao_ms": 598400
                   },
                   "programa": {
-                    "resumo": "Edição de terça com bastidores e notícias de famosos.",
                     "blocos": [
                       {
                         "inicio_ms": 0,
@@ -1393,7 +1392,6 @@
                     "duracao_ms": 598400
                   },
                   "programa": {
-                    "resumo": "Edição de terça com bastidores e notícias de famosos.",
                     "blocos": [
                       {
                         "inicio_ms": 0,
@@ -2107,7 +2105,6 @@
                       "duracao_ms": 598400
                     },
                     "programa": {
-                      "resumo": "Edição de terça com bastidores e notícias de famosos.",
                       "blocos": [
                         {
                           "inicio_ms": 0,
@@ -6851,11 +6848,6 @@
       },
       "Programa": {
         "properties": {
-          "resumo": {
-            "type": "string",
-            "maxLength": 2000,
-            "title": "Resumo"
-          },
           "blocos": {
             "items": {
               "$ref": "#/components/schemas/Bloco"
@@ -6867,7 +6859,6 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "resumo",
           "blocos"
         ],
         "title": "Programa"

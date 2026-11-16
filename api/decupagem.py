@@ -67,8 +67,15 @@ class Bloco(Intervalo):
 
 
 class Programa(_Estrito):
-    resumo: Texto
     blocos: list[Bloco]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sem_resumo_antigo(cls, dados: Any) -> Any:
+        """As versões anteriores gravaram `resumo`, que ninguém lê (#680): sai ao ler."""
+        if isinstance(dados, dict):
+            return {k: v for k, v in dados.items() if k != "resumo"}
+        return dados
 
 
 class Pauta(Intervalo):
