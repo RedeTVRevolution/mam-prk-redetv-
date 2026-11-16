@@ -71,6 +71,11 @@ def registro_do_video_concluido(
     )
 
 
+LIMITE_DO_MOTIVO = (
+    300  # caracteres do detalhe de erro que vai ao log e à `AnaliseFalhou`
+)
+
+
 def registro_da_resposta_fora_do_esquema(modelo: str, motivo: str) -> str:
     """Uma linha por resposta recusada, de qualquer chamada ao modelo: a métrica conta as linhas."""
     return json.dumps(
@@ -78,7 +83,7 @@ def registro_da_resposta_fora_do_esquema(modelo: str, motivo: str) -> str:
             "severity": "WARNING",
             "evento": "resposta_fora_do_esquema",
             "modelo": modelo,
-            "motivo": motivo[:300],
+            "motivo": motivo[:LIMITE_DO_MOTIVO],
         },
         ensure_ascii=False,
     )

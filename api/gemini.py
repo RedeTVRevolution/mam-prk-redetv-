@@ -27,6 +27,7 @@ from api.decupagem import (
 from api.espera import espera_com_jitter, sorteio_uniforme
 from api.programas import Perfis
 from api.sinais import (
+    LIMITE_DO_MOTIVO,
     Registrar,
     imprimir,
     registro_da_falha_de_rede,
@@ -218,7 +219,9 @@ def _erro_do_servico(resposta: Any) -> tuple[str, str]:
         return "", ""
     if not isinstance(erro, dict):
         return "", ""
-    return str(erro.get("status") or "")[:50], str(erro.get("message") or "")[:300]
+    return str(erro.get("status") or "")[:50], str(erro.get("message") or "")[
+        :LIMITE_DO_MOTIVO
+    ]
 
 
 class AnaliseFalhou(Exception):
@@ -329,12 +332,12 @@ class TransporteVertex:
             self._registrar(
                 registro_da_falha_de_rede(
                     erro,
-                    str(e)[:300],
+                    str(e)[:LIMITE_DO_MOTIVO],
                     chamada.modelo,
                     self._etapa or chamada.rotulos.get("etapa"),
                 )
             )
-            raise ErroHttp(503, erro, str(e)[:300]) from e
+            raise ErroHttp(503, erro, str(e)[:LIMITE_DO_MOTIVO]) from e
         if resposta.status_code != 200:
             codigo, mensagem = _erro_do_servico(resposta)
             self._registrar(
@@ -456,9 +459,9 @@ def gerar_validado[T](
         try:
             texto = transporte.gerar(chamada)
         except ErroHttp as e:
-            ultimo_erro = str(e)
+            ultimo_erro = str(e)[:LIMITE_DO_MOTIVO]
             if not repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
-                raise AnaliseFalhou(str(e)) from e
+                raise AnaliseFalhou(str(e)[:LIMITE_DO_MOTIVO]) from e
             dormir(
                 espera_com_jitter(falhas_rede, BACKOFF_BASE_S, BACKOFF_TETO_S, sortear)
             )
@@ -467,7 +470,7 @@ def gerar_validado[T](
         try:
             return validar(texto)
         except ValueError as e:
-            ultimo_erro = f"resposta fora do esquema: {e}"
+            ultimo_erro = f"resposta fora do esquema: {str(e)[:LIMITE_DO_MOTIVO]}"
             registrar(registro_da_resposta_fora_do_esquema(chamada.modelo, str(e)))
             if ao_fora_do_esquema:
                 ao_fora_do_esquema()

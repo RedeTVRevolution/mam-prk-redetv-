@@ -893,3 +893,10 @@ def test_timeout_de_rede_deixa_linha_de_log_com_evento_proprio_antes_do_503() ->
         registro["erro"] == "Timeout" and registro["modelo"] == "gemini-3.5-flash-lite"
     )
     assert erro.value.status == 503 and "Timeout" in str(erro.value)
+
+
+def test_esquema_esgotado_corta_o_detalhe_da_mensagem() -> None:
+    muitos_erros = json.dumps({"transcricao": [{"x": i} for i in range(1000)]})
+    with pytest.raises(AnaliseFalhou) as e:
+        _rodar(TransporteFalso(muitos_erros, muitos_erros, muitos_erros))
+    assert len(str(e.value)) < 1000
