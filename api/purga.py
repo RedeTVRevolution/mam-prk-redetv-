@@ -22,7 +22,7 @@ from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
-from api.bancos import cliente_da_colecao, cliente_do_firestore
+from api.bancos import auditoria_do_firestore, cliente_do_firestore
 from api.correcoes import RepositorioDeCorrecoes
 from api.dados_da_purga import dados_do_ambiente
 from api.indice_da_busca import IndiceDaBusca
@@ -40,12 +40,10 @@ from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.lixeira_na_leitura import PurgasDeMarcaFirestore, VersaoDaLixeiraFirestore
 from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs, agora_utc
 from api.nuvem import (
-    COLECAO_DA_AUDITORIA,
     ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
-    RepositorioDeAuditoriaFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
@@ -205,7 +203,6 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         return 2
     log_estruturado.configurar(logging.INFO)
     cliente = cliente_do_firestore(projeto, ambiente)
-    banco_de_seguranca = cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
     busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
     repositorio = RepositorioFirestore(cliente)
     purga = Purga(
@@ -222,7 +219,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
             if busca
             else None
         ),
-        RepositorioDeAuditoriaFirestore(banco_de_seguranca),
+        auditoria_do_firestore(projeto, ambiente),
         agora_utc,
         apagar_dados=dados_do_ambiente(cliente, ambiente).apagar,
     )
@@ -235,7 +232,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         lambda: purgar_catalogo_vencido(
             CatalogoFirestore(cliente),
             CatalogoDeMarcasFirestore(cliente),
-            RepositorioDeAuditoriaFirestore(banco_de_seguranca),
+            auditoria_do_firestore(projeto, ambiente),
             agora_utc(),
             PurgasDeMarcaFirestore(cliente),
             VersaoDaLixeiraFirestore(cliente).avancar,

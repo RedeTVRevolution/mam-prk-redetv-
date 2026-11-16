@@ -274,3 +274,9 @@ def test_request_state_do_chamador_so_se_le_pelas_funcoes_de_acesso() -> None:
             if leu_por_atributo or leu_por_getattr:
                 lidos.append(f"{arquivo.name}:{getattr(no, 'lineno', 0)}")
     assert [x for x in lidos if not x.startswith("auth.py:")] == []
+
+
+def test_os_adaptadores_vazios_e_a_sonda_nao_importam_o_app() -> None:
+    pasta = Path(__file__).resolve().parent.parent
+    for modulo in ("sem_adaptadores", "sondar_busca"):
+        assert "main" not in _importados(pasta / f"{modulo}.py"), modulo

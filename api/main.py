@@ -36,9 +36,7 @@ from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
     ChamadorAutenticado,
-    ChaveInvalida,
     Sistema,
-    TokenInvalido,
     Usuario,
     VerificadorDeChave,
     VerificadorDeToken,
@@ -46,7 +44,13 @@ from api.auth import (
     chamador_do_pedido,
     exigir_autenticacao,
 )
-from api.bancos import cliente_da_colecao, cliente_do_firestore
+from api.bancos import (
+    auditoria_do_firestore,
+    chaves_do_firestore,
+    cliente_de_seguranca,
+    cliente_do_firestore,
+    papeis_do_firestore,
+)
 from api.busca import (
     Busca,
     ListasDaBusca,
@@ -88,7 +92,7 @@ from api.eventos_de_uso import (
 from api.eventos_do_job import eventos_do_ambiente
 from api.fotos_de_referencia import FotosDeReferencia, FotosEmMemoria
 from api.fusao_de_pessoas import criar_rotas_da_fusao
-from api.gemini import Chamada, ErroHttp, Transporte
+from api.gemini import Transporte
 from api.idempotencia import RepositorioDeIdempotencia
 from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
 from api.jobs import (
@@ -122,9 +126,6 @@ from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.modelo_do_job import RepositorioDeJobs, agora_utc
 from api.nuvem import (
-    COLECAO_DA_AUDITORIA,
-    COLECAO_DE_CHAVES,
-    COLECAO_DE_PAPEIS,
     ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
@@ -137,11 +138,8 @@ from api.nuvem import (
     ProgramasFirestore,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
-    RepositorioDeAuditoriaFirestore,
-    RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDeIdempotenciaFirestore,
-    RepositorioDePapeisFirestore,
     RepositorioDeRevisaoFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
@@ -212,6 +210,7 @@ from api.rotas_das_chaves import (
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
 from api.rotas_dos_programas import criar_rotas_dos_programas
+from api.sem_adaptadores import SemChaves, SemModelo, SemVerificador
 from api.taxa_de_correcao import criar_rotas_da_qualidade
 from api.taxa_do_painel import LeitorDaTaxa, TaxaEmMemoria, taxa_do_ambiente
 from api.tempo_de_tela import ConsultaComCache as TempoDeTelaComCache
@@ -237,27 +236,6 @@ from api.usuarios import (
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
 CACHE_DOS_ASSETS = "public, max-age=31536000, immutable"
-
-
-class _SemVerificador:
-    """Sem projeto do Identity Platform (testes e máquina local): nega tudo."""
-
-    def verificar(self, token: str) -> Usuario:
-        raise TokenInvalido
-
-
-class _SemChaves:
-    """Sem adaptador de chaves de API: recusa toda chave."""
-
-    def verificar(self, chave: str) -> Sistema:
-        raise ChaveInvalida
-
-
-class _SemModelo:
-    """Sem modelo ligado: a busca por imagem fica indisponível."""
-
-    def gerar(self, chamada: Chamada) -> str:
-        raise ErroHttp(503)
 
 
 class _FrontComEnderecos(StaticFiles):
@@ -423,11 +401,11 @@ def criar_app(
             "Internal Server Error", status_code=500, headers=CABECALHOS_DE_SEGURANCA
         )
 
-    app.state.verificador = verificador or _SemVerificador()
+    app.state.verificador = verificador or SemVerificador()
     # Com repositório e chave MAC, a API confere as chaves emitidas por ela mesma.
     if chaves is None and repositorio_de_chaves and mac:
         chaves = VerificadorDeChaveDeApi(repositorio_de_chaves, mac)
-    app.state.chaves = chaves or _SemChaves()
+    app.state.chaves = chaves or SemChaves()
     app.state.papeis = papeis or RepositorioDePapeisEmMemoria()
     app.state.admins = admins_de(admins_emergencia)
     publicador = eventos or SemEventos()
@@ -640,7 +618,7 @@ def criar_app(
     v1.include_router(
         criar_rotas_da_busca(
             Busca(
-                transporte=transporte_da_consulta or _SemModelo(),
+                transporte=transporte_da_consulta or SemModelo(),
                 catalogo=catalogo_de_pessoas,
                 indice=indice_da_busca,
                 ranking=ranking or RankingEmOrdem(),
@@ -840,6 +818,9 @@ def _com_cache[C, R](
 configurar_o_log()
 
 if _projeto:
+    # Um cliente para as coleções comuns e um para o banco de segurança (#673).
+    _comum = cliente_do_firestore(_projeto)
+    _seguranca = cliente_de_seguranca(_projeto)
     _adaptadores = adaptadores_da_busca(os.environ)
     _busca = (
         ConfigDaBusca.do_ambiente(os.environ) if "BUSCA_COLECAO" in os.environ else None
@@ -848,7 +829,7 @@ if _projeto:
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(
-            cliente_do_firestore(_projeto),
+            _comum,
             listagem_por_mes=listagem_por_mes_do_ambiente(os.environ),
         ),
         ArmazenamentoStorage(
@@ -857,15 +838,11 @@ if _projeto:
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
-        papeis=RepositorioDePapeisFirestore(
-            cliente_da_colecao(_projeto, COLECAO_DE_PAPEIS)
-        ),
+        papeis=papeis_do_firestore(_projeto, cliente=_seguranca),
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
-        correcoes=RepositorioDeCorrecoesFirestore(cliente_do_firestore(_projeto)),
-        aprovacao=RepositorioDeAprovacaoFirestore(cliente_do_firestore(_projeto)),
-        auditoria=RepositorioDeAuditoriaFirestore(
-            cliente_da_colecao(_projeto, COLECAO_DA_AUDITORIA)
-        ),
+        correcoes=RepositorioDeCorrecoesFirestore(_comum),
+        aprovacao=RepositorioDeAprovacaoFirestore(_comum),
+        auditoria=auditoria_do_firestore(_projeto, cliente=_seguranca),
         contas=ContasIdentityPlatform(_projeto),
         # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
         # CPU durante ela. Uma tentativa, no TEMPO_DO_EVENTO_DE_USO_S; a falha vai ao log.
@@ -873,18 +850,16 @@ if _projeto:
         # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
         # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
         # sistema; listar e revogar funcionam.
-        idempotencia=RepositorioDeIdempotenciaFirestore(cliente_do_firestore(_projeto)),
-        listas_da_busca=ListasDaBuscaFirestore(cliente_do_firestore(_projeto)),
-        repositorio_de_chaves=RepositorioDeChavesFirestore(
-            cliente_da_colecao(_projeto, COLECAO_DE_CHAVES)
-        ),
+        idempotencia=RepositorioDeIdempotenciaFirestore(_comum),
+        listas_da_busca=ListasDaBuscaFirestore(_comum),
+        repositorio_de_chaves=chaves_do_firestore(_projeto, cliente=_seguranca),
         arquivos=ArquivosNoStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
         mac=mac_do_ambiente(os.environ),
-        revisao=_revisao_espelhada(cliente_do_firestore(_projeto)),
+        revisao=_revisao_espelhada(_comum),
         login_recente=timedelta(
             minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
             or LOGIN_RECENTE_PADRAO / timedelta(minutes=1)
@@ -901,11 +876,11 @@ if _projeto:
         janelas=JanelasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_ACEITOS"]
         ),
-        catalogo=CatalogoFirestore(cliente_do_firestore(_projeto)),
-        marcas=CatalogoDeMarcasFirestore(cliente_do_firestore(_projeto)),
-        versao_da_lixeira=VersaoDaLixeiraFirestore(cliente_do_firestore(_projeto)),
-        purgas_de_marca=PurgasDeMarcaFirestore(cliente_do_firestore(_projeto)),
-        programas=ProgramasFirestore(cliente_do_firestore(_projeto)),
+        catalogo=CatalogoFirestore(_comum),
+        marcas=CatalogoDeMarcasFirestore(_comum),
+        versao_da_lixeira=VersaoDaLixeiraFirestore(_comum),
+        purgas_de_marca=PurgasDeMarcaFirestore(_comum),
+        programas=ProgramasFirestore(_comum),
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),
@@ -916,16 +891,14 @@ if _projeto:
                 _busca,
                 _transporte_do_indice,
                 tentar_no_429=True,
-                orcamento=OrcamentoFirestore(cliente_do_firestore(_projeto)),
+                orcamento=OrcamentoFirestore(_comum),
             )
             if _busca and _transporte_do_indice
             else None
         ),
         copia=copia_do_ambiente(os.environ),
-        tipos_de_objeto=TiposDeObjetoFirestore(cliente_do_firestore(_projeto)),
-        apagar_dados_da_purga=dados_do_ambiente(
-            cliente_do_firestore(_projeto), os.environ
-        ).apagar,
+        tipos_de_objeto=TiposDeObjetoFirestore(_comum),
+        apagar_dados_da_purga=dados_do_ambiente(_comum, os.environ).apagar,
         busca_por_minuto=consultas_por_minuto_do_ambiente(os.environ),
         aceita_teste_de_carga=aceita_teste_de_carga_do_ambiente(os.environ),
         limites_da_imagem=LimitesDaImagem(

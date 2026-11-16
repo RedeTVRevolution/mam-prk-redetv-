@@ -24,7 +24,7 @@ from google.cloud.storage import Client as ClienteStorage
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.auditoria import RepositorioDeAuditoria
-from api.bancos import cliente_da_colecao, cliente_do_firestore
+from api.bancos import auditoria_do_firestore, cliente_do_firestore
 from api.ciclo_de_vida import NaoReprocessavel, prazo_vencido
 from api.erros import ServicoIndisponivel
 from api.ferramentas.comum import (
@@ -36,11 +36,9 @@ from api.ferramentas.comum import (
 from api.leitura_da_decupagem import AbreDecupagem
 from api.modelo_do_job import Job, RepositorioDeJobs, agora_utc
 from api.nuvem import (
-    COLECAO_DA_AUDITORIA,
     DecupagensStorage,
     DisparoPeloWorkflows,
     JanelasStorage,
-    RepositorioDeAuditoriaFirestore,
     RepositorioFirestore,
 )
 from api.progresso_das_janelas import JanelasDoJob
@@ -205,9 +203,7 @@ def main(argumentos: list[str], ambiente: Mapping[str, str] = os.environ) -> int
     reprocessar_versao(
         RepositorioFirestore(banco),
         decupagens,
-        RepositorioDeAuditoriaFirestore(
-            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
-        ),
+        auditoria_do_firestore(projeto, ambiente),
         DisparoPeloWorkflows(projeto, regiao, workflow),
         JanelasStorage(cliente, aceitos),
         de=de,

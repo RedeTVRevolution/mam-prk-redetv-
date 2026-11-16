@@ -181,11 +181,9 @@ def main(
 
 
 def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
-    from api.bancos import cliente_da_colecao
+    from api.bancos import auditoria_do_firestore
     from api.nuvem import (
-        COLECAO_DA_AUDITORIA,
         DecupagensStorage,
-        RepositorioDeAuditoriaFirestore,
         RepositorioFirestore,
     )
 
@@ -199,9 +197,7 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
     return main(
         argumentos,
         RepositorioFirestore(banco),
-        RepositorioDeAuditoriaFirestore(
-            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
-        ),
+        auditoria_do_firestore(projeto, ambiente),
         decupagens,
     )
 

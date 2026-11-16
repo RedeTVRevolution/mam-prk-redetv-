@@ -12,7 +12,14 @@ from typing import Any
 
 from google.cloud import firestore
 
-from api.nuvem import COLECAO_DA_AUDITORIA, COLECAO_DE_CHAVES, COLECAO_DE_PAPEIS
+from api.nuvem import (
+    COLECAO_DA_AUDITORIA,
+    COLECAO_DE_CHAVES,
+    COLECAO_DE_PAPEIS,
+    RepositorioDeAuditoriaFirestore,
+    RepositorioDeChavesFirestore,
+    RepositorioDePapeisFirestore,
+)
 
 VARIAVEL_DO_BANCO = "FIRESTORE_BANCO"
 VARIAVEL_DO_BANCO_DE_SEGURANCA = "FIRESTORE_BANCO_DE_SEGURANCA"
@@ -50,7 +57,44 @@ def cliente_da_colecao(
     projeto: str,
     colecao: str,
     ambiente: Mapping[str, str] | None = None,
-    fabrica: Callable[..., Any] = firestore.Client,
+    fabrica: Callable[..., Any] | None = None,
 ) -> Any:
     """Cliente do Firestore apontado para o banco onde a `colecao` mora."""
+    fabrica = fabrica or firestore.Client
     return fabrica(project=projeto, database=banco_da_colecao(colecao, ambiente))
+
+
+def cliente_de_seguranca(
+    projeto: str,
+    ambiente: Mapping[str, str] | None = None,
+    fabrica: Callable[..., Any] | None = None,
+) -> Any:
+    """O cliente do banco de segurança, que papéis, chaves e auditoria dividem."""
+    return cliente_da_colecao(projeto, COLECAO_DE_PAPEIS, ambiente, fabrica)
+
+
+def papeis_do_firestore(
+    projeto: str, ambiente: Mapping[str, str] | None = None, cliente: Any = None
+) -> RepositorioDePapeisFirestore:
+    """Os papéis no banco de segurança; com `cliente`, no que o chamador já abriu."""
+    return RepositorioDePapeisFirestore(
+        cliente or cliente_da_colecao(projeto, COLECAO_DE_PAPEIS, ambiente)
+    )
+
+
+def chaves_do_firestore(
+    projeto: str, ambiente: Mapping[str, str] | None = None, cliente: Any = None
+) -> RepositorioDeChavesFirestore:
+    """As chaves de API no banco de segurança; com `cliente`, no que já foi aberto."""
+    return RepositorioDeChavesFirestore(
+        cliente or cliente_da_colecao(projeto, COLECAO_DE_CHAVES, ambiente)
+    )
+
+
+def auditoria_do_firestore(
+    projeto: str, ambiente: Mapping[str, str] | None = None, cliente: Any = None
+) -> RepositorioDeAuditoriaFirestore:
+    """A auditoria no banco de segurança; com `cliente`, no que já foi aberto."""
+    return RepositorioDeAuditoriaFirestore(
+        cliente or cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
+    )
