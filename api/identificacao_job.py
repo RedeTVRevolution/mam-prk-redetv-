@@ -27,7 +27,7 @@ from api.decupagem import Decupagem
 from api.gemini import Transporte, TransporteVertex
 from api.juncao_de_pessoas import juntar_sem_nome
 from api.modelo_do_job import RepositorioDeJobs
-from api.modelo_forte import LIMITE_DE_PESSOAS, olhar_pessoas_sem_nome
+from api.modelo_forte import LIMITE_DE_PESSOAS, agrupar, olhar_pessoas_sem_nome
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,
@@ -47,6 +47,8 @@ class DecupagensDaIdentificacao(Protocol):
     def ler_decupagem(self, job_id: str) -> Decupagem | None: ...
 
     def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool: ...
+
+    def copia_limpa_existe(self, job_id: str) -> bool: ...
 
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None: ...
 
@@ -84,7 +86,14 @@ def executar(
     def trabalho() -> str:
         decupagem = decupagens.ler_decupagem(job_id)
         copia = pasta / f"{job_id}.copia_limpa.mp4"
-        if decupagem is None or not decupagens.baixar_copia_limpa(job_id, copia):
+        if decupagem is None:
+            return "sem_alteracao"
+        # Decide antes de baixar: sem pessoa sem nome a olhar, a cópia limpa só precisa
+        # existir (`identificado` é o que conclui a etapa; sem a cópia, ela falha).
+        if agrupar(decupagem)[: max(limite_de_pessoas, 0)]:
+            if not decupagens.baixar_copia_limpa(job_id, copia):
+                return "sem_alteracao"
+        elif not decupagens.copia_limpa_existe(job_id):
             return "sem_alteracao"
         falhas: list[Exception] = []
 
@@ -107,12 +116,11 @@ def executar(
         # uma pessoa nomeada por ele nunca absorve outra e o nome nunca se espalha. As
         # separações que uma pessoa fez na tela ainda valem num reprocessamento (#547).
         # Sem juiz do modelo: ele acertou 3 de 6 no dev (#547); a faixa ambígua não junta.
+        feitas = correcoes.listar(job_id) if correcoes else []
         nova = juntar_sem_nome(
             nova,
-            proibidos=pares_proibidos(correcoes.listar(job_id)) if correcoes else (),
-            corrigidas=pessoas_corrigidas(correcoes.listar(job_id))
-            if correcoes
-            else (),
+            proibidos=pares_proibidos(feitas),
+            corrigidas=pessoas_corrigidas(feitas),
         )
         decupagens.gravar_decupagem(job_id, nova.model_dump_json())
         return "incompleto" if falhas else "identificado"

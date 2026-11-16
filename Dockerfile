@@ -111,6 +111,7 @@ COPY api/__init__.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
+     api/intervalos.py \
      api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \
@@ -202,6 +203,7 @@ COPY api/__init__.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
+     api/intervalos.py \
      api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \
@@ -324,6 +326,7 @@ COPY api/__init__.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
+     api/intervalos.py \
      api/itens_da_decupagem.py \
      api/janelas.py \
      api/jobs.py \

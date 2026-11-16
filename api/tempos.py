@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from itertools import pairwise
 
 from api.decupagem import Decupagem, Intervalo, Plano
+from api.intervalos import comprimento_da_sobreposicao
 
 LIMITE_DE_AJUSTE_MS = 1000
 
@@ -50,7 +51,7 @@ def _com_tempos[T: Intervalo](item: T, inicio: int, fim: int) -> T:
 
 
 def _sobreposicao(a: Intervalo, inicio_ms: int, fim_ms: int) -> int:
-    return min(a.fim_ms, fim_ms) - max(a.inicio_ms, inicio_ms)
+    return comprimento_da_sobreposicao(a.inicio_ms, a.fim_ms, inicio_ms, fim_ms)
 
 
 def _planos_pelos_cortes(planos: Sequence[Plano], cortes: Sequence[int]) -> list[Plano]:

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from api.catalogo import Catalogo
 from api.decupagem import Decupagem, FonteDoNome, Intervalo, Pessoa
 from api.identidade import nao_identificado
+from api.intervalos import sobrepoe_com_folga
 from api.programas import Perfis
 from api.texto import normalizar
 from api.transcricao import Transcricao
@@ -72,7 +73,7 @@ def _palavras(texto: str) -> list[str]:
 
 
 def _sobrepoe(a: Intervalo, inicio_ms: int, fim_ms: int, folga_ms: int = 0) -> bool:
-    return a.inicio_ms - folga_ms < fim_ms and inicio_ms < a.fim_ms + folga_ms
+    return sobrepoe_com_folga(a.inicio_ms, a.fim_ms, inicio_ms, fim_ms, folga_ms)
 
 
 def _nomes_da_pessoa(
@@ -141,18 +142,10 @@ def _prova_de_fala(
     decupagem: Decupagem,
     pessoa: Pessoa,
     nomes: Sequence[Sequence[str]],
-    transcricao: Transcricao | None,
+    fluxo: Sequence[tuple[str, int, int]],
     tolerancia_ms: int,
     sem_nome: Mapping[str, str],
 ) -> bool:
-    if transcricao is None:
-        return False
-    # (palavra, início, fim) de cada palavra do Whisper, já separada em palavras.
-    fluxo = [
-        (w, round(p.inicio_s * 1000), round(p.fim_s * 1000))
-        for p in transcricao.palavras
-        for w in _palavras(p.texto)
-    ]
     palavras = [w for w, _, _ in fluxo]
     for nome in nomes:
         for i, j in _ocorrencias(palavras, nome):
@@ -164,6 +157,17 @@ def _prova_de_fala(
             ):
                 return True
     return False
+
+
+def _fluxo_de_palavras(transcricao: Transcricao | None) -> list[tuple[str, int, int]]:
+    """(palavra, início, fim) de cada palavra do Whisper, já separada em palavras."""
+    if transcricao is None:
+        return []
+    return [
+        (w, round(p.inicio_s * 1000), round(p.fim_s * 1000))
+        for p in transcricao.palavras
+        for w in _palavras(p.texto)
+    ]
 
 
 def _no_catalogo(catalogo: Catalogo, pessoa: Pessoa) -> str | None:
@@ -195,6 +199,7 @@ def identificar(
     imagem", conta como sem nome mesmo com um nome (o do modelo forte, ainda sem prova)
     ao grupo dela: as do mesmo grupo são uma pessoa só e não se bloqueiam."""
     sem_nome = sem_nome or {}
+    fluxo = _fluxo_de_palavras(transcricao)
     pessoas: list[Pessoa] = []
     for p in decupagem.pessoas:
         if p.origem == "revisao" or nao_identificado(p.nome):
@@ -204,7 +209,7 @@ def identificar(
         fontes: list[FonteDoNome] = []
         if _prova_de_gc(decupagem, p, nomes, sem_nome):
             fontes.append("gc")
-        if _prova_de_fala(decupagem, p, nomes, transcricao, tolerancia_ms, sem_nome):
+        if _prova_de_fala(decupagem, p, nomes, fluxo, tolerancia_ms, sem_nome):
             fontes.append("fala")
         if not fontes:
             pessoas.append(
