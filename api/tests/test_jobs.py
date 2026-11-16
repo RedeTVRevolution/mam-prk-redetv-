@@ -336,6 +336,41 @@ def test_expiracao_nao_mexe_em_job_que_ja_passou_do_upload() -> None:
     )
 
 
+def test_expiracao_le_so_os_jobs_que_aguardam_upload() -> None:
+    repositorio = RepositorioEmMemoria()
+    armazenamento = ArmazenamentoFalso()
+    lidos: list[str] = []
+    consultar = repositorio.consultar
+
+    def contando(filtro: Any) -> Any:
+        pagina = consultar(filtro)
+        lidos.extend(j.id for j in pagina.jobs)
+        return pagina
+
+    repositorio.consultar = contando  # type: ignore[method-assign]
+    estados: list[Estado] = ["concluido", "falhou", "analisando", "aguardando_upload"]
+    for i in range(100):
+        repositorio.salvar(
+            Job(
+                id=f"j{i}",
+                nome="clipe.mp4",
+                tamanho_bytes=10,
+                estado=estados[i % 4],
+                criado_por="u1",
+                criado_em=INICIO,
+                atualizado_em=INICIO,
+            )
+        )
+
+    expirados = expirar_uploads(
+        repositorio, armazenamento, INICIO + timedelta(hours=24)
+    )
+
+    assert sorted(lidos) == sorted(f"j{i}" for i in range(3, 100, 4))
+    assert sorted(expirados) == sorted(lidos)
+    assert repositorio.obter("j3").estado == "falhou"  # type: ignore[union-attr]
+
+
 def _job_com_estado(ambiente: Ambiente, estado: Estado) -> str:
     job = Job(
         id="j1",
