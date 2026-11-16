@@ -167,9 +167,8 @@ RUN apt-get update \
     && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
         || { echo "A instalação do ffmpeg $FFMPEG falhou. Se essa versão não está na lista abaixo, ela saiu do repositório do Debian: troque o ARG FFMPEG pela mesma versão nova no Dockerfile e no scripts/afk/Dockerfile." >&2; apt-cache madison ffmpeg >&2; exit 1; }) \
     && rm -rf /var/lib/apt/lists/*
-ARG DETECTOR=PP-OCRv5_server_det
 COPY scripts/baixar-modelos-ocr.sh /usr/local/bin/baixar-modelos-ocr
-RUN baixar-modelos-ocr "$DETECTOR"
+RUN baixar-modelos-ocr PP-OCRv5_server_det
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr-gpu --compile-bytecode
@@ -244,7 +243,7 @@ COPY api/__init__.py \
 RUN /app/.venv/bin/python -m compileall -q api
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
     LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_cupti/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufft/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cufile/lib:/app/.venv/lib/python3.12/site-packages/nvidia/curand/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/app/.venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/app/.venv/lib/python3.12/site-packages/cusparselt/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nccl/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:/app/.venv/lib/python3.12/site-packages/nvidia/nvtx/lib:/usr/local/nvidia/lib64 \
-    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True DISPOSITIVO=gpu DETECTOR=$DETECTOR
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True DISPOSITIVO=gpu
 # A máquina da construção não tem GPU nem o driver, e o `paddlepaddle-gpu` pede o
 # `libcuda.so.1` (do driver) já no `import paddle`: aqui ele não pode ser importado. Esta
 # etapa só grava o quadro de amostra (do teste depois da publicação, `MODO_TESTE=1`),

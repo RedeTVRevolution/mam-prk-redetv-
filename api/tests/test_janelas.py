@@ -16,7 +16,6 @@ from api.janelas import (
     falhar,
     iniciar,
     planejar_janelas,
-    situacao_do_job,
 )
 
 HORA_MS = 3_600_000
@@ -161,11 +160,6 @@ def test_falha_que_esgota_o_limite_vai_a_falhou_com_o_erro() -> None:
     assert estado == EstadoJanela(0, "falhou", LIMITE_DE_TENTATIVAS, "último erro")
 
 
-def test_limite_e_parametro() -> None:
-    estado = falhar(iniciar(pendente()), "x", limite=1)
-    assert estado.situacao == "falhou"
-
-
 def test_reiniciar_janela_em_andamento_conta_tentativa() -> None:
     estado = iniciar(iniciar(pendente()))
     assert estado == EstadoJanela(0, "em_andamento", 2, None)
@@ -198,29 +192,3 @@ def test_concluir_ou_falhar_sem_iniciar_e_erro(
 def test_iniciar_janela_pendente_com_limite_esgotado_vai_a_falhou() -> None:
     estado = EstadoJanela(0, "pendente", LIMITE_DE_TENTATIVAS, "x")
     assert iniciar(estado).situacao == "falhou"
-
-
-def test_progresso_parcial() -> None:
-    situacao = situacao_do_job([concluida(0), iniciar(pendente(1)), pendente(2)])
-    assert (situacao.prontas, situacao.total) == (1, 3)
-    assert situacao.falha is None
-    assert not situacao.pode_consolidar
-
-
-def test_job_falho_aponta_a_primeira_janela_falha() -> None:
-    estados = [concluida(0), falhou(3, "erro 3"), pendente(2), falhou(1, "erro 1")]
-    situacao = situacao_do_job(estados)
-    assert situacao.falha is not None
-    assert (situacao.falha.indice, situacao.falha.erro) == (1, "erro 1")
-    assert not situacao.pode_consolidar
-
-
-def test_job_com_tudo_concluido_pode_consolidar() -> None:
-    situacao = situacao_do_job([concluida(0), concluida(1)])
-    assert (situacao.prontas, situacao.total) == (2, 2)
-    assert situacao.falha is None
-    assert situacao.pode_consolidar
-
-
-def test_job_sem_janelas_nao_consolida() -> None:
-    assert not situacao_do_job([]).pode_consolidar

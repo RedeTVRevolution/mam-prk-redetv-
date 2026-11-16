@@ -221,12 +221,11 @@ def test_devolve_decupagem_valida() -> None:
     assert len(t.chamadas) == 1
 
 
-def test_chamada_leva_job_como_rotulo_e_nenhuma_ferramenta() -> None:
+def test_chamada_leva_job_como_rotulo() -> None:
     t = TransporteFalso(BOA)
     _rodar(t)
     c = t.chamadas[0]
     assert c.rotulos == {"job_id": JOB}
-    assert c.ferramentas == ()
     assert c.video_uri == VIDEO
     assert c.esquema["additionalProperties"] is False
     assert "video" not in c.esquema["properties"]

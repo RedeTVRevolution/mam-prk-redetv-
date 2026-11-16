@@ -5,7 +5,6 @@ modelo falso. Os modelos vêm da pasta da imagem, sem internet.
 """
 
 import logging
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -16,22 +15,13 @@ from api.leitura_da_tela import Caixa, LinhaLida
 log = logging.getLogger(__name__)
 
 DETECTOR = "PP-OCRv5_server_det"
-DETECTORES = (DETECTOR, "PP-OCRv5_mobile_det")
 RECONHECEDOR = "latin_PP-OCRv5_mobile_rec"
 
 DISPOSITIVOS = {"cpu": "cpu", "gpu": "gpu:0"}
 
 
-def detector() -> str:
-    """O detector da imagem: a variável `DETECTOR`, que o `ARG DETECTOR` do Dockerfile põe."""
-    nome = os.environ.get("DETECTOR") or DETECTOR
-    if nome not in DETECTORES:
-        raise ValueError(f"DETECTOR inválido: {nome!r} (um de {', '.join(DETECTORES)})")
-    return nome
-
-
 def nome_do_modelo() -> str:
-    return f"{detector()}+{RECONHECEDOR}"
+    return f"{DETECTOR}+{RECONHECEDOR}"
 
 
 def _gpus() -> int:
@@ -53,7 +43,7 @@ def _carregar(
         exigir_gpu((gpus or _gpus)(), "o Paddle")
     log.info("Leitura da tela em %s", dispositivo)
     pasta = Path(pasta_dos_modelos)
-    nome = detector()
+    nome = DETECTOR
     return PaddleOCR(
         device=DISPOSITIVOS[dispositivo],
         text_detection_model_name=nome,

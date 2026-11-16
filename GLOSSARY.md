@@ -65,7 +65,7 @@ GC, tarja, legenda, placar, chamada, logo ou QR code, com o texto lido e os temp
 _Evitar_: lettering
 
 **Leitura da tela**:
-O texto que o OCR lê no proxy, um quadro por segundo (`api/leitura_da_tela.py`). O OCR só lê de novo quando a imagem muda (`api/mudanca_da_tela.py`, #233): compara com o último quadro lido, em seis faixas horizontais de oito blocos, contra o limiar `LIMIAR_DE_MUDANCA`; o quadro igual repete a leitura, e o formato guardado segue com um quadro por segundo. O detector (`server` ou o leve `mobile`) é o `ARG DETECTOR` da imagem. `make comparar-leituras` compara duas leituras do mesmo vídeo.
+O texto que o OCR lê no proxy, um quadro por segundo (`api/leitura_da_tela.py`). O OCR só lê de novo quando a imagem muda (`api/mudanca_da_tela.py`, #233): compara com o último quadro lido, em seis faixas horizontais de oito blocos, contra o limiar `LIMIAR_DE_MUDANCA`; o quadro igual repete a leitura, e o formato guardado segue com um quadro por segundo. O detector é o `PP-OCRv5_server_det` (`paddle.DETECTOR`), baixado na imagem pelo `RUN baixar-modelos-ocr`. `make comparar-leituras` compara duas leituras do mesmo vídeo.
 
 **Perfil do programa**:
 Contexto fixo de um programa (apresentadores, repórteres, merchandising frequente), cadastrado no Firestore (`api/programas.py`) e editado na aba Programas da administração (permissão `programas.editar`: Editor, Curador e Administrador), que a instrução do modelo recebe quando o Job informa o programa. O vínculo com pessoa fundida aparece como o destino; o vínculo com pessoa na lixeira fica gravado e escondido, o `PUT` o preserva e restaurar a pessoa o devolve com o mesmo papel (#425).
