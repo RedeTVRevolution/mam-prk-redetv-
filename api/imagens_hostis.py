@@ -65,6 +65,16 @@ def resolver_dns(host: str) -> list[str]:
         raise ImagemRecusada("host não resolve") from e
 
 
+def _em_pe(imagem: Image.Image) -> Image.Image:
+    """O celular grava o retrato deitado com `Orientation`; como o EXIF não sai daqui,
+    o giro é aplicado antes de descartá-lo. O EXIF é hostil: se ler ou regravar falhar
+    (SyntaxError, TypeError, struct.error...), a imagem segue sem girar."""
+    try:
+        return ImageOps.exif_transpose(imagem)
+    except Exception:
+        return imagem
+
+
 def recodificar(
     dados: bytes,
     *,
@@ -85,9 +95,7 @@ def recodificar(
             if largura * altura > max_pixels:
                 raise AcimaDoLimiteDePixels
             imagem.load()
-            # O celular grava o retrato deitado com `Orientation`; como o EXIF não
-            # sai daqui, o giro tem de ser aplicado antes de descartá-lo.
-            colorida = ImageOps.exif_transpose(imagem).convert("RGBA")
+            colorida = _em_pe(imagem).convert("RGBA")
     except (
         UnidentifiedImageError,
         Image.DecompressionBombError,

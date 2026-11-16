@@ -1,6 +1,7 @@
 """Imagens da web como entrada hostil (#111): imagens sintéticas."""
 
 import io
+import struct
 from typing import Any, Self
 
 import pytest
@@ -177,6 +178,45 @@ def test_conferencia_de_pixels_usa_o_tamanho_original_com_orientacao() -> None:
 
     with pytest.raises(ImagemRecusada, match="pixels"):
         recodificar(entrada, max_bytes=10**6, max_pixels=79_999)
+
+
+def com_exif_hostil(formato: str, etiqueta: int | None) -> bytes:
+    """Orientation=6 mais uma etiqueta com tipo ASCII (o Pillow não a grava, então o
+    bloco TIFF é montado à mão); `None`: bloco que não é TIFF."""
+    if etiqueta is None:
+        exif = b"Exif\x00\x00bad"
+    else:
+        entradas = sorted(
+            [
+                (0x0112, 3, 1, struct.pack("<HH", 6, 0)),
+                (etiqueta, 2, 2, b"x\x00\x00\x00"),
+            ]
+        )
+        ifd = struct.pack("<H", len(entradas)) + b"".join(
+            struct.pack("<HHI", tag, tipo, n) + valor
+            for tag, tipo, n, valor in entradas
+        )
+        exif = b"Exif\x00\x00II*\x00\x08\x00\x00\x00" + ifd + b"\x00\x00\x00\x00"
+    saida = io.BytesIO()
+    Image.new("RGB", (16, 8)).save(saida, format=formato, exif=exif)
+    return saida.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("formato", "etiqueta"),
+    [("PNG", None), ("JPEG", 282), ("PNG", 282), ("JPEG", 259), ("PNG", 259)],
+)
+def test_exif_hostil_nao_derruba_e_a_imagem_segue_sem_girar(
+    formato: str, etiqueta: int | None
+) -> None:
+    entrada = com_exif_hostil(formato, etiqueta)
+
+    saida = Image.open(
+        io.BytesIO(recodificar(entrada, max_bytes=10**6, max_pixels=10**6))
+    )
+
+    assert saida.format == "JPEG"
+    assert saida.size == (16, 8)
 
 
 def test_png_e_webp_viram_jpeg() -> None:
