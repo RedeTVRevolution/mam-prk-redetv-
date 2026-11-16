@@ -22,7 +22,6 @@ refez).
 import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from functools import partial
 
 from api.catalogo import Catalogo
 from api.consolidacao import consolidar
@@ -202,13 +201,15 @@ def analisar_video(
     def decupar_em_paralelo(
         indices: Sequence[int], escalonar: bool = False
     ) -> dict[int, Decupagem]:
-        tarefas = [
-            partial(decupar, janelas[i], resultados[i] if escalonar else None)
-            for i in indices
-        ]
         return dict(
             zip(
-                indices, em_paralelo(tarefas, lambda t: t(), max_paralelas), strict=True
+                indices,
+                em_paralelo(
+                    indices,
+                    lambda i: decupar(janelas[i], resultados[i] if escalonar else None),
+                    max_paralelas,
+                ),
+                strict=True,
             )
         )
 
