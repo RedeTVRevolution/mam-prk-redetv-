@@ -1,7 +1,9 @@
 from typing import get_args
 
 import pytest
+from pydantic import TypeAdapter
 
+from api.nuvem import RepositorioDePapeisFirestore
 from api.papeis import (
     PERMISSOES_DO_PAPEL,
     ContaNaoEncontrada,
@@ -9,6 +11,7 @@ from api.papeis import (
     RepositorioDePapeisEmMemoria,
     admins_de,
     atribuir_papeis_main,
+    em_ordem,
     papeis_do_usuario,
     papeis_efetivos,
     permissoes_de,
@@ -17,10 +20,6 @@ from api.papeis import (
 
 def test_consulta_so_ve_a_decupagem() -> None:
     assert permissoes_de(["consulta"]) == {"decupagem.ver"}
-
-
-def test_operador_fica_igual_a_consulta() -> None:
-    assert permissoes_de(["operador"]) == permissoes_de(["consulta"])
 
 
 def test_editor_e_consulta_mais_editar_enviar_e_reprocessar() -> None:
@@ -43,7 +42,7 @@ def test_curador_e_editor_mais_aprovar_correcao_e_reprocessar_etapa() -> None:
 
 
 def test_so_o_curador_aprova_correcao() -> None:
-    for papel in ("consulta", "operador", "editor"):
+    for papel in ("consulta", "editor"):
         assert "correcao.aprovar" not in permissoes_de([papel])
 
 
@@ -157,7 +156,7 @@ def test_administrador_ja_guardado_nao_se_repete() -> None:
 
 
 def test_so_o_administrador_ve_a_auditoria() -> None:
-    for papel in ("consulta", "operador", "editor", "curador", "diretoria"):
+    for papel in ("consulta", "editor", "curador", "diretoria"):
         assert "auditoria.ver" not in permissoes_de([papel])
     assert "auditoria.ver" in permissoes_de(["administrador"])
 
@@ -189,3 +188,42 @@ def test_so_a_diretoria_e_o_administrador_veem_o_painel() -> None:
     com = {p for p, perms in PERMISSOES_DO_PAPEL.items() if "painel.ver" in perms}
 
     assert com == {"diretoria", "administrador"}
+
+
+class _DocFalso:
+    exists = True
+
+    def __init__(self, dados: dict[str, object]) -> None:
+        self.dados = dados
+
+    def to_dict(self) -> dict[str, object]:
+        return self.dados
+
+
+class _ClienteFalso:
+    def __init__(self, dados: dict[str, object]) -> None:
+        self.dados = dados
+
+    def collection(self, _nome: str) -> "_ClienteFalso":
+        return self
+
+    def document(self, _id: str) -> "_ClienteFalso":
+        return self
+
+    def get(self) -> _DocFalso:
+        return _DocFalso(self.dados)
+
+
+def test_validador_leitura_e_atribuicao_concordam_com_em_ordem() -> None:
+    from api.usuarios import PapeisPedidos
+
+    pedidos = ["administrador", "editor", "consulta", "editor"]
+    esperado = em_ordem(pedidos)
+    assert TypeAdapter(PapeisPedidos).validate_python(pedidos) == esperado
+    lido = RepositorioDePapeisFirestore(_ClienteFalso({"papeis": pedidos})).obter("u")  # type: ignore[arg-type]
+    assert lido == esperado
+    repo = RepositorioDePapeisEmMemoria()
+    atribuir_papeis_main(
+        ["a@b.c", ",".join(pedidos)], repo, lambda _e: "u", lambda _t: None
+    )
+    assert repo.obter("u") == esperado

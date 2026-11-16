@@ -36,9 +36,6 @@ from api.auditoria import (
     campo_da_pessoa,
 )
 from api.auditoria import (
-    casa_com_o_filtro as casa_com_o_filtro_da_auditoria,
-)
-from api.auditoria import (
     pagina_de as pagina_da_auditoria,
 )
 from api.catalogo import (
@@ -87,7 +84,8 @@ from api.modelo_do_job import (
     casa_com_o_filtro,
     paginar_em_python,
 )
-from api.papeis import PAPEIS, DocumentoDePapeis, Papel
+from api.papeis import DocumentoDePapeis, Papel
+from api.papeis import em_ordem as papeis_em_ordem
 from api.programas import (
     NomeEmUso,
     Programa,
@@ -777,7 +775,7 @@ class RepositorioDePapeisFirestore:
         # Sem `papeis` (só a marca `desativada`): a conta segue sem papéis guardados.
         # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
         if "papeis" in dados:
-            papeis = [p for p in PAPEIS if p in dados["papeis"]]
+            papeis = papeis_em_ordem(dados["papeis"])
         return DocumentoDePapeis(uid, dados.get("desativada") is True, papeis)
 
     def obter(self, uid: str) -> list[Papel] | None:
@@ -1399,11 +1397,12 @@ class RepositorioDeAuditoriaFirestore:
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
-        registros = (
-            RegistroDeAuditoria(**(doc.to_dict() or {})) for doc in consulta.stream()
-        )
+        if filtro.limite is not None:
+            # Um além do limite basta para saber se há próxima página (#667).
+            consulta = consulta.limit(filtro.limite + 1)
+        # O servidor já filtrou tudo: não há o que conferir em Python.
         return pagina_da_auditoria(
-            (r for r in registros if casa_com_o_filtro_da_auditoria(r, filtro)),
+            (RegistroDeAuditoria(**(doc.to_dict() or {})) for doc in consulta.stream()),
             filtro.limite,
         )
 

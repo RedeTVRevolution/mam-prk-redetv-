@@ -217,7 +217,7 @@ def test_job_inexistente_e_404() -> None:
     assert resposta.status_code == 404
 
 
-@pytest.mark.parametrize("papeis", [["consulta", "operador"], ["editor"], ["curador"]])
+@pytest.mark.parametrize("papeis", [["consulta", "diretoria"], ["editor"], ["curador"]])
 def test_quem_nao_e_administrador_recebe_403(papeis: list[Papel]) -> None:
     mundo = Mundo(_job("analisando"), papeis=papeis)
 

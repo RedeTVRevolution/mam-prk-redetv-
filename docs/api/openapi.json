@@ -7219,7 +7219,6 @@
               "type": "string",
               "enum": [
                 "consulta",
-                "operador",
                 "editor",
                 "curador",
                 "diretoria",

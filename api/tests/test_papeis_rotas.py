@@ -71,7 +71,6 @@ def test_quadro_exige_decupagem_ver() -> None:
     [
         (None, False),
         (["consulta"], False),
-        (["operador"], False),
         (["diretoria"], False),
         (["editor"], True),
         (["curador"], True),

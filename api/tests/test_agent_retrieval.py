@@ -1299,7 +1299,7 @@ def test_transporte_http_levanta_cota_esgotada_no_429(
         transporte_http()("POST", "x:batchCreate", {})
 
 
-def test_transporte_http_leitura_do_indice_tem_15_s_e_o_resto_60_s(
+def test_transporte_http_leitura_do_indice_e_embedding_da_consulta_tem_15_s_e_o_resto_60_s(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prazos: dict[str, object] = {}
@@ -1326,7 +1326,12 @@ def test_transporte_http_leitura_do_indice_tem_15_s_e_o_resto_60_s(
     chamar = transporte_http()
     chamar("POST", "c/x/dataObjects:batchSearch", {})
     chamar("POST", "c/x/dataObjects:batchCreate", {})
-    assert prazos == {"dataObjects:batchSearch": 15, "dataObjects:batchCreate": 60}
+    chamar("POST", "https://r-aiplatform.googleapis.com/v1/models/m:predict", {})
+    assert prazos == {
+        "dataObjects:batchSearch": 15,
+        "dataObjects:batchCreate": 60,
+        "m:predict": 15,
+    }
 
 
 class _OrcamentoFalso:
