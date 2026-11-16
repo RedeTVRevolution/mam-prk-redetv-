@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from api.decupagem import Decupagem
 from api.tests.test_analise import SHA, _ambiente, _analisar
 from api.tests.test_gemini import BOA
