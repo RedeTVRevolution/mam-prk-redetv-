@@ -197,12 +197,18 @@ NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS = {
 
 
 def _importes_do_nome_antigo(codigo: str, proibidos: dict[str, set[str]]) -> set[str]:
-    return {
-        f"{no.module}.{a.name}"
+    # Todo módulo de produção mora em api/, então `from .x` é `api.x`.
+    modulos = {
+        no: no.module if no.level == 0 else f"api.{no.module}"
         for no in ast.walk(ast.parse(codigo))
-        if isinstance(no, ast.ImportFrom) and no.level == 0 and no.module in proibidos
+        if isinstance(no, ast.ImportFrom) and no.level <= 1 and no.module
+    }
+    return {
+        f"{modulo}.{a.name}"
+        for no, modulo in modulos.items()
+        if modulo in proibidos
         for a in no.names
-        if a.name in proibidos[no.module]
+        if a.name in proibidos[modulo]
     }
 
 
@@ -222,6 +228,9 @@ def test_pega_import_do_nome_antigo() -> None:
     assert _importes_do_nome_antigo(codigo, NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS) == {
         "api.correcoes._sem_controle"
     }
+    assert _importes_do_nome_antigo(
+        "from .decupagem import _Intervalo\n", NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS
+    ) == {"api.decupagem._Intervalo"}
     assert not _importes_do_nome_antigo(
         "from api.correcoes import sem_controle\nfrom api.busca import _intercalar\n",
         NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS,
