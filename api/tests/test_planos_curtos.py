@@ -41,7 +41,7 @@ def _decupagem(planos: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "versao_esquema": "1.5",
         "video": {"sha256": "a" * 64, "duracao_ms": 10_000},
-        "programa": {"resumo": "r", "blocos": []},
+        "programa": {"blocos": []},
         "pautas": [],
         "pessoas": [],
         "planos": planos,

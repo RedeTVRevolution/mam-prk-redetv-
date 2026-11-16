@@ -54,7 +54,7 @@ def decupagem(
         {
             "versao_esquema": "1.3",
             "video": {"sha256": "a" * 64, "duracao_ms": 600_000},
-            "programa": {"resumo": "", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": pessoas,
             "planos": [],
@@ -334,7 +334,7 @@ def _resposta_do_modelo(nome: str, fontes: list[str]) -> str:
     """O que o Gemini devolve para um vídeo de 6 min: o homem de barba nomeado."""
     return json.dumps(
         {
-            "programa": {"resumo": "", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": [
                 {

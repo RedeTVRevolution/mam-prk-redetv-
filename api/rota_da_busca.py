@@ -29,6 +29,8 @@ from api.busca import (
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S
 from api.eventos_de_uso import Eventos, Filtro, SemEventos, quem_do_chamador, registrar
 from api.imagens_hostis import (
+    LIMITE_DE_BYTES_DO_ORIGINAL,
+    LIMITE_DE_PIXELS_DO_ORIGINAL,
     AcimaDoLimiteDeBytes,
     AcimaDoLimiteDePixels,
     ImagemRecusada,
@@ -93,8 +95,8 @@ _executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="busca")
 
 @dataclass(frozen=True)
 class LimitesDaImagem:
-    max_bytes: int = 5_000_000
-    max_pixels: int = 25_000_000
+    max_bytes: int = LIMITE_DE_BYTES_DO_ORIGINAL
+    max_pixels: int = LIMITE_DE_PIXELS_DO_ORIGINAL
 
 
 LIMITES_DA_IMAGEM = LimitesDaImagem()

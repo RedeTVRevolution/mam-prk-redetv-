@@ -47,6 +47,9 @@ from api.transcricao import Transcricao
 
 MODELO_FORTE = MODELO  # o Flash-Lite, como a análise (#539)
 ETAPA = "identificacao_modelo_forte"  # o rótulo de custo de cada chamada
+MODO_DO_MODELO_FORTE = (
+    MODO_STANDARD  # Standard, com cache (#414); o manifesto lê esta mesma constante
+)
 # Pessoas (grupos) enviadas ao modelo forte por vídeo; as de mais tempo na imagem primeiro.
 LIMITE_DE_PESSOAS = 8
 MAXIMO_DO_DADO = 200  # nome, papel, apelido ou descrição dentro do prompt
@@ -262,7 +265,7 @@ def olhar_pessoas_sem_nome(
                 esquema=esquema_da_resposta(),
                 rotulos={"job_id": job_id, "etapa": ETAPA},
                 imagens=tuple(quadros_em(instantes)),
-                modo=MODO_STANDARD,  # Standard, com cache (#414)
+                modo=MODO_DO_MODELO_FORTE,
             )
             resposta = gerar_validado(
                 transporte,

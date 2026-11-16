@@ -44,7 +44,7 @@ def resposta(
 ) -> str:
     return json.dumps(
         {
-            "programa": {"resumo": "", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": [],
             "planos": [],

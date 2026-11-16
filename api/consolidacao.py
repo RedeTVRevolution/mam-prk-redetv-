@@ -33,8 +33,6 @@ from api.tempos import aplicar_regra_de_tempos
 
 log = logging.getLogger(__name__)
 
-_LIMITE_DO_RESUMO = 2000  # tamanho máximo de `Texto` no esquema
-
 
 def _sobrepoe(a: Intervalo, b: Intervalo) -> bool:
     return sobrepoe_estrito(a.inicio_ms, a.fim_ms, b.inicio_ms, b.fim_ms)
@@ -270,13 +268,10 @@ def consolidar(
         o.model_copy(update={"id": f"obj{n:02d}"}) for n, o in enumerate(achados, 1)
     ]
 
-    resumo = " ".join(d.programa.resumo for d in decupagens if d.programa.resumo)
-    # ponytail: o resumo provisório é cortado em 2000 caracteres; a passada
-    # narrativa o reescreve.
     consolidada = Decupagem(
         versao_esquema=VERSAO_ESQUEMA,
         video=video,
-        programa=Programa(resumo=resumo[:_LIMITE_DO_RESUMO], blocos=blocos),
+        programa=Programa(blocos=blocos),
         pautas=pautas,
         pessoas=pessoas,
         objetos=objetos,

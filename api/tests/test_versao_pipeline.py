@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from api.decupagem import Decupagem
 from api.tests.test_analise import SHA, _ambiente, _analisar
 from api.tests.test_gemini import BOA
@@ -53,3 +55,12 @@ def test_busca_nao_faz_parte_das_etapas_da_decupagem() -> None:
     assert all(
         "consulta" not in fixado[parte] for parte in ("modelos", "modos", "instrucoes")
     )
+
+
+def test_o_manifesto_le_o_modo_do_modelo_forte_da_constante_da_execucao(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api import modelo_forte
+
+    monkeypatch.setattr(modelo_forte, "MODO_DO_MODELO_FORTE", "flex")
+    assert manifesto()["modos"]["modelo_forte"] == "flex"
