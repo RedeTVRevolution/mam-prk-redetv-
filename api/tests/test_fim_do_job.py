@@ -248,3 +248,35 @@ def test_sem_webhook_cadastrado_nao_e_erro_e_marca() -> None:
     assert m.publicador.mensagens == []
     assert len(m.eventos.publicados) == 1
     assert _marcado(m)
+
+
+def test_aviso_antigo_nao_apaga_o_marcador_da_passada_nova() -> None:
+    m = Mundo()
+    m.eventos = EventosQueFalham(1)
+
+    class ReprocessaNoMeioDoAvisoAntigo(PublicadorEmMemoria):
+        feito = False
+
+        def publicar(self, mensagem: MensagemDeEvento) -> None:
+            super().publicar(mensagem)
+            if not self.feito:
+                self.feito = True
+                # Enquanto o aviso da passada 0 publica, o Job é reprocessado, falha de
+                # novo e o aviso da passada 1 publica o webhook e falha no uso.
+                m.jobs.trocar("job-1", lambda j: {"reprocessamentos": 1})
+                with pytest.raises(_FalhaNoPubSub):
+                    m.avisar()
+
+    m.publicador = ReprocessaNoMeioDoAvisoAntigo()
+
+    assert m.avisar() is False
+
+    job = m.jobs.obter("job-1")
+    assert job is not None
+    assert job.fim_webhook_enviado_no_reprocessamento == 1
+    assert job.fim_avisado_no_reprocessamento is None
+
+    assert m.avisar() is True
+
+    assert len(m.eventos.publicados) == 1
+    assert len(m.publicador.mensagens) == 2

@@ -68,22 +68,31 @@ def avisar_o_fim(
         return False
     n = job.reprocessamentos
 
-    def marcar(campo: str) -> None:
-        repositorio.trocar(job_id, lambda _: {campo: n})
+    def marcar(campo: str) -> bool:
+        """`False` se o Job já foi reprocessado: este aviso é de uma passada antiga e
+        não pode sobrescrever os marcadores do aviso novo."""
+        return (
+            repositorio.trocar(
+                job_id,
+                lambda atual: {campo: n} if atual.reprocessamentos == n else None,
+            )
+            is not None
+        )
 
     if job.fim_webhook_enviado_no_reprocessamento != n:
         # Sem webhook cadastrado não há o que enviar, e isso não é erro.
         enviar_o_fim(
             job, webhooks, publicador, job.atualizado_em, _id_estavel(job, "webhook")
         )
-        marcar("fim_webhook_enviado_no_reprocessamento")
+        if not marcar("fim_webhook_enviado_no_reprocessamento"):
+            return False
     if job.fim_uso_enviado_no_reprocessamento != n:
         registrar_o_fim(
             eventos, job, job.atualizado_em, _id_estavel(job, "uso"), levantar=True
         )
-        marcar("fim_uso_enviado_no_reprocessamento")
-    marcar("fim_avisado_no_reprocessamento")
-    return True
+        if not marcar("fim_uso_enviado_no_reprocessamento"):
+            return False
+    return marcar("fim_avisado_no_reprocessamento")
 
 
 def _dependencias(
