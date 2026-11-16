@@ -8,8 +8,10 @@ import contextlib
 import os
 import threading
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -1631,6 +1633,44 @@ class TestTiposDeObjetoFirestore:
         achados = tipos.buscar("sa", limite=2)
 
         assert [t["tipo"] for t in achados] == ["sandália", "saia"]
+
+
+class _ColecaoQueConta:
+    """Dublê da coleção: devolve `n` documentos e anota o `limit` pedido."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+        self.limite: int | None = None
+        self.lidos = 0
+
+    def order_by(self, *_a: Any, **_k: Any) -> "_ColecaoQueConta":
+        return self
+
+    def limit(self, valor: int) -> "_ColecaoQueConta":
+        self.limite = valor
+        return self
+
+    def stream(self) -> Iterator[Any]:
+        for i in range(self.n if self.limite is None else min(self.n, self.limite)):
+            self.lidos += 1
+            registro = TestRepositorioDeAuditoriaFirestore._registro(f"r{i:03d}", -i)
+            yield type("Doc", (), {"to_dict": lambda _s, r=registro: r.model_dump()})()
+
+
+@pytest.mark.parametrize(("limite", "lidos"), [(50, 51), (None, 495)])
+def test_auditoria_firestore_le_um_alem_do_limite(
+    limite: int | None, lidos: int
+) -> None:
+    colecao = _ColecaoQueConta(495)
+    cliente = MagicMock()
+    cliente.collection.return_value = colecao
+    pagina = RepositorioDeAuditoriaFirestore(cliente).consultar(
+        FiltroDeAuditoria(limite=limite)
+    )
+
+    assert colecao.lidos == lidos
+    assert len(pagina.registros) == (50 if limite else 495)
+    assert pagina.proximo_cursor == ("r049" if limite else None)
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")

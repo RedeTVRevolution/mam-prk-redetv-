@@ -578,11 +578,13 @@ def expirar_uploads(
 ) -> list[str]:
     """Falha os Jobs sem upload completo há 24 h ou mais e cancela a sessão de upload."""
     expirados: list[str] = []
-    for job in repositorio.listar():
-        if (
-            job.estado != "aguardando_upload"
-            or agora - job.criado_em < PRAZO_DO_JOB_SEM_UPLOAD
-        ):
+    # Só os que esperam upload. `na_lixeira=None` porque o padrão `False` filtra a lixeira; Job
+    # em `aguardando_upload` não vai para ela, então o resultado é o mesmo.
+    esperando = repositorio.consultar(
+        FiltroDeJobs(estados=frozenset({"aguardando_upload"}), na_lixeira=None)
+    )
+    for job in esperando.jobs:
+        if agora - job.criado_em < PRAZO_DO_JOB_SEM_UPLOAD:
             continue
         # Primeiro a transição: se o Job andou nesse meio-tempo, o upload é dele.
         if transitar(

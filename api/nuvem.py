@@ -30,9 +30,6 @@ from api.auditoria import (
     campo_da_pessoa,
 )
 from api.auditoria import (
-    casa_com_o_filtro as casa_com_o_filtro_da_auditoria,
-)
-from api.auditoria import (
     pagina_de as pagina_da_auditoria,
 )
 from api.catalogo import (
@@ -1370,11 +1367,12 @@ class RepositorioDeAuditoriaFirestore:
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
-        registros = (
-            RegistroDeAuditoria(**(doc.to_dict() or {})) for doc in consulta.stream()
-        )
+        if filtro.limite is not None:
+            # Um além do limite basta para saber se há próxima página (#667).
+            consulta = consulta.limit(filtro.limite + 1)
+        # O servidor já filtrou tudo: não há o que conferir em Python.
         return pagina_da_auditoria(
-            (r for r in registros if casa_com_o_filtro_da_auditoria(r, filtro)),
+            (RegistroDeAuditoria(**(doc.to_dict() or {})) for doc in consulta.stream()),
             filtro.limite,
         )
 
