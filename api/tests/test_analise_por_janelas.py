@@ -455,12 +455,17 @@ def test_queda_no_escalonamento_nao_refaz_a_primeira_passada_ao_retomar() -> Non
 def test_janela_que_esgotou_as_tentativas_nao_gasta_mais_chamadas_ao_retomar() -> None:
     janelas = JanelasEmMemoria()
     modelo = ModeloFalso(
-        lambda inicio, fim: ErroHttp(400) if inicio == 290_000 else resposta()
+        lambda inicio, fim: (
+            ErroHttp(400, "INVALID_ARGUMENT", "esquema recusado")
+            if inicio == 290_000
+            else resposta()
+        )
     )
     with pytest.raises(AnaliseFalhou):
         _decupar(modelo, janelas_do_job=janelas)
 
     gravada = janelas.ler("j")[1]
+    assert gravada.erro is not None and "esquema recusado" in gravada.erro
     assert (gravada.situacao, gravada.tentativas) == ("falhou", LIMITE_DE_TENTATIVAS)
     outra = ModeloFalso(_fala_no_inicio_do_nucleo)
     with pytest.raises(AnaliseFalhou):
