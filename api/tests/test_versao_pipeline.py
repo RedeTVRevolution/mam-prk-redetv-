@@ -56,7 +56,7 @@ def test_busca_nao_faz_parte_das_etapas_da_decupagem() -> None:
 
 
 def test_o_manifesto_le_o_modo_do_modelo_forte_da_constante_da_execucao(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from api import modelo_forte
 
