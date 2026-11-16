@@ -21,6 +21,7 @@ from PIL import Image, ImageStat
 from api import log_estruturado
 from api.bancos import cliente_do_firestore
 from api.decupagem import Decupagem, caminho_do_quadro
+from api.intervalos import sobrepoe_estrito
 from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import QuadrosStorage, RepositorioFirestore
 from api.quadros import FalhaNosQuadros
@@ -213,7 +214,8 @@ def capa_da_decupagem(decupagem: Decupagem) -> str | None:
     aparicoes = [a for pessoa in decupagem.pessoas for a in pessoa.na_imagem]
     for plano in planos:
         if any(
-            a.inicio_ms < plano.fim_ms and a.fim_ms > plano.inicio_ms for a in aparicoes
+            sobrepoe_estrito(a.inicio_ms, a.fim_ms, plano.inicio_ms, plano.fim_ms)
+            for a in aparicoes
         ):
             return plano.quadro
     return planos[0].quadro if planos else None
