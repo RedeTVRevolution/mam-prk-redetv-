@@ -1,7 +1,7 @@
 from typing import Any
 
 from api.consolidacao import consolidar
-from api.decupagem import Decupagem, Video
+from api.decupagem import VERSAO_ESQUEMA, Decupagem, Video
 from api.janelas import Janela
 
 DURACAO = 900_000
@@ -23,7 +23,7 @@ J0, J1, J2 = (
 
 def decupagem(**partes: Any) -> Decupagem:
     base: dict[str, Any] = {
-        "versao_esquema": "1.5",
+        "versao_esquema": VERSAO_ESQUEMA,
         "video": VIDEO.model_dump(),
         "programa": {"blocos": []},
         "pautas": [],
