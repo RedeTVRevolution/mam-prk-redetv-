@@ -23,6 +23,30 @@
     {"entrada": "vaso ﬂoral", "cores": [], "chave": "floral vaso"},
     {"entrada": "ＣＡＮＥＣＡ", "cores": [], "chave": "caneca"},
     {"entrada": "Straße", "cores": [], "chave": "strasse"},
-    {"entrada": "", "cores": [], "chave": ""}
+    {"entrada": "", "cores": [], "chave": ""},
+    {"entrada": "torre", "cores": [], "chave": "torre"},
+    {"entrada": "torres", "cores": [], "chave": "torre"},
+    {"entrada": "padre", "cores": [], "chave": "padre"},
+    {"entrada": "padres", "cores": [], "chave": "padre"},
+    {"entrada": "livre", "cores": [], "chave": "livre"},
+    {"entrada": "livres", "cores": [], "chave": "livre"},
+    {"entrada": "lustre", "cores": [], "chave": "lustre"},
+    {"entrada": "lustres", "cores": [], "chave": "lustre"},
+    {"entrada": "árvore", "cores": [], "chave": "arvore"},
+    {"entrada": "árvores", "cores": [], "chave": "arvore"},
+    {"entrada": "arvores", "cores": [], "chave": "arvore"},
+    {"entrada": "flor", "cores": [], "chave": "flor"},
+    {"entrada": "flores", "cores": [], "chave": "flor"},
+    {"entrada": "mulher", "cores": [], "chave": "mulher"},
+    {"entrada": "mulheres", "cores": [], "chave": "mulher"},
+    {"entrada": "bar", "cores": [], "chave": "bar"},
+    {"entrada": "bares", "cores": [], "chave": "bar"}
+  ],
+  "formas": [
+    {"palavra": "torres", "contem": ["torres", "torre"], "nao_contem": ["torr"]},
+    {"palavra": "padres", "contem": ["padres", "padre"], "nao_contem": ["padr"]},
+    {"palavra": "padre", "contem": ["padres", "padre"], "nao_contem": []},
+    {"palavra": "flores", "contem": ["flores", "flor"], "nao_contem": ["flore"]},
+    {"palavra": "árvores", "contem": ["árvores", "árvore"], "nao_contem": ["árvor"]}
   ]
 }

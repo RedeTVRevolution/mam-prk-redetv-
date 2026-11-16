@@ -1,3 +1,7 @@
+import json
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from api.numero import com_as_formas, formas, mesma_palavra, singular
@@ -97,3 +101,31 @@ def test_com_as_formas_deixa_a_pontuacao_de_fora() -> None:
 )
 def test_com_as_formas_normaliza_deduplica_e_agrupa(texto: str, esperado: str) -> None:
     assert com_as_formas(texto) == esperado
+
+
+GABARITO = json.loads((Path(__file__).parent / "assinatura_do_nome.json").read_text())
+
+
+@pytest.mark.parametrize("caso", GABARITO["formas"], ids=lambda c: c["palavra"])
+def test_formas_do_gabarito(caso: dict[str, Any]) -> None:
+    achadas = formas(caso["palavra"])
+    assert set(caso["contem"]) <= achadas
+    assert not set(caso["nao_contem"]) & achadas
+
+
+@pytest.mark.parametrize(
+    "plural, esperado",
+    [
+        ("torres", "torre"),
+        ("padres", "padre"),
+        ("livres", "livre"),
+        ("lustres", "lustre"),
+        ("árvores", "árvore"),
+        ("arvores", "árvore"),
+        ("flores", "flor"),
+        ("bares", "bar"),
+        ("mulheres", "mulher"),
+    ],
+)
+def test_singular_de_res(plural: str, esperado: str) -> None:
+    assert singular(plural) == esperado
