@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -349,3 +350,42 @@ def test_lote_do_ffmpeg_sai_igual_ao_quadro_a_quadro_e_o_que_falta_vem_none(
 
     assert lote[2] is None
     assert [lote[0], lote[1], lote[3]] == extrair_quadros(video, [500, 2_500, 5_500])
+
+
+@precisa_de_ffmpeg
+def test_com_8_vagas_os_nomes_e_a_ordem_dos_quadros_sao_os_de_1_vaga(
+    tmp_path: Path,
+) -> None:
+    video = _video(tmp_path / "v.mp4")
+
+    def rodar(vagas: int) -> tuple[Decupagem, dict[str, bytes]]:
+        gravados: dict[str, bytes] = {}
+        ordem = iter(range(100, 0, -1))
+
+        def gravar(caminho: str, jpeg: bytes) -> None:
+            time.sleep(next(ordem) / 2000)  # termina fora de ordem
+            gravados[caminho] = jpeg
+
+        return com_quadros_chave(video, _decupagem(), gravar, vagas), gravados
+
+    uma, gravados_1 = rodar(1)
+    oito, gravados_8 = rodar(8)
+
+    assert oito.model_dump() == uma.model_dump()
+    assert gravados_8 == gravados_1
+
+
+@precisa_de_ffmpeg
+def test_falha_de_upload_sobe_e_os_que_nao_comecaram_nao_comecam(
+    tmp_path: Path,
+) -> None:
+    chamadas: list[str] = []
+
+    def gravar(caminho: str, jpeg: bytes) -> None:
+        chamadas.append(caminho)
+        raise OSError("storage fora")
+
+    with pytest.raises(OSError, match="storage fora"):
+        com_quadros_chave(_video(tmp_path / "v.mp4"), _decupagem(), gravar, 1)
+
+    assert len(chamadas) == 1
