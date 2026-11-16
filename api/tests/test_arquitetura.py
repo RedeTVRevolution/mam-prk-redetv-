@@ -40,7 +40,6 @@ FERRAMENTAS = {
     "preencher_catalogo_dos_jobs",
     "preencher_filtros_da_busca",
     "preencher_planos_recorrentes",
-    "registrar_webhook",
     "regressao",
     "regressao_da_versao",
     "reprocessar_versao",

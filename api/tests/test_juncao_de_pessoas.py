@@ -17,7 +17,6 @@ from api.catalogo import CatalogoEmMemoria
 from api.decupagem import Decupagem, Pessoa
 from api.jobs import RepositorioEmMemoria
 from api.juncao_de_pessoas import (
-    Veredito,
     chave_da_pessoa,
     juntar_sem_nome,
 )
@@ -269,48 +268,17 @@ def test_pautas_e_donos_de_objetos_vao_para_a_pessoa_juntada_e_a_origem_lembra()
     assert origem["pes02"].objetos == ["obj01"]
 
 
-def test_na_faixa_ambigua_o_modelo_decide_e_incerto_nao_junta() -> None:
-    def d() -> Decupagem:
-        return decupagem(
-            [
-                pessoa("pes01", 0, [(100_000, 110_000)]),
-                pessoa(
-                    "pes02",
-                    1,
-                    [(400_000, 410_000)],
-                    nome=NAO + "blusa vermelha, calvo",
-                ),
-            ]
-        )
-
-    perguntas: list[int] = []
-
-    def juiz(respostas: list[str]) -> Any:
-        def julgar(pares: Sequence[tuple[Pessoa, Pessoa]]) -> list[str]:
-            perguntas.append(len(pares))
-            return respostas
-
-        return julgar
-
-    assert len(juntar_sem_nome(d(), julgar=juiz(["sim"])).pessoas) == 1
-    assert len(juntar_sem_nome(d(), julgar=juiz(["incerto"])).pessoas) == 2
-    assert len(juntar_sem_nome(d(), julgar=juiz(["nao"])).pessoas) == 2
-    assert len(juntar_sem_nome(d()).pessoas) == 2  # sem juiz, ninguém junta
-    assert perguntas == [1, 1, 1]
-
-
-def test_o_juiz_nao_e_chamado_para_o_que_ja_se_decide() -> None:
+def test_na_faixa_ambigua_ninguem_junta() -> None:
     d = decupagem(
         [
             pessoa("pes01", 0, [(100_000, 110_000)]),
-            pessoa("pes02", 1, [(400_000, 410_000)]),
+            pessoa(
+                "pes02", 1, [(400_000, 410_000)], nome=NAO + "blusa vermelha, calvo"
+            ),
         ]
     )
 
-    def julgar(pares: Sequence[tuple[Pessoa, Pessoa]]) -> list[Veredito]:
-        raise AssertionError("não devia perguntar")
-
-    assert len(juntar_sem_nome(d, julgar=julgar).pessoas) == 1
+    assert len(juntar_sem_nome(d).pessoas) == 2
 
 
 # ---- fluxo completo: da análise por janelas à Decupagem gravada -----------------

@@ -104,7 +104,6 @@ COPY api/__init__.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/erros.py \
-     api/espera.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
      api/florence.py \
@@ -195,7 +194,6 @@ COPY api/__init__.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/erros.py \
-     api/espera.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
      api/florence.py \
@@ -319,7 +317,6 @@ COPY api/__init__.py \
      api/decupagem.py \
      api/dispositivo.py \
      api/erros.py \
-     api/espera.py \
      api/eventos_de_uso.py \
      api/florence.py \
      api/idempotencia.py \

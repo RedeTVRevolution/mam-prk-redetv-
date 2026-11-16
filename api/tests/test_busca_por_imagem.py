@@ -77,7 +77,7 @@ def test_png_com_extensao_jpg_e_aceito_pelo_conteudo_e_busca_o_termo_do_modelo()
     # Só a descrição da foto usa o modelo.
     [descricao] = m.transporte.chamadas
     assert descricao.modelo == MODELO_DA_CONSULTA and descricao.video_uri == ""
-    assert len(descricao.imagens) == 1 and descricao.ferramentas == ()
+    assert len(descricao.imagens) == 1
 
 
 def test_o_termo_do_modelo_vira_texto_puro_sem_segunda_chamada() -> None:
