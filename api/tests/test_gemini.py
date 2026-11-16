@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 import requests
+from pydantic import BaseModel
 
 from api.decupagem import Video, esquema_do_modelo
 from api.gemini import (
@@ -22,6 +23,7 @@ from api.gemini import (
     _validar,
     analisar,
     instrucao,
+    validar_json,
 )
 from api.tests.programas_de_teste import perfis_da_tv_fama
 from api.tests.test_decupagem import DURACAO_MS, decupagem_valida
@@ -900,3 +902,16 @@ def test_esquema_esgotado_corta_o_detalhe_da_mensagem() -> None:
     with pytest.raises(AnaliseFalhou) as e:
         _rodar(TransporteFalso(muitos_erros, muitos_erros, muitos_erros))
     assert len(str(e.value)) < 1000
+
+
+class _Modelo(BaseModel):
+    a: int
+
+
+def test_validar_json_devolve_o_modelo_da_resposta_valida() -> None:
+    assert validar_json(_Modelo, '{"a": 1}') == _Modelo(a=1)
+
+
+def test_validar_json_troca_o_erro_do_pydantic_por_resposta_fora_do_esquema() -> None:
+    with pytest.raises(ValueError, match="^resposta fora do esquema$"):
+        validar_json(_Modelo, '{"a": "x"}')
