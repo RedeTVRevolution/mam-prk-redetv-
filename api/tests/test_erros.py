@@ -25,8 +25,16 @@ def _importados(modulo: str) -> set[str]:
     return achados
 
 
-def test_jobs_reexporta_a_mesma_classe() -> None:
-    assert api.jobs.ServicoIndisponivel is api.erros.ServicoIndisponivel
+def test_jobs_usa_servico_indisponivel_sem_reexportar() -> None:
+    # Importa de `api.erros`, sem o `as ServicoIndisponivel` que o tornava parte da API de `api.jobs`.
+    achados = [
+        (no.module, a.asname)
+        for no in ast.walk(ast.parse((API / "jobs.py").read_text()))
+        if isinstance(no, ast.ImportFrom)
+        for a in no.names
+        if a.name == "ServicoIndisponivel"
+    ]
+    assert achados == [("api.erros", None)]
 
 
 def test_excecao_do_modulo_de_erros_cai_no_503_da_aplicacao(tmp_path: Path) -> None:

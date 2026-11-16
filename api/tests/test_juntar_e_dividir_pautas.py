@@ -166,8 +166,7 @@ def test_dividir_fora_da_pauta_ou_com_titulo_vazio_e_422() -> None:
 
 
 def test_os_tipos_novos_estao_no_catalogo_e_podem_exigir_aprovacao() -> None:
-    from api.catalogo_de_correcoes import catalogo
-    from api.correcoes import RepositorioDeAprovacaoEmMemoria
+    from api.correcoes import RepositorioDeAprovacaoEmMemoria, catalogo
 
     tipos = {t.valor: t.rotulo for t in catalogo().tipos}
     repo = RepositorioDeAprovacaoEmMemoria()

@@ -7,12 +7,11 @@ A conta nunca é apagada, porque as correções guardam o autor. Cada ação dei
 registro na auditoria.
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import (
     AfterValidator,
     AwareDatetime,
@@ -21,17 +20,23 @@ from pydantic import (
     StringConstraints,
 )
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auditoria import (
+    Acao,
+    FiltroDeAuditoria,
+    RepositorioDeAuditoria,
+    registro_de_auditoria,
+)
+from api.auth import Usuario
 from api.erros import ServicoIndisponivel
-from api.jobs import _confere_permissao
 from api.papeis import (
-    PAPEIS,
+    DocumentoDePapeis,
     Papel,
     RepositorioDePapeis,
+    em_ordem,
     papeis_do_usuario,
     papeis_efetivos,
 )
+from api.permissoes import exige
 from api.texto_como_dado import Linha
 
 NOME_MAXIMO = 200
@@ -137,12 +142,8 @@ class UsuarioDaLista(BaseModel):
     situacao: Literal["ativa", "desativada"]
 
 
-def _em_ordem(papeis: list[Papel]) -> list[Papel]:
-    return [p for p in PAPEIS if p in papeis]
-
-
 # Sem repetição e na ordem de `PAPEIS`.
-PapeisPedidos = Annotated[list[Papel], AfterValidator(_em_ordem)]
+PapeisPedidos = Annotated[list[Papel], AfterValidator(em_ordem)]
 
 
 class NovoUsuario(BaseModel):
@@ -166,12 +167,13 @@ class PapeisDoUsuario(BaseModel):
     papeis: PapeisPedidos
 
 
-def _exige_gerir(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `usuarios.gerir`; chave de sistema não gere usuários."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não gere usuários")
-    _confere_permissao(request, chamador, "usuarios.gerir")
-    return chamador
+def _criacao_incompleta(documento: DocumentoDePapeis) -> bool:
+    return documento.pendente or (documento.papeis is None and not documento.desativada)
+
+
+def _ja_registrada(auditoria: RepositorioDeAuditoria, uid: str) -> bool:
+    filtro = FiltroDeAuditoria(acao="conta.criada", alvo_id=uid, limite=1)
+    return bool(auditoria.consultar(filtro).registros)
 
 
 def criar_rotas_dos_usuarios(
@@ -191,12 +193,13 @@ def criar_rotas_dos_usuarios(
         )
 
     def da_lista(conta: ContaDoIdentityPlatform) -> UsuarioDaLista:
-        desativada = conta.bloqueada or papeis.desativada(conta.uid)
+        documento = papeis.ler(conta.uid)
+        desativada = conta.bloqueada or documento.desativada
         return UsuarioDaLista(
             uid=conta.uid,
             email=conta.email,
             nome=conta.nome,
-            papeis=efetivos(conta, papeis.obter(conta.uid)),
+            papeis=efetivos(conta, documento.papeis),
             criada_em=conta.criada_em,
             ultimo_acesso=conta.ultimo_acesso,
             situacao="desativada" if desativada else "ativa",
@@ -215,22 +218,23 @@ def criar_rotas_dos_usuarios(
         detalhes: dict[str, object] | None = None,
     ) -> None:
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=relogio(),
-                uid=autor.uid,
-                email=autor.email,
+                quem=autor,
                 acao=acao,
                 alvo_tipo="usuario",
                 alvo_id=conta.uid,
                 alvo_nome=conta.email,
-                detalhes=detalhes or {},
+                detalhes=detalhes,
             )
         )
 
     @rotas.get("")
     def listar(
-        _pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> list[UsuarioDaLista]:
         return sorted(
             (da_lista(c) for c in contas.listar()), key=lambda u: u.email.lower()
@@ -238,22 +242,53 @@ def criar_rotas_dos_usuarios(
 
     @rotas.post("", status_code=201)
     def criar(
-        pedido: NovoUsuario, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        pedido: NovoUsuario,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> UsuarioDaLista:
+        concluindo = False
         try:
             conta = contas.criar(pedido.email, pedido.nome)
+            # Pendente até o registro: sem ele a conta não fica ativa nem sem rastro.
+            papeis.marcar_pendente(conta.uid, True)
         except EmailJaCadastrado:
-            raise HTTPException(409, "Já existe uma conta com esse e-mail") from None
+            # Conclui a criação que falhou: conta pendente, ou sem documento de papéis
+            # e ativa (a marca nem chegou a ser gravada).
+            incompleta = next(
+                (
+                    c
+                    for c in contas.listar()
+                    if c.email.lower() == pedido.email.lower()
+                    and _criacao_incompleta(papeis.ler(c.uid))
+                ),
+                None,
+            )
+            if incompleta is None:
+                raise HTTPException(
+                    409, "Já existe uma conta com esse e-mail"
+                ) from None
+            conta = incompleta
+            concluindo = True
         papeis.salvar(conta.uid, pedido.papeis)
         # O registro antes do link: se o envio falha, a conta já tem rastro e o
-        # link pode ser reenviado.
-        registrar(pessoa, "conta.criada", conta, {"papeis": pedido.papeis})
+        # link pode ser reenviado. Se o registro falha, a conta segue pendente.
+        # ponytail: dois POSTs simultâneos na conclusão gravariam dois registros;
+        # resolver se a tela de usuários passar a repetir o pedido sozinha.
+        if not (concluindo and _ja_registrada(auditoria, conta.uid)):
+            registrar(pessoa, "conta.criada", conta, {"papeis": pedido.papeis})
+        papeis.marcar_pendente(conta.uid, False)
         contas.enviar_link_de_senha(conta.email)
         return da_lista(conta)
 
     @rotas.post("/{uid}/link-de-senha")
     def reenviar_link(
-        uid: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        uid: str,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> dict[str, bool]:
         conta = achar(uid)
         contas.enviar_link_de_senha(conta.email)
@@ -264,7 +299,10 @@ def criar_rotas_dos_usuarios(
     def trocar_papeis(
         uid: str,
         pedido: PapeisDoUsuario,
-        pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> UsuarioDaLista:
         conta = achar(uid)
         guardados = papeis.obter(uid)
@@ -281,10 +319,10 @@ def criar_rotas_dos_usuarios(
                 409, "Você não pode tirar de si mesmo o papel de Administrador"
             )
         # Grava pelo guardado: o de emergência pode tirar um papel que a lista mantém.
-        if guardados is None or _em_ordem(guardados) != pedido.papeis:
+        if guardados is None or em_ordem(guardados) != pedido.papeis:
             papeis.salvar(uid, pedido.papeis)
         # Audita só o que mudou de fato (os efetivos).
-        if _em_ordem(antes) == _em_ordem(depois):
+        if em_ordem(antes) == em_ordem(depois):
             return da_lista(conta)
         try:
             registrar(
@@ -297,11 +335,20 @@ def criar_rotas_dos_usuarios(
 
     @rotas.post("/{uid}/desativar")
     def desativar(
-        uid: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        uid: str,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> UsuarioDaLista:
         if uid == pessoa.uid:
             raise HTTPException(409, "Você não pode desativar a própria conta")
         conta = achar(uid)
+        # A pendente já está sem acesso; desativá-la seria desfeito pelo pedido que conclui.
+        if papeis.ler(uid).pendente:
+            raise HTTPException(
+                409, "Criação pendente: repita o pedido de criar o usuário"
+            )
         # A marca primeiro: é ela que corta o acesso na hora. Sem registro, a marca
         # sai. O bloqueio no Identity Platform e a revogação dos tokens vêm por
         # último; se falham, o corte já vale e o pedido pode ser repetido.
@@ -316,9 +363,17 @@ def criar_rotas_dos_usuarios(
 
     @rotas.post("/{uid}/reativar")
     def reativar(
-        uid: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        uid: str,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
+        ],
     ) -> UsuarioDaLista:
         conta = achar(uid)
+        if papeis.ler(uid).pendente:
+            raise HTTPException(
+                409, "Criação pendente: repita o pedido de criar o usuário"
+            )
         contas.bloquear(uid, False)
         papeis.marcar_desativada(uid, False)
         try:

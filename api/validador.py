@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from api.cortes import LIMIAR_PADRAO, DeteccaoFalhou, detectar_cortes
-from api.jobs import CodigoDeFalha
+from api.modelo_do_job import CodigoDeFalha
 
 MARCAS_PERMITIDAS = {b"isom", b"mp41", b"mp42", b"avc1"}
 CODECS_VIDEO = {"h264", "hevc"}

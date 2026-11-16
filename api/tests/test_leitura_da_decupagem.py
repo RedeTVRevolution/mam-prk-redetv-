@@ -16,13 +16,14 @@ from api.catalogo import (
     RenomeacaoDaPessoa,
 )
 from api.correcoes import Correcao, RepositorioDeCorrecoesEmMemoria, versao_do_modelo
-from api.jobs import FiltroDeJobs, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.leitura_da_decupagem import (
     LeituraDaDecupagem,
     decupagens_corrigidas,
     decupagens_dos_jobs,
 )
 from api.marcas import CatalogoDeMarcasEmMemoria, MarcaDoCatalogo
+from api.modelo_do_job import FiltroDeJobs
 
 BASE = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
 ENVIO = EnvioParaLixeira(em=BASE, por_uid="u1", por_email="a@r.com", motivo="teste")

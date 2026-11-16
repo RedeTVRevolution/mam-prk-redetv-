@@ -6,7 +6,7 @@ from typing import Annotated, Protocol, TypedDict
 from fastapi import APIRouter, Depends
 
 from api.auth import Chamador
-from api.jobs import _exige
+from api.permissoes import exige_escopo
 from api.taxonomia_de_objetos import TIPOS_CANONICOS
 from api.texto import normalizar
 from api.texto_como_dado import LinhaDaConsulta
@@ -80,7 +80,7 @@ def criar_rotas_dos_tipos_de_objeto(tipos: TiposDeObjeto) -> APIRouter:
 
     @rotas.get("/objetos/tipos")
     def buscar(
-        _chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        _chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
         q: Annotated[str, LinhaDaConsulta(100)] = "",
     ) -> list[TipoDeObjeto]:
         return buscar_com_a_lista(tipos, q, LIMITE_PADRAO)

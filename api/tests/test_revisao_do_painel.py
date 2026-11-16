@@ -10,7 +10,8 @@ from typing import Any
 import pytest
 
 from api.custo_do_painel import CustoEmMemoria
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.painel import NumerosDeRevisao, tempo_no_painel
 from api.revisao import Medida, Pulso, RepositorioDeRevisaoEmMemoria
 from api.revisao_do_painel import (

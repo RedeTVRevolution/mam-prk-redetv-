@@ -7,9 +7,8 @@ os papéis vão para o Firestore. A busca na nuvem não tem teste automático.
 import os
 import sys
 
-from api.bancos import cliente_da_colecao
+from api.bancos import papeis_do_firestore
 from api.clientes_de_nuvem import sessao_autenticada
-from api.nuvem import COLECAO_DE_PAPEIS, RepositorioDePapeisFirestore
 from api.papeis import ContaNaoEncontrada, atribuir_papeis_main
 
 
@@ -33,9 +32,7 @@ if __name__ == "__main__":
     sys.exit(
         atribuir_papeis_main(
             sys.argv[1:],
-            RepositorioDePapeisFirestore(
-                cliente_da_colecao(projeto, COLECAO_DE_PAPEIS)
-            ),
+            papeis_do_firestore(projeto),
             lambda email: achar_uid(projeto, email),
         )
     )

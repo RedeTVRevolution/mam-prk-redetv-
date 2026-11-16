@@ -6,7 +6,6 @@ não é Administrador. Quem apaga de fato é a purga, depois de 30 dias (ADR 001
 
 import logging
 import math
-import uuid
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal, Protocol
@@ -14,27 +13,36 @@ from typing import Annotated, Literal, Protocol
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoes
 from api.indice_da_busca import IndiceDaBusca
-from api.jobs import (
+from api.marcas import CatalogoDeMarcas
+from api.modelo_do_job import (
+    FIM_OU_CANCELADO,
     FiltroDeJobs,
     Job,
     RepositorioDeJobs,
-    _confere_permissao,
-    _tem_permissao,
 )
-from api.marcas import CatalogoDeMarcas
-from api.texto_como_dado import Texto
+from api.permissoes import JobDoPedido, exige, tem_permissao
+from api.texto_como_dado import Linha, Texto
 
 log = logging.getLogger(__name__)
 
 PRAZO_DA_PURGA = timedelta(days=30)
 MOTIVO_MAXIMO = 500
+# Quem consta no registro da purga que ninguém pediu (o prazo de 30 dias venceu).
+SISTEMA_DA_PURGA = "Purga automática"
 # Em andamento, o Job ainda escreve nos arquivos: cancelar primeiro.
-ESTADOS_QUE_VAO_PARA_A_LIXEIRA = ("concluido", "falhou", "cancelado")
+ESTADOS_QUE_VAO_PARA_A_LIXEIRA = FIM_OU_CANCELADO
+
+
+class PedidoDePurga(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # O nome, digitado: a prova de que a pessoa sabe o que está apagando.
+    nome: Annotated[str, Linha(255)]
 
 
 class ArquivosContados(BaseModel):
@@ -107,35 +115,18 @@ class Envio(BaseModel):
 
 
 def sem_job_na_lixeira(
-    repositorio: RepositorioDeJobs,
-) -> Callable[[Request, ChamadorAutenticado], None]:
+    request: Request, chamador: ChamadorAutenticado, job: JobDoPedido
+) -> None:
     """Dependência de `/v1`: toda rota com `{job_id}` dá 404 ao Job na lixeira, menos ao
-    Administrador, que o lê para conferir e restaurar. O Job lido fica em
-    `request.state.job_lido`, para a rota não ler de novo."""
-
-    def verificar(request: Request, chamador: ChamadorAutenticado) -> None:
-        job_id = request.path_params.get("job_id")
-        if job_id is None:
-            return
-        job = repositorio.obter(job_id)
-        request.state.job_lido = job
-        if job is None or job.lixeira is None:
-            return
-        if isinstance(chamador, Usuario) and _tem_permissao(
-            request, chamador, "lixeira.gerir"
-        ):
-            return
-        raise HTTPException(404, "Job não encontrado")
-
-    return verificar
-
-
-def _exige_gerir(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `lixeira.gerir`; chave de sistema não mexe na lixeira."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não mexe na lixeira")
-    _confere_permissao(request, chamador, "lixeira.gerir")
-    return chamador
+    Administrador, que o lê para conferir e restaurar. O Job vem de `JobDoPedido`, o
+    mesmo que a rota recebe."""
+    if job is None or job.lixeira is None:
+        return
+    if isinstance(chamador, Usuario) and tem_permissao(
+        request, chamador, "lixeira.gerir"
+    ):
+        return
+    raise HTTPException(404, "Job não encontrado")
 
 
 def _quem_enviou(job: Job) -> str:
@@ -242,11 +233,9 @@ def criar_rotas_da_lixeira(
         impacto: ImpactoDoVideo,
     ) -> None:
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=relogio(),
-                uid=autor.uid,
-                email=autor.email,
+                quem=autor,
                 acao=acao,
                 alvo_tipo="video",
                 alvo_id=job.id,
@@ -278,7 +267,10 @@ def criar_rotas_da_lixeira(
 
     @rotas.get("")
     def listar(
-        _pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> list[ItemDaLixeira]:
         agora = relogio()
         itens = [
@@ -300,7 +292,11 @@ def criar_rotas_da_lixeira(
 
     @rotas.get("/videos/{id_do_video}/impacto")
     def impacto(
-        id_do_video: str, _pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        id_do_video: str,
+        _pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> ImpactoDoVideo:
         return impacto_de(achar(id_do_video))
 
@@ -308,7 +304,10 @@ def criar_rotas_da_lixeira(
     def enviar(
         id_do_video: str,
         pedido: Envio,
-        pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> ItemDaLixeira:
         job = achar(id_do_video)
         if job.estado not in ESTADOS_QUE_VAO_PARA_A_LIXEIRA:
@@ -351,7 +350,11 @@ def criar_rotas_da_lixeira(
 
     @rotas.post("/videos/{id_do_video}/restaurar")
     def restaurar(
-        id_do_video: str, pessoa: Annotated[Usuario, Depends(_exige_gerir)]
+        id_do_video: str,
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> JobRestaurado:
         job = achar(id_do_video)
         envio = job.lixeira

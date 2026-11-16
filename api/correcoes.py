@@ -26,6 +26,9 @@ from pydantic import (
 
 from api import catalogo_de_correcoes as textos
 from api.decupagem import (
+    CATEGORIAS_DE_OBJETO,
+    CORES_BASE,
+    RELACOES_DO_OBJETO,
     CategoriaDeObjeto,
     Comercial,
     CorBase,
@@ -40,6 +43,7 @@ from api.identidade import (
     identidade_do_comercial as _identidade_do_comercial,
 )
 from api.identidade import identidade_do_nome, nao_identificado
+from api.indice_da_busca import NOME_DA_CATEGORIA
 from api.pessoas import LISTAS
 from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, Texto
@@ -108,7 +112,7 @@ _TEMPOS = re.compile(r"^(\d{1,12})-(\d{1,12})$")
 _PROIBIDAS = {"Cc", "Cf", "Zl", "Zp"}
 
 
-def _sem_controle(texto: str, permitidos: str = "") -> str:
+def sem_controle(texto: str, permitidos: str = "") -> str:
     if any(
         unicodedata.category(c) in _PROIBIDAS and c not in permitidos for c in texto
     ):
@@ -118,7 +122,7 @@ def _sem_controle(texto: str, permitidos: str = "") -> str:
 
 def _sem_controle_salvo_quebra(texto: str) -> str:
     """O motivo vem de um campo de várias linhas: aceita só a quebra de linha."""
-    return _sem_controle(texto.replace("\r\n", "\n"), permitidos="\n")
+    return sem_controle(texto.replace("\r\n", "\n"), permitidos="\n")
 
 
 class Ancora(BaseModel):
@@ -234,7 +238,7 @@ class NovoComercial(BaseModel):
     @field_validator("marca")
     @classmethod
     def _texto_sem_controle(cls, valor: str) -> str:
-        return _sem_controle(valor)
+        return sem_controle(valor)
 
     @model_validator(mode="after")
     def _coerente(self) -> Self:
@@ -263,7 +267,7 @@ class NovaAparicao(BaseModel):
     @field_validator("nome", "evidencia")
     @classmethod
     def _texto_sem_controle(cls, valor: str | None) -> str | None:
-        return None if valor is None else _sem_controle(valor)
+        return None if valor is None else sem_controle(valor)
 
     @model_validator(mode="after")
     def _coerente(self) -> Self:
@@ -307,7 +311,7 @@ class NovaDescricao(BaseModel):
     @classmethod
     def _sem_controle_nos_rotulos(cls, valor: str | list[str]) -> str | list[str]:
         for texto in [valor] if isinstance(valor, str) else valor:
-            _sem_controle(texto)
+            sem_controle(texto)
         return valor
 
     @field_validator("acao")
@@ -344,7 +348,7 @@ class NovoTexto(BaseModel):
     @field_validator("locutor")
     @classmethod
     def _locutor(cls, valor: str) -> str:
-        return _sem_controle(valor)
+        return sem_controle(valor)
 
 
 class NovoPapelVisual(BaseModel):
@@ -374,7 +378,7 @@ class NovoPapelVisual(BaseModel):
     @field_validator("papel", "visual")
     @classmethod
     def _sem_controle_nos_rotulos(cls, valor: str | None) -> str | None:
-        return None if valor is None else _sem_controle(valor)
+        return None if valor is None else sem_controle(valor)
 
 
 class NovoTextoNaTela(BaseModel):
@@ -423,7 +427,7 @@ class _AtributosDoObjeto(BaseModel):
     @field_validator("tipo", "cor", "detalhe", "marca")
     @classmethod
     def _sem_controle_nos_rotulos(cls, valor: str | None) -> str | None:
-        return None if valor is None else _sem_controle(valor)
+        return None if valor is None else sem_controle(valor)
 
     @field_validator("cor_base")
     @classmethod
@@ -506,7 +510,7 @@ class NovaPauta(BaseModel):
     @field_validator("titulo")
     @classmethod
     def _titulo(cls, valor: str) -> str:
-        return _sem_controle(valor)
+        return sem_controle(valor)
 
     @field_validator("resumo")
     @classmethod
@@ -538,7 +542,7 @@ class NovaJuncao(BaseModel):
     @field_validator("titulo")
     @classmethod
     def _titulo(cls, valor: str) -> str:
-        return _sem_controle(valor)
+        return sem_controle(valor)
 
     @model_validator(mode="after")
     def _sem_repetir(self) -> Self:
@@ -569,7 +573,7 @@ class NovaDivisao(BaseModel):
     @classmethod
     def _titulos(cls, valor: list[str]) -> list[str]:
         for titulo in valor:
-            _sem_controle(titulo)
+            sem_controle(titulo)
         return valor
 
 
@@ -804,7 +808,7 @@ def versao_do_modelo(conteudo: bytes) -> str:
     return hashlib.sha256(conteudo).hexdigest()
 
 
-def _intervalo_da_pessoa(
+def intervalo_da_pessoa(
     pessoa: dict[str, Any], listas: tuple[str, ...] = LISTAS
 ) -> tuple[int, int]:
     ocorrencias = [o for lista in listas for o in pessoa.get(lista, [])]
@@ -825,33 +829,33 @@ def identidade_da_pessoa(pessoa: dict[str, Any]) -> str:
     nome = str(pessoa["nome"])
     identidade = identidade_do_nome(nome)
     if identidade is None:
-        inicio, fim = _intervalo_da_pessoa(pessoa, ("na_imagem",))
+        inicio, fim = intervalo_da_pessoa(pessoa, ("na_imagem",))
         return f"{normalizar(nome)}@{inicio}-{fim}"
     return identidade
 
 
-def _pessoas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+def pessoas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pessoas", []) if isinstance(p, dict)]
 
 
-def _ids_das_pessoas(modelo: dict[str, Any]) -> set[Any]:
-    return {p.get("id") for p in _pessoas(modelo)}
+def ids_das_pessoas(modelo: dict[str, Any]) -> set[Any]:
+    return {p.get("id") for p in pessoas(modelo)}
 
 
-def _pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+def pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [p for p in modelo.get("pautas", []) if isinstance(p, dict)]
 
 
-def _objetos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+def objetos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [o for o in modelo.get("objetos", []) if isinstance(o, dict)]
 
 
-def _intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
+def intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
     """Pauta, comercial, plano e fala: o item tem o próprio intervalo."""
     return int(pauta["inicio_ms"]), int(pauta["fim_ms"])
 
 
-def _intervalo_do_objeto(objeto: dict[str, Any]) -> tuple[int, int]:
+def intervalo_do_objeto(objeto: dict[str, Any]) -> tuple[int, int]:
     """Do menor início ao maior fim das ocorrências: o objeto não tem intervalo próprio."""
     ocorrencias = objeto["ocorrencias"]
     return (
@@ -865,22 +869,22 @@ def identidade_do_comercial(comercial: dict[str, Any]) -> str:
     return _identidade_do_comercial(str(comercial["marca"]), str(comercial["tipo"]))
 
 
-def _intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, int]:
+def intervalo_do_item(item: dict[str, Any], tipo_do_item: str) -> tuple[int, int]:
     if tipo_do_item == "pessoa":
-        return _intervalo_da_pessoa(item)
+        return intervalo_da_pessoa(item)
     if tipo_do_item == "objeto":
-        return _intervalo_do_objeto(item)
-    return _intervalo_da_pauta(item)
+        return intervalo_do_objeto(item)
+    return intervalo_da_pauta(item)
 
 
-def _valor_do_item(item: dict[str, Any], tipo: str) -> str:
+def valor_do_item(item: dict[str, Any], tipo: str) -> str:
     """O valor que a correção do `tipo` troca neste item."""
     leitor = TIPOS[tipo].valor_do_item
     assert leitor is not None
     return leitor(item)
 
 
-def _acha_ocorrencia(
+def acha_ocorrencia(
     pessoa: dict[str, Any],
     inicio_ms: int,
     fim_ms: int,
@@ -938,12 +942,12 @@ class CatalogoIdInvalido(Exception):
     """O `catalogo_id` não existe no catálogo ou é de outro nome."""
 
 
-def _ancora_do_item(
+def ancora_do_item(
     item: dict[str, Any], tipo_do_item: TipoDoItem, versao: str
 ) -> Ancora:
     if tipo_do_item == "pessoa":
         return _ancora_da_pessoa(item, versao)
-    inicio, fim = _intervalo_do_item(item, tipo_do_item)
+    inicio, fim = intervalo_do_item(item, tipo_do_item)
     # Plano e fala se casam pelo intervalo: a identidade é só o tipo.
     if tipo_do_item == "comercial":
         identidade = identidade_do_comercial(item)
@@ -965,7 +969,7 @@ def _ancora_do_item(
 
 
 def _ancora_da_pessoa(pessoa: dict[str, Any], versao: str) -> Ancora:
-    inicio, fim = _intervalo_da_pessoa(pessoa)
+    inicio, fim = intervalo_da_pessoa(pessoa)
     return Ancora(
         versao=versao,
         tipo_do_item="pessoa",
@@ -1041,11 +1045,11 @@ class Reconciliacao:
     sem_casar: list[Correcao]
 
 
-def _sobrepoe(a: tuple[int, int], b: tuple[int, int]) -> bool:
+def sobrepoe(a: tuple[int, int], b: tuple[int, int]) -> bool:
     return a[0] <= b[1] and b[0] <= a[1]
 
 
-def _sobrepoe_metade(a: tuple[int, int], b: tuple[int, int]) -> bool:
+def sobrepoe_metade(a: tuple[int, int], b: tuple[int, int]) -> bool:
     """A sobreposição cobre pelo menos metade do menor dos dois intervalos.
 
     Um intervalo de duração zero (um instante) conta se cai dentro do outro.
@@ -1055,7 +1059,7 @@ def _sobrepoe_metade(a: tuple[int, int], b: tuple[int, int]) -> bool:
     return sobreposicao >= 0 and sobreposicao * 2 >= menor
 
 
-def _sobrepoe_de_verdade(a: tuple[int, int], b: tuple[int, int]) -> bool:
+def sobrepoe_de_verdade(a: tuple[int, int], b: tuple[int, int]) -> bool:
     """Sobreposição positiva: trechos que só se encostam não são o mesmo.
 
     Um instante (duração zero) conta se cai dentro do outro intervalo.
@@ -1066,7 +1070,7 @@ def _sobrepoe_de_verdade(a: tuple[int, int], b: tuple[int, int]) -> bool:
 
 
 def _ja_traz_o_valor(c: Correcao, item: dict[str, Any]) -> bool:
-    return _valor_do_item(item, c.tipo) == c.depois
+    return valor_do_item(item, c.tipo) == c.depois
 
 
 _CHAVE_DO_ITEM = {
@@ -1079,7 +1083,7 @@ _CHAVE_DO_ITEM = {
 }
 
 
-def _itens_com_o_id(resultado: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
+def itens_com_o_id(resultado: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
     chave = _CHAVE_DO_ITEM[c.ancora.tipo_do_item]
     return [
         item
@@ -1088,7 +1092,7 @@ def _itens_com_o_id(resultado: dict[str, Any], c: Correcao) -> list[dict[str, An
     ]
 
 
-def _por_inicio(ocorrencias: list[dict[str, Any]]) -> None:
+def por_inicio(ocorrencias: list[dict[str, Any]]) -> None:
     ocorrencias.sort(key=lambda o: (o["inicio_ms"], o["fim_ms"]))
 
 
@@ -1099,7 +1103,7 @@ def _ocorrencia_da_correcao(
     sobreposição; se sumiu, `None` (nada muda). Achada, a pessoa vira revisão."""
     o = c.ocorrencia
     assert o is not None
-    achada = _acha_ocorrencia(pessoa, o.inicio_ms, o.fim_ms, (o.lista,))
+    achada = acha_ocorrencia(pessoa, o.inicio_ms, o.fim_ms, (o.lista,))
     if achada is None:
         return None
     pessoa["origem"] = "revisao"
@@ -1114,7 +1118,7 @@ def _tempos_da_ocorrencia(
         return
     o, ocorrencia = achada
     ocorrencia["inicio_ms"], ocorrencia["fim_ms"] = tempos_de(c.depois)
-    _por_inicio(pessoa[o.lista])
+    por_inicio(pessoa[o.lista])
 
 
 def _papel_visual_da_ocorrencia(
@@ -1178,7 +1182,7 @@ def _separar(resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao) -> 
         }
     )
     ainda = {i for o in restantes for i in o["pautas"]}
-    for pauta in _pautas(resultado):
+    for pauta in pautas(resultado):
         if pauta.get("id") in origem["pautas"]:
             ids = [
                 i
@@ -1186,7 +1190,7 @@ def _separar(resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao) -> 
                 if i != pessoa["id"] or pauta["id"] in ainda
             ]
             pauta["pessoas"] = list(dict.fromkeys([*ids, novo_id]))
-    for objeto in _objetos(resultado):
+    for objeto in objetos(resultado):
         if (
             objeto.get("id") in origem["objetos"]
             and objeto.get("pessoa") == pessoa["id"]
@@ -1201,7 +1205,7 @@ def _origem_ja_separada(c: Correcao, item: dict[str, Any]) -> bool:
 
 def _confere_a_origem(decupagem: dict[str, Any], valor: str) -> None:
     if not any(
-        o["chave"] == valor for p in _pessoas(decupagem) for o in p.get("origens", [])
+        o["chave"] == valor for p in pessoas(decupagem) for o in p.get("origens", [])
     ):
         raise ItemInexistente(valor)
 
@@ -1214,16 +1218,16 @@ def _leva_os_objetos(
 ) -> None:
     """O objeto da pessoa visto só na aparição trocada passa à pessoa nova; o
     visto também noutra aparição dela fica com ela."""
-    trocada = _intervalo_da_pauta(aparicao)
-    restantes = [_intervalo_da_pauta(a) for a in pessoa["na_imagem"]]
-    for objeto in _objetos(resultado):
+    trocada = intervalo_da_pauta(aparicao)
+    restantes = [intervalo_da_pauta(a) for a in pessoa["na_imagem"]]
+    for objeto in objetos(resultado):
         if objeto.get("pessoa") != pessoa.get("id"):
             continue
-        tempos = [_intervalo_da_pauta(t) for t in objeto.get("ocorrencias", [])]
+        tempos = [intervalo_da_pauta(t) for t in objeto.get("ocorrencias", [])]
         if (
             tempos
-            and all(_sobrepoe(t, trocada) for t in tempos)
-            and not any(_sobrepoe_de_verdade(t, r) for t in tempos for r in restantes)
+            and all(sobrepoe(t, trocada) for t in tempos)
+            and not any(sobrepoe_de_verdade(t, r) for t in tempos for r in restantes)
         ):
             objeto["pessoa"] = novo_id
 
@@ -1240,7 +1244,7 @@ def _aparicao_para_mencao(
     if c.depois == "citada_no_texto":
         mencao["texto"] = ocorrencia["evidencia"]
     pessoa[c.depois].append(mencao)
-    _por_inicio(pessoa[c.depois])
+    por_inicio(pessoa[c.depois])
 
 
 def _mencao_para_aparicao(
@@ -1258,7 +1262,7 @@ def _mencao_para_aparicao(
             "evidencia": c.depois,
         }
     )
-    _por_inicio(pessoa["na_imagem"])
+    por_inicio(pessoa["na_imagem"])
 
 
 def _aparicao_na_pessoa(
@@ -1276,7 +1280,7 @@ def _acrescentar_aparicao(pessoa: dict[str, Any], aparicao: dict[str, Any]) -> N
             "evidencia": aparicao["evidencia"],
         }
     )
-    _por_inicio(pessoa["na_imagem"])
+    por_inicio(pessoa["na_imagem"])
 
 
 def _acrescentar_pessoa(resultado: dict[str, Any], c: Correcao) -> None:
@@ -1285,7 +1289,7 @@ def _acrescentar_pessoa(resultado: dict[str, Any], c: Correcao) -> None:
     existente = next(
         (
             p
-            for p in _pessoas(resultado)
+            for p in pessoas(resultado)
             if normalizar(str(p["nome"])) == c.ancora.identidade
         ),
         None,
@@ -1418,7 +1422,7 @@ class Tipo:
 
 
 def _campo_longo(n: NovaCorrecao) -> str:
-    _sem_controle(n.valor)
+    sem_controle(n.valor)
     if len(n.valor) > LIMITE_DO_NOME:
         raise ValueError("valor longo demais")
     return n.valor
@@ -1512,7 +1516,7 @@ def _canonizar_nao_e(n: NovaCorrecao) -> str:
 
 
 def _canonizar_separar(n: NovaCorrecao) -> str:
-    return _sem_controle(n.valor)
+    return sem_controle(n.valor)
 
 
 def _canonizar_aparicao_para_mencao(n: NovaCorrecao) -> str:
@@ -1530,7 +1534,7 @@ def _canonizar_papel_visual(n: NovaCorrecao) -> str:
 def _canonizar_mencao_para_aparicao(n: NovaCorrecao) -> str:
     if _lista_do_pedido(n) == "na_imagem":
         raise ValueError("a ocorrência já é uma aparição")
-    _sem_controle(n.valor)
+    sem_controle(n.valor)
     if len(n.valor) > LIMITE_DO_NOME:
         raise ValueError("evidência longa demais")
     return n.valor
@@ -1541,7 +1545,7 @@ def _campo(nome: str) -> Callable[[dict[str, Any]], str]:
 
 
 def _tempos_do_item(item: dict[str, Any]) -> str:
-    inicio, fim = _intervalo_da_pauta(item)
+    inicio, fim = intervalo_da_pauta(item)
     return f"{inicio}-{fim}"
 
 
@@ -1591,7 +1595,7 @@ def _valor_do_dono(item: dict[str, Any]) -> str:
 
 def _confere_o_dono(entregue: dict[str, Any], valor: str) -> None:
     pessoa = json.loads(valor)["pessoa"]
-    if pessoa is not None and pessoa not in _ids_das_pessoas(entregue):
+    if pessoa is not None and pessoa not in ids_das_pessoas(entregue):
         raise ItemInexistente(pessoa)
 
 
@@ -1617,7 +1621,7 @@ def _ocorrencia_do_pedido(
     pessoa: dict[str, Any], ocorrencia: Ocorrencia | None, listas: tuple[str, ...]
 ) -> tuple[str, dict[str, Any]] | None:
     assert ocorrencia is not None
-    return _acha_ocorrencia(pessoa, ocorrencia.inicio_ms, ocorrencia.fim_ms, listas)
+    return acha_ocorrencia(pessoa, ocorrencia.inicio_ms, ocorrencia.fim_ms, listas)
 
 
 def _na_lista(
@@ -1651,7 +1655,7 @@ def _aparicao_acrescentada_na_lista(
     pessoa: dict[str, Any], ocorrencia: Ocorrencia | None, depois: str
 ) -> str:
     alvo = json.loads(depois)
-    achada = _acha_ocorrencia(pessoa, alvo["inicio_ms"], alvo["fim_ms"], ("na_imagem",))
+    achada = acha_ocorrencia(pessoa, alvo["inicio_ms"], alvo["fim_ms"], ("na_imagem",))
     if achada is None:
         return ""
     lista, o = achada
@@ -1666,14 +1670,14 @@ def _nome_entregue_do_alvo(
     original = next(
         (
             o
-            for o in _pessoas(modelo)
+            for o in pessoas(modelo)
             if identidade_da_pessoa(o) == alvo.ancora.identidade
         ),
         None,
     )
     if original is not None:
         pessoa = next(
-            (p for p in _pessoas(entregue) if p.get("id") == original.get("id")), None
+            (p for p in pessoas(entregue) if p.get("id") == original.get("id")), None
         )
         if pessoa is not None:
             return str(pessoa["nome"])
@@ -1697,17 +1701,17 @@ def _traz_objetos(entregue: dict[str, Any]) -> bool:
 
 
 def _traz_tom(entregue: dict[str, Any]) -> bool:
-    return any("tom" in p for p in _pautas(entregue))
+    return any("tom" in p for p in pautas(entregue))
 
 
 def _traz_fontes(entregue: dict[str, Any]) -> bool:
-    return any("fontes_do_nome" in p for p in _pessoas(entregue))
+    return any("fontes_do_nome" in p for p in pessoas(entregue))
 
 
 def _traz_papel_visual(entregue: dict[str, Any]) -> bool:
     return any(
         "papel" in a or "visual" in a
-        for p in _pessoas(entregue)
+        for p in pessoas(entregue)
         for a in p.get("na_imagem", [])
     )
 
@@ -1815,14 +1819,14 @@ def _traz_o_tipo(c: Correcao, item: dict[str, Any]) -> bool:
 def _traz_o_papel_visual(c: Correcao, item: dict[str, Any]) -> bool:
     assert c.ocorrencia is not None
     o = c.ocorrencia
-    achada = _acha_ocorrencia(item, o.inicio_ms, o.fim_ms, (o.lista,))
+    achada = acha_ocorrencia(item, o.inicio_ms, o.fim_ms, (o.lista,))
     return achada is not None and _json_do_papel_visual(achada[1]) == c.depois
 
 
 def _traz_a_aparicao(c: Correcao, item: dict[str, Any]) -> bool:
     alvo = json.loads(c.depois)
     return (
-        _acha_ocorrencia(item, alvo["inicio_ms"], alvo["fim_ms"], ("na_imagem",))
+        acha_ocorrencia(item, alvo["inicio_ms"], alvo["fim_ms"], ("na_imagem",))
         is not None
     )
 
@@ -1900,7 +1904,7 @@ def _ancora_do_objeto_novo(valor: str, item_id: str, versao: str) -> Ancora:
         "tipo": novo["tipo"],
         "ocorrencias": [{"inicio_ms": novo["inicio_ms"], "fim_ms": novo["fim_ms"]}],
     }
-    return _ancora_do_item(item, "objeto", versao)
+    return ancora_do_item(item, "objeto", versao)
 
 
 def _do_mesmo_tipo_de_objeto(
@@ -1911,20 +1915,20 @@ def _do_mesmo_tipo_de_objeto(
 
 
 def _tempos_do_objeto(item: dict[str, Any]) -> str:
-    inicio, fim = _intervalo_do_objeto(item)
+    inicio, fim = intervalo_do_objeto(item)
     return f"{inicio}-{fim}"
 
 
 def _ancora_do_comercial_novo(valor: str, item_id: str, versao: str) -> Ancora:
-    return _ancora_do_item(json.loads(valor), "comercial", versao)
+    return ancora_do_item(json.loads(valor), "comercial", versao)
 
 
 def _ancora_do_texto_novo(valor: str, item_id: str, versao: str) -> Ancora:
-    return _ancora_do_item(json.loads(valor), "texto_na_tela", versao)
+    return ancora_do_item(json.loads(valor), "texto_na_tela", versao)
 
 
 def _ancora_da_pauta_nova(valor: str, item_id: str, versao: str) -> Ancora:
-    return _ancora_do_item(json.loads(valor), "pauta", versao)
+    return ancora_do_item(json.loads(valor), "pauta", versao)
 
 
 def _ancora_da_pessoa_nova(valor: str, item_id: str, versao: str) -> Ancora | None:
@@ -2023,7 +2027,7 @@ def _canonizar_divisao(n: NovaCorrecao) -> str:
 
 
 def _pautas_em_ordem(modelo: dict[str, Any]) -> list[dict[str, Any]]:
-    return sorted(_pautas(modelo), key=lambda p: (p["inicio_ms"], p["fim_ms"]))
+    return sorted(pautas(modelo), key=lambda p: (p["inicio_ms"], p["fim_ms"]))
 
 
 def _preparar_juncao(
@@ -2061,7 +2065,7 @@ def _aplicar_juncao(resultado: dict[str, Any], c: Correcao) -> None:
     juntas = [
         p
         for p in _pautas_em_ordem(resultado)
-        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+        if sobrepoe_metade(intervalo, intervalo_da_pauta(p))
     ]
     if not juntas:
         return
@@ -2087,13 +2091,13 @@ def _reapontar_juncao(
     achadas = [
         p
         for p in _pautas_em_ordem(modelo)
-        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+        if sobrepoe_metade(intervalo, intervalo_da_pauta(p))
     ]
     if not achadas:
         return None
     if len(achadas) == 1:
         # Uma pauta só: o modelo já a trouxe junta se ela cobre ao menos metade do trecho.
-        inicio, fim = _intervalo_da_pauta(achadas[0])
+        inicio, fim = intervalo_da_pauta(achadas[0])
         sobreposicao = min(fim, intervalo[1]) - max(inicio, intervalo[0])
         if sobreposicao * 2 <= intervalo[1] - intervalo[0]:
             return None
@@ -2126,12 +2130,12 @@ def _preparar_divisao(
     entregue: dict[str, Any], novo: NovaCorrecao, versao: str
 ) -> tuple[str, Ancora]:
     divisao = NovaDivisao.model_validate_json(novo.valor)
-    item = next((p for p in _pautas(entregue) if p.get("id") == novo.item_id), None)
+    item = next((p for p in pautas(entregue) if p.get("id") == novo.item_id), None)
     if item is None:
         raise ItemInexistente(novo.item_id)
     if not item["inicio_ms"] < divisao.em_ms < item["fim_ms"]:
         raise EstruturaInvalida("o corte cai fora da pauta")
-    return novo.valor, _ancora_do_item(item, "pauta", versao)
+    return novo.valor, ancora_do_item(item, "pauta", versao)
 
 
 def _aplicar_divisao(resultado: dict[str, Any], c: Correcao) -> None:
@@ -2139,7 +2143,7 @@ def _aplicar_divisao(resultado: dict[str, Any], c: Correcao) -> None:
     só dá a cada metade o seu título."""
     divisao = json.loads(c.depois)
     em = divisao["em_ms"]
-    for pauta in _itens_com_o_id(resultado, c):
+    for pauta in itens_com_o_id(resultado, c):
         if abs(pauta["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS:
             seguinte = next(
                 (
@@ -2180,7 +2184,7 @@ def _reapontar_divisao(
     achadas = [
         p
         for p in _pautas_em_ordem(modelo)
-        if _sobrepoe_metade(intervalo, _intervalo_da_pauta(p))
+        if sobrepoe_metade(intervalo, intervalo_da_pauta(p))
     ]
     antes = [p for p in achadas if abs(p["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
     depois = [p for p in achadas if abs(p["inicio_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
@@ -2197,7 +2201,7 @@ def _reapontar_divisao(
     nova = c.model_copy(
         update={
             "item_id": str(item.get("id", "")),
-            "ancora": _ancora_do_item(item, "pauta", versao),
+            "ancora": ancora_do_item(item, "pauta", versao),
         }
     )
     return nova, atendida
@@ -2500,3 +2504,31 @@ def rotulos_dos_tipos() -> list[textos.Opcao]:
     """Todo tipo de Correção com o rótulo: os da tabela e os das decisões."""
     rotulos = {t: e.rotulo for t, e in TIPOS.items()} | ROTULOS_DAS_DECISOES
     return [textos.Opcao(valor=t, rotulo=r) for t, r in rotulos.items()]
+
+
+def catalogo() -> textos.CatalogoDeCorrecoes:
+    return textos.CatalogoDeCorrecoes(
+        tipos=rotulos_dos_tipos(),
+        tipos_de_comercial=textos.opcoes(
+            get_args(Comercial.model_fields["tipo"].annotation), {}
+        ),
+        tipos_de_texto_na_tela=textos.opcoes(
+            get_args(TextoNaTela.model_fields["tipo"].annotation), {}
+        ),
+        tons_da_pauta=textos.opcoes(get_args(TomDaPauta), textos.ROTULOS_DOS_TONS),
+        fontes_do_nome=textos.opcoes(get_args(FonteDoNome), textos.ROTULOS_DAS_FONTES),
+        categorias_de_objeto=textos.opcoes(CATEGORIAS_DE_OBJETO, NOME_DA_CATEGORIA),
+        cores_base=textos.opcoes(CORES_BASE, {}),
+        relacoes_do_objeto=textos.opcoes(
+            RELACOES_DO_OBJETO, textos.ROTULOS_DAS_RELACOES
+        ),
+        limites=textos.Limites(
+            nome=LIMITE_DO_NOME,
+            texto=LIMITE_DO_TEXTO,
+            motivo=LIMITE_DO_MOTIVO,
+        ),
+        prefixos=textos.Prefixos(
+            acrescentado=PREFIXO_ACRESCENTADO,
+            nao_identificado=PREFIXO_NAO_IDENTIFICADO,
+        ),
+    )

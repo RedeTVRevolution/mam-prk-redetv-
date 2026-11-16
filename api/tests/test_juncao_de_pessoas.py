@@ -15,12 +15,13 @@ from api import identificacao_job
 from api.analise_por_janelas import analisar_video
 from api.catalogo import CatalogoEmMemoria
 from api.decupagem import Decupagem, Pessoa
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.juncao_de_pessoas import (
     Veredito,
     chave_da_pessoa,
     juntar_sem_nome,
 )
+from api.modelo_do_job import Job
 from api.tests.test_analise_por_janelas import (
     URI,
     VIDEO,

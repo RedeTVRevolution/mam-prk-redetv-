@@ -42,9 +42,9 @@ from api.busca import (
     VideoDoResultado,
     filtros_do_servidor,
 )
-from api.gemini import Chamada, ErroHttp
 from api.jobs import Armazenamento
 from api.nuvem import CatalogoFirestore, RepositorioFirestore
+from api.sem_adaptadores import SemModelo
 
 
 @dataclass(frozen=True)
@@ -193,13 +193,6 @@ def veredito(caso: Caso, videos: list[VideoDoResultado]) -> bool | None:
     )
 
 
-# A sonda só busca por texto e não precisa do modelo da foto.
-# Importar o `api.main` montaria o app, que pede o ambiente inteiro.
-class _SemModelo:
-    def gerar(self, chamada: Chamada) -> str:
-        raise ErroHttp(503)
-
-
 class _SemQuadro:
     """A sonda não abre quadros: a URL assinada não muda o resultado."""
 
@@ -239,7 +232,7 @@ def main() -> int:
         print(erro, file=sys.stderr)
         return 1
     busca = Busca(
-        transporte=_SemModelo(),
+        transporte=SemModelo(),
         catalogo=CatalogoFirestore(cliente),
         indice=AgentRetrieval(config, transporte),
         ranking=RankingEmOrdem(),

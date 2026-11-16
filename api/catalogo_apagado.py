@@ -13,12 +13,13 @@ CATALOGO_ID = "catalogo_id"
 
 
 def ids_do_catalogo(entregue: dict[str, Any], campo: str) -> list[str]:
-    """Os `catalogo_id` distintos de `pessoas` ou `comerciais`, na ordem em que aparecem."""
+    """Os `catalogo_id` distintos de `pessoas` ou `comerciais`, na ordem em que aparecem.
+    Só texto não vazio é id do catálogo: outro valor não conta."""
     ids = (
         item.get(CATALOGO_ID) if isinstance(item, dict) else None
         for item in entregue.get(campo) or []
     )
-    return list(dict.fromkeys(i for i in ids if isinstance(i, str)))
+    return list(dict.fromkeys(i for i in ids if isinstance(i, str) and i))
 
 
 def lido_em_lote[T](

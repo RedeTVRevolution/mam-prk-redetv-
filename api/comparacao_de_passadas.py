@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from api.auth import Chamador
 from api.decupagem import Decupagem
 from api.gemini import MODELO
-from api.jobs import Job, RepositorioDeJobs, _enxerga, _exige
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.pareamento import (
     TIPOS_COM_IDENTIDADE,
     TOLERANCIA_MS,
@@ -29,6 +29,7 @@ from api.pareamento import (
     parear,
 )
 from api.passadas import FORMA_DO_ID, LeituraDePassadas, Passada
+from api.permissoes import JobDoPedido, enxerga, exige_escopo
 from api.texto import normalizar
 
 LADO_A = "job"
@@ -526,9 +527,10 @@ def criar_rotas_da_comparacao(
     def comparacao(
         job_id: str,
         passada_id: Annotated[str, CaminhoDaRota(pattern=FORMA_DO_ID)],
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> ComparacaoNaTela:
-        job = _enxerga(chamador, repositorio.obter(job_id))
+        job = enxerga(chamador, lido)
         if job.estado != "concluido" or job.duracao_s is None:
             raise HTTPException(409, f"Job em {job.estado}, não concluido")
         passada = passadas.ler_passada(job.id, passada_id)

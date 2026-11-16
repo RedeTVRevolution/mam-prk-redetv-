@@ -25,8 +25,8 @@ from api.clientes_de_nuvem import sessao_autenticada
 from api.correcoes import Correcao
 from api.decupagem import Decupagem
 from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
-from api.jobs import RepositorioDeJobs
 from api.juncao_de_pessoas import juntar_sem_nome
+from api.modelo_do_job import RepositorioDeJobs
 from api.modelo_forte import LIMITE_DE_PESSOAS, olhar_pessoas_sem_nome
 from api.nuvem import (
     CatalogoFirestore,

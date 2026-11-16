@@ -32,8 +32,9 @@ from api.eventos_do_job import (
     eventos_do_ambiente,
     repositorio_do_ambiente,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_aprovacao import CURADOR
@@ -85,7 +86,7 @@ class Mundo:
         self.armazenamento.decupagens["j1"] = [BYTES]
         self.chaves = RepositorioDeChavesEmMemoria()
         papeis = RepositorioDePapeisEmMemoria()
-        papeis.salvar("ana", papeis_da_ana or ["editor", "operador"])
+        papeis.salvar("ana", papeis_da_ana or ["editor"])
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso(
@@ -385,6 +386,15 @@ def test_concluir_publica_o_fim_do_processamento() -> None:
     assert (evento.quem_tipo, evento.quem_id) == ("usuario", "ana")
     assert (evento.job_id, evento.programa) == ("j1", "TV Fama")
     assert (evento.estado, evento.codigo_falha) == ("concluido", None)
+
+
+def test_cancelar_nao_publica_o_fim_do_processamento() -> None:
+    eventos = EventosEmMemoria()
+    repositorio = _repositorio_com(_job_em("analisando"), eventos)
+
+    repositorio.transitar("j1", "analisando", {"estado": "cancelado"})
+
+    assert eventos.publicados == []
 
 
 def test_o_fim_leva_quanto_o_job_levou_do_registro_ao_fim() -> None:

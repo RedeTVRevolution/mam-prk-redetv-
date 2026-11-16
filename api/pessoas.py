@@ -5,7 +5,7 @@ listas separadas: uma menção nunca vira aparição. Só as aparições contam 
 tempo de tela.
 """
 
-from api.decupagem import Pessoa, _Intervalo
+from api.decupagem import Intervalo, Pessoa
 from api.identidade import identidade_do_nome
 
 LISTAS = ("na_imagem", "citada_na_fala", "citada_no_texto")
@@ -48,7 +48,7 @@ def unir_pessoas(
             mapa[janela][p.id] = unidas[posicao].id
     for i, p in enumerate(unidas):
         unidas[i] = p.model_copy(
-            update={campo: _em_ordem(getattr(p, campo)) for campo in LISTAS}
+            update={campo: em_ordem(getattr(p, campo)) for campo in LISTAS}
         )
     return unidas, mapa
 
@@ -66,7 +66,7 @@ def _juntar(base: Pessoa, outra: Pessoa) -> Pessoa:
     )
 
 
-def _em_ordem[T: _Intervalo](itens: list[T]) -> list[T]:
+def em_ordem[T: Intervalo](itens: list[T]) -> list[T]:
     return sorted(itens, key=lambda i: (i.inicio_ms, i.fim_ms))
 
 
@@ -74,7 +74,7 @@ def tempo_de_tela_ms(pessoa: Pessoa) -> int:
     """Soma das aparições, sem contar duas vezes o trecho sobreposto."""
     total = 0
     fim_atual = 0
-    for a in _em_ordem(pessoa.na_imagem):
+    for a in em_ordem(pessoa.na_imagem):
         inicio = max(a.inicio_ms, fim_atual)
         if a.fim_ms > inicio:
             total += a.fim_ms - inicio

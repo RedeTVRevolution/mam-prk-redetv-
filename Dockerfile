@@ -120,10 +120,12 @@ COPY api/__init__.py \
      api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
+     api/modelo_do_job.py \
      api/numero.py \
      api/nuvem.py \
      api/paddle.py \
      api/papeis.py \
+     api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
      api/progresso_das_janelas.py \
@@ -209,12 +211,14 @@ COPY api/__init__.py \
      api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
+     api/modelo_do_job.py \
      api/mudanca_da_tela.py \
      api/numero.py \
      api/nuvem.py \
      api/ocr_job.py \
      api/paddle.py \
      api/papeis.py \
+     api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
      api/progresso_das_janelas.py \
@@ -329,11 +333,13 @@ COPY api/__init__.py \
      api/lixeira_na_leitura.py \
      api/log_estruturado.py \
      api/marcas.py \
+     api/modelo_do_job.py \
      api/numero.py \
      api/nuvem.py \
      api/objetos_job.py \
      api/paddle.py \
      api/papeis.py \
+     api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
      api/progresso_das_janelas.py \

@@ -19,7 +19,9 @@ from api.correcoes import (
     versao_do_modelo,
 )
 from api.decupagem import Decupagem
-from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.erros import ServicoIndisponivel
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.pareamento import TIPOS, Item, itens_do_modelo, parear
 from api.regressao import (
     PERCENTUAL_RESERVADO,

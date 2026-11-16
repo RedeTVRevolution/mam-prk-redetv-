@@ -8,19 +8,12 @@ de uma Correção (o `antes` e o `depois`) também sai daqui, uma vez por tipo.
 import json
 import re
 from collections.abc import Callable, Mapping
-from typing import Any, get_args
+from typing import Any
 
 from pydantic import BaseModel
 
 from api.decupagem import (
-    CATEGORIAS_DE_OBJETO,
-    CORES_BASE,
-    RELACOES_DO_OBJETO,
-    Comercial,
-    FonteDoNome,
     RelacaoDoObjeto,
-    TextoNaTela,
-    TomDaPauta,
     em_mm_ss,
 )
 from api.indice_da_busca import NOME_DA_CATEGORIA
@@ -233,34 +226,5 @@ class CatalogoDeCorrecoes(BaseModel):
     prefixos: Prefixos
 
 
-def _opcoes(valores: tuple[str, ...], rotulos: Mapping[Any, str]) -> list[Opcao]:
+def opcoes(valores: tuple[str, ...], rotulos: Mapping[Any, str]) -> list[Opcao]:
     return [Opcao(valor=v, rotulo=rotulos.get(v, v)) for v in valores]
-
-
-def catalogo() -> CatalogoDeCorrecoes:
-    # A tabela, os limites e os prefixos moram em `api.correcoes`, que importa este módulo.
-    from api import correcoes
-
-    return CatalogoDeCorrecoes(
-        tipos=correcoes.rotulos_dos_tipos(),
-        tipos_de_comercial=_opcoes(
-            get_args(Comercial.model_fields["tipo"].annotation), {}
-        ),
-        tipos_de_texto_na_tela=_opcoes(
-            get_args(TextoNaTela.model_fields["tipo"].annotation), {}
-        ),
-        tons_da_pauta=_opcoes(get_args(TomDaPauta), ROTULOS_DOS_TONS),
-        fontes_do_nome=_opcoes(get_args(FonteDoNome), ROTULOS_DAS_FONTES),
-        categorias_de_objeto=_opcoes(CATEGORIAS_DE_OBJETO, NOME_DA_CATEGORIA),
-        cores_base=_opcoes(CORES_BASE, {}),
-        relacoes_do_objeto=_opcoes(RELACOES_DO_OBJETO, ROTULOS_DAS_RELACOES),
-        limites=Limites(
-            nome=correcoes.LIMITE_DO_NOME,
-            texto=correcoes.LIMITE_DO_TEXTO,
-            motivo=correcoes.LIMITE_DO_MOTIVO,
-        ),
-        prefixos=Prefixos(
-            acrescentado=correcoes.PREFIXO_ACRESCENTADO,
-            nao_identificado=correcoes.PREFIXO_NAO_IDENTIFICADO,
-        ),
-    )

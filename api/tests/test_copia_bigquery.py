@@ -29,7 +29,7 @@ from api.decupagem import (
 )
 from api.ferramentas.exemplos_da_busca import EXEMPLOS
 from api.indexacao import reindexar
-from api.jobs import CopiaNoBigQuery, Indexacao, Job
+from api.modelo_do_job import CopiaNoBigQuery, Indexacao, Job
 from api.tests.test_correcoes import BASE
 from api.tests.test_indexacao import (
     AUTORIZACAO,

@@ -8,15 +8,11 @@ from fastapi.testclient import TestClient
 
 from api.auth import TokenInvalido, Usuario
 from api.correcoes import versao_do_modelo
+from api.erros import ServicoIndisponivel
 from api.idempotencia import RepositorioDeIdempotenciaEmMemoria
-from api.jobs import (
-    Estado,
-    Job,
-    RepositorioEmMemoria,
-    ServicoIndisponivel,
-    expirar_uploads,
-)
+from api.jobs import RepositorioEmMemoria, expirar_uploads
 from api.main import criar_app
+from api.modelo_do_job import Estado, Job
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.programas_de_teste import cadastro_com_tv_fama
 
@@ -338,6 +334,41 @@ def test_expiracao_nao_mexe_em_job_que_ja_passou_do_upload() -> None:
         )
         == []
     )
+
+
+def test_expiracao_le_so_os_jobs_que_aguardam_upload() -> None:
+    repositorio = RepositorioEmMemoria()
+    armazenamento = ArmazenamentoFalso()
+    lidos: list[str] = []
+    consultar = repositorio.consultar
+
+    def contando(filtro: Any) -> Any:
+        pagina = consultar(filtro)
+        lidos.extend(j.id for j in pagina.jobs)
+        return pagina
+
+    repositorio.consultar = contando  # type: ignore[method-assign]
+    estados: list[Estado] = ["concluido", "falhou", "analisando", "aguardando_upload"]
+    for i in range(100):
+        repositorio.salvar(
+            Job(
+                id=f"j{i}",
+                nome="clipe.mp4",
+                tamanho_bytes=10,
+                estado=estados[i % 4],
+                criado_por="u1",
+                criado_em=INICIO,
+                atualizado_em=INICIO,
+            )
+        )
+
+    expirados = expirar_uploads(
+        repositorio, armazenamento, INICIO + timedelta(hours=24)
+    )
+
+    assert sorted(lidos) == sorted(f"j{i}" for i in range(3, 100, 4))
+    assert sorted(expirados) == sorted(lidos)
+    assert repositorio.obter("j3").estado == "falhou"  # type: ignore[union-attr]
 
 
 def _job_com_estado(ambiente: Ambiente, estado: Estado) -> str:
@@ -860,7 +891,8 @@ def test_lista_e_detalhe_sem_decupagem_ver_dao_403_sem_assinar_a_capa() -> None:
 def test_etapa_tem_dispositivo_e_tentativas_na_gpu_so_quando_o_workflow_grava() -> None:
     from datetime import UTC, datetime
 
-    from api.jobs import Etapa, EtapaPublica
+    from api.jobs import EtapaPublica
+    from api.modelo_do_job import Etapa
 
     agora = datetime(2026, 11, 2, tzinfo=UTC)
 

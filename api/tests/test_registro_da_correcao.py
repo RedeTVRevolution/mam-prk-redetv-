@@ -21,8 +21,9 @@ from api.correcoes import (
     VersaoDesatualizada,
 )
 from api.eventos_de_uso import EventoDeUso, EventosEmMemoria
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.marcas import CatalogoDeMarcasEmMemoria
+from api.modelo_do_job import Job
 from api.registro_da_correcao import RegistroDaCorrecao
 from api.tests.test_correcoes import BYTES, MODELO, VERSAO, _novo, _pessoa
 from api.tests.test_jobs import ArmazenamentoFalso

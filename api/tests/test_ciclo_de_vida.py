@@ -14,7 +14,8 @@ from api.ciclo_de_vida import (
     iniciar_etapa,
     transitar,
 )
-from api.jobs import CodigoDeFalha, Estado, Job, JobPublico, RepositorioEmMemoria
+from api.jobs import JobPublico, RepositorioEmMemoria
+from api.modelo_do_job import CodigoDeFalha, Estado, Job
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 DEPOIS = BASE + timedelta(minutes=5)

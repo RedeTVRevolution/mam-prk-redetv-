@@ -12,9 +12,9 @@ from typing import Any, Literal, Protocol
 from api.decupagem import (
     CategoriaDeObjeto,
     Decupagem,
+    Intervalo,
     ObjetoDoInventario,
     Pessoa,
-    _Intervalo,
     id_posicional,
 )
 from api.texto import normalizar
@@ -199,14 +199,14 @@ def registros_da_decupagem(
     }
     catalogo = {p.id: p.catalogo_id for p in decupagem.pessoas}
 
-    def na_imagem(i: _Intervalo) -> list[str]:
+    def na_imagem(i: Intervalo) -> list[str]:
         achados: list[str] = []
         for pessoa in decupagem.pessoas:
             if pessoa.catalogo_id and _aparece(pessoa, i):
                 achados.append(pessoa.catalogo_id)
         return achados
 
-    def quadro_do_plano(i: _Intervalo) -> str | None:
+    def quadro_do_plano(i: Intervalo) -> str | None:
         """O quadro-chave do plano em que o momento começa."""
         for plano in decupagem.planos:
             if plano.inicio_ms <= i.inicio_ms < plano.fim_ms:
@@ -341,7 +341,7 @@ def registros_da_decupagem(
     return registros
 
 
-def _aparece(pessoa: Pessoa, i: _Intervalo) -> bool:
+def _aparece(pessoa: Pessoa, i: Intervalo) -> bool:
     return any(
         a.inicio_ms < i.fim_ms and i.inicio_ms < a.fim_ms for a in pessoa.na_imagem
     )

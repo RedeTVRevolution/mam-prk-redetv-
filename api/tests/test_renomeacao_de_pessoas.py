@@ -10,7 +10,8 @@ from fastapi.testclient import TestClient
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, RenomeacaoDaPessoa
-from api.catalogo_dos_jobs import ids_do_catalogo, passar_pessoa_nos_jobs
+from api.catalogo_apagado import ids_do_catalogo
+from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.ferramentas.exemplos_da_busca import EXEMPLOS
 from api.indexacao import reindexar_jobs
@@ -67,7 +68,12 @@ class Mundo:
                     "cat-sabrina-sato": self.sabrina.id,
                     "cat-outra": self.outra.id,
                 }[pessoa["catalogo_id"]]
-            self.jobs.salvar(_job(id, pessoas_do_catalogo=ids_do_catalogo(modelo)[0]))
+            self.jobs.salvar(
+                _job(
+                    id,
+                    pessoas_do_catalogo=sorted(ids_do_catalogo(modelo, "pessoas")),
+                )
+            )
             self.armazenamento.decupagens[id] = [json.dumps(modelo).encode()]
         papeis = RepositorioDePapeisEmMemoria()
         papeis.salvar("cur", ["curador"])

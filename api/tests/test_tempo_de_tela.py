@@ -24,8 +24,9 @@ from api.copia_bigquery import (
     LinhaDoMomento,
     PessoaDoMomento,
 )
-from api.jobs import Job, RepositorioEmMemoria, agora_utc
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job, agora_utc
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
     NOMES_EM_JSON,

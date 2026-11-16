@@ -12,8 +12,10 @@ from api.chaves import (
     VerificadorDeChaveDeApi,
     emitir_chave,
 )
-from api.jobs import Job, RepositorioEmMemoria, ServicoIndisponivel
+from api.erros import ServicoIndisponivel
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.programas import Programa, ProgramasEmMemoria
 from api.tests.test_auth import VerificadorFalso
@@ -222,3 +224,14 @@ def test_repetir_o_mesmo_pedido_depois_do_503_dispara_a_indexacao() -> None:
     assert resposta.status_code == 200
     assert mundo.disparo.ids == ["j1"]
     assert len(mundo.auditoria.consultar(FiltroDeAuditoria()).registros) == 1
+
+
+@pytest.mark.parametrize("data", ["2026-11-05", "2026-01-02", "2025-12-31"])
+def test_mes_da_edicao_e_o_que_o_validador_do_job_deriva(data: str) -> None:
+    mundo = Mundo()
+
+    mundo.editar({"data_exibicao": data})
+
+    job = mundo.job()
+    assert job.mes_exibicao == _job(data_exibicao=data).mes_exibicao
+    assert job.mes_exibicao == _job(data_exibicao=date.fromisoformat(data)).mes_exibicao

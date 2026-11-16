@@ -57,7 +57,7 @@ from api.comparacao_de_passadas import (
 from api.decupagem import Decupagem
 from api.ferramentas.comum import dolar
 from api.gemini import MODELO
-from api.jobs import RepositorioDeJobs
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import DecupagensStorage, RepositorioFirestore
 from api.passadas import LeituraDePassadas, Passada, PassadasStorage
 from api.precos_dos_modelos import Preco, lista_de_pares, precos_do_ambiente

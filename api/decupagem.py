@@ -37,7 +37,7 @@ class _Estrito(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class _Intervalo(_Estrito):
+class Intervalo(_Estrito):
     inicio_ms: int = Field(ge=0)
     fim_ms: int = Field(ge=0)
     # Tempos do modelo, guardados só quando a regra de tempos os mudou.
@@ -62,7 +62,7 @@ class Video(_Estrito):
     timecode_origem: Rotulo | None = None
 
 
-class Bloco(_Intervalo):
+class Bloco(Intervalo):
     titulo: Rotulo
 
 
@@ -71,7 +71,7 @@ class Programa(_Estrito):
     blocos: list[Bloco]
 
 
-class Pauta(_Intervalo):
+class Pauta(Intervalo):
     id: Id
     titulo: Rotulo
     resumo: Texto = Field(description="Resumo jornalístico fiel ao mostrado e dito.")
@@ -89,7 +89,7 @@ def caminho_do_quadro(arquivo: str) -> str:
     return f"quadros/{arquivo}"
 
 
-class Aparicao(_Intervalo):
+class Aparicao(Intervalo):
     evidencia: Rotulo = Field(description="O que mostra que é essa pessoa.")
     papel: Rotulo | None = Field(
         default=None,
@@ -103,11 +103,11 @@ class Aparicao(_Intervalo):
     quadro: str | None = None  # o JPEG da aparição (#115)
 
 
-class MencaoNaFala(_Intervalo):
+class MencaoNaFala(Intervalo):
     pass
 
 
-class MencaoNoTexto(_Intervalo):
+class MencaoNoTexto(Intervalo):
     texto: Texto = Field(description="O texto na tela que cita a pessoa.")
 
 
@@ -266,7 +266,7 @@ class Objeto(_Estrito):
         default=None,
         description="Como a pessoa se liga ao objeto; nulo sem `pessoa`.",
     )
-    ocorrencias: list[_Intervalo] = Field(
+    ocorrencias: list[Intervalo] = Field(
         min_length=1, description="Intervalos em que o objeto está visível."
     )
     quadro: str | None = None  # o JPEG da primeira ocorrência (#115)
@@ -339,7 +339,7 @@ Ambiente = Literal[
 ]
 
 
-class Plano(_Intervalo):
+class Plano(Intervalo):
     id: Id
     ambiente: Rotulo = Field(description="Local: estúdio, aeroporto, estádio, rua…")
     plano_limpo: bool = Field(
@@ -375,7 +375,7 @@ class Plano(_Intervalo):
 EvidenciaDoComercial = Literal["fala", "logo", "texto_na_tela", "produto"]
 
 
-class Comercial(_Intervalo):
+class Comercial(Intervalo):
     marca: Rotulo
     # A marca do catálogo (#150); o servidor grava, o modelo não conhece.
     catalogo_id: Id | None = None
@@ -412,7 +412,7 @@ def id_posicional(chave: str, n: int) -> str:
     return f"{PREFIXO_POSICIONAL[chave]}{n:03d}"
 
 
-class Fala(_Intervalo):
+class Fala(Intervalo):
     # O id posicional (`fal###`) ou o da correção que a acrescentou; o servidor grava
     # (#418), o modelo não conhece e o índice da busca o usa no id do registro. Fora do
     # `model_dump`: a decupagem gravada pela análise não ganha `"id": null`, que passaria
@@ -424,7 +424,7 @@ class Fala(_Intervalo):
     texto_original: Texto | None = None
 
 
-class CorrecaoDaTranscricao(_Intervalo):
+class CorrecaoDaTranscricao(Intervalo):
     """Uma palavra do Whisper que o Gemini corrigiu, com a prova.
 
     `inicio`/`fim` são o momento da palavra; `original` é o que o Whisper
@@ -449,7 +449,7 @@ class CorrecaoDescartada(CorrecaoDaTranscricao):
     motivo: MotivoDaRecusa
 
 
-class TextoNaTela(_Intervalo):
+class TextoNaTela(Intervalo):
     """Cada vez que um texto fica visível é um item, com o início e o fim em que
     ele está na tela; um GC que sai e volta são dois itens. Nunca estenda o texto
     até o fim do bloco ou do plano."""
@@ -502,8 +502,8 @@ class Decupagem(_Estrito):
     versao_pipeline: Rotulo | None = None
     manifesto_do_pipeline: dict[str, Any] | None = None
 
-    def _intervalos(self) -> list[_Intervalo]:
-        achados: list[_Intervalo] = [*self.programa.blocos, *self.pautas]
+    def _intervalos(self) -> list[Intervalo]:
+        achados: list[Intervalo] = [*self.programa.blocos, *self.pautas]
         for p in self.pessoas:
             achados += [*p.na_imagem, *p.citada_na_fala, *p.citada_no_texto]
         achados += [o for objeto in self.objetos for o in objeto.ocorrencias]

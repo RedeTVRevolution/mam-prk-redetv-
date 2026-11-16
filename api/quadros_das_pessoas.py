@@ -9,7 +9,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from api.decupagem import _Intervalo
+from api.decupagem import Intervalo
 from api.quadros import FalhaNosQuadros
 
 QUADROS_POR_PESSOA = 3
@@ -21,7 +21,7 @@ INSTANTES_POR_PROCESSO = 16
 
 
 def instantes_das_aparicoes(
-    aparicoes: Sequence[_Intervalo], maximo: int = QUADROS_POR_PESSOA
+    aparicoes: Sequence[Intervalo], maximo: int = QUADROS_POR_PESSOA
 ) -> list[int]:
     """Instantes (ms) dos quadros: o meio de cada uma das `maximo` aparições mais
     longas. Com uma aparição só, dois quadros dela, a 1/3 e a 2/3. Em ordem de tempo.

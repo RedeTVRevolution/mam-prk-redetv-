@@ -5,10 +5,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
-from api.catalogo_dos_jobs import ids_do_catalogo
+from api.catalogo_apagado import ids_do_catalogo
+from api.catalogo_dos_jobs import gravar_se_mudou
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.jobs import FiltroDeJobs, Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.leitura_da_decupagem import LeituraDaDecupagem
+from api.modelo_do_job import FiltroDeJobs, Job
 from api.preencher_catalogo_dos_jobs import preencher
 from api.tests.test_correcoes import Mundo
 from api.tests.test_jobs import ArmazenamentoFalso
@@ -109,7 +111,28 @@ def test_ids_do_catalogo_sem_repetir_e_sem_vazios() -> None:
         "comerciais": [{"catalogo_id": None}, {"catalogo_id": "m"}, {}],
     }
 
-    assert ids_do_catalogo(entregue) == (["a", "b"], ["m"])
+    assert ids_do_catalogo(entregue, "pessoas") == ["b", "a"]
+    assert ids_do_catalogo(entregue, "comerciais") == ["m"]
+
+
+def test_id_que_nao_e_texto_no_job_nao_quebra_e_o_job_grava_em_ordem() -> None:
+    entregue = {
+        "pessoas": [
+            {"catalogo_id": 7},
+            {"catalogo_id": "b"},
+            {"catalogo_id": ""},
+            {"catalogo_id": ["x"]},
+            {"catalogo_id": "a"},
+        ],
+        "comerciais": [{"catalogo_id": 3}],
+    }
+    repositorio = RepositorioEmMemoria()
+    repositorio.salvar(_job("j1", pessoas_do_catalogo=[], marcas_do_catalogo=[]))
+
+    assert gravar_se_mudou(repositorio, "j1", entregue)
+
+    job = repositorio.obter("j1")
+    assert job and (job.pessoas_do_catalogo, job.marcas_do_catalogo) == (["a", "b"], [])
 
 
 def _decupagem(pessoa: str | None, marca: str | None) -> bytes:

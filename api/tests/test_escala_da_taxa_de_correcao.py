@@ -10,7 +10,8 @@ from datetime import timedelta
 from typing import Any
 
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.revisao import RepositorioDeRevisaoEmMemoria
 from api.taxa_de_correcao import _em_vigor_no_periodo, calcular
 from api.tests.test_taxa_de_correcao import (
@@ -37,8 +38,10 @@ class JobsQueConta(RepositorioEmMemoria):
         self.listagens += 1
         return super().listar()
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        achados = super().obter_varios(job_ids)
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
+        achados = super().obter_varios(job_ids, so_a_lista)
         self.lidos += [j.id for j in achados]
         return achados
 

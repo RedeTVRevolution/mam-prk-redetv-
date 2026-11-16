@@ -38,25 +38,25 @@ from api.correcoes import (
     TemposInvalidos,
     TipoDoItem,
     VersaoDesatualizada,
-    _acha_ocorrencia,
-    _ancora_do_item,
-    _ids_das_pessoas,
-    _intervalo_da_pauta,
-    _intervalo_da_pessoa,
-    _intervalo_do_item,
-    _intervalo_do_objeto,
-    _itens_com_o_id,
-    _objetos,
-    _pautas,
-    _pessoas,
-    _por_inicio,
-    _sobrepoe,
-    _sobrepoe_de_verdade,
-    _sobrepoe_metade,
-    _valor_do_item,
+    acha_ocorrencia,
+    ancora_do_item,
     em_ordem,
     identidade_da_pessoa,
     identidade_do_comercial,
+    ids_das_pessoas,
+    intervalo_da_pauta,
+    intervalo_da_pessoa,
+    intervalo_do_item,
+    intervalo_do_objeto,
+    itens_com_o_id,
+    objetos,
+    pautas,
+    pessoas,
+    por_inicio,
+    sobrepoe,
+    sobrepoe_de_verdade,
+    sobrepoe_metade,
+    valor_do_item,
 )
 from api.decupagem import (
     PREFIXO_POSICIONAL,
@@ -103,9 +103,9 @@ def _falas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return _com_ids_posicionais(modelo, "transcricao")
 
 
-def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
+def itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
     if tipo_do_item == "pessoa":
-        return _pessoas(modelo)
+        return pessoas(modelo)
     if tipo_do_item == "comercial":
         return _comerciais(modelo)
     if tipo_do_item == "plano":
@@ -115,8 +115,8 @@ def _itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
     if tipo_do_item == "texto_na_tela":
         return _textos(modelo)
     if tipo_do_item == "objeto":
-        return _objetos(modelo)
-    return _pautas(modelo)
+        return objetos(modelo)
+    return pautas(modelo)
 
 
 def _rotulo_do_item(item: dict[str, Any], tipo_do_item: str) -> str:
@@ -236,16 +236,16 @@ def corrigir(
                 **campos,
             )
     item = next(
-        (i for i in _itens(modelo, tipo_do_item) if i.get("id") == novo.item_id), None
+        (i for i in itens(modelo, tipo_do_item) if i.get("id") == novo.item_id), None
     )
     if item is None:
         raise ItemInexistente(novo.item_id)
     if novo.ocorrencia is not None:
         pessoa = next(
-            (p for p in _pessoas(entregue) if p.get("id") == novo.item_id), None
+            (p for p in pessoas(entregue) if p.get("id") == novo.item_id), None
         )
         o = novo.ocorrencia
-        if pessoa is None or not _acha_ocorrencia(
+        if pessoa is None or not acha_ocorrencia(
             pessoa, o.inicio_ms, o.fim_ms, (o.lista,)
         ):
             raise ItemInexistente(f"{novo.item_id} {o.lista}")
@@ -257,7 +257,7 @@ def corrigir(
         antes=antes,
         ocorrencia=novo.ocorrencia,
         catalogo_id=_id_no_catalogo(novo, catalogo, marcas),
-        ancora=_ancora_do_item(item, tipo_do_item, versao),
+        ancora=ancora_do_item(item, tipo_do_item, versao),
         **campos,
     )
 
@@ -471,12 +471,12 @@ def _valor_atual(
     if entrada.traz_o_campo is not None and not entrada.traz_o_campo(entregue):
         raise ItemInexistente(tipo)
     de_ocorrencia = tipo_do_item == "pessoa" and entrada.valor_da_ocorrencia is not None
-    for item in _itens(entregue, tipo_do_item):
+    for item in itens(entregue, tipo_do_item):
         if item.get("id") != item_id:
             continue
         if de_ocorrencia:
             return _valor_da_ocorrencia(item, tipo, ocorrencia, depois)
-        return _valor_do_item(item, tipo)
+        return valor_do_item(item, tipo)
     if entrada.acrescenta is not None or de_ocorrencia:
         return ""
     raise ItemInexistente(item_id)
@@ -494,9 +494,7 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
     ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
     if c.ancora.tipo_do_item == "pauta":
         return [
-            p
-            for p in _pautas(modelo)
-            if _sobrepoe_metade(ancora, _intervalo_da_pauta(p))
+            p for p in pautas(modelo) if sobrepoe_metade(ancora, intervalo_da_pauta(p))
         ]
     if c.ancora.tipo_do_item == "plano":
         return [
@@ -509,7 +507,7 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
         return [
             f
             for f in _falas(modelo)
-            if _sobrepoe_de_verdade(ancora, _intervalo_da_pauta(f))
+            if sobrepoe_de_verdade(ancora, intervalo_da_pauta(f))
         ]
     if c.ancora.tipo_do_item == "texto_na_tela":
         identidades = TIPOS[c.tipo].identidades(c)
@@ -517,15 +515,15 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
             t
             for t in _textos(modelo)
             if normalizar(str(t["texto"])) in identidades
-            and _sobrepoe_de_verdade(ancora, _intervalo_da_pauta(t))
+            and sobrepoe_de_verdade(ancora, intervalo_da_pauta(t))
         ]
     if c.ancora.tipo_do_item == "objeto":
         identidades = TIPOS[c.tipo].identidades(c)
         return [
             o
-            for o in _objetos(modelo)
+            for o in objetos(modelo)
             if normalizar(str(o["tipo"])) in identidades
-            and _sobrepoe_de_verdade(ancora, _intervalo_do_objeto(o))
+            and sobrepoe_de_verdade(ancora, intervalo_do_objeto(o))
         ]
     if c.ancora.tipo_do_item == "comercial":
         identidades = TIPOS[c.tipo].identidades(c)
@@ -533,7 +531,7 @@ def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
             m
             for m in _comerciais(modelo)
             if identidade_do_comercial(m) in identidades
-            and _sobrepoe(ancora, _intervalo_da_pauta(m))
+            and sobrepoe(ancora, intervalo_da_pauta(m))
         ]
     return _candidatos_pessoa(modelo, c)
 
@@ -543,20 +541,20 @@ def _candidatos_pessoa(modelo: dict[str, Any], c: Correcao) -> list[dict[str, An
     ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
     sem_nome = nao_identificado(c.ancora.identidade.split("@")[0])
     achados = []
-    for pessoa in _pessoas(modelo):
+    for pessoa in pessoas(modelo):
         nome = str(pessoa["nome"])
         if sem_nome and nao_identificado(nome):
             # Só as aparições mostram quem é.
-            intervalo = _intervalo_da_pessoa(pessoa, ("na_imagem",))
+            intervalo = intervalo_da_pessoa(pessoa, ("na_imagem",))
         elif (
             entrada.casa_pelo_nome_novo and normalizar(nome) == normalizar(c.depois)
         ) or (not sem_nome and normalizar(nome) == c.ancora.identidade):
-            intervalo = _intervalo_da_pessoa(pessoa)
+            intervalo = intervalo_da_pessoa(pessoa)
         else:
             continue
         # A aparição acrescentada pode estar longe do que a pessoa já tem.
         longe_ok = entrada.casa_longe and not sem_nome
-        if longe_ok or (_sobrepoe(ancora, intervalo) and _tem_a_ocorrencia(c, pessoa)):
+        if longe_ok or (sobrepoe(ancora, intervalo) and _tem_a_ocorrencia(c, pessoa)):
             achados.append(pessoa)
     return achados
 
@@ -566,7 +564,7 @@ def _tem_a_ocorrencia(c: Correcao, pessoa: dict[str, Any]) -> bool:
     o = c.ocorrencia
     if o is None:
         return True
-    return _acha_ocorrencia(pessoa, o.inicio_ms, o.fim_ms, (o.lista,)) is not None
+    return acha_ocorrencia(pessoa, o.inicio_ms, o.fim_ms, (o.lista,)) is not None
 
 
 def reconciliar(
@@ -619,7 +617,7 @@ def reconciliar(
         nova = c.model_copy(
             update={
                 "item_id": str(item.get("id", "")),
-                "ancora": _ancora_do_item(item, c.ancora.tipo_do_item, versao),
+                "ancora": ancora_do_item(item, c.ancora.tipo_do_item, versao),
             }
         )
         resultado.casadas.append(nova)
@@ -639,7 +637,7 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
             confere(resultado, c.depois)
         except ItemInexistente:
             return  # o que a correção aponta já não existe nesta versão
-    for item in _itens_com_o_id(resultado, c):
+    for item in itens_com_o_id(resultado, c):
         aplica(item, c)
         item["origem"] = "revisao"
 
@@ -741,7 +739,7 @@ def _juntar_as_do_mesmo_nome(
     absorve as outras. "Não identificado" nunca junta. Roda no fim de `aplicar`,
     para cada correção casar pela identidade do modelo, antes de qualquer troca."""
     grupos: dict[str, list[dict[str, Any]]] = {}
-    for p in _pessoas(resultado):
+    for p in pessoas(resultado):
         chave = identidade_do_nome(str(p["nome"]))
         if chave is not None:
             grupos.setdefault(chave, []).append(p)
@@ -758,7 +756,7 @@ def _juntar_as_do_mesmo_nome(
         for outra in outras:
             for lista in LISTAS:
                 base[lista] = [*base.get(lista, []), *outra.get(lista, [])]
-                _por_inicio(base[lista])
+                por_inicio(base[lista])
             base["fontes_do_nome"] = list(
                 dict.fromkeys(
                     [*base.get("fontes_do_nome", []), *outra.get("fontes_do_nome", [])]
@@ -779,14 +777,14 @@ def _juntar_as_do_mesmo_nome(
     if not absorvidas:
         return
     resultado["pessoas"] = [
-        p for p in _pessoas(resultado) if not any(p is a for a in absorvidas)
+        p for p in pessoas(resultado) if not any(p is a for a in absorvidas)
     ]
-    for pauta in _pautas(resultado):
+    for pauta in pautas(resultado):
         if "pessoas" in pauta:
             pauta["pessoas"] = list(
                 dict.fromkeys(para.get(i, i) for i in pauta["pessoas"])
             )
-    for objeto in _objetos(resultado):
+    for objeto in objetos(resultado):
         if objeto.get("pessoa") in para:
             objeto["pessoa"] = para[objeto["pessoa"]]
 
@@ -807,7 +805,7 @@ def aplicar(
     item único; as que não casam não se aplicam (e seguem no histórico).
     """
     resultado: dict[str, Any] = json.loads(json.dumps(modelo))
-    pessoas = _pessoas(resultado)
+    as_pessoas = pessoas(resultado)
     # Os ids posicionais saem da posição no modelo, antes de qualquer correção.
     posicionais = []
     for chave in PREFIXO_POSICIONAL:
@@ -815,14 +813,16 @@ def aplicar(
             if isinstance(real, dict):
                 real["id"] = id_posicional(chave, n)
                 posicionais.append(real)
-    for item in [*pessoas, *_pautas(resultado), *_planos(resultado), *posicionais]:
+    for item in [*as_pessoas, *pautas(resultado), *_planos(resultado), *posicionais]:
         # O nome confirmado pelo código (`modelo_forte`) segue como o modelo gravou.
         if item.get("origem") != "modelo_forte":
             item["origem"] = "modelo"
     # Casa pela identidade do modelo, calculada antes de qualquer renomeação.
-    identidades = [identidade_da_pessoa(p) for p in pessoas]
-    identidade_no_modelo = {id(p): i for p, i in zip(pessoas, identidades, strict=True)}
-    pessoas_do_modelo = [dict(p) for p in pessoas]
+    identidades = [identidade_da_pessoa(p) for p in as_pessoas]
+    identidade_no_modelo = {
+        id(p): i for p, i in zip(as_pessoas, identidades, strict=True)
+    }
+    pessoas_do_modelo = [dict(p) for p in as_pessoas]
     estado = estado_das(correcoes)
     # ponytail: reconciliar a cada leitura relê as pessoas do modelo por
     # correção antiga (custo pequeno hoje); guardar o resultado quando houver
@@ -861,16 +861,16 @@ def aplicar(
             if c.id not in atendidas:
                 _aplicar_no_item(resultado, c)
             elif entrada.atender_no_item is not None:
-                for item in _itens_com_o_id(resultado, c):
+                for item in itens_com_o_id(resultado, c):
                     entrada.atender_no_item(item, c)
             continue
         aplicadas: set[int] = set()
         for pessoa, identidade, do_modelo in zip(
-            pessoas, identidades, pessoas_do_modelo, strict=True
+            as_pessoas, identidades, pessoas_do_modelo, strict=True
         ):
             if not casa(c, pessoa, identidade):
                 continue
-            pessoa = _com_a_ocorrencia(pessoas, pessoa, c)
+            pessoa = _com_a_ocorrencia(as_pessoas, pessoa, c)
             if id(pessoa) in aplicadas:
                 continue
             assert entrada.aplicar_na_pessoa is not None
@@ -878,7 +878,7 @@ def aplicar(
             # absorver nela (pelo nome de antes dela): quem corrige vê uma só.
             juntas = [
                 j
-                for j in _do_mesmo_nome(pessoas, pessoa, c)
+                for j in _do_mesmo_nome(as_pessoas, pessoa, c)
                 if not casa(c, j, identidade_no_modelo[id(j)])
             ]
             if c.id in atendidas:
@@ -891,7 +891,7 @@ def aplicar(
                 if id(junta) not in aplicadas:
                     entrada.aplicar_na_pessoa(resultado, junta, c)
                     aplicadas.add(id(junta))
-        for pessoa in pessoas:
+        for pessoa in as_pessoas:
             if id(pessoa) not in aplicadas or c.id in atendidas:
                 continue
             if c.tipo == "pessoa.renomear":
@@ -904,24 +904,24 @@ def aplicar(
     sumidas = [e for e in esvaziadas if not any(e[lista] for lista in LISTAS)]
     if sumidas:
         resultado["pessoas"] = [
-            p for p in _pessoas(resultado) if not any(p is e for e in sumidas)
+            p for p in pessoas(resultado) if not any(p is e for e in sumidas)
         ]
         ids = {e.get("id") for e in sumidas}
-        for pauta in _pautas(resultado):
+        for pauta in pautas(resultado):
             if "pessoas" in pauta:
                 pauta["pessoas"] = [i for i in pauta["pessoas"] if i not in ids]
     # O objeto cuja pessoa não está mais na decupagem fica em cena: sem dono, sem relação.
-    ids_das_pessoas = _ids_das_pessoas(resultado)
-    for objeto in _objetos(resultado):
-        if objeto.get("pessoa") is not None and objeto["pessoa"] not in ids_das_pessoas:
+    ids_vivos = ids_das_pessoas(resultado)
+    for objeto in objetos(resultado):
+        if objeto.get("pessoa") is not None and objeto["pessoa"] not in ids_vivos:
             objeto["pessoa"] = objeto["relacao"] = None
     if "objetos" in resultado:
         resultado["objetos"] = [
-            o for o in _objetos(resultado) if not o.pop("_removido", False)
+            o for o in objetos(resultado) if not o.pop("_removido", False)
         ]
     # As pautas do modelo ficam na ordem em que vieram; só a acrescentada
     # pede reordenar, para entrar no lugar do seu início.
-    if any(p.get("acrescentado") for p in _pautas(resultado)):
+    if any(p.get("acrescentado") for p in pautas(resultado)):
         resultado["pautas"].sort(key=lambda p: (p["inicio_ms"], p["fim_ms"]))
     if "textos_na_tela" in resultado:
         resultado["textos_na_tela"].sort(key=lambda t: (t["inicio_ms"], t["fim_ms"]))
@@ -940,22 +940,22 @@ def fila(
 ) -> list[ItemDaFila]:
     """As correções que não casaram, da mais antiga para a mais nova, cada uma
     com as pessoas da versão atual que sobrepõem o intervalo ancorado."""
-    itens = []
+    sugestoes = []
     for c in reconciliar(modelo, versao, correcoes).sem_casar:
         ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
         tipo_do_item = c.ancora.tipo_do_item
         candidatos = []
         # Juntar e dividir não se reaplicam num item só: ficam na fila para descartar.
-        for item in [] if TIPOS[c.tipo].reestrutura else _itens(modelo, tipo_do_item):
-            intervalo = _intervalo_do_item(item, tipo_do_item)
+        for item in [] if TIPOS[c.tipo].reestrutura else itens(modelo, tipo_do_item):
+            intervalo = intervalo_do_item(item, tipo_do_item)
             # Plano e fala que só encostam no ancorado não são o mesmo trecho.
-            sobrepoe = (
-                _sobrepoe_de_verdade
+            casa = (
+                sobrepoe_de_verdade
                 if tipo_do_item in ("plano", "fala", "texto_na_tela")
-                else _sobrepoe
+                else sobrepoe
             )
             # Reaplicar numa pessoa sem a aparição ou menção não mudaria nada.
-            if sobrepoe(ancora, intervalo) and _tem_a_ocorrencia(c, item):
+            if casa(ancora, intervalo) and _tem_a_ocorrencia(c, item):
                 candidatos.append(
                     Candidato(
                         item_id=str(item.get("id", "")),
@@ -964,7 +964,7 @@ def fila(
                         fim_ms=intervalo[1],
                     )
                 )
-        itens.append(
+        sugestoes.append(
             ItemDaFila(
                 **c.model_dump(),
                 candidatos=candidatos,
@@ -972,7 +972,7 @@ def fila(
                 depois_legivel=valor_legivel(c.tipo, c.depois),
             )
         )
-    return itens
+    return sugestoes
 
 
 def _na_fila(
@@ -1002,7 +1002,7 @@ def reaplicar(
     if item_id not in {c.item_id for c in item.candidatos}:
         raise NaoCandidato(item_id)
     tipo_do_item = alvo.ancora.tipo_do_item
-    novo = next(i for i in _itens(modelo, tipo_do_item) if i.get("id") == item_id)
+    novo = next(i for i in itens(modelo, tipo_do_item) if i.get("id") == item_id)
     # O vídeo reprocessado pode ser mais curto que o da correção original.
     _confere_duracao(modelo, alvo.tipo, alvo.depois)
     return _registro(
@@ -1025,7 +1025,7 @@ def reaplicar(
             alvo.depois,
         ),
         depois=alvo.depois,
-        ancora=_ancora_do_item(novo, tipo_do_item, versao),
+        ancora=ancora_do_item(novo, tipo_do_item, versao),
     )
 
 
@@ -1111,9 +1111,9 @@ def _com_tipo_canonico(modelo: dict[str, Any], entregue: dict[str, Any]) -> None
     bruto não mudou; o objeto corrigido ou acrescentado, o antigo sem tipo e o fora da lista
     passam pelo dicionário de nome livre para tipo, e o que não está nele fica em `outro`."""
     brutos = {
-        o.get("id"): (o.get("tipo"), o.get("tipo_canonico")) for o in _objetos(modelo)
+        o.get("id"): (o.get("tipo"), o.get("tipo_canonico")) for o in objetos(modelo)
     }
-    for o in _objetos(entregue):
+    for o in objetos(entregue):
         tipo, canonico = brutos.get(o.get("id"), (None, None))
         gravado = canonico if tipo == o.get("tipo") else None
         o["tipo_canonico"] = tipo_canonico_de(

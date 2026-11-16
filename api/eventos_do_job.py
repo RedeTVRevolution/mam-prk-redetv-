@@ -22,6 +22,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.clientes_de_nuvem import TransporteRest, transporte_rest
+from api.erros import ServicoIndisponivel
 from api.eventos_de_uso import (
     Eventos,
     EventosPubSub,
@@ -29,13 +30,13 @@ from api.eventos_de_uso import (
     SemEventos,
     registrar,
 )
-from api.jobs import (
+from api.modelo_do_job import (
+    FIM,
     Estado,
     FiltroDeJobs,
     Job,
     PaginaDeJobs,
     RepositorioDeJobs,
-    ServicoIndisponivel,
     agora_utc,
 )
 from api.webhook import (
@@ -59,7 +60,6 @@ STATUS_REPETIVEIS_DO_PUBSUB = {429, 500, 502, 503, 504}
 ESPERAS_DO_PUBSUB = (1.0, 2.0)
 # O evento de uso não vale uma espera longa na ação de quem o causou.
 TEMPO_DO_EVENTO_DE_USO_S = 5.0
-FIM_DE_JOB: tuple[Estado, ...] = ("concluido", "falhou")
 
 
 class MensagemDeEvento(BaseModel):
@@ -150,22 +150,12 @@ def publicar_fim(
     return True
 
 
-class RepositorioQuePublicaOFim:
-    """Repositório de Jobs que publica o evento a cada transição para `concluido` ou
-    `falhou`. As transições do ciclo de vida passam todas por `transitar`; `trocar`
-    (correções de estado à mão) não dispara nada, como diz o GLOSSARY."""
+class _RepositorioQueRepassa:
+    """Os métodos do `RepositorioDeJobs` que os decoradores só repassam; cada um escreve
+    `transitar`. Herança, e não `__getattr__`, para o mypy conferir o Protocol."""
 
-    def __init__(
-        self,
-        repositorio: RepositorioDeJobs,
-        webhooks: RepositorioDeWebhooks,
-        publicador: PublicadorDeEventos,
-        relogio: Callable[[], datetime] = agora_utc,
-    ) -> None:
+    def __init__(self, repositorio: RepositorioDeJobs) -> None:
         self._repositorio = repositorio
-        self._webhooks = webhooks
-        self._publicador = publicador
-        self._relogio = relogio
 
     def salvar(self, job: Job) -> None:
         self._repositorio.salvar(job)
@@ -179,16 +169,10 @@ class RepositorioQuePublicaOFim:
     def obter_fila_gpu(self) -> dict[str, Any]:
         return self._repositorio.obter_fila_gpu()
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        return self._repositorio.obter_varios(job_ids)
-
-    def transitar(
-        self, job_id: str, de: Estado, mudancas: dict[str, Any]
-    ) -> Job | None:
-        job = self._repositorio.transitar(job_id, de, mudancas)
-        if job is not None and job.estado != de:
-            publicar_fim(job, self._webhooks, self._publicador, self._relogio())
-        return job
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
+        return self._repositorio.obter_varios(job_ids, so_a_lista)
 
     def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
         self._repositorio.acrescentar_ano_da_copia(job_id, ano)
@@ -209,6 +193,32 @@ class RepositorioQuePublicaOFim:
 
     def contar_criados(self, criado_por: str, desde: datetime) -> int:
         return self._repositorio.contar_criados(criado_por, desde)
+
+
+class RepositorioQuePublicaOFim(_RepositorioQueRepassa):
+    """Repositório de Jobs que publica o evento a cada transição para `concluido` ou
+    `falhou`. As transições do ciclo de vida passam todas por `transitar`; `trocar`
+    (correções de estado à mão) não dispara nada, como diz o GLOSSARY."""
+
+    def __init__(
+        self,
+        repositorio: RepositorioDeJobs,
+        webhooks: RepositorioDeWebhooks,
+        publicador: PublicadorDeEventos,
+        relogio: Callable[[], datetime] = agora_utc,
+    ) -> None:
+        super().__init__(repositorio)
+        self._webhooks = webhooks
+        self._publicador = publicador
+        self._relogio = relogio
+
+    def transitar(
+        self, job_id: str, de: Estado, mudancas: dict[str, Any]
+    ) -> Job | None:
+        job = self._repositorio.transitar(job_id, de, mudancas)
+        if job is not None and job.estado != de:
+            publicar_fim(job, self._webhooks, self._publicador, self._relogio())
+        return job
 
 
 def registrar_o_fim(eventos: Eventos, job: Job, agora: datetime) -> None:
@@ -236,7 +246,7 @@ def registrar_o_fim(eventos: Eventos, job: Job, agora: datetime) -> None:
     )
 
 
-class RepositorioQueRegistraOFim:
+class RepositorioQueRegistraOFim(_RepositorioQueRepassa):
     """Repositório de Jobs que publica o evento de uso (#279) a cada transição para
     `concluido` ou `falhou`. Como no webhook, `trocar` (correção de estado à mão) não
     dispara nada."""
@@ -247,52 +257,17 @@ class RepositorioQueRegistraOFim:
         eventos: Eventos,
         relogio: Callable[[], datetime] = agora_utc,
     ) -> None:
-        self._repositorio = repositorio
+        super().__init__(repositorio)
         self._eventos = eventos
         self._relogio = relogio
-
-    def salvar(self, job: Job) -> None:
-        self._repositorio.salvar(job)
-
-    def criar(self, job: Job) -> bool:
-        return self._repositorio.criar(job)
-
-    def obter(self, job_id: str) -> Job | None:
-        return self._repositorio.obter(job_id)
-
-    def obter_fila_gpu(self) -> dict[str, Any]:
-        return self._repositorio.obter_fila_gpu()
-
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        return self._repositorio.obter_varios(job_ids)
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
     ) -> Job | None:
         job = self._repositorio.transitar(job_id, de, mudancas)
-        if job is not None and job.estado != de and job.estado in FIM_DE_JOB:
+        if job is not None and job.estado != de and job.estado in FIM:
             registrar_o_fim(self._eventos, job, self._relogio())
         return job
-
-    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
-        self._repositorio.acrescentar_ano_da_copia(job_id, ano)
-
-    def trocar(
-        self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
-    ) -> Job | None:
-        return self._repositorio.trocar(job_id, mudar)
-
-    def remover(self, job_id: str) -> None:
-        self._repositorio.remover(job_id)
-
-    def listar(self) -> list[Job]:
-        return self._repositorio.listar()
-
-    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
-        return self._repositorio.consultar(filtro)
-
-    def contar_criados(self, criado_por: str, desde: datetime) -> int:
-        return self._repositorio.contar_criados(criado_por, desde)
 
 
 def eventos_do_ambiente(

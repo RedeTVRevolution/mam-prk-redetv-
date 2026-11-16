@@ -34,7 +34,7 @@ from api.eventos_do_job import (
     registrar_o_fim,
     transporte_do_pubsub,
 )
-from api.jobs import Job, RepositorioDeJobs
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.webhook import RepositorioDeWebhooks
 
 

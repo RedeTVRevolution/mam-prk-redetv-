@@ -38,8 +38,8 @@ from api.eventos_do_job import (
     RepositorioQuePublicaOFim,
     criar_rotas_do_push,
 )
-from api.jobs import Job, RepositorioDeJobs
 from api.main import criar_app
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.nuvem import RepositorioDeIdempotenciaFirestore, RepositorioFirestore
 from api.tests.test_jobs import ArmazenamentoFalso
 from api.webhook import (

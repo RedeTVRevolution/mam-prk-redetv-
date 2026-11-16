@@ -9,7 +9,8 @@ from typing import Any
 import pytest
 
 from api.decupagem import Decupagem, esquema_do_modelo
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.quadros_chave import com_quadros_chave, e_escuro, executar, instantes_alvo
 from api.quadros_das_pessoas import extrair_quadros, extrair_quadros_em_lote
 

@@ -37,13 +37,14 @@ from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.correcoes import RepositorioDeCorrecoes
+from api.erros import ServicoIndisponivel
 from api.itens_da_decupagem import (
     ItensDaDecupagem,
     contar_itens,
     objeto_dos_itens,
 )
-from api.jobs import RepositorioDeJobs, ServicoIndisponivel
 from api.leitura_da_decupagem import AbreDecupagem
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import (
     DecupagensStorage,
     RepositorioDeCorrecoesFirestore,

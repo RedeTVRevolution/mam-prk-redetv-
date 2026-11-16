@@ -18,7 +18,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from api.catalogo import Catalogo
-from api.decupagem import Decupagem, FonteDoNome, Pessoa, _Intervalo
+from api.decupagem import Decupagem, FonteDoNome, Intervalo, Pessoa
 from api.identidade import nao_identificado
 from api.programas import Perfis
 from api.texto import normalizar
@@ -71,7 +71,7 @@ def _palavras(texto: str) -> list[str]:
     return re.findall(r"\w+", normalizar(texto))
 
 
-def _sobrepoe(a: _Intervalo, inicio_ms: int, fim_ms: int, folga_ms: int = 0) -> bool:
+def _sobrepoe(a: Intervalo, inicio_ms: int, fim_ms: int, folga_ms: int = 0) -> bool:
     return a.inicio_ms - folga_ms < fim_ms and inicio_ms < a.fim_ms + folga_ms
 
 

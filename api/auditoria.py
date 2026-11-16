@@ -3,17 +3,18 @@
 A interface tem acrescentar e consultar; nada altera nem apaga um registro.
 """
 
-import itertools
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 
-from api.auth import ChamadorAutenticado, Usuario
-from api.jobs import CursorInvalido, _confere_permissao
+from api.auth import Sistema, Usuario
+from api.modelo_do_job import CursorInvalido, um_alem_do_limite
+from api.permissoes import exige
 from api.texto_como_dado import LinhaDaConsulta
 
 # Cada ticket que grava uma ação nova a acrescenta a esta lista.
@@ -78,6 +79,36 @@ class RegistroDeAuditoria(BaseModel):
         if so_parte or pessoa == (self.sistema is not None):
             raise ValueError("quem fez é a pessoa (uid e e-mail) ou o sistema")
         return self
+
+
+def registro_de_auditoria(
+    quem: Usuario | Sistema | str,
+    quando: datetime,
+    acao: Acao,
+    alvo_tipo: str,
+    alvo_id: str,
+    alvo_nome: str,
+    motivo: str | None = None,
+    detalhes: dict[str, Any] | None = None,
+) -> RegistroDeAuditoria:
+    """O registro de uma ação: quem fez (pessoa ou sistema), o alvo e o `id` novo."""
+    # Texto é o nome de um sistema sem chave (purga automática, comandos do `make`).
+    de_quem = (
+        {"uid": quem.uid, "email": quem.email}
+        if isinstance(quem, Usuario)
+        else {"sistema": quem if isinstance(quem, str) else quem.sistema}
+    )
+    return RegistroDeAuditoria(
+        id=uuid.uuid4().hex,
+        quando=quando,
+        **de_quem,
+        acao=acao,
+        alvo_tipo=alvo_tipo,
+        alvo_id=alvo_id,
+        alvo_nome=alvo_nome,
+        motivo=motivo,
+        detalhes=detalhes or {},
+    )
 
 
 @dataclass(frozen=True)
@@ -155,21 +186,7 @@ class RepositorioDeAuditoriaEmMemoria:
 
 def pagina_de(registros: Any, limite: int | None) -> PaginaDeAuditoria:
     """Corta os registros já filtrados e em ordem; só lê um além do limite."""
-    if limite is None:
-        return PaginaDeAuditoria(list(registros))
-    lidos = list(itertools.islice(registros, limite + 1))
-    if len(lidos) <= limite:
-        return PaginaDeAuditoria(lidos)
-    pagina = lidos[:limite]
-    return PaginaDeAuditoria(pagina, pagina[-1].id)
-
-
-def _exige_ver(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `auditoria.ver`; chave de sistema não consulta."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não consulta a auditoria")
-    _confere_permissao(request, chamador, "auditoria.ver")
-    return chamador
+    return PaginaDeAuditoria(*um_alem_do_limite(registros, limite))
 
 
 def criar_rotas_da_auditoria(repositorio: RepositorioDeAuditoria) -> APIRouter:
@@ -177,7 +194,12 @@ def criar_rotas_da_auditoria(repositorio: RepositorioDeAuditoria) -> APIRouter:
 
     @rotas.get("")
     def listar(
-        _pessoa: Annotated[Usuario, Depends(_exige_ver)],
+        _pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige("auditoria.ver", "Chave de sistema não consulta a auditoria")
+            ),
+        ],
         pessoa: Annotated[str | None, LinhaDaConsulta(254)] = None,
         alvo: Annotated[str | None, LinhaDaConsulta(200)] = None,
         acao: Annotated[list[Acao] | None, Query()] = None,

@@ -21,7 +21,7 @@ const COMUM = { uid: 'u1', email: 'ana@redetv.com.br', papeis: ['consulta'], per
 
 const contas = (): Conta[] => [
   { uid: 'u1', email: 'ana@redetv.com.br', nome: 'Ana Lima', papeis: ['administrador'], criada_em: null, ultimo_acesso: '2026-10-28T14:02:00Z', situacao: 'ativa' },
-  { uid: 'u2', email: 'rui@redetv.com.br', nome: 'Rui Prado', papeis: ['editor', 'operador'], criada_em: null, ultimo_acesso: null, situacao: 'ativa' },
+  { uid: 'u2', email: 'rui@redetv.com.br', nome: 'Rui Prado', papeis: ['consulta', 'editor'], criada_em: null, ultimo_acesso: null, situacao: 'ativa' },
   { uid: 'u3', email: 'eva@redetv.com.br', nome: 'Eva Costa', papeis: ['consulta'], criada_em: null, ultimo_acesso: null, situacao: 'desativada' },
 ]
 
@@ -160,7 +160,7 @@ test('a tabela mostra nome, e-mail, papéis em texto, último acesso e situaçã
   await abrir('/admin/usuarios')
   const rui = await linhaDe('Rui Prado')
   expect(within(rui).getByText('rui@redetv.com.br')).toBeTruthy()
-  expect(within(rui).getByText('Editor, Operador')).toBeTruthy()
+  expect(within(rui).getByText('Consulta, Editor')).toBeTruthy()
   expect(within(rui).getByText('Ativa')).toBeTruthy()
   expect(within(await linhaDe('Eva Costa')).getByText('Desativada')).toBeTruthy()
 })
@@ -204,7 +204,7 @@ test('Editar papéis grava os papéis marcados e atualiza a linha', async () => 
   await abrirMenu(usuario, 'Rui Prado')
   await usuario.click(await screen.findByRole('menuitem', { name: 'Editar papéis' }))
   const dialogo = await screen.findByRole('dialog')
-  await usuario.click(within(dialogo).getByRole('checkbox', { name: /Operador/ }))
+  await usuario.click(within(dialogo).getByRole('checkbox', { name: /Consulta/ }))
   await usuario.click(within(dialogo).getByRole('checkbox', { name: /Curador/ }))
   await usuario.click(within(dialogo).getByRole('checkbox', { name: /Diretoria/ }))
   await usuario.click(within(dialogo).getByRole('button', { name: 'Salvar' }))

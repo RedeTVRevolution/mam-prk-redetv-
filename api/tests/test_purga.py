@@ -10,9 +10,10 @@ from api.auth import Usuario
 from api.catalogo import EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
 from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.lixeira import ArquivosContados, ArquivosEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Job
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.purga import Purga, purgar_vencidas, rodar_a_varredura_diaria
 from api.tests.test_auth import VerificadorFalso

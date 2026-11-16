@@ -1,6 +1,6 @@
 """`api/texto.py`: o único lugar que tira acento (#658)."""
 
-from api.jobs import palavras_do_nome
+from api.modelo_do_job import palavras_do_nome
 from api.teste_dos_jobs import normalizar as normalizar_do_teste_dos_jobs
 from api.texto import normalizar, sem_acento
 

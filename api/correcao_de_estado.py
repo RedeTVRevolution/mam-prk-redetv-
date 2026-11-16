@@ -12,17 +12,16 @@ Comando: `make corrigir-estado JOB=... ESTADO=... MOTIVO=...`. Ambiente:
 import getpass
 import os
 import sys
-import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Annotated, cast, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
+from api.auth import Usuario
 from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import (
     DestinoDaCorrecao,
@@ -31,15 +30,11 @@ from api.ciclo_de_vida import (
     desfazer_correcao,
 )
 from api.decupagem import Decupagem
-from api.jobs import (
-    Job,
-    JobPublico,
-    RepositorioDeJobs,
-    ServicoIndisponivel,
-    _confere_permissao,
-    agora_utc,
-)
+from api.erros import ServicoIndisponivel
+from api.jobs import JobPublico
 from api.leitura_da_decupagem import AbreDecupagem
+from api.modelo_do_job import Job, RepositorioDeJobs, agora_utc
+from api.permissoes import exige
 from api.texto_como_dado import Texto
 
 SISTEMA = "corrigir-estado"
@@ -64,10 +59,10 @@ def corrigir_estado_com_rastro(
     motivo: str,
     agora: datetime,
     *,
-    autor: dict[str, str],
+    autor: Usuario | str,
 ) -> Job | None:
     """O Job de depois, ou `None` se não existe. `EstadoNaoCorrigivel` sobe.
-    `autor` é `uid` e `email` ou `sistema`."""
+    `autor` é a pessoa ou o nome do sistema."""
     trocado = corrigir_estado(
         repositorio,
         job_id,
@@ -81,10 +76,9 @@ def corrigir_estado_com_rastro(
     antes, depois = trocado
     try:
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=agora,
-                **autor,
+                quem=autor,
                 acao="job.estado_corrigido",
                 alvo_tipo="job",
                 alvo_id=depois.id,
@@ -106,14 +100,6 @@ class PedidoDeCorrecao(BaseModel):
     motivo: Annotated[str, Texto(MOTIVO_MAXIMO, min_length=1, strip=True)]
 
 
-def _exige_corrigir_estado(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `job.corrigir_estado` (o Administrador)."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não corrige o estado")
-    _confere_permissao(request, chamador, "job.corrigir_estado")
-    return chamador
-
-
 def criar_rotas_da_correcao_de_estado(
     repositorio: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
@@ -126,7 +112,12 @@ def criar_rotas_da_correcao_de_estado(
     def corrigir(
         job_id: str,
         pedido: PedidoDeCorrecao,
-        pessoa: Annotated[Usuario, Depends(_exige_corrigir_estado)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(
+                exige("job.corrigir_estado", "Chave de sistema não corrige o estado")
+            ),
+        ],
     ) -> JobPublico:
         try:
             job = corrigir_estado_com_rastro(
@@ -137,7 +128,7 @@ def criar_rotas_da_correcao_de_estado(
                 pedido.estado,
                 pedido.motivo,
                 relogio(),
-                autor={"uid": pessoa.uid, "email": pessoa.email},
+                autor=pessoa,
             )
         except EstadoNaoCorrigivel as erro:
             raise HTTPException(409, str(erro)) from None
@@ -175,7 +166,7 @@ def main(
             cast(DestinoDaCorrecao, estado),
             motivo,
             relogio(),
-            autor={"sistema": f"{SISTEMA}:{quem or getpass.getuser()}"},
+            autor=f"{SISTEMA}:{quem or getpass.getuser()}",
         )
     except EstadoNaoCorrigivel as erro:
         escrever(f"recusado: {erro}")
@@ -190,11 +181,9 @@ def main(
 
 
 def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
-    from api.bancos import cliente_da_colecao
+    from api.bancos import auditoria_do_firestore
     from api.nuvem import (
-        COLECAO_DA_AUDITORIA,
         DecupagensStorage,
-        RepositorioDeAuditoriaFirestore,
         RepositorioFirestore,
     )
 
@@ -208,9 +197,7 @@ def _do_ambiente(argumentos: list[str], ambiente: Mapping[str, str]) -> int:
     return main(
         argumentos,
         RepositorioFirestore(banco),
-        RepositorioDeAuditoriaFirestore(
-            cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
-        ),
+        auditoria_do_firestore(projeto, ambiente),
         decupagens,
     )
 

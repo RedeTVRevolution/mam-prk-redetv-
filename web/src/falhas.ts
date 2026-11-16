@@ -1,4 +1,4 @@
-// A frase em português de cada `codigo_falha` de api/jobs.py; o código fica numa dica, para o suporte.
+// A frase em português de cada `codigo_falha` de api/modelo_do_job.py; o código fica numa dica, para o suporte.
 export const FRASES_DE_FALHA: Record<string, string> = {
   formato_invalido: 'O arquivo não é um MP4 válido. Envie um vídeo em MP4.',
   arquivo_corrompido: 'O arquivo está corrompido e não pôde ser lido. Exporte o vídeo de novo e envie.',

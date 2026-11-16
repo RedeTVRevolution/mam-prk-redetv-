@@ -6,8 +6,10 @@ import jwt
 from fastapi import Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
+from google.api_core.exceptions import GoogleAPIError
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.erros import ServicoIndisponivel, resposta_de_indisponibilidade
 from api.papeis import DocumentoDePapeis
 
 PREFIXO_PROTEGIDO = "/v1"
@@ -156,13 +158,19 @@ async def exigir_autenticacao(
     a quem não se autenticou."""
     if not _protegido(request.url.path):
         return await seguinte(request)
-    chamador = await _autenticar(request)
-    if isinstance(chamador, Usuario):
-        documento = await _documento_de_papeis(request, chamador)
-        if documento.desativada:
-            chamador = None  # O corte vale na hora, mesmo com um ID token ainda válido.
-        else:
-            request.state.papeis_guardados = documento
+    try:
+        chamador = await _autenticar(request)
+        if isinstance(chamador, Usuario):
+            documento = await _documento_de_papeis(request, chamador)
+            if documento.desativada:
+                chamador = (
+                    None  # O corte vale na hora, mesmo com um ID token ainda válido.
+                )
+            else:
+                request.state.papeis_guardados = documento
+    except (ServicoIndisponivel, GoogleAPIError) as erro:
+        # Este middleware fica por fora do `ExceptionMiddleware`: o handler do app não o vê.
+        return resposta_de_indisponibilidade(erro)
     if chamador is None:
         return JSONResponse(
             {"detail": "Not authenticated"},
@@ -173,8 +181,23 @@ async def exigir_autenticacao(
     return await seguinte(request)
 
 
+def chamador_do_pedido(request: Request) -> Chamador | None:
+    """Quem o middleware autenticou; `None` fora de `/v1` ou antes dele."""
+    chamador: Chamador | None = getattr(request.state, "chamador", None)
+    return chamador
+
+
+def papeis_guardados(request: Request) -> DocumentoDePapeis | None:
+    """O documento de papéis que o middleware leu neste pedido (só de pessoa)."""
+    documento: DocumentoDePapeis | None = getattr(
+        request.state, "papeis_guardados", None
+    )
+    return documento
+
+
 def chamador_autenticado(request: Request) -> Chamador:
-    chamador: Chamador = request.state.chamador
+    chamador = chamador_do_pedido(request)
+    assert chamador is not None, "rota de /v1 sem o middleware de autenticação"
     return chamador
 
 

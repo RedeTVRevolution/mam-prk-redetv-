@@ -8,8 +8,10 @@ import contextlib
 import os
 import threading
 import uuid
+from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -36,17 +38,11 @@ from api.busca import (
 from api.catalogo import EnvioParaLixeira, FusaoDaPessoa, PessoaInexistente
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
+from api.erros import ServicoIndisponivel
 from api.idempotencia import nova_reserva
-from api.jobs import (
-    JANELA_DA_URL_DO_QUADRO,
-    VALIDADE_DA_IMAGEM,
-    CursorInvalido,
-    FiltroDeJobs,
-    Job,
-    ServicoIndisponivel,
-    palavras_do_nome,
-)
+from api.jobs import JANELA_DA_URL_DO_QUADRO, VALIDADE_DA_IMAGEM
 from api.marcas import MarcaDoCatalogo, MarcaInexistente, carregar_marcas
+from api.modelo_do_job import CursorInvalido, FiltroDeJobs, Job, palavras_do_nome
 from api.nuvem import (
     TENTATIVAS_SOB_DISPUTA,
     ArmazenamentoStorage,
@@ -56,7 +52,6 @@ from api.nuvem import (
     ListasDaBuscaFirestore,
     ProgramasFirestore,
     QuadrosStorage,
-    ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
@@ -746,60 +741,6 @@ def test_arquivos_no_storage_conta_o_que_o_job_tem(
     assert contados.copia_limpa == copia_limpa
 
 
-@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
-@pytest.mark.parametrize("copia_limpa", [False, True])
-def test_arquivos_no_storage_apaga_tudo_do_job_e_nada_de_outro(
-    armazenamento: ArmazenamentoStorage,
-    copia_limpa: bool,
-) -> None:
-    _com_buckets(armazenamento)
-    aceitos = armazenamento._cliente.bucket(armazenamento._aceitos)
-    decupagens = armazenamento._cliente.bucket(armazenamento._decupagens)
-    do_job = {
-        aceitos: ["job1/proxy.mp4", "job1/copia_limpa.mp4", "job1/janelas/0000.json"],
-        decupagens: ["job1.json", "job1.comparacao.json", "job1/quadros/plano-0.jpg"],
-    }
-    if not copia_limpa:
-        do_job[aceitos].remove("job1/copia_limpa.mp4")
-    de_outro = {aceitos: ["job10/proxy.mp4"], decupagens: ["job10.json", "job2.json"]}
-    for bucket, objetos in (*do_job.items(), *de_outro.items()):
-        for objeto in objetos:
-            bucket.blob(objeto).upload_from_string(b"x")
-    arquivos = ArquivosNoStorage(
-        armazenamento._cliente, armazenamento._aceitos, armazenamento._decupagens
-    )
-
-    assert all(b.blob(o).exists() for b, os in do_job.items() for o in os)
-    assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
-    assert aceitos.blob("job1/copia_limpa.mp4").exists() is copia_limpa
-
-    arquivos.apagar("job1")
-    arquivos.apagar("job1")
-
-    assert not any(b.blob(o).exists() for b, os in do_job.items() for o in os)
-    assert not aceitos.blob("job1/copia_limpa.mp4").exists()
-    assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
-
-
-@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
-def test_referencias_apagam_a_pasta_da_pessoa_e_nada_de_outra(
-    armazenamento: ArmazenamentoStorage,
-) -> None:
-    nome = f"teste-referencias-{uuid.uuid4().hex[:8]}"
-    bucket = armazenamento._cliente.create_bucket(nome)
-    da_pessoa = ["referencias/ana/0.jpg", "referencias/ana/velha.jpg"]
-    de_outra = ["referencias/ana2/0.jpg", "palpites/ana/0.jpg"]
-    for objeto in da_pessoa + de_outra:
-        bucket.blob(objeto).upload_from_string(b"x")
-    fotos = ReferenciasStorage(armazenamento._cliente, nome)
-
-    fotos.apagar_prefixo("referencias/ana/")
-    fotos.apagar_prefixo("referencias/ana/")
-
-    assert not any(bucket.blob(o).exists() for o in da_pessoa)
-    assert all(bucket.blob(o).exists() for o in de_outra)
-
-
 def _registro_de_chave(id: str) -> RegistroDeChave:
     return RegistroDeChave(
         id=id,
@@ -957,9 +898,9 @@ class TestRepositorioDePapeisFirestore:
     def test_grava_e_le_os_papeis_do_uid(
         self, papeis: RepositorioDePapeisFirestore
     ) -> None:
-        papeis.salvar("u1", ["curador", "operador"])
+        papeis.salvar("u1", ["curador", "editor"])
 
-        assert papeis.obter("u1") == ["operador", "curador"]
+        assert papeis.obter("u1") == ["editor", "curador"]
         assert papeis.obter("u2") is None
 
     def test_papel_desconhecido_no_documento_e_ignorado(
@@ -1639,6 +1580,45 @@ class TestTiposDeObjetoFirestore:
         assert [t["tipo"] for t in achados] == ["sandália", "saia"]
 
 
+class _ColecaoQueConta:
+    """Dublê da coleção: devolve `n` documentos e anota o `limit` pedido."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+        self.limite: int | None = None
+        self.lidos = 0
+
+    def order_by(self, *_a: Any, **_k: Any) -> "_ColecaoQueConta":
+        return self
+
+    def limit(self, valor: int) -> "_ColecaoQueConta":
+        self.limite = valor
+        return self
+
+    def stream(self) -> Iterator[Any]:
+        for i in range(self.n if self.limite is None else min(self.n, self.limite)):
+            self.lidos += 1
+            registro = TestRepositorioDeAuditoriaFirestore._registro(f"r{i:03d}", -i)
+            yield type("Doc", (), {"to_dict": lambda _s, r=registro: r.model_dump()})()
+
+
+@pytest.mark.parametrize(("limite", "lidos"), [(50, 51), (None, 495)])
+def test_auditoria_firestore_le_um_alem_do_limite(
+    limite: int | None, lidos: int
+) -> None:
+    colecao = _ColecaoQueConta(495)
+    cliente = MagicMock()
+    cliente.collection.return_value = colecao
+    pagina = RepositorioDeAuditoriaFirestore(cliente).consultar(
+        FiltroDeAuditoria(limite=limite)
+    )
+
+    assert colecao.limite == (limite + 1 if limite is not None else None)
+    assert colecao.lidos == lidos
+    assert len(pagina.registros) == (50 if limite else 495)
+    assert pagina.proximo_cursor == ("r049" if limite else None)
+
+
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
 class TestRepositorioDeAuditoriaFirestore:
     @pytest.fixture
@@ -1893,6 +1873,33 @@ def test_marca_de_job_gravado_abortada_repete(
     chaves.marcar_job_gravado("sistema:Legado A", "k1")
 
     assert colecao.criacoes == 3
+
+
+def test_os_tres_lacos_sob_disputa_dao_o_mesmo_503_ao_esgotar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    agora = datetime(2026, 11, 4, tzinfo=UTC)
+
+    def sempre_aborta() -> _ColecaoQueAborta:
+        return _ColecaoQueAborta(abortos=10**6, depois=None)
+
+    casos: dict[str, Callable[[_ColecaoQueAborta], object]] = {
+        "criar": lambda c: RepositorioFirestore(_ClienteSemRede(c)).criar(_job_novo()),  # type: ignore[arg-type]
+        "reservar": lambda c: RepositorioDeIdempotenciaFirestore(
+            _ClienteSemRede(c)  # type: ignore[arg-type]
+        ).reservar("s", "k", "imp", "j1", agora),
+        "marcar": lambda c: RepositorioDeIdempotenciaFirestore(
+            _ClienteSemRede(c)  # type: ignore[arg-type]
+        ).marcar_job_gravado("s", "k"),
+    }
+    for nome, chamar in casos.items():
+        colecao = sempre_aborta()
+        with pytest.raises(
+            ServicoIndisponivel, match="Firestore disputado: tente de novo"
+        ):
+            chamar(colecao)
+        assert colecao.criacoes == TENTATIVAS_SOB_DISPUTA, nome
 
 
 class _DocumentoDaReservaVencida:

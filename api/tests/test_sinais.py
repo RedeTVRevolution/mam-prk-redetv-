@@ -16,7 +16,8 @@ from api.gemini import (
     ErroHttp,
     gerar_validado,
 )
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.sinais import ContagemDaAnalise
 from api.tests.test_analise import BASE, DEPOIS, SHA, DecupagensEmMemoria
 from api.tests.test_analise_por_janelas import (

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,8 +9,9 @@ from api.auditoria import (
     FiltroDeAuditoria,
     RegistroDeAuditoria,
     RepositorioDeAuditoriaEmMemoria,
+    registro_de_auditoria,
 )
-from api.auth import Usuario
+from api.auth import Sistema, Usuario
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -175,7 +177,7 @@ def test_sem_auditoria_ver_a_rota_responde_403() -> None:
     repo = RepositorioDeAuditoriaEmMemoria()
     repo.acrescentar(_registro("a"))
 
-    for papel in ("consulta", "operador", "editor", "curador", "diretoria"):
+    for papel in ("consulta", "editor", "curador", "diretoria"):
         resposta = _cliente([papel], repo).get(
             "/v1/admin/auditoria", headers=AUTORIZACAO
         )
@@ -269,3 +271,63 @@ def test_chave_de_sistema_nao_consulta_a_auditoria() -> None:
     resposta = cliente.get("/v1/admin/auditoria", headers={"X-API-Key": emitida.chave})
 
     assert resposta.status_code == 403
+
+
+def test_registro_de_auditoria_pessoa_sistema_e_nome_de_sistema() -> None:
+    alvo = {
+        "acao": "chave.emitida",
+        "alvo_tipo": "chave",
+        "alvo_id": "c",
+        "alvo_nome": "n",
+    }
+    pessoa = registro_de_auditoria(
+        Usuario(uid="u1", email="Ana@RedeTV.com"),
+        BASE,
+        **alvo,  # type: ignore[arg-type]
+    )
+    chave = registro_de_auditoria(
+        Sistema(sistema="Playout", escopos=["ler"]),
+        BASE,
+        **alvo,  # type: ignore[arg-type]
+    )
+    nome = registro_de_auditoria("Purga automática", BASE, **alvo, motivo="m")  # type: ignore[arg-type]
+
+    assert (pessoa.uid, pessoa.email, pessoa.sistema) == ("u1", "ana@redetv.com", None)
+    assert (chave.uid, chave.email, chave.sistema) == (None, None, "Playout")
+    assert (nome.sistema, nome.motivo, nome.detalhes) == ("Purga automática", "m", {})
+    assert len({pessoa.id, chave.id, nome.id}) == 3
+    assert all(len(r.id) == 32 for r in (pessoa, chave, nome))
+
+
+@pytest.mark.parametrize(
+    ("total", "limite"), [(5, None), (5, 2), (5, 5), (5, 9), (0, 3)]
+)
+def test_a_pagina_de_jobs_e_a_da_auditoria_cortam_igual(
+    total: int, limite: int | None
+) -> None:
+    from api.auditoria import pagina_de
+    from api.modelo_do_job import PaginaDeJobs
+
+    class Item:
+        def __init__(self, id: str) -> None:
+            self.id = id
+
+    def lidos_ate_o_corte(pagina_com: Any) -> tuple[list[str], str | None, int]:
+        lidos = 0
+
+        def fonte() -> Any:
+            nonlocal lidos
+            for n in range(total):
+                lidos += 1
+                yield Item(f"i{n}")
+
+        pagina = pagina_com(fonte())
+        itens = pagina.jobs if hasattr(pagina, "jobs") else pagina.registros
+        return [i.id for i in itens], pagina.proximo_cursor, lidos
+
+    assert lidos_ate_o_corte(lambda f: PaginaDeJobs.de(f, limite)) == lidos_ate_o_corte(
+        lambda f: pagina_de(f, limite)
+    )
+    ids, cursor, lidos = lidos_ate_o_corte(lambda f: pagina_de(f, limite))
+    if limite is not None and limite < total:
+        assert (len(ids), cursor, lidos) == (limite, f"i{limite - 1}", limite + 1)

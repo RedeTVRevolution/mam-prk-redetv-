@@ -15,8 +15,9 @@ from api.chaves import (
     emitir_chave,
     revogar_chave,
 )
-from api.jobs import ServicoIndisponivel, agora_utc
+from api.erros import ServicoIndisponivel
 from api.mac_kms import ErroDoKms, MacKms, mac_do_ambiente
+from api.modelo_do_job import agora_utc
 
 CHAVE = "projects/p/locations/l/keyRings/r/cryptoKeys/k"
 

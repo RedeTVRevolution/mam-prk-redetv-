@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
+from api.erros import ServicoIndisponivel
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
-from api.jobs import ServicoIndisponivel
 from api.qualidade_do_painel import _periodo
 from api.taxa_de_correcao import calcular
 from api.taxa_diaria import (

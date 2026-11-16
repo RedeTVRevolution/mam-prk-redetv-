@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from api import ocr_job
-from api.jobs import Estado, Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.leitura_da_tela import (
     Caixa,
     LeituraDaTela,
@@ -18,6 +18,7 @@ from api.leitura_da_tela import (
     LinhaLida,
     QuadroLido,
 )
+from api.modelo_do_job import Estado, Job
 from api.ocr_job import executar
 from api.paddle import DETECTOR, DETECTORES, RECONHECEDOR, LeitorPaddle
 from api.quadros import FalhaNosQuadros, quadros_por_trecho, tirar_quadros

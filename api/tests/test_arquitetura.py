@@ -120,3 +120,163 @@ def test_leitura_do_painel_nao_puxa_os_modulos_de_lote() -> None:
     lote = {"taxa_diaria", "taxa_de_correcao", "revisao_do_painel"}
     for modulo in ("taxa_do_painel", "qualidade_do_painel"):
         assert not _fecho(modulo) & lote, (modulo, _fecho(modulo) & lote)
+
+
+def _importa(codigo: str, modulo: str) -> bool:
+    """Se o código importa `modulo` (`api.jobs`), em qualquer ponto: topo, função ou `TYPE_CHECKING`."""
+    pacote, _, nome = modulo.rpartition(".")
+    for no in ast.walk(ast.parse(codigo)):
+        if isinstance(no, ast.Import) and any(a.name == modulo for a in no.names):
+            return True
+        if (
+            isinstance(no, ast.ImportFrom)
+            and no.level == 0
+            and (
+                no.module == modulo
+                or (no.module == pacote and any(a.name == nome for a in no.names))
+            )
+        ):
+            return True
+    return False
+
+
+# Quem importa o módulo à direita volta ao ciclo que o modelo do Job (#661) desfez.
+SEM_IMPORTAR = {
+    "ciclo_de_vida": "api.jobs",
+    "leitura_da_decupagem": "api.jobs",
+    "catalogo_dos_jobs": "api.jobs",
+    "chaves": "api.jobs",
+    "catalogo_de_correcoes": "api.correcoes",
+}
+
+
+def test_modulos_do_modelo_nao_voltam_ao_ciclo_com_as_rotas() -> None:
+    for modulo, proibido in SEM_IMPORTAR.items():
+        codigo = (API / f"{modulo}.py").read_text()
+        assert not _importa(codigo, proibido), f"{modulo} importa {proibido}"
+
+
+def test_pega_import_de_jobs_no_topo_em_funcao_e_em_type_checking() -> None:
+    for codigo in (
+        "from api.jobs import Job\n",
+        "def f():\n    from api.jobs import Job\n",
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from api.jobs import Job\n",
+        "from api import jobs\n",
+        "import api.jobs\n",
+    ):
+        assert _importa(codigo, "api.jobs"), codigo
+    assert not _importa("from api.modelo_do_job import Job\n", "api.jobs")
+
+
+# Nomes que deixaram de ser privados (#662): importar o `_` antigo de outro módulo volta ao nome escondido.
+# Ficam de fora os de outras áreas (`api.busca._intercalar`, `api.indexacao._registrar`, ...).
+NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS = {
+    "api.correcoes": {
+        "_acha_ocorrencia",
+        "_ancora_do_item",
+        "_ids_das_pessoas",
+        "_intervalo_da_pauta",
+        "_intervalo_da_pessoa",
+        "_intervalo_do_item",
+        "_intervalo_do_objeto",
+        "_itens_com_o_id",
+        "_objetos",
+        "_pautas",
+        "_pessoas",
+        "_por_inicio",
+        "_sobrepoe",
+        "_sobrepoe_de_verdade",
+        "_sobrepoe_metade",
+        "_valor_do_item",
+        "_sem_controle",
+    },
+    "api.regras_das_correcoes": {"_itens"},
+    "api.pessoas": {"_em_ordem"},
+    "api.decupagem": {"_Intervalo"},
+}
+
+
+def _importes_do_nome_antigo(codigo: str, proibidos: dict[str, set[str]]) -> set[str]:
+    # Todo módulo de produção mora em api/, então `from .x` é `api.x`.
+    modulos = {
+        no: no.module if no.level == 0 else f"api.{no.module}"
+        for no in ast.walk(ast.parse(codigo))
+        if isinstance(no, ast.ImportFrom) and no.level <= 1 and no.module
+    }
+    return {
+        f"{modulo}.{a.name}"
+        for no, modulo in modulos.items()
+        if modulo in proibidos
+        for a in no.names
+        if a.name in proibidos[modulo]
+    }
+
+
+def test_ninguem_importa_o_nome_com_o_underscore_antigo() -> None:
+    achados = {
+        (arquivo.relative_to(API).as_posix(), nome)
+        for arquivo in API.rglob("*.py")
+        for nome in _importes_do_nome_antigo(
+            arquivo.read_text(), NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS
+        )
+    }
+    assert not achados, f"importa o nome que deixou de ser privado: {sorted(achados)}"
+
+
+def test_pega_import_do_nome_antigo() -> None:
+    codigo = "def f():\n    from api.correcoes import LIMITE_DO_NOME, _sem_controle\n"
+    assert _importes_do_nome_antigo(codigo, NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS) == {
+        "api.correcoes._sem_controle"
+    }
+    assert _importes_do_nome_antigo(
+        "from .decupagem import _Intervalo\n", NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS
+    ) == {"api.decupagem._Intervalo"}
+    assert not _importes_do_nome_antigo(
+        "from api.correcoes import sem_controle\nfrom api.busca import _intercalar\n",
+        NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS,
+    )
+
+
+def test_estados_de_fim_cobrem_o_ciclo_de_vida() -> None:
+    from typing import get_args
+
+    from api.ciclo_de_vida import FINAIS
+    from api.modelo_do_job import FIM, FIM_OU_CANCELADO, Estado
+    from api.painel import ESTADOS_DA_FILA
+
+    assert FINAIS == FIM_OU_CANCELADO
+    assert FIM < FIM_OU_CANCELADO
+    assert set(ESTADOS_DA_FILA) | FIM_OU_CANCELADO == set(get_args(Estado))
+
+
+def test_request_state_do_chamador_so_se_le_pelas_funcoes_de_acesso() -> None:
+    # A escrita é do middleware; a leitura passa por `chamador_do_pedido` e `papeis_guardados`.
+    lidos = []
+    for arquivo in API.glob("*.py"):
+        for no in ast.walk(ast.parse(arquivo.read_text())):
+            leu_por_atributo = (
+                isinstance(no, ast.Attribute)
+                and isinstance(no.ctx, ast.Load)
+                and no.attr in {"chamador", "papeis_guardados"}
+                and isinstance(no.value, ast.Attribute)
+                and no.value.attr == "state"
+            )
+            leu_por_getattr = (
+                isinstance(no, ast.Call)
+                and isinstance(no.func, ast.Name)
+                and no.func.id == "getattr"
+                and len(no.args) > 1
+                and isinstance(no.args[0], ast.Attribute)
+                and no.args[0].attr == "state"
+                and isinstance(no.args[1], ast.Constant)
+                and no.args[1].value in {"chamador", "papeis_guardados"}
+            )
+            if leu_por_atributo or leu_por_getattr:
+                lidos.append(f"{arquivo.name}:{getattr(no, 'lineno', 0)}")
+    assert [x for x in lidos if not x.startswith("auth.py:")] == []
+
+
+def test_os_adaptadores_vazios_e_a_sonda_nao_importam_o_app() -> None:
+    pasta = Path(__file__).resolve().parent.parent
+    for modulo in ("sem_adaptadores", "sondar_busca"):
+        assert "main" not in _importados(pasta / f"{modulo}.py"), modulo

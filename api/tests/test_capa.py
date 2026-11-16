@@ -4,7 +4,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from api.decupagem import Decupagem
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.quadros_chave import capa_da_decupagem, executar
 from api.tests.test_quadros_chave import QuadrosFalso, _video, precisa_de_ffmpeg
 

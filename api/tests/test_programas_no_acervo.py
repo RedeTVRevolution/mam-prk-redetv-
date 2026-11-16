@@ -17,8 +17,9 @@ from api.chaves import (
     VerificadorDeChaveDeApi,
     emitir_chave,
 )
-from api.jobs import FiltroDeJobs, Job, PaginaDeJobs, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import FiltroDeJobs, Job, PaginaDeJobs
 from api.nuvem import (
     MAXIMO_DE_COMPONENTES,
     MAXIMO_DE_DISJUNCOES,

@@ -12,7 +12,7 @@ from bisect import bisect_left
 from collections.abc import Sequence
 from itertools import pairwise
 
-from api.decupagem import Decupagem, Plano, _Intervalo
+from api.decupagem import Decupagem, Intervalo, Plano
 
 LIMITE_DE_AJUSTE_MS = 1000
 
@@ -24,7 +24,7 @@ def _mais_proximo(cortes: Sequence[int], tempo_ms: int) -> int:
     return min(candidatos, key=lambda c: (abs(c - tempo_ms), c))
 
 
-def _ajustar[T: _Intervalo](item: T, cortes: Sequence[int], limite_ms: int | None) -> T:
+def _ajustar[T: Intervalo](item: T, cortes: Sequence[int], limite_ms: int | None) -> T:
     def ponta(tempo_ms: int) -> int:
         corte = _mais_proximo(cortes, tempo_ms)
         if limite_ms is not None and abs(corte - tempo_ms) > limite_ms:
@@ -37,7 +37,7 @@ def _ajustar[T: _Intervalo](item: T, cortes: Sequence[int], limite_ms: int | Non
     return _com_tempos(item, inicio, fim)
 
 
-def _com_tempos[T: _Intervalo](item: T, inicio: int, fim: int) -> T:
+def _com_tempos[T: Intervalo](item: T, inicio: int, fim: int) -> T:
     """O item com os tempos novos; os do modelo ficam guardados se mudaram."""
     if (inicio, fim) == (item.inicio_ms, item.fim_ms):
         return item
@@ -49,7 +49,7 @@ def _com_tempos[T: _Intervalo](item: T, inicio: int, fim: int) -> T:
     return item.model_copy(update={"inicio_ms": inicio, "fim_ms": fim, **modelo})
 
 
-def _sobreposicao(a: _Intervalo, inicio_ms: int, fim_ms: int) -> int:
+def _sobreposicao(a: Intervalo, inicio_ms: int, fim_ms: int) -> int:
     return min(a.fim_ms, fim_ms) - max(a.inicio_ms, inicio_ms)
 
 

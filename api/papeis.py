@@ -7,10 +7,16 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol, get_args
 
-Papel = Literal[
-    "consulta", "operador", "editor", "curador", "diretoria", "administrador"
-]
+Papel = Literal["consulta", "editor", "curador", "diretoria", "administrador"]
 PAPEIS: tuple[Papel, ...] = get_args(Papel)
+
+
+def em_ordem(papeis: Iterable[str]) -> list[Papel]:
+    """Os papéis conhecidos, sem repetição e na ordem canônica de `PAPEIS`."""
+    pedidos = set(papeis)
+    return [p for p in PAPEIS if p in pedidos]
+
+
 Permissao = Literal[
     "decupagem.ver",
     "video.enviar",
@@ -36,8 +42,6 @@ _EDITOR: frozenset[Permissao] = _CONSULTA | frozenset(
 )
 PERMISSOES_DO_PAPEL: dict[Papel, frozenset[Permissao]] = {
     "consulta": _CONSULTA,
-    # Igual à Consulta: o envio e o reprocessamento são do Editor, do Curador e do Administrador.
-    "operador": _CONSULTA,
     "editor": _EDITOR,
     "curador": _EDITOR
     | frozenset(
@@ -96,6 +100,8 @@ class DocumentoDePapeis:
     uid: str
     desativada: bool
     papeis: list[Papel] | None
+    # Conta criada cuja auditoria falhou: sempre junto com `desativada`.
+    pendente: bool = False
 
 
 class RepositorioDePapeis(Protocol):
@@ -117,14 +123,22 @@ class RepositorioDePapeis(Protocol):
         """Liga ou desliga a marca sem tocar nos papéis (nem criar papéis)."""
         ...
 
+    def marcar_pendente(self, uid: str, pendente: bool) -> None:
+        """Liga ou desliga, numa gravação só, `pendente` e `desativada` (a criação
+        de conta sem registro na auditoria não deixa acesso)."""
+        ...
+
 
 class RepositorioDePapeisEmMemoria:
     def __init__(self) -> None:
         self._papeis: dict[str, list[Papel]] = {}
         self._desativadas: set[str] = set()
+        self._pendentes: set[str] = set()
 
     def ler(self, uid: str) -> DocumentoDePapeis:
-        return DocumentoDePapeis(uid, self.desativada(uid), self.obter(uid))
+        return DocumentoDePapeis(
+            uid, self.desativada(uid), self.obter(uid), uid in self._pendentes
+        )
 
     def obter(self, uid: str) -> list[Papel] | None:
         return self._papeis.get(uid)
@@ -137,6 +151,10 @@ class RepositorioDePapeisEmMemoria:
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         (self._desativadas.add if desativada else self._desativadas.discard)(uid)
+
+    def marcar_pendente(self, uid: str, pendente: bool) -> None:
+        (self._pendentes.add if pendente else self._pendentes.discard)(uid)
+        self.marcar_desativada(uid, pendente)
 
 
 class ContaNaoEncontrada(Exception):
@@ -154,7 +172,7 @@ def atribuir_papeis_main(
         imprimir(uso)
         return 2
     email = argv[0].strip()
-    pedidos = sorted({p.strip() for p in argv[1].split(",") if p.strip()})
+    pedidos = {p.strip() for p in argv[1].split(",") if p.strip()}
     desconhecidos = [p for p in pedidos if p not in PAPEIS]
     if not email or not pedidos or desconhecidos:
         if desconhecidos:
@@ -167,7 +185,7 @@ def atribuir_papeis_main(
     except ContaNaoEncontrada:
         imprimir(f"conta não encontrada: {email}")
         return 2
-    papeis: list[Papel] = [p for p in PAPEIS if p in pedidos]
+    papeis = em_ordem(pedidos)
     repositorio.salvar(uid, papeis)
     imprimir(f"{email} (uid {uid}): {', '.join(papeis)}")
     return 0

@@ -7,31 +7,35 @@ catálogo e mantém o texto. A saída do modelo não é tocada (ADR 0010).
 """
 
 import logging
-import uuid
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auditoria import (
+    Acao,
+    RegistroDeAuditoria,
+    RepositorioDeAuditoria,
+    registro_de_auditoria,
+)
+from api.auth import Usuario
 from api.catalogo import (
     Catalogo,
     EnvioParaLixeira,
     PessoaInexistente,
-    prefixo_das_fotos,
 )
 from api.catalogo_apagado import so_o_rosto
 from api.correcoes import RepositorioDeCorrecoes
-from api.jobs import FiltroDeJobs, RepositorioDeJobs, _confere_permissao
+from api.fotos_de_referencia import FotosDeReferencia, apagar_fotos_da_pessoa
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.lixeira import (
     PRAZO_DA_PURGA,
+    SISTEMA_DA_PURGA,
     Envio,
     ItemDaLixeira,
-    _exige_gerir,
+    PedidoDePurga,
     item_da_lixeira,
     login_recente_ou_403,
 )
@@ -42,32 +46,12 @@ from api.marcas import (
     MarcaInexistente,
     nomes_de_busca_da_marca,
 )
+from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
+from api.permissoes import exige
 from api.relatorio_de_marcas import ConsultaDeInsercoes, SoMarcasQueContam
 from api.relatorios import ou_503
-from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
-
-SISTEMA_DA_PURGA = "Purga automática"
-
-
-class FotosDeReferencia(Protocol):
-    """Porta para o bucket das referências; os testes usam a versão em memória."""
-
-    def apagar(self, objeto: str) -> None: ...
-
-    def apagar_prefixo(self, prefixo: str) -> None: ...
-
-
-class FotosEmMemoria:
-    def __init__(self, objetos: set[str] | None = None) -> None:
-        self.objetos = objetos if objetos is not None else set()
-
-    def apagar(self, objeto: str) -> None:
-        self.objetos.discard(objeto)
-
-    def apagar_prefixo(self, prefixo: str) -> None:
-        self.objetos = {o for o in self.objetos if not o.startswith(prefixo)}
 
 
 class ImpactoDaPessoa(BaseModel):
@@ -82,21 +66,6 @@ class ImpactoDaMarca(BaseModel):
     # O que o relatório de marcas deixa de contar, pelo nome e pelos apelidos (#597); sem
     # relatório configurado, 0. A busca entra só no texto da tela, sem número.
     insercoes_que_saem_do_relatorio: int = 0
-
-
-def _exige_apagar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `catalogo.apagar`; chave de sistema não mexe no catálogo."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não mexe no catálogo")
-    _confere_permissao(request, chamador, "catalogo.apagar")
-    return chamador
-
-
-class PedidoDePurga(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # O nome, digitado: a prova de que a pessoa sabe o que está apagando.
-    nome: Annotated[str, Linha(255)]
 
 
 class Restaurado(BaseModel):
@@ -114,12 +83,9 @@ def _registro(
     quando: datetime,
     autor: Usuario | None,
 ) -> RegistroDeAuditoria:
-    return RegistroDeAuditoria(
-        id=uuid.uuid4().hex,
+    return registro_de_auditoria(
         quando=quando,
-        uid=autor.uid if autor else None,
-        email=autor.email if autor else None,
-        sistema=None if autor else SISTEMA_DA_PURGA,
+        quem=autor or SISTEMA_DA_PURGA,
         acao=acao,
         alvo_tipo=tipo,
         alvo_id=id,
@@ -279,14 +245,22 @@ def criar_rotas_da_lixeira_do_catalogo(
 
     @rotas.get("/pessoas/{id_da_pessoa}/impacto")
     def impacto_pessoa(
-        id_da_pessoa: str, _autor: Annotated[Usuario, Depends(_exige_apagar)]
+        id_da_pessoa: str,
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("catalogo.apagar", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> ImpactoDaPessoa:
         achada = pessoa(id_da_pessoa)
         return impacto_da_pessoa(achada.id, len(achada.rostos))
 
     @rotas.get("/marcas/{id_da_marca}/impacto")
     def impacto_marca(
-        id_da_marca: str, _autor: Annotated[Usuario, Depends(_exige_apagar)]
+        id_da_marca: str,
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("catalogo.apagar", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> ImpactoDaMarca:
         return impacto_da_marca(marca(id_da_marca))
 
@@ -294,7 +268,10 @@ def criar_rotas_da_lixeira_do_catalogo(
     def enviar_pessoa(
         id_da_pessoa: str,
         pedido: Envio,
-        autor: Annotated[Usuario, Depends(_exige_apagar)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("catalogo.apagar", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> ItemDaLixeira:
         achada = pessoa(id_da_pessoa)
         if achada.lixeira is not None:
@@ -306,10 +283,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         ao_mudar()  # antes das fotos: apagá-las não se desfaz
         # Rosto é dado sensível: as fotos saem já, sem esperar a purga, e não voltam.
         # Pela pasta da pessoa também: as fotos da web trocadas antes ficaram lá.
-        for rosto in achada.rostos:
-            fotos.apagar(rosto.referencia)
-        fotos.apagar_prefixo(prefixo_das_fotos(achada.id))
-        pessoas.definir_rostos(achada.id, [])
+        apagar_fotos_da_pessoa(fotos, pessoas, achada)
         envio = envio_de(autor, pedido.motivo)
         lixeira_da_pessoa(achada.id, envio)
         try:
@@ -331,7 +305,10 @@ def criar_rotas_da_lixeira_do_catalogo(
     def enviar_marca(
         id_da_marca: str,
         pedido: Envio,
-        autor: Annotated[Usuario, Depends(_exige_apagar)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("catalogo.apagar", "Chave de sistema não mexe no catálogo")),
+        ],
     ) -> ItemDaLixeira:
         achada = marca(id_da_marca)
         if achada.lixeira is not None:
@@ -355,7 +332,11 @@ def criar_rotas_da_lixeira_do_catalogo(
 
     @rotas.post("/pessoas/{id_da_pessoa}/restaurar")
     def restaurar_pessoa(
-        id_da_pessoa: str, autor: Annotated[Usuario, Depends(_exige_gerir)]
+        id_da_pessoa: str,
+        autor: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> Restaurado:
         achada = pessoa(id_da_pessoa)
         if achada.lixeira is None:
@@ -379,7 +360,11 @@ def criar_rotas_da_lixeira_do_catalogo(
 
     @rotas.post("/marcas/{id_da_marca}/restaurar")
     def restaurar_marca(
-        id_da_marca: str, autor: Annotated[Usuario, Depends(_exige_gerir)]
+        id_da_marca: str,
+        autor: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> Restaurado:
         achada = marca(id_da_marca)
         if achada.lixeira is None:
@@ -439,7 +424,10 @@ def criar_rotas_da_lixeira_do_catalogo(
     def purgar_pessoa(
         id_da_pessoa: str,
         pedido: PedidoDePurga,
-        autor: Annotated[Usuario, Depends(_exige_gerir)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> Restaurado:
         return purgar("pessoa", pessoa(id_da_pessoa), pedido, autor)
 
@@ -447,7 +435,10 @@ def criar_rotas_da_lixeira_do_catalogo(
     def purgar_marca(
         id_da_marca: str,
         pedido: PedidoDePurga,
-        autor: Annotated[Usuario, Depends(_exige_gerir)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> Restaurado:
         return purgar("marca", marca(id_da_marca), pedido, autor)
 

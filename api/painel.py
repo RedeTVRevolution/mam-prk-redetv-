@@ -10,18 +10,21 @@ abertura; filtro novo, sim: é outra coisa vista. As rotas leem só as tabelas r
 import logging
 import threading
 import time
-import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal, get_args
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auditoria import (
+    FiltroDeAuditoria,
+    RepositorioDeAuditoria,
+    registro_de_auditoria,
+)
+from api.auth import Usuario
 from api.cache_curto import CacheCurto
 from api.csv_seguro import csv_em_texto
 from api.custo_do_painel import (
@@ -33,16 +36,11 @@ from api.custo_do_painel import (
     linhas_do_csv_de_custo,
     relatorio_de_custo,
 )
-from api.jobs import (
-    Estado,
-    FiltroDeJobs,
-    Job,
-    RepositorioDeJobs,
-    ServicoIndisponivel,
-    _confere_permissao,
-    espera_da_gpu,
-)
+from api.erros import ServicoIndisponivel
+from api.jobs import espera_da_gpu
+from api.modelo_do_job import Estado, FiltroDeJobs, Job, RepositorioDeJobs
 from api.periodo_padrao import Periodo, dependencia_do_periodo
+from api.permissoes import exige
 from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel
 from api.relatorios import (
     confere_o_pedido,
@@ -78,14 +76,6 @@ FAIXAS_DO_AUTO: tuple[tuple[int, Grupo], ...] = (
 log = logging.getLogger(__name__)
 
 
-def exige_painel(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência das rotas do painel: só pessoa com `painel.ver`; chave de sistema não vê."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não vê o painel")
-    _confere_permissao(request, chamador, "painel.ver")
-    return chamador
-
-
 class FiltroDoPainel(BaseModel):
     """Os filtros comuns das abas. `desde` e `ate` são dias de São Paulo, os dois inclusive;
     `programa` e `usuario` (o uid) vazios valem "todos"."""
@@ -116,11 +106,9 @@ class AcessosAoPainel:
     ) -> None:
         try:
             self._auditoria.acrescentar(
-                RegistroDeAuditoria(
-                    id=uuid.uuid4().hex,
+                registro_de_auditoria(
                     quando=self._relogio(),
-                    uid=pessoa.uid,
-                    email=pessoa.email,
+                    quem=pessoa,
                     acao=acao,
                     alvo_tipo="painel",
                     alvo_id="diretoria",
@@ -154,7 +142,9 @@ class AcessosAoPainel:
         self._gravar(pessoa, "painel.exportado", aba, filtro)
 
 
-PodeVerOPainel = Annotated[Usuario, Depends(exige_painel)]
+PodeVerOPainel = Annotated[
+    Usuario, Depends(exige("painel.ver", "Chave de sistema não vê o painel"))
+]
 
 
 class DiaDeAcessos(BaseModel):

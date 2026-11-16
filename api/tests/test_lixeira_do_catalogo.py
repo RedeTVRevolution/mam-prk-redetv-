@@ -10,8 +10,9 @@ from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira, FusaoDaPessoa, Rosto
 from api.copia_bigquery import CopiaEmMemoria, LinhaDoMomento
+from api.fotos_de_referencia import FotosEmMemoria
 from api.jobs import RepositorioEmMemoria
-from api.lixeira_do_catalogo import FotosEmMemoria, purgar_catalogo_vencido
+from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.lixeira_na_leitura import PurgasDeMarcaEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria, MarcaDoCatalogo

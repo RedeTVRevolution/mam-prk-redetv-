@@ -15,7 +15,8 @@ from api.ferramentas.comum import (
     percentil,
 )
 from api.indice_da_busca import IndiceEmMemoria, Registro
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import Job
 from api.preencher_catalogo_dos_jobs import preencher as preencher_catalogo
 from api.preencher_filtros_da_busca import preencher as preencher_filtros
 from api.preencher_planos_recorrentes import preencher as preencher_planos

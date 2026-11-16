@@ -9,58 +9,49 @@ na lixeira há 30 dias ou mais.
 import logging
 import os
 import sys
-import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.cloud.storage import Client as ClienteStorage
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from api import log_estruturado
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca, transporte_http
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
-from api.bancos import cliente_da_colecao, cliente_do_firestore
+from api.bancos import auditoria_do_firestore, cliente_do_firestore
 from api.correcoes import RepositorioDeCorrecoes
 from api.dados_da_purga import dados_do_ambiente
 from api.indice_da_busca import IndiceDaBusca
-from api.jobs import (
-    Armazenamento,
-    FiltroDeJobs,
-    Job,
-    RepositorioDeJobs,
-    agora_utc,
-    expirar_uploads,
-)
+from api.jobs import Armazenamento, expirar_uploads
 from api.lixeira import (
     PRAZO_DA_PURGA,
+    SISTEMA_DA_PURGA,
     ArquivosDoJob,
     ImpactoDoVideo,
-    _exige_gerir,
+    PedidoDePurga,
     calcular_impacto,
     login_recente_ou_403,
 )
 from api.lixeira_do_catalogo import purgar_catalogo_vencido
 from api.lixeira_na_leitura import PurgasDeMarcaFirestore, VersaoDaLixeiraFirestore
+from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs, agora_utc
 from api.nuvem import (
-    COLECAO_DA_AUDITORIA,
     ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
-    RepositorioDeAuditoriaFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
-from api.texto_como_dado import Linha
+from api.permissoes import exige
 
 log = logging.getLogger(__name__)
 
-SISTEMA_DA_PURGA = "Purga automática"
 LOGIN_RECENTE_PADRAO = timedelta(minutes=5)
 
 
@@ -101,12 +92,9 @@ class Purga:
             raise NaoEstaNaLixeira(job_id)
         impacto = self.impacto(job)
         self._auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=self._relogio(),
-                uid=autor.uid if autor else None,
-                email=autor.email if autor else None,
-                sistema=None if autor else SISTEMA_DA_PURGA,
+                quem=autor or SISTEMA_DA_PURGA,
                 acao="item.purgado",
                 alvo_tipo="video",
                 alvo_id=job.id,
@@ -145,13 +133,6 @@ def purgar_vencidas(
     return purgados
 
 
-class PedidoDePurga(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # O nome do arquivo, digitado: a prova de que a pessoa sabe o que está apagando.
-    nome: Annotated[str, Linha(255)]
-
-
 class VideoPurgado(BaseModel):
     id: str
     nome: str
@@ -170,7 +151,10 @@ def criar_rotas_da_purga(
     def purgar(
         id_do_video: str,
         pedido: PedidoDePurga,
-        pessoa: Annotated[Usuario, Depends(_exige_gerir)],
+        pessoa: Annotated[
+            Usuario,
+            Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
+        ],
     ) -> VideoPurgado:
         login_recente_ou_403(pessoa, relogio(), login_recente)
         job = repositorio.obter(id_do_video)
@@ -219,7 +203,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         return 2
     log_estruturado.configurar(logging.INFO)
     cliente = cliente_do_firestore(projeto, ambiente)
-    banco_de_seguranca = cliente_da_colecao(projeto, COLECAO_DA_AUDITORIA, ambiente)
+    auditoria = auditoria_do_firestore(projeto, ambiente)
     busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
     repositorio = RepositorioFirestore(cliente)
     purga = Purga(
@@ -236,7 +220,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
             if busca
             else None
         ),
-        RepositorioDeAuditoriaFirestore(banco_de_seguranca),
+        auditoria,
         agora_utc,
         apagar_dados=dados_do_ambiente(cliente, ambiente).apagar,
     )
@@ -249,7 +233,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         lambda: purgar_catalogo_vencido(
             CatalogoFirestore(cliente),
             CatalogoDeMarcasFirestore(cliente),
-            RepositorioDeAuditoriaFirestore(banco_de_seguranca),
+            auditoria,
             agora_utc(),
             PurgasDeMarcaFirestore(cliente),
             VersaoDaLixeiraFirestore(cliente).avancar,

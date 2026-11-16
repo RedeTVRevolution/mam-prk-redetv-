@@ -11,12 +11,10 @@ import zlib
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import PurePath
 from typing import Annotated, Any, Literal, Protocol, Self
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -25,20 +23,17 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
-    field_serializer,
     field_validator,
     model_validator,
 )
 
 from api.auth import (
     Chamador,
-    ChamadorAutenticado,
-    Escopo,
     Sistema,
     Usuario,
 )
 from api.cache_curto import CacheCurto
-from api.catalogo import Catalogo, EnvioParaLixeira
+from api.catalogo import Catalogo
 from api.ciclo_de_vida import (
     PRAZO_DO_REPROCESSAMENTO,
     JaTerminou,
@@ -70,8 +65,7 @@ from api.correcoes import (
     VersaoDesatualizada,
 )
 from api.decupagem import caminho_do_quadro
-from api.dispositivo import Dispositivo
-from api.erros import ServicoIndisponivel as ServicoIndisponivel  # noqa: PLC0414 (reexport explícito para o mypy)
+from api.erros import ServicoIndisponivel
 from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
 from api.idempotencia import (
     TAMANHO_MAXIMO_DA_CHAVE,
@@ -82,13 +76,31 @@ from api.idempotencia import (
 )
 from api.leitura_da_decupagem import LeituraDaDecupagem, ler_modelo
 from api.marcas import CatalogoDeMarcas
-from api.papeis import (
-    DocumentoDePapeis,
-    Papel,
-    Permissao,
-    RepositorioDePapeis,
-    papeis_do_usuario,
-    permissoes_de,
+from api.modelo_do_job import (
+    CAMPOS_DA_LISTA,
+    CodigoDeFalha,
+    CopiaNoBigQuery,
+    CursorInvalido,
+    Estado,
+    Etapa,
+    FiltroDeJobs,
+    Indexacao,
+    Job,
+    NomeDaEtapa,
+    Ordem,
+    PaginaDeJobs,
+    RepositorioDeJobs,
+    casa_com_o_filtro,
+    paginar_em_python,
+    palavras_do_nome,
+)
+from api.permissoes import (
+    JobDoPedido,
+    de_outro_sistema,
+    enxerga,
+    exige,
+    exige_escopo,
+    tem_permissao,
 )
 from api.programas import RepositorioDeProgramas
 from api.registro_da_correcao import RegistroDaCorrecao
@@ -97,7 +109,6 @@ from api.regras_das_correcoes import (
     fila,
     historico,
 )
-from api.texto import sem_acento
 from api.texto_como_dado import PADRAO_DA_LINHA, Linha, LinhaDaConsulta
 
 TIPO_DO_VIDEO = "video/mp4"
@@ -130,206 +141,12 @@ TETO_POR_HORA_DO_SISTEMA = 200
 TETO_POR_HORA_DA_PESSOA = 30
 JANELA_DO_TETO = timedelta(hours=1)
 
-Estado = Literal[
-    "aguardando_upload",
-    "validando",
-    "analisando",
-    "concluido",
-    "falhou",
-    "cancelado",
-]
-CodigoDeFalha = Literal[
-    "formato_invalido",
-    "arquivo_corrompido",
-    "codec_nao_suportado",
-    "duracao_excedida",
-    "upload_expirado",
-    "analise_falhou",
-    "transcricao_falhou",
-    "ocr_falhou",
-    # O próprio Workflows caiu num erro que nenhum passo tratou (`marca_interrompido`).
-    "processamento_interrompido",
-]
-
-
-EstadoDaIndexacao = Literal["pendente", "indexado", "falhou"]
-
 
 # Quanto a lista sem capa (o polling da busca) fica guardada: o selo "Finalizando" atrasa até isto.
 VALIDADE_DA_LISTA_S = 15.0
 
 # Teto de assinaturas de capa ao mesmo tempo na listagem do Acervo.
 ASSINATURAS_SIMULTANEAS = 8
-
-
-class Indexacao(BaseModel):
-    """Onde o Job está no índice da busca; uma falha dela não muda o `estado` do Job."""
-
-    estado: EstadoDaIndexacao
-    em: datetime
-    # O começo da rodada que terminou em `em`: o que foi gravado até aqui entrou nela.
-    desde: datetime | None = None
-
-
-class RodadaDaIndexacao(BaseModel):
-    """A execução que está indexando o vídeo agora (#419): quem a toma é a única que grava no
-    índice, e o `id` separa a dela de uma que a substituiu depois de `em` vencer."""
-
-    id: str
-    em: datetime
-
-
-EstadoDaCopia = Literal["pendente", "copiado", "falhou"]
-
-
-class CopiaNoBigQuery(BaseModel):
-    """Onde o Job está na cópia para o BigQuery (#260); falhar não muda o `estado` do Job."""
-
-    estado: EstadoDaCopia
-    em: datetime
-    desde: datetime | None = None
-    anos: list[int] = Field(default_factory=list)
-    # Só fica completo depois do primeiro MERGE sem filtro, inclusive se não há data.
-    particoes_conhecidas: bool = False
-
-
-NomeDaEtapa = Literal[
-    "validacao",
-    "transcricao",
-    "leitura_da_tela",
-    "analise",
-    # Depois do `concluido`, na ordem do Workflows. A identificação aprimora a Decupagem
-    # no lugar (#221).
-    "identificacao",
-    "quadros_chave",
-    "inventario_de_objetos",
-    "indexacao",
-]
-# Etapas do #112 retiradas no #327; só os Jobs antigos ainda as trazem.
-ETAPAS_QUE_SAIRAM = frozenset({"referencias", "comparacao"})
-ResultadoDaEtapa = Literal["concluida", "falhou"]
-
-
-class Etapa(BaseModel):
-    """Uma etapa já iniciada do processamento; `fim` e `resultado` só depois que ela acaba."""
-
-    inicio: datetime
-    fim: datetime | None = None
-    resultado: ResultadoDaEtapa | None = None
-    # Só a transcrição e a leitura da tela (#239): onde rodaram e quantas vezes o Workflows
-    # tentou o Job com GPU (a espera por falta de GPU ou de cota); `None` nas outras etapas
-    # e em etapa anterior ao campo.
-    dispositivo: Dispositivo | None = None
-    tentativas_gpu: int | None = None
-
-
-class Job(BaseModel):
-    id: str
-    nome: str
-    tamanho_bytes: int
-    sha256: str | None = None
-    duracao_s: float | None = None
-    # Cortes de câmera da validação, em ms; `None` em Job anterior à detecção.
-    cortes_ms: list[int] | None = None
-    # Timecode inicial da faixa `tmcd` do arquivo; `None` sem a faixa, fora do
-    # formato ou em Job anterior ao campo.
-    timecode_origem: str | None = None
-    # Quadros por segundo do vídeo (ffprobe); `None` em Job anterior ao campo.
-    taxa_de_quadros: float | None = None
-    # Caminho do quadro de capa (`quadros/plano-1.jpg`), escolhido ao tirar os
-    # quadros-chave; `None` sem planos com quadro e em Job anterior ao campo.
-    capa: str | None = None
-    estado: Estado
-    codigo_falha: CodigoDeFalha | None = None
-    criado_por: str
-    # E-mail de quem criou; `None` em Job de sistema e em Job anterior ao campo.
-    criado_por_email: str | None = None
-    sistema: str | None = None
-    programa: str | None = None
-    # Palavras normalizadas do nome do arquivo, para a busca por nome (o Firestore
-    # não busca por trecho); vazio em Job anterior ao campo.
-    palavras: list[str] = []
-    # Dia em que o programa foi ao ar; `None` em Job anterior ao campo.
-    data_exibicao: date | None = None
-    # Mês de `data_exibicao` (`AAAA-MM`), sempre derivado dela ao montar o Job: a lista por
-    # envio filtra o período por aqui no Firestore, onde um intervalo em `data_exibicao`
-    # não cabe com a ordem por `criado_em` (#479). `None` sem data; em Job anterior ao
-    # campo, só `make gravar-mes-nos-jobs` o grava.
-    mes_exibicao: str | None = None
-    # A `versao_pipeline` da Decupagem, gravada ao concluir a análise: o reprocessar por versão
-    # lê daqui, sem abrir as decupagens (#494). `anterior` se a decupagem não tem o campo.
-    # `None` até concluir, depois de uma correção à mão para concluído e em Job anterior ao
-    # campo, até `make gravar-versao-nos-jobs`.
-    versao_pipeline: str | None = None
-    # `None` até o Job concluir (e em Job anterior ao campo).
-    indexacao: Indexacao | None = None
-    # Quantas vezes se pediu a indexação do vídeo e até qual pedido ela já chegou (#419): aprovar a
-    # revisão, trocar o nome do programa e o `make` da indexação só incrementam `versao_pedida`; o
-    # `mam-indexacao` reindexa até `versao_indexada` alcançá-la. Zero nos dois em Job anterior.
-    versao_pedida: int = 0
-    versao_indexada: int = 0
-    # `None` sem execução indexando; ver `api.ciclo_de_vida.tomar_a_rodada`.
-    rodada_da_indexacao: RodadaDaIndexacao | None = None
-    # `None` até a primeira cópia (e onde o BigQuery não está configurado).
-    copia_bigquery: CopiaNoBigQuery | None = None
-    # A etapa em andamento; `None` entre etapas, com o Job parado e em Job anterior ao campo.
-    etapa_atual: NomeDaEtapa | None = None
-    # Só as etapas iniciadas, por nome; vazio em Job anterior ao campo. Quem grava é
-    # `api.ciclo_de_vida` (e o Workflows, com o mesmo formato).
-    etapas: dict[NomeDaEtapa, Etapa] = {}
-    # Quantas vezes o Job foi reprocessado a partir da etapa que falhou (#147).
-    reprocessamentos: int = 0
-    # Início da passada atual; `None` em Job anterior ao campo.
-    inicio_da_passada: datetime | None = None
-    # Em qual `reprocessamentos` o fim `falhou` deste Job já foi avisado (webhook e evento de
-    # uso) por `api.fim_do_job`, o caminho do `falhou` que o Workflows grava; `None` se nunca.
-    fim_avisado_no_reprocessamento: int | None = None
-    # `None` fora da lixeira. Na lixeira o Job só o Administrador enxerga; nada é apagado.
-    lixeira: EnvioParaLixeira | None = None
-    # Os `catalogo_id` que aparecem na Decupagem entregue (Correções aplicadas, pessoas
-    # fundidas resolvidas): o impacto de uma pessoa ou marca do catálogo acha os vídeos
-    # por aqui, sem abrir todas as decupagens (#359). Vazios em Job anterior ao campo
-    # até rodar `make preencher-catalogo-dos-jobs`.
-    pessoas_do_catalogo: list[str] = []
-    marcas_do_catalogo: list[str] = []
-    criado_em: datetime
-    atualizado_em: datetime
-
-    @field_serializer("data_exibicao")
-    def _data_como_texto(self, data: date | None) -> str | None:
-        # O Firestore não guarda `date`; o Pydantic a lê de volta do texto ISO.
-        return data.isoformat() if data else None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _sem_as_etapas_que_sairam(cls, dados: Any) -> Any:
-        # Jobs gravados antes do #327 trazem as etapas `referencias` e `comparacao`, que
-        # deixaram de existir; elas somem na leitura em vez de derrubar o Job.
-        if not isinstance(dados, dict):
-            return dados
-        dados = dict(dados)
-        data = dados.get("data_exibicao")
-        if isinstance(data, date | str):
-            dados["mes_exibicao"] = (
-                data.isoformat()[:7] if isinstance(data, date) else data[:7]
-            )
-        etapas = dados.get("etapas")
-        if isinstance(etapas, dict):
-            dados["etapas"] = {
-                n: e for n, e in etapas.items() if n not in ETAPAS_QUE_SAIRAM
-            }
-        if dados.get("etapa_atual") in ETAPAS_QUE_SAIRAM:
-            dados["etapa_atual"] = None
-        return dados
-
-
-def palavras_do_nome(nome: str) -> list[str]:
-    """Palavras do nome do arquivo, sem maiúsculas nem acentos.
-
-    Quebra em tudo que não é letra nem dígito (`_`, `-`, `.`, espaço, parênteses...).
-    """
-    palavras = [p for p in re.split(r"[\W_]+", sem_acento(nome).casefold()) if p]
-    return list(dict.fromkeys(palavras))
 
 
 class EnviadoPor(BaseModel):
@@ -545,17 +362,10 @@ class DisparoDaIndexacaoIndisponivel:
         raise ServicoIndisponivel
 
 
-class CursorInvalido(Exception):
-    """O cursor não aponta para um Job que exista."""
-
-
-Ordem = Literal["enviado", "exibicao"]
 LIMITE_MAXIMO = 200
 # Candidatos que um pedido paginado examina no Firestore antes de devolver a página que
 # tiver, com o cursor (pode vir vazia); só vale com `limite`.
 TETO_DE_CANDIDATOS = 2000
-
-SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 # Teto de programas marcados num pedido (Acervo e relatórios).
 MAXIMO_DE_PROGRAMAS = 200
@@ -570,176 +380,6 @@ def programas_do_pedido(programa: list[str] | None) -> tuple[str, ...]:
             422, f"No máximo {MAXIMO_DE_PROGRAMAS} programas por pedido"
         )
     return tuple(pedidos)
-
-
-@dataclass(frozen=True)
-class FiltroDeJobs:
-    """Os filtros do acervo; todos opcionais e combináveis."""
-
-    # Os programas do filtro (o `GET /v1/jobs` do Acervo); imutável porque o filtro é a chave do
-    # cache da lista sem capa. Vazio: todos.
-    programas: frozenset[str] = frozenset()
-    estados: frozenset[Estado] = frozenset()
-    exibicao_de: date | None = None
-    exibicao_ate: date | None = None
-    # Dia do envio (`criado_em`) no fuso de São Paulo, as duas pontas inclusive.
-    enviado_de: date | None = None
-    enviado_ate: date | None = None
-    palavras: tuple[str, ...] = ()  # já normalizadas: todas precisam estar no nome
-    sistema: str | None = None
-    # `False`: só os Jobs fora da lixeira (o acervo); `True`: só os que estão nela;
-    # `None`: os dois (para achar o mesmo arquivo, esteja onde estiver).
-    na_lixeira: bool | None = False
-    sha256: str | None = None  # só os Jobs do mesmo arquivo
-    pessoa_do_catalogo: str | None = None  # só os vídeos em que a pessoa aparece
-    marca_do_catalogo: str | None = None  # só os vídeos em que a marca aparece
-    ordem: Ordem = "enviado"
-    limite: int | None = None  # `None`: a lista inteira, sem cursor e sem teto
-    cursor: str | None = None  # id do último Job examinado na página anterior
-    # Só a lista do acervo: lê os campos do `JobResumido` (e os que o filtro confere), não o
-    # Job inteiro. O Job vem incompleto, então quem o regrava não pode pedir isto (#480).
-    so_os_da_lista: bool = False
-
-
-@dataclass(frozen=True)
-class PaginaDeJobs:
-    jobs: list[Job]
-    proximo_cursor: str | None = None
-
-    @classmethod
-    def de(cls, jobs: Iterable[Job], limite: int | None) -> "PaginaDeJobs":
-        """Corta os Jobs já filtrados e em ordem; só lê um além do limite."""
-        if limite is None:
-            return cls(list(jobs))
-        lidos = list(itertools.islice(jobs, limite + 1))
-        if len(lidos) <= limite:
-            return cls(lidos)
-        pagina = lidos[:limite]
-        return cls(pagina, pagina[-1].id)
-
-
-def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
-    """Todos os filtros menos ordem e paginação."""
-    if filtro.na_lixeira is not None and (job.lixeira is not None) != filtro.na_lixeira:
-        return False
-    if filtro.sha256 is not None and job.sha256 != filtro.sha256:
-        return False
-    if (
-        filtro.pessoa_do_catalogo is not None
-        and filtro.pessoa_do_catalogo not in job.pessoas_do_catalogo
-    ):
-        return False
-    if (
-        filtro.marca_do_catalogo is not None
-        and filtro.marca_do_catalogo not in job.marcas_do_catalogo
-    ):
-        return False
-    if filtro.programas and job.programa not in filtro.programas:
-        return False
-    if filtro.sistema is not None and job.sistema != filtro.sistema:
-        return False
-    if filtro.estados and job.estado not in filtro.estados:
-        return False
-    if filtro.exibicao_de is not None or filtro.exibicao_ate is not None:
-        if job.data_exibicao is None:
-            return False
-        if filtro.exibicao_de and job.data_exibicao < filtro.exibicao_de:
-            return False
-        if filtro.exibicao_ate and job.data_exibicao > filtro.exibicao_ate:
-            return False
-    if filtro.enviado_de is not None or filtro.enviado_ate is not None:
-        dia = job.criado_em.astimezone(SAO_PAULO).date()
-        if filtro.enviado_de and dia < filtro.enviado_de:
-            return False
-        if filtro.enviado_ate and dia > filtro.enviado_ate:
-            return False
-    return all(p in job.palavras for p in filtro.palavras)
-
-
-def chave_de_ordem(job: Job, ordem: Ordem) -> tuple[Any, ...]:
-    """Maior primeiro. Na exibição, quem não tem data fica no fim; o id desempata."""
-    if ordem == "exibicao":
-        return (job.data_exibicao is not None, job.data_exibicao or date.min, job.id)
-    return (job.criado_em, job.id)
-
-
-def paginar_em_python(
-    jobs: Iterable[Job], filtro: FiltroDeJobs, obter: Callable[[str], Job | None]
-) -> PaginaDeJobs:
-    """Ordena e pagina Jobs já filtrados; `obter` acha o Job do cursor."""
-    corte = None
-    if filtro.cursor is not None:
-        ancora = obter(filtro.cursor)
-        if ancora is None:
-            raise CursorInvalido
-        corte = chave_de_ordem(ancora, filtro.ordem)
-    ordenados = sorted(
-        (j for j in jobs if corte is None or chave_de_ordem(j, filtro.ordem) < corte),
-        key=lambda j: chave_de_ordem(j, filtro.ordem),
-        reverse=True,
-    )
-    return PaginaDeJobs.de(ordenados, filtro.limite)
-
-
-class RepositorioDeJobs(Protocol):
-    """Porta para o Firestore; os testes usam uma versão em memória."""
-
-    def salvar(self, job: Job) -> None: ...
-
-    def criar(self, job: Job) -> bool:
-        """Grava só se o id não existe; `False` se já existia (não regrava)."""
-        ...
-
-    def obter(self, job_id: str) -> Job | None: ...
-
-    def obter_fila_gpu(self) -> dict[str, Any]:
-        """O documento `fila_gpu/vagas`; vazio quando ainda não existe."""
-        ...
-
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        """Os Jobs que existem entre `job_ids`, numa leitura em lote, em qualquer ordem."""
-        ...
-
-    def transitar(
-        self, job_id: str, de: Estado, mudancas: dict[str, Any]
-    ) -> Job | None:
-        """Aplica `mudancas` só se o Job ainda estiver em `de`; atômica.
-
-        Devolve o Job gravado, ou `None` se ele não existe ou já saiu de `de`.
-        Quem decide as transições é `api.ciclo_de_vida`; use `transitar` de lá.
-        """
-        ...
-
-    def acrescentar_ano_da_copia(self, job_id: str, ano: int) -> None:
-        """Acrescenta o ano possível da cópia atomicamente, sem remover os anteriores."""
-        ...
-
-    def trocar(
-        self, job_id: str, mudar: Callable[[Job], dict[str, Any] | None]
-    ) -> Job | None:
-        """Lê o Job, pede a `mudar` as mudanças e as grava, tudo atômico.
-
-        `mudar` devolve `None` para recusar (nada é gravado); ela pode rodar mais de
-        uma vez, então não pode ter efeito de fora. Devolve o Job gravado, ou `None`
-        se ele não existe ou `mudar` recusou. Quem decide é `api.ciclo_de_vida`.
-        """
-        ...
-
-    def remover(self, job_id: str) -> None:
-        """Apaga o Job. Só a purga (`api.purga`) chama; não há erro se ele não existe."""
-        ...
-
-    def listar(self) -> list[Job]:
-        """Do mais recente para o mais antigo."""
-        ...
-
-    def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
-        """Filtra, ordena e pagina. Levanta `CursorInvalido` se o cursor não existe."""
-        ...
-
-    def contar_criados(self, criado_por: str, desde: datetime) -> int:
-        """Quantos Jobs `criado_por` criou de `desde` em diante (lixeira inclusive)."""
-        ...
 
 
 class Armazenamento(Protocol):
@@ -784,8 +424,13 @@ class RepositorioEmMemoria:
     def obter_fila_gpu(self) -> dict[str, Any]:
         return {}
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
-        return [self._jobs[i] for i in dict.fromkeys(job_ids) if i in self._jobs]
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
+        achados = [self._jobs[i] for i in dict.fromkeys(job_ids) if i in self._jobs]
+        if so_a_lista:
+            return [Job(**j.model_dump(include=set(CAMPOS_DA_LISTA))) for j in achados]
+        return achados
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
@@ -852,7 +497,9 @@ class RepositorioIndisponivel:
     def obter_fila_gpu(self) -> dict[str, Any]:
         raise ServicoIndisponivel
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
         raise ServicoIndisponivel
 
     def transitar(
@@ -940,11 +587,13 @@ def expirar_uploads(
 ) -> list[str]:
     """Falha os Jobs sem upload completo há 24 h ou mais e cancela a sessão de upload."""
     expirados: list[str] = []
-    for job in repositorio.listar():
-        if (
-            job.estado != "aguardando_upload"
-            or agora - job.criado_em < PRAZO_DO_JOB_SEM_UPLOAD
-        ):
+    # Só os que esperam upload. `na_lixeira=None` porque o padrão `False` filtra a lixeira; Job
+    # em `aguardando_upload` não vai para ela, então o resultado é o mesmo.
+    esperando = repositorio.consultar(
+        FiltroDeJobs(estados=frozenset({"aguardando_upload"}), na_lixeira=None)
+    )
+    for job in esperando.jobs:
+        if agora - job.criado_em < PRAZO_DO_JOB_SEM_UPLOAD:
             continue
         # Primeiro a transição: se o Job andou nesse meio-tempo, o upload é dele.
         if transitar(
@@ -962,10 +611,6 @@ def expirar_uploads(
                 # Não segura os outros Jobs: o ciclo de vida da quarentena apaga o objeto.
                 log.exception("não consegui apagar o upload do Job %s", job.id)
     return expirados
-
-
-def agora_utc() -> datetime:
-    return datetime.now(UTC)
 
 
 def aceita_gzip(accept_encoding: str) -> bool:
@@ -993,96 +638,6 @@ def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
         if dados := compressor.compress(pedaco):
             yield dados
     yield compressor.flush()
-
-
-# Permissão que a pessoa precisa para cada escopo de chave. Cancelar exige a de enviar.
-PERMISSAO_DO_ESCOPO: dict[Escopo, Permissao] = {
-    "criar": "video.enviar",
-    "ler": "decupagem.ver",
-    "cancelar": "video.enviar",
-}
-
-
-def _confere_permissao(request: Request, pessoa: Usuario, permissao: Permissao) -> None:
-    """403 se a pessoa não tem a permissão por nenhum dos seus papéis."""
-    if not _tem_permissao(request, pessoa, permissao):
-        raise HTTPException(403, f"Sem a permissão {permissao}")
-
-
-def _exige(escopo: Escopo) -> Callable[[Request, Chamador], Chamador]:
-    """Dependência: chave sem o escopo, ou pessoa sem a permissão, recebe 403."""
-
-    def verificar(request: Request, chamador: ChamadorAutenticado) -> Chamador:
-        if isinstance(chamador, Sistema):
-            if escopo not in chamador.escopos:
-                raise HTTPException(403, f"Chave sem o escopo {escopo}")
-            return chamador
-        _confere_permissao(request, chamador, PERMISSAO_DO_ESCOPO[escopo])
-        return chamador
-
-    return verificar
-
-
-def _chave_com_algum(*escopos: Escopo) -> Callable[[Chamador], Chamador]:
-    """Dependência: chave sem nenhum dos escopos recebe 403; pessoa passa."""
-
-    def verificar(chamador: ChamadorAutenticado) -> Chamador:
-        if isinstance(chamador, Sistema) and not set(escopos) & set(chamador.escopos):
-            raise HTTPException(403, f"Chave sem o escopo {' ou '.join(escopos)}")
-        return chamador
-
-    return verificar
-
-
-def _exige_editar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `decupagem.editar`; chave de sistema não corrige."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não corrige a decupagem")
-    _confere_permissao(request, chamador, "decupagem.editar")
-    return chamador
-
-
-def _exige_aprovar(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `correcao.aprovar` (o Curador)."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não aprova correções")
-    _confere_permissao(request, chamador, "correcao.aprovar")
-    return chamador
-
-
-def papeis_da_pessoa(request: Request, pessoa: Usuario) -> list[Papel]:
-    """Os papéis efetivos, num ponto só para o `/v1/eu` e as rotas nunca discordarem."""
-    guardado: DocumentoDePapeis | None = getattr(
-        request.state, "papeis_guardados", None
-    )
-    if guardado is not None and guardado.uid == pessoa.uid:
-        # Lido pelo middleware neste pedido; só vale para quem pediu.
-        guardados = guardado.papeis
-    else:
-        papeis: RepositorioDePapeis = request.app.state.papeis
-        guardados = papeis.obter(pessoa.uid)
-    return papeis_do_usuario(
-        guardados,
-        pessoa.email,
-        pessoa.email_verificado,
-        request.app.state.admins,
-    )
-
-
-def _tem_permissao(request: Request, pessoa: Usuario, permissao: Permissao) -> bool:
-    return permissao in permissoes_de(papeis_da_pessoa(request, pessoa))
-
-
-def _enxerga(chamador: Chamador, job: Job | None) -> Job:
-    """O job, ou 404 se não existe ou é de outro sistema (ou de uma pessoa), para uma chave."""
-    if job is None or _de_outro_sistema(chamador, job):
-        raise HTTPException(404, "Job não encontrado")
-    return job
-
-
-def _de_outro_sistema(chamador: Chamador, job: Job) -> bool:
-    """Se a chave de sistema não enxerga o Job (é de outro sistema ou de uma pessoa)."""
-    return isinstance(chamador, Sistema) and job.sistema != chamador.sistema
 
 
 # As exceções do Registro da Correção e da regra, por classe, para HTTP. Mensagem `None`: a do erro.
@@ -1144,7 +699,7 @@ def criar_rotas(
     @rotas.post("", status_code=202)
     def criar(
         novo: NovoJob,
-        chamador: Annotated[Chamador, Depends(_exige("criar"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("criar"))],
         resposta: Response,
         idempotency_key: Annotated[
             str | None, Header(max_length=200, pattern=PADRAO_DA_LINHA)
@@ -1281,7 +836,7 @@ def criar_rotas(
 
     @rotas.get("", response_model=list[JobResumido])
     def listar(
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
         programa: Annotated[list[Annotated[str, Linha(100)]] | None, Query()] = None,
         estado: Annotated[list[Estado] | None, Query()] = None,
         exibicao_de: date | None = None,
@@ -1320,7 +875,7 @@ def criar_rotas(
         if not capa:
             # Quem só conta (o polling da busca) lê a lista guardada por 15 s. A chave é o
             # filtro efetivo inteiro, com o sistema já forçado ao do chamador; entra depois
-            # da checagem de permissão (`_exige`), que roda a cada chamada.
+            # da checagem de permissão (`exige_escopo`), que roda a cada chamada.
             try:
                 corpo, proximo = cache_da_lista.obter(
                     filtro, lambda: _lista_sem_capa(filtro)
@@ -1347,7 +902,7 @@ def criar_rotas(
     @rotas.get("/andamento", response_model=list[JobResumido])
     def andamento(
         request: Request,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
         ids: Annotated[
             str,
             LinhaDaConsulta(
@@ -1363,15 +918,15 @@ def criar_rotas(
         if len(pedidos) > LIMITE_DO_ANDAMENTO:
             raise HTTPException(422, f"No máximo {LIMITE_DO_ANDAMENTO} ids")
         posicao = {id_: n for n, id_ in enumerate(dict.fromkeys(pedidos))}
-        jobs = repositorio.obter_varios(posicao)
-        pode_ver_lixeira = isinstance(chamador, Usuario) and _tem_permissao(
+        jobs = repositorio.obter_varios(posicao, so_a_lista=True)
+        pode_ver_lixeira = isinstance(chamador, Usuario) and tem_permissao(
             request, chamador, "lixeira.gerir"
         )
         visiveis = [
             j
             for j in jobs
             if (j.lixeira is None or pode_ver_lixeira)
-            and not _de_outro_sistema(chamador, j)
+            and not de_outro_sistema(chamador, j)
         ]
         visiveis.sort(key=lambda j: posicao[j.id])
         corpo = [_sem_capa(j) for j in visiveis]
@@ -1381,9 +936,10 @@ def criar_rotas(
     def ler(
         job_id: str,
         request: Request,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> Response:
-        job = _enxerga(chamador, repositorio.obter(job_id))
+        job = enxerga(chamador, lido)
         publico = JobPublico.de(job)
         publico.posicao_na_fila_gpu = next(
             (
@@ -1400,42 +956,45 @@ def criar_rotas(
             return Response(status_code=304, headers=cabecalhos)
         return JSONResponse(publico.model_dump(mode="json"), headers=cabecalhos)
 
-    def obter_concluido(job_id: str, chamador: Chamador) -> Job:
-        return _concluido(chamador, repositorio.obter(job_id))
-
     def _concluido(chamador: Chamador, lido: Job | None) -> Job:
-        job = _enxerga(chamador, lido)
+        job = enxerga(chamador, lido)
         if job.estado != "concluido":
             raise HTTPException(409, f"Job em {job.estado}, não concluido")
         return job
 
     @rotas.delete("/{job_id}", status_code=202)
     def cancelar(
-        job_id: str, chamador: Annotated[Chamador, Depends(_exige("cancelar"))]
+        job_id: str,
+        chamador: Annotated[Chamador, Depends(exige_escopo("cancelar"))],
+        lido: JobDoPedido,
     ) -> JobPublico:
-        _enxerga(chamador, repositorio.obter(job_id))
+        visto = enxerga(chamador, lido)
         try:
-            job = cancelar_job(repositorio, job_id, relogio())
+            job = cancelar_job(repositorio, job_id, relogio(), visto)
         except JaTerminou as terminou:
             raise HTTPException(
                 409, f"Job em {terminou.estado}, não cancelável"
             ) from None
-        return JobPublico.de(_enxerga(chamador, job))
+        return JobPublico.de(enxerga(chamador, job))
 
     @rotas.get("/{job_id}/reproducao")
     def reproducao(
-        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+        job_id: str,
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> Reproducao:
-        job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
         acessos.abriu(chamador, job)
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
     @rotas.get("/{job_id}/download")
     def baixar_video(
-        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+        job_id: str,
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> DownloadDoVideo:
-        job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         nome = f"{PurePath(job.nome).stem}.480p.mp4"
         url = armazenamento.url_de_download(job.id, nome, VALIDADE_DO_DOWNLOAD)
         # O registro vem antes da resposta: sem ele a URL não sai (503).
@@ -1445,7 +1004,7 @@ def criar_rotas(
     @rotas.post("/quadros")
     def quadros_em_lote(
         pedido: PedidoDeQuadros,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
     ) -> list[QuadroDoLote]:
         """As URLs assinadas dos quadros de uma página da busca, numa chamada só: cada Job
         é lido uma vez e o papel, uma vez. O par de Job que não existe, não se enxerga, está
@@ -1453,7 +1012,7 @@ def criar_rotas(
         jobs = {
             j.id: j
             for j in repositorio.obter_varios(
-                dict.fromkeys(p.job for p in pedido.quadros)
+                dict.fromkeys(p.job for p in pedido.quadros), so_a_lista=True
             )
         }
         expira_em = relogio() + VALIDADE_INFORMADA_DA_IMAGEM
@@ -1464,7 +1023,7 @@ def criar_rotas(
                 job is not None
                 and job.estado == "concluido"
                 and job.lixeira is None
-                and not _de_outro_sistema(chamador, job)
+                and not de_outro_sistema(chamador, job)
             )
 
         # Só os pares visíveis, uma vez cada, vão ao IAM, em paralelo (como as capas).
@@ -1500,14 +1059,10 @@ def criar_rotas(
     def quadro(
         job_id: str,
         arquivo: Annotated[str, Path(pattern=ARQUIVO_DO_QUADRO)],
-        request: Request,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> Reproducao:
-        # O Job que a dependência da lixeira já leu neste pedido (None se não existe).
-        if hasattr(request.state, "job_lido"):
-            job = _concluido(chamador, request.state.job_lido)
-        else:
-            job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         url = armazenamento.url_do_quadro(
             job.id, caminho_do_quadro(arquivo), VALIDADE_DA_IMAGEM
         )
@@ -1535,10 +1090,11 @@ def criar_rotas(
     def decupagem(
         job_id: str,
         request: Request,
-        chamador: Annotated[Chamador, Depends(_exige("ler"))],
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
         versao: Literal["modelo"] | None = None,
     ) -> StreamingResponse:
-        job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         if versao == "modelo":
             pedacos = iter(armazenamento.abrir_decupagem(job.id))
             # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
@@ -1548,9 +1104,11 @@ def criar_rotas(
 
     @rotas.get("/{job_id}/decupagem/download")
     def baixar_decupagem(
-        job_id: str, chamador: Annotated[Chamador, Depends(_exige("ler"))]
+        job_id: str,
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> Response:
-        job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         # Indentado como o arquivo que a tela baixava (`web/src/baixar.ts`).
         corpo = json.dumps(_entregue(job), indent=2, ensure_ascii=False).encode()
         acessos.baixou(chamador, job, "decupagem.baixada")
@@ -1566,7 +1124,7 @@ def criar_rotas(
 
     def _espera_curador(request: Request, autor: Usuario, tipo: str) -> bool:
         """Só a correção de quem não é Curador, num tipo da lista, espera decisão."""
-        return tipo in aprovacao.tipos() and not _tem_permissao(
+        return tipo in aprovacao.tipos() and not tem_permissao(
             request, autor, "correcao.aprovar"
         )
 
@@ -1582,9 +1140,15 @@ def criar_rotas(
         job_id: str,
         request: Request,
         novo: NovaCorrecao,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             correcao, versao = registro.corrigir(
                 job,
@@ -1596,9 +1160,16 @@ def criar_rotas(
 
     @rotas.get("/{job_id}/correcoes")
     def historico_de_correcoes(
-        job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
+        job_id: str,
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
+        lido: JobDoPedido,
     ) -> list[ItemDoHistorico]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         indexacao = job.indexacao
         return com_o_estado_na_busca(
             historico(_ler_correcoes(job.id)),
@@ -1611,9 +1182,15 @@ def criar_rotas(
         job_id: str,
         correcao_id: str,
         corpo: NovoDesfazer,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             desfeita = registro.desfazer(
                 job, correcao_id, corpo.motivo, _autoria(autor)
@@ -1623,14 +1200,20 @@ def criar_rotas(
     @rotas.post("/{job_id}/revisao/aprovar", status_code=202)
     def aprovar_revisao(
         job_id: str,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
         """Fecha a revisão: pede a indexação e a dispara em segundo plano. As ações da
         revisão só gravam Correções; o índice e o BigQuery mudam aqui. O estado vai a
         `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, a
         `indexacao` volta ao que era (503), para o `pendente` não ficar preso sem execução
         nenhuma. A `versao_pedida` fica: o próximo disparo (ou uma rodada em curso) a atende."""
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         anterior = job.indexacao
         if pedir_indexacao(repositorio, job.id, relogio()) is None:
             raise HTTPException(409, "O vídeo saiu de concluído")
@@ -1643,9 +1226,16 @@ def criar_rotas(
 
     @rotas.get("/{job_id}/fila")
     def fila_de_revisao(
-        job_id: str, autor: Annotated[Usuario, Depends(_exige_editar)]
+        job_id: str,
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
+        lido: JobDoPedido,
     ) -> list[ItemDaFila]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         return fila(*ler_modelo(armazenamento, job.id), _ler_correcoes(job.id))
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
@@ -1653,11 +1243,17 @@ def criar_rotas(
         job_id: str,
         correcao_id: str,
         corpo: NovaReaplicacao,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
         # Não espera o Curador: só reaponta uma correção que já valia (pendente
         # não vai para a fila), e a original sai da fila quando ela nasce.
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             nova = registro.reaplicar(
                 job, correcao_id, corpo.item_id, corpo.motivo, _autoria(autor)
@@ -1669,9 +1265,15 @@ def criar_rotas(
         job_id: str,
         correcao_id: str,
         corpo: NovaResolucao,
-        autor: Annotated[Usuario, Depends(_exige_editar)],
+        autor: Annotated[
+            Usuario,
+            Depends(
+                exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
+            ),
+        ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             descarte = registro.descartar(
                 job, correcao_id, corpo.motivo, _autoria(autor)
@@ -1679,13 +1281,13 @@ def criar_rotas(
         return {"id": descarte.id}
 
     def _decidir(
-        job_id: str,
+        lido: Job | None,
         correcao_id: str,
         autor: Usuario,
         aprovada: bool,
         motivo: str = "",
     ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             decisao = registro.decidir(
                 job, correcao_id, aprovada, motivo, _autoria(autor)
@@ -1696,17 +1298,25 @@ def criar_rotas(
     def aprovar_correcao(
         job_id: str,
         correcao_id: str,
-        autor: Annotated[Usuario, Depends(_exige_aprovar)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("correcao.aprovar", "Chave de sistema não aprova correções")),
+        ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        return _decidir(job_id, correcao_id, autor, True)
+        return _decidir(lido, correcao_id, autor, True)
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/recusar", status_code=201)
     def recusar_correcao(
         job_id: str,
         correcao_id: str,
         corpo: NovaRecusa,
-        autor: Annotated[Usuario, Depends(_exige_aprovar)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("correcao.aprovar", "Chave de sistema não aprova correções")),
+        ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        return _decidir(job_id, correcao_id, autor, False, corpo.motivo)
+        return _decidir(lido, correcao_id, autor, False, corpo.motivo)
 
     return rotas

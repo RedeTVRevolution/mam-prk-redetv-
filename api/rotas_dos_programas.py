@@ -27,22 +27,23 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
-    Request,
     Response,
 )
 from pydantic import BaseModel, field_validator
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
-from api.catalogo import Catalogo, visivel
-from api.ciclo_de_vida import pedir_indexacao
-from api.correcoes import _sem_controle
-from api.jobs import (
-    DisparoDaIndexacao,
-    FiltroDeJobs,
-    RepositorioDeJobs,
-    _confere_permissao,
+from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
+from api.auth import Usuario
+from api.catalogo import (
+    AndamentoDaRenomeacao,
+    Catalogo,
+    andamento_da_renomeacao,
+    visivel,
 )
+from api.ciclo_de_vida import pedir_indexacao
+from api.correcoes import sem_controle
+from api.jobs import DisparoDaIndexacao
+from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
+from api.permissoes import exige
 from api.programas import (
     NomeDoPrograma,
     NomeEmUso,
@@ -57,7 +58,6 @@ from api.programas import (
     pessoas_do_programa,
     troca_vale,
 )
-from api.renomeacao_de_pessoas import AndamentoDaRenomeacao
 from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
@@ -96,13 +96,13 @@ class DadosDoPrograma(BaseModel):
     perfil: PerfilEmTexto = ""
     pessoas: list[VinculoDaPessoa] = []
 
-    _sem_controle_no_nome = field_validator("nome")(_sem_controle)
+    _sem_controle_no_nome = field_validator("nome")(sem_controle)
 
     @field_validator("perfil")
     @classmethod
     def _perfil_sem_controle(cls, perfil: str) -> str:
         # Várias linhas, como o texto que o modelo lê.
-        return _sem_controle(perfil.replace("\r\n", "\n"), permitidos="\n")
+        return sem_controle(perfil.replace("\r\n", "\n"), permitidos="\n")
 
     @field_validator("pessoas")
     @classmethod
@@ -113,7 +113,7 @@ class DadosDoPrograma(BaseModel):
         if len(set(ids)) != len(ids):
             raise ValueError("a mesma pessoa duas vezes no programa")
         for p in pessoas:
-            _sem_controle(p.papel)
+            sem_controle(p.papel)
         return pessoas
 
 
@@ -121,26 +121,18 @@ class NovaPessoaDoPrograma(BaseModel):
     nome: NomeDoPrograma
     apelidos: list[Apelido] = []
 
-    _sem_controle_no_nome = field_validator("nome")(_sem_controle)
+    _sem_controle_no_nome = field_validator("nome")(sem_controle)
 
     @field_validator("apelidos")
     @classmethod
     def _apelidos_validos(cls, apelidos: list[str]) -> list[str]:
         if len(apelidos) > LIMITE_DE_APELIDOS:
             raise ValueError("apelidos demais")
-        return [_sem_controle(a) for a in apelidos]
+        return [sem_controle(a) for a in apelidos]
 
 
 class ImpactoDoPrograma(BaseModel):
     videos: int
-
-
-def _exige_editar_programas(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: só pessoa com `programas.editar`; chave de sistema não edita."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não edita programas")
-    _confere_permissao(request, chamador, "programas.editar")
-    return chamador
 
 
 def criar_rotas_dos_programas(
@@ -175,14 +167,7 @@ def criar_rotas_dos_programas(
             pessoas=pessoas,
             renomeacao=None
             if r is None
-            else AndamentoDaRenomeacao(
-                # Para quem lê, a troca que espera a auditoria já está em andamento.
-                estado="em_andamento" if r.estado == "confirmando" else r.estado,
-                feitos=r.total - len(r.pendentes),
-                total=r.total,
-                nome_antigo=r.nome_antigo,
-                nome_novo=r.nome_novo,
-            ),
+            else andamento_da_renomeacao(r, confirmando_conta_como_em_andamento=True),
         )
 
     def conferir_pessoas(dados: DadosDoPrograma) -> None:
@@ -208,11 +193,9 @@ def criar_rotas_dos_programas(
         sem = {"renomeacao"}
         try:
             auditoria.acrescentar(
-                RegistroDeAuditoria(
-                    id=uuid.uuid4().hex,
+                registro_de_auditoria(
                     quando=relogio(),
-                    uid=autor.uid,
-                    email=autor.email,
+                    quem=autor,
                     acao=acao,
                     alvo_tipo="programa",
                     alvo_id=programa.id,
@@ -324,14 +307,20 @@ def criar_rotas_dos_programas(
 
     @rotas.get("")
     def listar(
-        _autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> list[ProgramaPublico]:
         return [publico(p) for p in programas.listar()]
 
     @rotas.post("", status_code=201)
     def criar(
         dados: DadosDoPrograma,
-        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> ProgramaPublico:
         conferir_pessoas(dados)
         programa = Programa(id=novo_id(), **dados.model_dump())
@@ -351,7 +340,10 @@ def criar_rotas_dos_programas(
         id: str,
         dados: DadosDoPrograma,
         segundo_plano: BackgroundTasks,
-        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> ProgramaPublico:
         antes = programas.obter(id)
         if antes is None:
@@ -450,7 +442,10 @@ def criar_rotas_dos_programas(
     def retomar(
         id: str,
         segundo_plano: BackgroundTasks,
-        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> ProgramaPublico:
         programa = programas.obter(id)
         if programa is None or programa.renomeacao is None:
@@ -467,11 +462,9 @@ def criar_rotas_dos_programas(
             log.warning("troca %s do programa %s retomada sem confirmar", r.id, id)
             try:
                 auditoria.acrescentar(
-                    RegistroDeAuditoria(
-                        id=uuid.uuid4().hex,
+                    registro_de_auditoria(
                         quando=relogio(),
-                        uid=autor.uid,
-                        email=autor.email,
+                        quem=autor,
                         acao="programa.alterado",
                         alvo_tipo="programa",
                         alvo_id=id,
@@ -504,7 +497,11 @@ def criar_rotas_dos_programas(
 
     @rotas.get("/{id}/impacto")
     def impacto(
-        id: str, _autor: Annotated[Usuario, Depends(_exige_editar_programas)]
+        id: str,
+        _autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> ImpactoDoPrograma:
         programa = programas.obter(id)
         if programa is None:
@@ -514,7 +511,11 @@ def criar_rotas_dos_programas(
 
     @rotas.delete("/{id}", status_code=204)
     def apagar(
-        id: str, autor: Annotated[Usuario, Depends(_exige_editar_programas)]
+        id: str,
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> Response:
         antes = programas.obter(id)
         if antes is None:
@@ -538,7 +539,10 @@ def criar_rotas_dos_programas(
     @rotas.post("/pessoas", status_code=201)
     def criar_pessoa(
         dados: NovaPessoaDoPrograma,
-        autor: Annotated[Usuario, Depends(_exige_editar_programas)],
+        autor: Annotated[
+            Usuario,
+            Depends(exige("programas.editar", "Chave de sistema não edita programas")),
+        ],
     ) -> PessoaNoProgramaPublica:
         """A pessoa que ainda não está no catálogo, criada ali mesmo (sem papel: o
         papel é do vínculo com o programa)."""

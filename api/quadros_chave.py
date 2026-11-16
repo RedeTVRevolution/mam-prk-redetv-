@@ -21,7 +21,7 @@ from PIL import Image, ImageStat
 from api import log_estruturado
 from api.bancos import cliente_do_firestore
 from api.decupagem import Decupagem, caminho_do_quadro
-from api.jobs import RepositorioDeJobs
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import QuadrosStorage, RepositorioFirestore
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros_em_lote

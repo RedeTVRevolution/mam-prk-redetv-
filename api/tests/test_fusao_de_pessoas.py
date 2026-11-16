@@ -11,8 +11,8 @@ from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, Rosto
 from api.correcoes import LIMITE_DO_MOTIVO, versao_do_modelo
+from api.fotos_de_referencia import FotosEmMemoria
 from api.jobs import RepositorioEmMemoria
-from api.lixeira_do_catalogo import FotosEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso

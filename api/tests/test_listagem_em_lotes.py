@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from api.jobs import FiltroDeJobs, Job
+from api.modelo_do_job import CAMPOS_DA_LISTA, FiltroDeJobs, Job
 from api.nuvem import RepositorioFirestore
 
 LIXEIRA = {
@@ -254,7 +254,6 @@ def test_a_lista_preserva_o_inicio_da_passada_do_job_reprocessado() -> None:
 def test_os_campos_da_lista_cobrem_o_job_resumido_e_os_obrigatorios_do_job() -> None:
     # Um campo novo no `JobResumido` que não entre no `select()` chegaria vazio na lista.
     from api.jobs import JobResumido
-    from api.nuvem import _CAMPOS_DA_LISTA
 
     do_resumo = set(JobResumido.model_fields) - {
         "enviado_por",
@@ -264,5 +263,5 @@ def test_os_campos_da_lista_cobrem_o_job_resumido_e_os_obrigatorios_do_job() -> 
     obrigatorios = {n for n, c in Job.model_fields.items() if c.is_required()}
 
     assert do_resumo | obrigatorios | {"capa", "sistema", "criado_por_email"} <= (
-        _CAMPOS_DA_LISTA
+        CAMPOS_DA_LISTA
     )

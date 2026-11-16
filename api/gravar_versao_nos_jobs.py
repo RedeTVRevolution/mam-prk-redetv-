@@ -17,8 +17,8 @@ from typing import Any
 
 from api.ambiente import FaltaNoAmbiente
 from api.bancos import cliente_do_firestore
-from api.jobs import Job
 from api.leitura_da_decupagem import AbreDecupagem
+from api.modelo_do_job import Job
 from api.nuvem import COLECAO_DE_JOBS, DecupagensStorage
 from api.reprocessar_versao import ANTERIOR, versao_da_decupagem
 

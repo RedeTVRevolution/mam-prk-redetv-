@@ -17,13 +17,13 @@ from api.decupagem import (
     CorrecaoDescartada,
     Decupagem,
     Fala,
+    Intervalo,
     Objeto,
     Pauta,
     Plano,
     Programa,
     TextoNaTela,
     Video,
-    _Intervalo,
 )
 from api.identidade import identidade_do_comercial
 from api.janelas import Janela
@@ -35,11 +35,11 @@ log = logging.getLogger(__name__)
 _LIMITE_DO_RESUMO = 2000  # tamanho máximo de `Texto` no esquema
 
 
-def _sobrepoe(a: _Intervalo, b: _Intervalo) -> bool:
+def _sobrepoe(a: Intervalo, b: Intervalo) -> bool:
     return a.inicio_ms < b.fim_ms and b.inicio_ms < a.fim_ms
 
 
-def _dono[T: _Intervalo](itens: Sequence[T], janela: Janela, ultima: bool) -> list[T]:
+def _dono[T: Intervalo](itens: Sequence[T], janela: Janela, ultima: bool) -> list[T]:
     """Itens que começam no núcleo da janela (a última inclui o fim)."""
     return [
         i
@@ -49,12 +49,12 @@ def _dono[T: _Intervalo](itens: Sequence[T], janela: Janela, ultima: bool) -> li
     ]
 
 
-def _antes_do_nucleo[T: _Intervalo](itens: Sequence[T], janela: Janela) -> list[T]:
+def _antes_do_nucleo[T: Intervalo](itens: Sequence[T], janela: Janela) -> list[T]:
     """Itens que a janela descarta por começarem no contexto, antes do núcleo."""
     return [i for i in itens if i.inicio_ms < janela.inicio_ms]
 
 
-def _emendar[T: _Intervalo](item: T, pares: Sequence[_Intervalo]) -> T:
+def _emendar[T: Intervalo](item: T, pares: Sequence[Intervalo]) -> T:
     """Estende o fim até o maior fim dos pares da janela seguinte que se sobrepõem.
 
     Os pares são só os itens que a janela seguinte descarta: o que ela mantém é
@@ -64,7 +64,7 @@ def _emendar[T: _Intervalo](item: T, pares: Sequence[_Intervalo]) -> T:
     return item if fim == item.fim_ms else item.model_copy(update={"fim_ms": fim})
 
 
-def _em_ordem[T: _Intervalo](itens: Sequence[T]) -> list[T]:
+def _em_ordem[T: Intervalo](itens: Sequence[T]) -> list[T]:
     return sorted(itens, key=lambda i: (i.inicio_ms, i.fim_ms))
 
 
@@ -72,7 +72,7 @@ def _sem_repetir(itens: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(itens))
 
 
-def _agrupar_por_sobreposicao[T: _Intervalo](
+def _agrupar_por_sobreposicao[T: Intervalo](
     janelas: Sequence[Sequence[T]],
 ) -> list[list[T]]:
     """Agrupa os itens da janela N e da N+1 que se sobrepõem, em cadeia.
@@ -94,7 +94,7 @@ def _agrupar_por_sobreposicao[T: _Intervalo](
     return [[i for _, i in g] for g in grupos]
 
 
-def _duracao(i: _Intervalo) -> int:
+def _duracao(i: Intervalo) -> int:
     return i.fim_ms - i.inicio_ms
 
 
@@ -109,16 +109,16 @@ def consolidar(
     ultimo = len(resultados) - 1
 
     # Itens das pessoas por janela, já com o id novo, para achar os pares.
-    brutas: list[dict[tuple[str, str], list[_Intervalo]]] = []
+    brutas: list[dict[tuple[str, str], list[Intervalo]]] = []
     for k, d in enumerate(decupagens):
-        por_chave: dict[tuple[str, str], list[_Intervalo]] = {}
+        por_chave: dict[tuple[str, str], list[Intervalo]] = {}
         for p in d.pessoas:
             for lista in LISTAS:
                 por_chave.setdefault((mapa[k][p.id], lista), []).extend(
                     getattr(p, lista)
                 )
         brutas.append(por_chave)
-    mantidas: dict[tuple[str, str], list[_Intervalo]] = {}
+    mantidas: dict[tuple[str, str], list[Intervalo]] = {}
     for k, (janela, _) in enumerate(resultados):
         proximas = brutas[k + 1] if k < ultimo else {}
         for chave, itens in brutas[k].items():

@@ -15,9 +15,13 @@ from api.bancos import (
     BANCO_PADRAO,
     VARIAVEL_DO_BANCO,
     VARIAVEL_DO_BANCO_DE_SEGURANCA,
+    auditoria_do_firestore,
     banco_da_colecao,
+    chaves_do_firestore,
     cliente_da_colecao,
+    cliente_de_seguranca,
     cliente_do_firestore,
+    papeis_do_firestore,
 )
 from api.nuvem import (
     COLECAO_DA_AUDITORIA,
@@ -26,6 +30,8 @@ from api.nuvem import (
     COLECAO_DE_CORRECOES,
     COLECAO_DE_JOBS,
     COLECAO_DE_PAPEIS,
+    RepositorioDeAuditoriaFirestore,
+    RepositorioDeChavesFirestore,
     RepositorioDePapeisFirestore,
 )
 
@@ -112,6 +118,61 @@ def test_o_cliente_do_firestore_abre_o_banco_da_configuracao(
     ]
 
 
+class _BancoFalso:
+    """Cliente que só diz em qual banco foi aberto e quais coleções lhe pediram."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.banco = kwargs["database"]
+        self.colecoes: list[str] = []
+
+    def collection(self, nome: str) -> object:
+        self.colecoes.append(nome)
+        return object()
+
+
+@pytest.mark.parametrize(
+    ("montar", "classe", "colecao"),
+    [
+        (papeis_do_firestore, RepositorioDePapeisFirestore, COLECAO_DE_PAPEIS),
+        (chaves_do_firestore, RepositorioDeChavesFirestore, COLECAO_DE_CHAVES),
+        (auditoria_do_firestore, RepositorioDeAuditoriaFirestore, COLECAO_DA_AUDITORIA),
+    ],
+)
+@pytest.mark.parametrize(
+    ("ambiente", "banco"),
+    [(COM_BANCO, "seguranca-teste"), ({}, BANCO_PADRAO)],
+)
+def test_o_repositorio_de_seguranca_sai_montado_no_banco_certo(
+    monkeypatch: pytest.MonkeyPatch,
+    montar: Callable[..., Any],
+    classe: type,
+    colecao: str,
+    ambiente: dict[str, str],
+    banco: str,
+) -> None:
+    monkeypatch.setattr(firestore, "Client", _BancoFalso)
+    assert cliente_de_seguranca("proj", ambiente).banco == banco
+    dado = _BancoFalso(database="x")
+    assert isinstance(montar("proj", ambiente, cliente=dado), classe)
+    assert dado.colecoes == [colecao]
+
+
+def test_o_repositorio_de_seguranca_abre_o_banco_pelo_ambiente(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    abertos: list[_BancoFalso] = []
+
+    def fabrica(**kwargs: Any) -> _BancoFalso:
+        abertos.append(_BancoFalso(**kwargs))
+        return abertos[-1]
+
+    monkeypatch.setattr(firestore, "Client", fabrica)
+    papeis_do_firestore("proj", COM_BANCO)
+    assert [(a.banco, a.colecoes) for a in abertos] == [
+        ("seguranca-teste", [COLECAO_DE_PAPEIS])
+    ]
+
+
 class _Parou(Exception):
     pass
 
@@ -131,8 +192,8 @@ AMBIENTE_DO_ENTRYPOINT = {
     ("modulo", "rodar"),
     [
         (bancos, lambda a: correcao_de_estado._do_ambiente(["j1"], a)),
-        (purga, purga.main),
-        (reprocessar_versao, lambda a: reprocessar_versao.main([], a)),
+        (bancos, purga.main),
+        (bancos, lambda a: reprocessar_versao.main([], a)),
     ],
 )
 def test_os_comandos_escolhem_o_banco_pelo_ambiente_que_recebem(

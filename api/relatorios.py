@@ -13,10 +13,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from typing import Annotated, Any, Protocol
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException
 from fastapi.responses import Response
 
-from api.auth import ChamadorAutenticado, Usuario
+from api.auth import Usuario
 from api.copia_bigquery import (
     ConfigDoBigQuery,
     CopiaEmMemoria,
@@ -27,24 +27,16 @@ from api.copia_bigquery import (
     transporte_http,
 )
 from api.erros import lido
-from api.jobs import (
-    FiltroDeJobs,
-    RepositorioDeJobs,
-    _confere_permissao,
-)
+from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
+from api.permissoes import exige
 from api.texto_como_dado import Linha
 
-
-def _exige_ver_o_relatorio(request: Request, chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: pessoa com `decupagem.ver`. A cópia não guarda o sistema dono do
-    vídeo, então uma chave de sistema veria os vídeos dos outros: não consulta."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não consulta o relatório")
-    _confere_permissao(request, chamador, "decupagem.ver")
-    return chamador
-
-
-PodeVerORelatorio = Annotated[Usuario, Depends(_exige_ver_o_relatorio)]
+# A cópia não guarda o sistema dono do vídeo, então uma chave de sistema veria os vídeos dos
+# outros: não consulta.
+PodeVerORelatorio = Annotated[
+    Usuario,
+    Depends(exige("decupagem.ver", "Chave de sistema não consulta o relatório")),
+]
 
 
 # Cada `programa` repetido é uma linha só, com tamanho máximo (#621).

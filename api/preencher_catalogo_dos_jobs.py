@@ -16,8 +16,8 @@ from api.ambiente import FaltaNoAmbiente
 from api.bancos import cliente_do_firestore
 from api.catalogo_dos_jobs import gravar_se_mudou
 from api.ferramentas.comum import TAMANHO_DA_PAGINA, jobs_concluidos
-from api.jobs import RepositorioDeJobs
 from api.leitura_da_decupagem import LeituraDaDecupagem
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import (
     CatalogoFirestore,
     DecupagensStorage,

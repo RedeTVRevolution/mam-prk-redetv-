@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
+from itertools import batched
 from pathlib import Path
 from typing import Any, Self
 from urllib.parse import quote
@@ -17,7 +18,12 @@ from urllib.parse import quote
 import google.auth
 import google.auth.transport.requests
 import requests
-from google.api_core.exceptions import Aborted, AlreadyExists, NotFound
+from google.api_core.exceptions import (
+    Aborted,
+    AlreadyExists,
+    NotFound,
+    from_http_response,
+)
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
@@ -28,9 +34,6 @@ from api.auditoria import (
     PaginaDeAuditoria,
     RegistroDeAuditoria,
     campo_da_pessoa,
-)
-from api.auditoria import (
-    casa_com_o_filtro as casa_com_o_filtro_da_auditoria,
 )
 from api.auditoria import (
     pagina_de as pagina_da_auditoria,
@@ -51,6 +54,7 @@ from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.clientes_de_nuvem import ESCOPO_DA_NUVEM, sessao_autenticada
 from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
+from api.erros import ServicoIndisponivel
 from api.florence import ObjetosDaDecupagem
 from api.idempotencia import (
     Reserva,
@@ -62,8 +66,15 @@ from api.itens_da_decupagem import contar_itens, objeto_dos_itens
 from api.jobs import (
     JANELA_DA_URL_DO_QUADRO,
     PRAZO_DA_URL_DE_UPLOAD,
-    SAO_PAULO,
     TETO_DE_CANDIDATOS,
+    disposicao_do_nome,
+)
+from api.leitura_da_tela import LeituraDaTela
+from api.lixeira import ArquivosContados
+from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
+from api.modelo_do_job import (
+    CAMPOS_DA_LISTA,
+    SAO_PAULO,
     CursorInvalido,
     Estado,
     FiltroDeJobs,
@@ -71,15 +82,11 @@ from api.jobs import (
     NomeDaEtapa,
     PaginaDeJobs,
     RepositorioDeJobs,
-    ServicoIndisponivel,
     casa_com_o_filtro,
-    disposicao_do_nome,
     paginar_em_python,
 )
-from api.leitura_da_tela import LeituraDaTela
-from api.lixeira import ArquivosContados
-from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
-from api.papeis import PAPEIS, DocumentoDePapeis, Papel
+from api.papeis import DocumentoDePapeis, Papel
+from api.papeis import em_ordem as papeis_em_ordem
 from api.programas import (
     NomeEmUso,
     Programa,
@@ -98,17 +105,6 @@ from api.usuarios import ContaDoIdentityPlatform, EmailJaCadastrado
 from api.webhook import RegistroDeWebhook
 
 COLECAO_DE_JOBS = "jobs"
-# O que a lista do acervo lê do Job: os campos do `JobResumido` (menos `enviado_por`, que vem
-# de `sistema` e `criado_por_email`), os obrigatórios do `Job` e os que `casa_com_o_filtro`
-# confere (#480). Fica de fora o que pesa: `cortes_ms`, os catálogos e o `sha256`.
-_CAMPOS_DA_LISTA = frozenset(
-    {
-        "id", "nome", "tamanho_bytes", "estado", "criado_por", "criado_em", "atualizado_em",
-        "codigo_falha", "duracao_s", "timecode_origem", "taxa_de_quadros", "capa", "programa",
-        "data_exibicao", "indexacao", "copia_bigquery", "etapa_atual", "etapas",
-        "reprocessamentos", "inicio_da_passada", "criado_por_email", "sistema", "palavras", "lixeira",
-    }
-)  # fmt: skip
 # Candidatos mínimos por leitura quando a página já está cheia e falta achar o próximo aprovado.
 LOTE_MINIMO_DE_CANDIDATOS = 25
 COLECAO_DE_CHAVES = "chaves_de_api"
@@ -128,6 +124,9 @@ COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 _LOTE_DE_LEITURA = 500
+# Limite do lote da API JSON do Storage (o cliente aceita até 1000, a API só 100).
+_LOTE_DE_APAGAR_NO_STORAGE = 100
+_LOTE_DE_ESCRITA = 500  # Limite do WriteBatch do Firestore.
 
 log = logging.getLogger(__name__)
 
@@ -137,13 +136,39 @@ def _documento(colecao: Any, id: str) -> Any:
     return colecao.document(id_conferido(id))
 
 
-def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:
+def apagar_objetos(cliente: ClienteStorage, blobs: Iterable[Any]) -> None:
+    """Apaga os `blobs` em lotes do Storage. O `NotFound` de um objeto (a regra de 7
+    dias do bucket já o apagou, #502) é aceito; qualquer outro erro sobe, depois de o
+    lote inteiro correr, e a purga se repete."""
+    for lote in batched(blobs, _LOTE_DE_APAGAR_NO_STORAGE):
+        # raise_exception=False: sem isso o cliente só levanta o último erro do lote e
+        # um 404 mascararia um 500 anterior.
+        with cliente.batch(raise_exception=False) as envio:
+            for blob in lote:
+                blob.delete()
+        # ponytail: `_responses` não tem acessor público no cliente (3.17).
+        for resposta in envio._responses:
+            if (
+                resposta.status_code not in range(200, 300)
+                and resposta.status_code != 404
+            ):
+                raise from_http_response(resposta)  # type: ignore[no-untyped-call]
+
+
+def _lidos_em_lote(
+    cliente: Any, colecao: Any, ids: Iterable[str], campos: list[str] | None = None
+) -> Iterator[Any]:
     """Os documentos que existem entre os `ids` (sem repetir), lidos em lotes de
-    `_LOTE_DE_LEITURA` com `get_all`."""
+    `_LOTE_DE_LEITURA` com `get_all`; `campos` limita o que vem em cada um."""
     referencias = [_documento(colecao, i) for i in dict.fromkeys(ids)]
     for inicio in range(0, len(referencias), _LOTE_DE_LEITURA):
         lote = referencias[inicio : inicio + _LOTE_DE_LEITURA]
-        yield from (d for d in cliente.get_all(lote) if d.exists)
+        lidos = (
+            cliente.get_all(lote)
+            if campos is None
+            else cliente.get_all(lote, field_paths=campos)
+        )
+        yield from (d for d in lidos if d.exists)
 
 
 def objeto_do_proxy(job_id: str) -> str:
@@ -209,21 +234,29 @@ def espera_sob_disputa(rodada: int) -> float:
     return random.uniform(0, limite)
 
 
-def _repetir_sob_disputa[T](
-    na_transacao: Callable[[Any], T], cliente: firestore.Client
-) -> T:
-    # Com muitas chamadas no mesmo documento, o Firestore esgota as tentativas da
-    # transação (ValueError causado por Aborted). Quem perde começa de novo, depois de
-    # uma espera aleatória, e lê o estado que o vencedor deixou. Outro ValueError (um
-    # Job que não passa no modelo, por exemplo) não é disputa e sobe na hora.
+def _repetir_sob_disputa[T](tentar: Callable[[], T]) -> T:
+    # Com muitas chamadas no mesmo documento, o Firestore aborta a operação (`Aborted`) ou
+    # esgota as tentativas da transação (ValueError causado por Aborted). Quem perde começa
+    # de novo, depois de uma espera aleatória, e lê o estado que o vencedor deixou. Outro
+    # ValueError (um Job que não passa no modelo, por exemplo) não é disputa e sobe na hora.
+    # O que decide dentro do laço (`AlreadyExists`, `NotFound`) fica em `tentar`.
     for rodada in range(TENTATIVAS_SOB_DISPUTA):
         try:
-            return na_transacao(cliente.transaction())
+            return tentar()
         except (ValueError, Aborted) as erro:
             if isinstance(erro, ValueError) and not isinstance(erro.__cause__, Aborted):
                 raise
             time.sleep(espera_sob_disputa(rodada))
     raise ServicoIndisponivel("Firestore disputado: tente de novo")
+
+
+def _criar_ou_existir(referencia: Any, dados: dict[str, Any]) -> bool:
+    """`create` atômico: `True` se gravou, `False` se o documento já existia."""
+    try:
+        referencia.create(dados)
+    except AlreadyExists:
+        return False
+    return True
 
 
 # Limites do Firestore depois de expandir a consulta em forma normal disjuntiva:
@@ -339,19 +372,14 @@ class RepositorioFirestore:
         # `Aborted` não diz que outro gravou: o documento estava travado e o `create`
         # pode ter perdido para outro que também aborta. Repete até um gravar
         # (`AlreadyExists` para os outros).
-        for rodada in range(TENTATIVAS_SOB_DISPUTA):
-            try:
-                _documento(self._colecao, job.id).create(job.model_dump())
-            except AlreadyExists:
-                return False
-            except Aborted:
-                time.sleep(espera_sob_disputa(rodada))
-                continue
-            return True
-        raise ServicoIndisponivel("Firestore disputado: tente de novo")
+        return _repetir_sob_disputa(
+            lambda: _criar_ou_existir(
+                _documento(self._colecao, job.id), job.model_dump()
+            )
+        )
 
     def _sob_disputa(self, na_transacao: Callable[[Any], Job | None]) -> Job | None:
-        return _repetir_sob_disputa(na_transacao, self._cliente)
+        return _repetir_sob_disputa(lambda: na_transacao(self._cliente.transaction()))
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
@@ -411,12 +439,16 @@ class RepositorioFirestore:
         doc = self._cliente.collection("fila_gpu").document("vagas").get()
         return doc.to_dict() or {}
 
-    def obter_varios(self, job_ids: Iterable[str]) -> list[Job]:
+    def obter_varios(
+        self, job_ids: Iterable[str], so_a_lista: bool = False
+    ) -> list[Job]:
         # Em lotes: sem período, a taxa pede todos os vídeos revisados do acervo, e
         # um pedido só com dezenas de milhares de referências arrisca o prazo.
+        # `so_a_lista`: só os campos da lista, sem `cortes_ms` e catálogos (quem regrava o Job não liga).
+        campos = sorted(CAMPOS_DA_LISTA) if so_a_lista else None
         return [
             Job(**(doc.to_dict() or {}))
-            for doc in _lidos_em_lote(self._cliente, self._colecao, job_ids)
+            for doc in _lidos_em_lote(self._cliente, self._colecao, job_ids, campos)
         ]
 
     def listar(self) -> list[Job]:
@@ -504,7 +536,7 @@ class RepositorioFirestore:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
         if filtro.so_os_da_lista:
-            consulta = consulta.select(sorted(_CAMPOS_DA_LISTA | {campo.split(".")[0]}))
+            consulta = consulta.select(sorted(CAMPOS_DA_LISTA | {campo.split(".")[0]}))
         if filtro.limite is None:
             # Lista inteira: o consumidor interno não segue cursor, então não há teto.
             jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
@@ -644,24 +676,16 @@ class RepositorioDeIdempotenciaFirestore:
         # transação aqui esgotaria as tentativas sob essa disputa e daria 500. Se o
         # Firestore aborta o `create` por disputa (`Aborted`), espera um pouco e tenta o
         # `create` de novo, até criar ou receber `AlreadyExists` e ler a que ficou.
-        for rodada in range(TENTATIVAS_SOB_DISPUTA):
-            try:
-                referencia.create(criada.model_dump())
-                return criada, True
-            except AlreadyExists:
-                pass
-            except Aborted:
-                time.sleep(espera_sob_disputa(rodada))
-                continue
-            doc = referencia.get()
-            if doc.exists:
-                existente = Reserva(**(doc.to_dict() or {}))
-                if existente.expira_em > agora:
-                    conferir(existente, impressao)
-                    return existente, False
-            break
-        else:
-            raise ServicoIndisponivel("Firestore disputado: tente de novo")
+        if _repetir_sob_disputa(
+            lambda: _criar_ou_existir(referencia, criada.model_dump())
+        ):
+            return criada, True
+        doc = referencia.get()
+        if doc.exists:
+            existente = Reserva(**(doc.to_dict() or {}))
+            if existente.expira_em > agora:
+                conferir(existente, impressao)
+                return existente, False
         # Vencida (o TTL do Firestore demora a apagar) ou apagada agora: troca pela nova,
         # na transação, para quem chegar junto ver a que ficou.
 
@@ -678,24 +702,22 @@ class RepositorioDeIdempotenciaFirestore:
 
         # Várias repetições na mesma reserva vencida disputam a transação.
         resultado: tuple[Reserva, bool] = _repetir_sob_disputa(
-            trocar_a_vencida, self._cliente
+            lambda: trocar_a_vencida(self._cliente.transaction())
         )
         return resultado
 
     def marcar_job_gravado(self, escopo: str, chave: str) -> None:
         referencia = self._colecao.document(id_da_reserva(escopo, chave))
+
         # As repetições em paralelo leem a reserva enquanto ela é marcada: o Firestore
         # aborta o `update` por disputa (`Aborted`), e ele é repetido como o `create`.
-        for rodada in range(TENTATIVAS_SOB_DISPUTA):
+        def marcar() -> None:
             try:
                 referencia.update({"job_gravado": True})
             except NotFound:
-                return  # a reserva venceu e o TTL a apagou
-            except Aborted:
-                time.sleep(espera_sob_disputa(rodada))
-                continue
-            return
-        raise ServicoIndisponivel("Firestore disputado: tente de novo")
+                pass  # a reserva venceu e o TTL a apagou
+
+        _repetir_sob_disputa(marcar)
 
 
 class ListasDaBuscaFirestore:
@@ -747,8 +769,13 @@ class RepositorioDePapeisFirestore:
         # Sem `papeis` (só a marca `desativada`): a conta segue sem papéis guardados.
         # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
         if "papeis" in dados:
-            papeis = [p for p in PAPEIS if p in dados["papeis"]]
-        return DocumentoDePapeis(uid, dados.get("desativada") is True, papeis)
+            papeis = papeis_em_ordem(dados["papeis"])
+        return DocumentoDePapeis(
+            uid,
+            dados.get("desativada") is True,
+            papeis,
+            dados.get("pendente") is True,
+        )
 
     def obter(self, uid: str) -> list[Papel] | None:
         return self.ler(uid).papeis
@@ -762,6 +789,11 @@ class RepositorioDePapeisFirestore:
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         _documento(self._colecao, uid).set({"desativada": desativada}, merge=True)
+
+    def marcar_pendente(self, uid: str, pendente: bool) -> None:
+        _documento(self._colecao, uid).set(
+            {"pendente": pendente, "desativada": pendente}, merge=True
+        )
 
 
 class ContasIdentityPlatform:
@@ -1042,7 +1074,7 @@ class ProgramasFirestore:
             return novo
 
         resultado: Programa | None = _repetir_sob_disputa(
-            trocar_na_transacao, self._cliente
+            lambda: trocar_na_transacao(self._cliente.transaction())
         )
         return resultado
 
@@ -1075,7 +1107,9 @@ class ProgramasFirestore:
             transacao.set(job_ref, novo.model_dump())
             return novo
 
-        resultado: Job | None = _repetir_sob_disputa(levar, self._cliente)
+        resultado: Job | None = _repetir_sob_disputa(
+            lambda: levar(self._cliente.transaction())
+        )
         return resultado
 
     def apagar(self, id: str) -> None:
@@ -1259,11 +1293,9 @@ class ReferenciasStorage:
             pass
 
     def apagar_prefixo(self, prefixo: str) -> None:
-        for blob in self._cliente.list_blobs(self._bucket, prefix=prefixo):
-            try:
-                blob.delete()
-            except NotFound:
-                pass
+        apagar_objetos(
+            self._cliente, self._cliente.list_blobs(self._bucket, prefix=prefixo)
+        )
 
 
 class RepositorioDeCorrecoesFirestore:
@@ -1272,6 +1304,7 @@ class RepositorioDeCorrecoesFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_CORRECOES
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     def acrescentar(self, correcao: Correcao) -> None:
@@ -1298,10 +1331,12 @@ class RepositorioDeCorrecoesFirestore:
         }
 
     def purgar(self, job_id: str) -> None:
-        for doc in self._colecao.where(
-            filter=FieldFilter("job_id", "==", job_id)
-        ).stream():
-            doc.reference.delete()
+        consulta = self._colecao.where(filter=FieldFilter("job_id", "==", job_id))
+        for docs in batched(consulta.stream(), _LOTE_DE_ESCRITA):
+            lote = self._cliente.batch()
+            for doc in docs:
+                lote.delete(doc.reference)
+            lote.commit()
 
 
 class RepositorioDeAprovacaoFirestore:
@@ -1368,11 +1403,12 @@ class RepositorioDeAuditoriaFirestore:
             if not ancora.exists:
                 raise CursorInvalido
             consulta = consulta.start_after(ancora)
-        registros = (
-            RegistroDeAuditoria(**(doc.to_dict() or {})) for doc in consulta.stream()
-        )
+        if filtro.limite is not None:
+            # Um além do limite basta para saber se há próxima página (#667).
+            consulta = consulta.limit(filtro.limite + 1)
+        # O servidor já filtrou tudo: não há o que conferir em Python.
         return pagina_da_auditoria(
-            (r for r in registros if casa_com_o_filtro_da_auditoria(r, filtro)),
+            (RegistroDeAuditoria(**(doc.to_dict() or {})) for doc in consulta.stream()),
             filtro.limite,
         )
 
@@ -1542,6 +1578,46 @@ def _gravar_os_itens(
     )
 
 
+def _gravar_decupagem(
+    cliente: ClienteStorage, bucket: str, job_id: str, conteudo: str
+) -> None:
+    cliente.bucket(bucket).blob(objeto_da_decupagem(job_id)).upload_from_string(
+        conteudo, content_type="application/json"
+    )
+    _gravar_os_itens(cliente, bucket, job_id, conteudo)
+
+
+def _ler_decupagem(
+    cliente: ClienteStorage, bucket: str, job_id: str
+) -> Decupagem | None:
+    blob = cliente.bucket(bucket).blob(objeto_da_decupagem(job_id))
+    try:
+        return Decupagem.model_validate_json(blob.download_as_bytes())
+    except NotFound:
+        return None
+
+
+def _ler_quadro(
+    cliente: ClienteStorage, bucket: str, job_id: str, caminho: str
+) -> bytes:
+    return bytes(
+        cliente.bucket(bucket)
+        .blob(objeto_do_quadro(job_id, caminho))
+        .download_as_bytes()
+    )
+
+
+def _baixar_se_existir(
+    cliente: ClienteStorage, bucket: str, objeto: str, destino: Path
+) -> bool:
+    """Baixa o objeto para `destino`; `False` se ele não existe."""
+    try:
+        cliente.bucket(bucket).blob(objeto).download_to_filename(str(destino))
+    except NotFound:
+        return False
+    return True
+
+
 class DecupagensStorage:
     """A Decupagem no Cloud Storage e o proxy que o Gemini lê: o mesmo adaptador grava e lê."""
 
@@ -1568,10 +1644,7 @@ class DecupagensStorage:
         return f"gs://{self._aceitos}/{objeto_do_proxy(job_id)}"
 
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
-        self._cliente.bucket(self._decupagens).blob(
-            objeto_da_decupagem(job_id)
-        ).upload_from_string(conteudo, content_type="application/json")
-        _gravar_os_itens(self._cliente, self._decupagens, job_id, conteudo)
+        _gravar_decupagem(self._cliente, self._decupagens, job_id, conteudo)
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
@@ -1583,26 +1656,15 @@ class DecupagensStorage:
             raise ServicoIndisponivel from e
 
     def ler_decupagem(self, job_id: str) -> Decupagem | None:
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
-        try:
-            return Decupagem.model_validate_json(blob.download_as_bytes())
-        except NotFound:
-            return None
+        return _ler_decupagem(self._cliente, self._decupagens, job_id)
 
     def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        return bytes(
-            self._cliente.bucket(self._decupagens)
-            .blob(objeto_do_quadro(job_id, caminho))
-            .download_as_bytes()
-        )
+        return _ler_quadro(self._cliente, self._decupagens, job_id, caminho)
 
     def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
-        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
-        try:
-            blob.download_to_filename(str(destino))
-        except NotFound:
-            return False
-        return True
+        return _baixar_se_existir(
+            self._cliente, self._aceitos, objeto_da_copia_limpa(job_id), destino
+        )
 
 
 class TranscricoesStorage:
@@ -1613,12 +1675,9 @@ class TranscricoesStorage:
         self._aceitos = bucket_de_aceitos
 
     def baixar_audio(self, job_id: str, destino: Path) -> bool:
-        blob = self._cliente.bucket(self._aceitos).blob(objeto_do_audio(job_id))
-        try:
-            blob.download_to_filename(str(destino))
-        except NotFound:
-            return False
-        return True
+        return _baixar_se_existir(
+            self._cliente, self._aceitos, objeto_do_audio(job_id), destino
+        )
 
     def gravar_transcricao(self, job_id: str, transcricao: Transcricao) -> None:
         self._cliente.bucket(self._aceitos).blob(
@@ -1657,10 +1716,10 @@ class JanelasStorage:
         ).upload_from_string(janela.model_dump_json(), content_type="application/json")
 
     def apagar(self, job_id: str) -> None:
-        for blob in self._cliente.list_blobs(
-            self._aceitos, prefix=prefixo_das_janelas(job_id)
-        ):
-            blob.delete()
+        apagar_objetos(
+            self._cliente,
+            self._cliente.list_blobs(self._aceitos, prefix=prefixo_das_janelas(job_id)),
+        )
 
 
 class LeiturasStorage:
@@ -1699,18 +1758,10 @@ class ObjetosStorage:
         self._decupagens = bucket_de_decupagens
 
     def ler_decupagem(self, job_id: str) -> Decupagem | None:
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
-        try:
-            return Decupagem.model_validate_json(blob.download_as_bytes())
-        except NotFound:
-            return None
+        return _ler_decupagem(self._cliente, self._decupagens, job_id)
 
     def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        return bytes(
-            self._cliente.bucket(self._decupagens)
-            .blob(objeto_do_quadro(job_id, caminho))
-            .download_as_bytes()
-        )
+        return _ler_quadro(self._cliente, self._decupagens, job_id, caminho)
 
     def gravar_resultado(
         self, job_id: str, resultado: ObjetosDaDecupagem, destino: str | None
@@ -1737,10 +1788,7 @@ class ObjetosStorage:
             return None
 
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
-        self._cliente.bucket(self._decupagens).blob(
-            objeto_da_decupagem(job_id)
-        ).upload_from_string(conteudo, content_type="application/json")
-        _gravar_os_itens(self._cliente, self._decupagens, job_id, conteudo)
+        _gravar_decupagem(self._cliente, self._decupagens, job_id, conteudo)
 
     def gravar_texto(self, objeto: str, conteudo: str) -> None:
         """Um JSON solto no bucket das decupagens (a medição do Florence-2, #329)."""
@@ -1801,17 +1849,18 @@ class ArquivosNoStorage:
     def apagar(self, job_id: str) -> None:
         # A regra de 7 dias do bucket pode apagar a cópia limpa ou o áudio entre a
         # listagem e o `delete()`: o objeto que sumiu já está apagado (#502).
-        for bucket in (self._aceitos, self._decupagens):
-            for blob in self._cliente.list_blobs(bucket, prefix=f"{job_id}/"):
-                try:
-                    blob.delete()
-                except NotFound:
-                    pass
-        for objeto in (objeto_da_decupagem(job_id), f"{job_id}.comparacao.json"):
-            try:
-                self._cliente.bucket(self._decupagens).blob(objeto).delete()
-            except NotFound:
-                pass
+        apagar_objetos(
+            self._cliente, self._cliente.list_blobs(self._aceitos, prefix=f"{job_id}/")
+        )
+        bucket = self._cliente.bucket(self._decupagens)
+        apagar_objetos(
+            self._cliente,
+            [
+                *self._cliente.list_blobs(self._decupagens, prefix=f"{job_id}/"),
+                bucket.blob(objeto_da_decupagem(job_id)),
+                bucket.blob(f"{job_id}.comparacao.json"),
+            ],
+        )
 
 
 # Quadros guardados por instância: uns 50 por página da grade, com folga para o acervo.
@@ -1886,11 +1935,7 @@ class ArmazenamentoStorage:
         return url
 
     def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        return bytes(
-            self._cliente.bucket(self._decupagens)
-            .blob(objeto_do_quadro(job_id, caminho))
-            .download_as_bytes()
-        )
+        return _ler_quadro(self._cliente, self._decupagens, job_id, caminho)
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         """A mesma URL para o mesmo quadro dentro da janela; um quadro regravado no meio

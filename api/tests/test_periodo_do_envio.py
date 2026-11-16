@@ -8,7 +8,8 @@ import pytest
 from google.auth.credentials import AnonymousCredentials
 from google.cloud import firestore
 
-from api.jobs import FiltroDeJobs, Job, PaginaDeJobs, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
+from api.modelo_do_job import FiltroDeJobs, Job, PaginaDeJobs
 from api.nuvem import RepositorioFirestore, limites_do_envio
 from api.tests.test_nuvem import EMULADOR_FIRESTORE
 from api.tests.test_programas_no_acervo import PERIODO, Mundo, _programas

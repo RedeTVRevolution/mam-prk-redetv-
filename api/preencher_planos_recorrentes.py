@@ -24,7 +24,7 @@ from api import log_estruturado
 from api.bancos import cliente_do_firestore
 from api.decupagem import Decupagem
 from api.ferramentas.comum import TAMANHO_DA_PAGINA, jobs_concluidos
-from api.jobs import RepositorioDeJobs
+from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import ObjetosStorage, RepositorioFirestore
 from api.planos_recorrentes import com_os_planos_recorrentes, contagem
 

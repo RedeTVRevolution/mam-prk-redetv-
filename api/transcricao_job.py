@@ -16,8 +16,8 @@ from api import log_estruturado, teste_dos_jobs
 from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import transitar
 from api.eventos_do_job import jobs_do_ambiente
-from api.jobs import RepositorioDeJobs
-from api.jobs import agora_utc as agora
+from api.modelo_do_job import RepositorioDeJobs
+from api.modelo_do_job import agora_utc as agora
 from api.nuvem import TranscricoesStorage
 from api.transcricao import Transcricao, TranscricoesDoJob, Transcritor
 from api.whisper import IDIOMA, NOME_DO_MODELO, TranscritorFasterWhisper

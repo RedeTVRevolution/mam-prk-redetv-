@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from starlette.datastructures import Headers
@@ -35,16 +36,21 @@ from api.auth import (
     CAMINHO_HEALTH,
     PREFIXO_PROTEGIDO,
     ChamadorAutenticado,
-    ChaveInvalida,
     Sistema,
-    TokenInvalido,
     Usuario,
     VerificadorDeChave,
     VerificadorDeToken,
     VerificadorIdentityPlatform,
+    chamador_do_pedido,
     exigir_autenticacao,
 )
-from api.bancos import cliente_da_colecao, cliente_do_firestore
+from api.bancos import (
+    auditoria_do_firestore,
+    chaves_do_firestore,
+    cliente_de_seguranca,
+    cliente_do_firestore,
+    papeis_do_firestore,
+)
 from api.busca import (
     Busca,
     ListasDaBusca,
@@ -55,7 +61,6 @@ from api.busca_na_nuvem import adaptadores_da_busca, aquecer_na_partida
 from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CatalogoEmMemoria, CopiaCurta
 from api.catalogo_de_correcoes import CatalogoDeCorrecoes
-from api.catalogo_de_correcoes import catalogo as catalogo_de_correcoes
 from api.chaves import (
     Mac,
     RepositorioDeChaves,
@@ -70,10 +75,14 @@ from api.correcoes import (
     RepositorioDeCorrecoes,
     RepositorioDeCorrecoesEmMemoria,
 )
+from api.correcoes import (
+    catalogo as catalogo_de_correcoes,
+)
 from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
 from api.dados_da_purga import dados_do_ambiente
 from api.decupagem import Decupagem
 from api.edicao_do_video import criar_rotas_da_edicao
+from api.erros import ServicoIndisponivel, resposta_de_indisponibilidade
 from api.eventos_de_uso import (
     Eventos,
     SemEventos,
@@ -81,8 +90,9 @@ from api.eventos_de_uso import (
     registrar,
 )
 from api.eventos_do_job import eventos_do_ambiente
+from api.fotos_de_referencia import FotosDeReferencia, FotosEmMemoria
 from api.fusao_de_pessoas import criar_rotas_da_fusao
-from api.gemini import Chamada, ErroHttp, Transporte
+from api.gemini import Transporte
 from api.idempotencia import RepositorioDeIdempotencia
 from api.indice_da_busca import IndiceDaBusca, IndiceEmMemoria
 from api.jobs import (
@@ -91,15 +101,10 @@ from api.jobs import (
     ArmazenamentoIndisponivel,
     DisparoDaIndexacao,
     DisparoDaIndexacaoIndisponivel,
-    RepositorioDeJobs,
     RepositorioIndisponivel,
-    ServicoIndisponivel,
     TipoNaoSuportado,
-    _chave_com_algum,
     aceita_gzip,
-    agora_utc,
     criar_rotas,
-    papeis_da_pessoa,
 )
 from api.lixeira import (
     ArquivosDoJob,
@@ -107,11 +112,7 @@ from api.lixeira import (
     criar_rotas_da_lixeira,
     sem_job_na_lixeira,
 )
-from api.lixeira_do_catalogo import (
-    FotosDeReferencia,
-    FotosEmMemoria,
-    criar_rotas_da_lixeira_do_catalogo,
-)
+from api.lixeira_do_catalogo import criar_rotas_da_lixeira_do_catalogo
 from api.lixeira_na_leitura import (
     PurgasDeMarca,
     PurgasDeMarcaEmMemoria,
@@ -123,10 +124,8 @@ from api.lixeira_na_leitura import (
 from api.log_estruturado import configurar as configurar_o_log
 from api.mac_kms import mac_do_ambiente
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
+from api.modelo_do_job import RepositorioDeJobs, agora_utc
 from api.nuvem import (
-    COLECAO_DA_AUDITORIA,
-    COLECAO_DE_CHAVES,
-    COLECAO_DE_PAPEIS,
     ArmazenamentoStorage,
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
@@ -139,11 +138,8 @@ from api.nuvem import (
     ProgramasFirestore,
     ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
-    RepositorioDeAuditoriaFirestore,
-    RepositorioDeChavesFirestore,
     RepositorioDeCorrecoesFirestore,
     RepositorioDeIdempotenciaFirestore,
-    RepositorioDePapeisFirestore,
     RepositorioDeRevisaoFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
@@ -165,6 +161,7 @@ from api.passadas import (
     PassadasStorage,
     criar_rotas_das_passadas,
 )
+from api.permissoes import chave_com_algum, papeis_da_pessoa
 from api.programas import (
     NomesDosProgramas,
     ProgramasEmMemoria,
@@ -213,6 +210,7 @@ from api.rotas_das_chaves import (
 )
 from api.rotas_do_catalogo import criar_rotas_do_catalogo
 from api.rotas_dos_programas import criar_rotas_dos_programas
+from api.sem_adaptadores import SemChaves, SemModelo, SemVerificador
 from api.taxa_de_correcao import criar_rotas_da_qualidade
 from api.taxa_do_painel import LeitorDaTaxa, TaxaEmMemoria, taxa_do_ambiente
 from api.tempo_de_tela import ConsultaComCache as TempoDeTelaComCache
@@ -238,27 +236,6 @@ from api.usuarios import (
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
 CACHE_DOS_ASSETS = "public, max-age=31536000, immutable"
-
-
-class _SemVerificador:
-    """Sem projeto do Identity Platform (testes e máquina local): nega tudo."""
-
-    def verificar(self, token: str) -> Usuario:
-        raise TokenInvalido
-
-
-class _SemChaves:
-    """Sem adaptador de chaves de API: recusa toda chave."""
-
-    def verificar(self, chave: str) -> Sistema:
-        raise ChaveInvalida
-
-
-class _SemModelo:
-    """Sem modelo ligado: a busca por imagem fica indisponível."""
-
-    def gerar(self, chamada: Chamada) -> str:
-        raise ErroHttp(503)
 
 
 class _FrontComEnderecos(StaticFiles):
@@ -404,9 +381,12 @@ def criar_app(
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV", dependencies=[Depends(conferir_ids_e_consultas)])
 
+    # `GoogleAPIError` é a base de todo erro do Firestore e do Google: sem isto, a falha
+    # de uma leitura sairia como 500 e o sistema que repete só em 503 não repetiria.
     @app.exception_handler(ServicoIndisponivel)
-    def _indisponivel(_request: Request, _erro: ServicoIndisponivel) -> JSONResponse:
-        return JSONResponse({"detail": "Serviço indisponível"}, status_code=503)
+    @app.exception_handler(GoogleAPIError)
+    def _indisponivel(_request: Request, erro: Exception) -> JSONResponse:
+        return resposta_de_indisponibilidade(erro)
 
     @app.exception_handler(TipoNaoSuportado)
     def _tipo_errado(_request: Request, _erro: TipoNaoSuportado) -> JSONResponse:
@@ -421,11 +401,11 @@ def criar_app(
             "Internal Server Error", status_code=500, headers=CABECALHOS_DE_SEGURANCA
         )
 
-    app.state.verificador = verificador or _SemVerificador()
+    app.state.verificador = verificador or SemVerificador()
     # Com repositório e chave MAC, a API confere as chaves emitidas por ela mesma.
     if chaves is None and repositorio_de_chaves and mac:
         chaves = VerificadorDeChaveDeApi(repositorio_de_chaves, mac)
-    app.state.chaves = chaves or _SemChaves()
+    app.state.chaves = chaves or SemChaves()
     app.state.papeis = papeis or RepositorioDePapeisEmMemoria()
     app.state.admins = admins_de(admins_emergencia)
     publicador = eventos or SemEventos()
@@ -437,7 +417,7 @@ def criar_app(
         request: Request, seguinte: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         resposta = await seguinte(request)
-        chamador = getattr(request.state, "chamador", None)
+        chamador = chamador_do_pedido(request)
         if isinstance(chamador, Sistema):
             # O caminho da rota, com `{job_id}` em vez do valor, e com o prefixo.
             rota = getattr(request.scope.get("route"), "path", None)
@@ -518,7 +498,7 @@ def criar_app(
     # nome do parâmetro de `criar_app`).
     @v1.get(
         "/programas",
-        dependencies=[Depends(_chave_com_algum("criar", "ler"))],
+        dependencies=[Depends(chave_com_algum("criar", "ler"))],
         operation_id="programas_v1_programas_get",
     )
     def lista_de_programas() -> list[str]:
@@ -531,6 +511,7 @@ def criar_app(
         return catalogo_de_correcoes()
 
     repositorio_de_jobs = repositorio or RepositorioIndisponivel()
+    app.state.jobs = repositorio_de_jobs
     armazenamento_dos_jobs = armazenamento or ArmazenamentoIndisponivel()
     repositorio_de_correcoes = correcoes or RepositorioDeCorrecoesEmMemoria()
     indice_da_busca = indice or IndiceEmMemoria()
@@ -637,7 +618,7 @@ def criar_app(
     v1.include_router(
         criar_rotas_da_busca(
             Busca(
-                transporte=transporte_da_consulta or _SemModelo(),
+                transporte=transporte_da_consulta or SemModelo(),
                 catalogo=catalogo_de_pessoas,
                 indice=indice_da_busca,
                 ranking=ranking or RankingEmOrdem(),
@@ -802,9 +783,7 @@ def criar_app(
         )
     )
     # Vale para toda rota com `{job_id}`: o vídeo na lixeira some para quem não é Administrador.
-    app.include_router(
-        v1, dependencies=[Depends(sem_job_na_lixeira(repositorio_de_jobs))]
-    )
+    app.include_router(v1, dependencies=[Depends(sem_job_na_lixeira)])
     # Fora de `/v1`, com o token do Pub/Sub em vez do de pessoa ou sistema.
     if rotas_do_push is not None:
         app.include_router(rotas_do_push)
@@ -839,6 +818,9 @@ def _com_cache[C, R](
 configurar_o_log()
 
 if _projeto:
+    # Um cliente para as coleções comuns e um para o banco de segurança (#673).
+    _comum = cliente_do_firestore(_projeto)
+    _seguranca = cliente_de_seguranca(_projeto)
     _adaptadores = adaptadores_da_busca(os.environ)
     _busca = (
         ConfigDaBusca.do_ambiente(os.environ) if "BUSCA_COLECAO" in os.environ else None
@@ -847,7 +829,7 @@ if _projeto:
     app = criar_app(
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(
-            cliente_do_firestore(_projeto),
+            _comum,
             listagem_por_mes=listagem_por_mes_do_ambiente(os.environ),
         ),
         ArmazenamentoStorage(
@@ -856,15 +838,11 @@ if _projeto:
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
-        papeis=RepositorioDePapeisFirestore(
-            cliente_da_colecao(_projeto, COLECAO_DE_PAPEIS)
-        ),
+        papeis=papeis_do_firestore(_projeto, cliente=_seguranca),
         admins_emergencia=os.environ.get("ADMINS_EMERGENCIA"),
-        correcoes=RepositorioDeCorrecoesFirestore(cliente_do_firestore(_projeto)),
-        aprovacao=RepositorioDeAprovacaoFirestore(cliente_do_firestore(_projeto)),
-        auditoria=RepositorioDeAuditoriaFirestore(
-            cliente_da_colecao(_projeto, COLECAO_DA_AUDITORIA)
-        ),
+        correcoes=RepositorioDeCorrecoesFirestore(_comum),
+        aprovacao=RepositorioDeAprovacaoFirestore(_comum),
+        auditoria=auditoria_do_firestore(_projeto, cliente=_seguranca),
         contas=ContasIdentityPlatform(_projeto),
         # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
         # CPU durante ela. Uma tentativa, no TEMPO_DO_EVENTO_DE_USO_S; a falha vai ao log.
@@ -872,18 +850,16 @@ if _projeto:
         # A chave MAC é a do Cloud KMS (KMS_CHAVE_MAC); sem ela, a simulada (como no
         # `make emitir-chave`). Sem nenhuma, emitir dá 503 e a API não aceita chave de
         # sistema; listar e revogar funcionam.
-        idempotencia=RepositorioDeIdempotenciaFirestore(cliente_do_firestore(_projeto)),
-        listas_da_busca=ListasDaBuscaFirestore(cliente_do_firestore(_projeto)),
-        repositorio_de_chaves=RepositorioDeChavesFirestore(
-            cliente_da_colecao(_projeto, COLECAO_DE_CHAVES)
-        ),
+        idempotencia=RepositorioDeIdempotenciaFirestore(_comum),
+        listas_da_busca=ListasDaBuscaFirestore(_comum),
+        repositorio_de_chaves=chaves_do_firestore(_projeto, cliente=_seguranca),
         arquivos=ArquivosNoStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],
             os.environ["BUCKET_DECUPAGENS"],
         ),
         mac=mac_do_ambiente(os.environ),
-        revisao=_revisao_espelhada(cliente_do_firestore(_projeto)),
+        revisao=_revisao_espelhada(_comum),
         login_recente=timedelta(
             minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)
             or LOGIN_RECENTE_PADRAO / timedelta(minutes=1)
@@ -900,11 +876,11 @@ if _projeto:
         janelas=JanelasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_ACEITOS"]
         ),
-        catalogo=CatalogoFirestore(cliente_do_firestore(_projeto)),
-        marcas=CatalogoDeMarcasFirestore(cliente_do_firestore(_projeto)),
-        versao_da_lixeira=VersaoDaLixeiraFirestore(cliente_do_firestore(_projeto)),
-        purgas_de_marca=PurgasDeMarcaFirestore(cliente_do_firestore(_projeto)),
-        programas=ProgramasFirestore(cliente_do_firestore(_projeto)),
+        catalogo=CatalogoFirestore(_comum),
+        marcas=CatalogoDeMarcasFirestore(_comum),
+        versao_da_lixeira=VersaoDaLixeiraFirestore(_comum),
+        purgas_de_marca=PurgasDeMarcaFirestore(_comum),
+        programas=ProgramasFirestore(_comum),
         fotos_de_referencia=ReferenciasStorage(
             ClienteStorage(project=_projeto), os.environ["BUCKET_REFERENCIAS"]
         ),
@@ -915,16 +891,14 @@ if _projeto:
                 _busca,
                 _transporte_do_indice,
                 tentar_no_429=True,
-                orcamento=OrcamentoFirestore(cliente_do_firestore(_projeto)),
+                orcamento=OrcamentoFirestore(_comum),
             )
             if _busca and _transporte_do_indice
             else None
         ),
         copia=copia_do_ambiente(os.environ),
-        tipos_de_objeto=TiposDeObjetoFirestore(cliente_do_firestore(_projeto)),
-        apagar_dados_da_purga=dados_do_ambiente(
-            cliente_do_firestore(_projeto), os.environ
-        ).apagar,
+        tipos_de_objeto=TiposDeObjetoFirestore(_comum),
+        apagar_dados_da_purga=dados_do_ambiente(_comum, os.environ).apagar,
         busca_por_minuto=consultas_por_minuto_do_ambiente(os.environ),
         aceita_teste_de_carga=aceita_teste_de_carga_do_ambiente(os.environ),
         limites_da_imagem=LimitesDaImagem(

@@ -7,7 +7,6 @@ análise escolhida, o progresso das janelas é apagado antes do disparo, para o 
 rodar de novo em todas elas.
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Protocol
@@ -15,21 +14,17 @@ from typing import Annotated, Protocol
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
-from api.auth import ChamadorAutenticado, Usuario
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
+from api.auth import Usuario
 from api.ciclo_de_vida import (
     NaoReprocessavel,
     desfazer_reprocessamento,
     reprocessar,
 )
-from api.jobs import (
-    Job,
-    JobPublico,
-    NomeDaEtapa,
-    RepositorioDeJobs,
-    ServicoIndisponivel,
-    _confere_permissao,
-)
+from api.erros import ServicoIndisponivel
+from api.jobs import JobPublico
+from api.modelo_do_job import Job, NomeDaEtapa, RepositorioDeJobs
+from api.permissoes import confere_permissao, exige_pessoa
 from api.progresso_das_janelas import JanelasDoJob
 from api.texto_como_dado import Linha, Texto
 
@@ -63,13 +58,6 @@ class PedidoDeReprocessamento(BaseModel):
     etapa: Annotated[str, Linha(40)] | None = None
 
 
-def _exige_pessoa(chamador: ChamadorAutenticado) -> Usuario:
-    """Dependência: chave de sistema não reprocessa."""
-    if not isinstance(chamador, Usuario):
-        raise HTTPException(403, "Chave de sistema não reprocessa")
-    return chamador
-
-
 def reprocessar_com_rastro(
     repositorio: RepositorioDeJobs,
     auditoria: RepositorioDeAuditoria,
@@ -79,13 +67,13 @@ def reprocessar_com_rastro(
     agora: datetime,
     escolhida: str | None,
     *,
-    autor: dict[str, str],
+    autor: Usuario | str,
     motivo: str | None,
     relogio: Callable[[], datetime],
 ) -> Job | None:
     """Muda o Job, registra na auditoria e dispara o Workflows; o Job de depois, ou
     `None` se não existe. `NaoReprocessavel` sobe; falha no registro ou no disparo
-    devolve o Job ao que era e sobe também. `autor` é `uid` e `email` ou `sistema`."""
+    devolve o Job ao que era e sobe também. `autor` é a pessoa ou o nome do sistema."""
     trocado = reprocessar(repositorio, job_id, agora, escolhida)
     if trocado is None:
         return None
@@ -96,10 +84,9 @@ def reprocessar_com_rastro(
         # O Job já mudou: o registro vem antes do disparo, para nunca haver
         # reprocessamento sem rastro.
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=agora,
-                **autor,
+                quem=autor,
                 acao="video.reprocessado",
                 alvo_tipo="job",
                 alvo_id=job.id,
@@ -132,12 +119,14 @@ def criar_rotas_do_reprocessamento(
     def reprocessar_job(
         job_id: str,
         request: Request,
-        pessoa: Annotated[Usuario, Depends(_exige_pessoa)],
+        pessoa: Annotated[
+            Usuario, Depends(exige_pessoa("Chave de sistema não reprocessa"))
+        ],
         pedido: PedidoDeReprocessamento | None = None,
     ) -> JobPublico:
         escolhida = pedido.etapa if pedido else None
         # `video.reprocessar` refaz o que falhou; refazer um vídeo bom é do Curador.
-        _confere_permissao(
+        confere_permissao(
             request,
             pessoa,
             "video.reprocessar" if escolhida is None else "video.reprocessar_etapa",
@@ -154,7 +143,7 @@ def criar_rotas_do_reprocessamento(
                 job_id,
                 agora,
                 escolhida,
-                autor={"uid": pessoa.uid, "email": pessoa.email},
+                autor=pessoa,
                 motivo=pedido.motivo if pedido else None,
                 relogio=relogio,
             )

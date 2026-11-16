@@ -16,8 +16,9 @@ from api.catalogo import CatalogoEmMemoria
 from api.correcoes import Ancora, Correcao
 from api.decupagem import Decupagem
 from api.gemini import ErroHttp
-from api.jobs import Job, RepositorioEmMemoria
+from api.jobs import RepositorioEmMemoria
 from api.juncao_de_pessoas import chave_da_pessoa
+from api.modelo_do_job import Job
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_identificacao import decupagem, gc, pessoa, whisper
 

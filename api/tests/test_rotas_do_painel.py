@@ -19,8 +19,9 @@ from api.chaves import (
     emitir_chave,
 )
 from api.copia_bigquery import parametro
-from api.jobs import Estado, Job, RepositorioEmMemoria, agora_utc
+from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.modelo_do_job import Estado, Job, agora_utc
 from api.painel import escolhe_o_grupo, inicio_do_grupo
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.resumos_de_uso import (
@@ -184,7 +185,7 @@ def _diretoria() -> Mundo:
         "/fila",
     ],
 )
-@pytest.mark.parametrize("papel", ["consulta", "operador", "editor", "curador"])
+@pytest.mark.parametrize("papel", ["consulta", "editor", "curador"])
 def test_sem_painel_ver_e_403(rota: str, papel: str) -> None:
     mundo = Mundo([papel])
 

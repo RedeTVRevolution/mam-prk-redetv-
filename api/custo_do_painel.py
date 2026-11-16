@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.eventos_de_uso import Quem
-from api.jobs import Job
+from api.modelo_do_job import Job
 from api.qualidade_do_painel import SAO_PAULO
 from api.relatorios import linhas_da_consulta
 

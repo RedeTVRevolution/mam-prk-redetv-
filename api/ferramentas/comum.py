@@ -5,7 +5,7 @@ from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from api.jobs import Job, RepositorioDeJobs
+    from api.modelo_do_job import Job, RepositorioDeJobs
 
 TAMANHO_DA_PAGINA = 500
 
@@ -19,7 +19,7 @@ def jobs_concluidos(
     """Os Jobs concluídos, página a página. `na_lixeira=None` traz também os da lixeira (as
     cargas que a lixeira marca); `False` os deixa de fora (quem reprocessa)."""
     # Import aqui: api.jobs puxa o app, e as ferramentas que só usam hash ou percentil não.
-    from api.jobs import FiltroDeJobs
+    from api.modelo_do_job import FiltroDeJobs
 
     cursor: str | None = None
     while True:
