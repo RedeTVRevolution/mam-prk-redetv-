@@ -2,7 +2,6 @@
 
 import json
 import threading
-import time
 from typing import Any
 
 import pytest
@@ -471,7 +470,9 @@ def test_uma_falha_cancela_os_lotes_que_ainda_nao_comecaram() -> None:
     assert len(chamadas) == 1
 
 
-def test_com_vagas_sobrando_uma_falha_cancela_os_lotes_que_nao_comecaram() -> None:
+def test_com_vagas_sobrando_uma_falha_cancela_os_lotes_que_nao_comecaram(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     quadros = bruto(
         *[
             quadro(
@@ -483,17 +484,23 @@ def test_com_vagas_sobrando_uma_falha_cancela_os_lotes_que_nao_comecaram() -> No
         ]
     )
     iniciados: list[int] = []
-    a_1_falhou = threading.Event()
+    falha_registrada = threading.Event()
+
+    class EventoQueAvisa(threading.Event):
+        def set(self) -> None:
+            super().set()
+            falha_registrada.set()
+
+    # O auxiliar marca a falha no seu Event; a chamada 0 só termina depois disso.
+    monkeypatch.setattr("api.paralelo.Event", EventoQueAvisa)
 
     class TransporteComUmaLentaEUmaQueFalha:
         def gerar(self, chamada: Chamada) -> str:
             plano = int(chamada.texto.split()[1])
             iniciados.append(plano)
             if plano == 0:  # lenta: só termina depois de a 1 falhar
-                a_1_falhou.wait(timeout=5)
-                time.sleep(0.2)
+                falha_registrada.wait(timeout=5)  # o prazo só protege contra travar
                 return resposta({"plano": 0, "objetos": []})
-            a_1_falhou.set()
             raise AnaliseFalhou("sem capacidade")
 
     with pytest.raises(AnaliseFalhou, match="sem capacidade"):

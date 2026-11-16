@@ -23,9 +23,16 @@ def em_paralelo[T, R](
             falhou.set()
             raise
 
-    with ThreadPoolExecutor(max_workers=max(maximo, 1)) as pool:
+    pool = ThreadPoolExecutor(max_workers=max(maximo, 1))
+    try:
         futuros = [pool.submit(rodar, i) for i in itens]
         erros = [f.exception() for f in futuros]
+    except BaseException:
+        # Ctrl+C na thread principal: o que não começou também não começa.
+        falhou.set()
+        pool.shutdown(cancel_futures=True)
+        raise
+    pool.shutdown()
     for erro in erros:
         if erro and not isinstance(erro, CancelledError):
             raise erro
