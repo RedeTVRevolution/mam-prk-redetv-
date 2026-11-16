@@ -66,7 +66,18 @@ PLANOS_POR_LOTE_DO_GEMINI = 4
 # ~3 rodadas. Mais que isso arrisca 429 (falta de capacidade do Flex).
 PARALELISMO_DO_INVENTARIO = 8
 
+
 Inventarios = dict[int, list[ObjetoDoInventario]]
+
+
+class _ComFaltas(Inventarios):
+    """O que os dois motores devolvem: `nao_inventariados` são os planos que o modelo pulou
+    mesmo depois de pedidos de novo (#692): têm lista vazia, mas não são "sem objetos".
+    Quem lê só vê um `Inventarios`; `aplicar_inventario` olha o atributo, se houver."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.nao_inventariados: set[int] = set()
 
 
 class _Estrito(BaseModel):
@@ -173,6 +184,23 @@ Você faz o inventário dos objetos de cena de cada plano de um vídeo de televi
 
 def _lotes[T](itens: Sequence[T], tamanho: int) -> list[list[T]]:
     return [list(itens[i : i + tamanho]) for i in range(0, len(itens), max(tamanho, 1))]
+
+
+def _pedir_com_uma_rodada_extra[R: BaseModel](
+    lote: list[int], chamar: Callable[[list[int]], R]
+) -> tuple[list[Any], list[int]]:
+    """Os planos da resposta do lote; o que o modelo omitiu é pedido de novo, só ele, uma
+    vez (#692). Devolve os planos respondidos e os que seguem ausentes."""
+
+    def respondidos(r: R) -> list[Any]:
+        return [p for p in r.planos if p.plano in lote]  # type: ignore[attr-defined]
+
+    planos = respondidos(chamar(lote))
+    faltam = [i for i in lote if i not in {p.plano for p in planos}]
+    if faltam:
+        planos += respondidos(chamar(faltam))
+        faltam = [i for i in lote if i not in {p.plano for p in planos}]
+    return planos, faltam
 
 
 def _gravar_plano(inventarios: Inventarios, plano: int, itens: list[Any]) -> None:
@@ -310,14 +338,14 @@ def converter_do_florence(
     por_plano: dict[int, list[Any]] = {}
     for q in bruto.quadros:
         por_plano.setdefault(q.plano, []).append(q)
-    inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
+    inventarios = _ComFaltas({i: [] for i in range(len(decupagem.planos))})
     esquema = esquema_obrigatorio(RespostaConvertida)
     lotes = _lotes(
         [i for i in range(len(decupagem.planos)) if i in por_plano], planos_por_lote
     )
-    respostas = em_paralelo(
-        lotes,
-        lambda lote: gerar_validado(
+
+    def converter(lote: list[int]) -> RespostaConvertida:
+        return gerar_validado(
             transporte,
             _chamada(
                 modelo,
@@ -330,13 +358,14 @@ def converter_do_florence(
             dormir=dormir,
             sortear=sortear,
             relogio=relogio,
-        ),
-        paralelismo,
+        )
+
+    respostas = em_paralelo(
+        lotes, lambda lote: _pedir_com_uma_rodada_extra(lote, converter), paralelismo
     )
-    for lote, resposta in zip(lotes, respostas, strict=True):
-        for do_plano in resposta.planos:
-            if do_plano.plano not in lote:
-                continue
+    for planos, faltam in respostas:
+        inventarios.nao_inventariados.update(faltam)
+        for do_plano in planos:
             caixas_por_id: dict[str, CaixaDoQuadro] = {}
             for k, q in enumerate(por_plano[do_plano.plano]):
                 for n, o in enumerate(q.objetos):
@@ -377,7 +406,7 @@ def olhar_com_gemini(
 ) -> Inventarios:
     """Motor `gemini`: o modelo olha os quadros-chave (resolução cheia, sem redução) e
     devolve o mesmo inventário, com as caixas. `quadro_de` lê o JPEG pelo caminho."""
-    inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
+    inventarios = _ComFaltas({i: [] for i in range(len(decupagem.planos))})
     esquema = esquema_obrigatorio(RespostaVista)
     com_quadros = [i for i, p in enumerate(decupagem.planos) if p.quadros]
 
@@ -409,12 +438,12 @@ def olhar_com_gemini(
         )
 
     lotes = _lotes(com_quadros, planos_por_lote)
-    for lote, resposta in zip(
-        lotes, em_paralelo(lotes, olhar, paralelismo), strict=True
-    ):
-        for do_plano in resposta.planos:
-            if do_plano.plano not in lote:
-                continue
+    respostas = em_paralelo(
+        lotes, lambda lote: _pedir_com_uma_rodada_extra(lote, olhar), paralelismo
+    )
+    for planos, faltam in respostas:
+        inventarios.nao_inventariados.update(faltam)
+        for do_plano in planos:
             quadros = decupagem.planos[do_plano.plano].quadros
             itens = [
                 _item(
@@ -439,7 +468,12 @@ def aplicar_inventario(
 ) -> Decupagem:
     """A Decupagem com o inventário de cada plano no lugar do anterior."""
     planos = [
-        p.model_copy(update={"inventario": inventarios.get(i, [])})
+        p.model_copy(
+            update={
+                "inventario": inventarios.get(i, []),
+                "inventariado": i not in getattr(inventarios, "nao_inventariados", ()),
+            }
+        )
         for i, p in enumerate(decupagem.planos)
     ]
     update: dict[str, Any] = {

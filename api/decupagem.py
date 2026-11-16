@@ -367,6 +367,9 @@ class Plano(Intervalo):
     quadros: list[str] = []
     # O inventário de objetos (#244): preenchido pelo servidor, fora do esquema da análise.
     inventario: list[ObjetoDoInventario] = []
+    # `False` quando o modelo pulou o plano mesmo depois de pedido de novo (#692): o
+    # `inventario` vazio então não quer dizer "sem objetos". Decupagem antiga: `True`.
+    inventariado: bool = True
     # O grupo de planos da mesma câmera e do mesmo enquadramento (#546), um id curto por
     # vídeo; `None` no plano sem par. O servidor grava, o modelo não conhece.
     plano_recorrente: Id | None = None
@@ -564,6 +567,7 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "motivo",
         "correcoes_descartadas",
         "inventario",
+        "inventariado",
         "inventario_gerado_por",
         "plano_recorrente",
         "versao_pipeline",

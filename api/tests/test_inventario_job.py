@@ -192,11 +192,13 @@ def test_o_job_grava_o_grupo_dos_planos_recorrentes_pelos_quadros_chave() -> Non
     executar(
         "j1",
         armazem,
-        TransporteFalso(json.dumps({"planos": []})),
+        # O modelo omite os dois planos nas duas rodadas (a extra é a segunda resposta).
+        TransporteFalso(*[json.dumps({"planos": []})] * 2),
         ConfigDoInventario(motor="gemini", modelo="gemini-x"),
     )
 
     gravada = Decupagem.model_validate_json(armazem.gravadas[0][1])
+    assert [p.inventariado for p in gravada.planos] == [False, False]
     assert [p.plano_recorrente for p in gravada.planos] == ["rec01", "rec01"]
 
 

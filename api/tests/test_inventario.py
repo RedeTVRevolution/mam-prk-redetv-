@@ -515,3 +515,118 @@ def test_com_vagas_sobrando_uma_falha_cancela_os_lotes_que_nao_comecaram(
         )
 
     assert sorted(iniciados) == [0, 1]
+
+
+# Plano que o modelo omite (#692): pedido de novo, só ele; ainda ausente, fica marcado.
+DOIS_PLANOS_FLORENCE = bruto(
+    *[
+        quadro(
+            i,
+            f"q/{i}.jpg",
+            objetos=[ObjetoDetectado(rotulo="vase", caixa=caixa())],
+        )
+        for i in range(2)
+    ]
+)
+
+
+def _vaso(i: int) -> dict[str, Any]:
+    return {"plano": i, "objetos": [convertido("vaso", [f"p{i}q0o0"])]}
+
+
+def test_florence_plano_omitido_e_pedido_de_novo_so_ele() -> None:
+    transporte = TransporteFalso(resposta(_vaso(0)), resposta(_vaso(1)))
+
+    inventarios = converter_do_florence(
+        decupagem(["q/0.jpg"], ["q/1.jpg"]),
+        DOIS_PLANOS_FLORENCE,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+    )
+
+    assert len(transporte.chamadas) == 2
+    segunda = transporte.chamadas[1]
+    assert "PLANO 1" in segunda.texto and "PLANO 0" not in segunda.texto
+    assert segunda.instrucao == transporte.chamadas[0].instrucao
+    assert segunda.esquema == transporte.chamadas[0].esquema
+    assert [len(inventarios[i]) for i in (0, 1)] == [1, 1]
+    nova = aplicar_inventario(
+        decupagem(["q/0.jpg"], ["q/1.jpg"]), inventarios, motor="florence", modelo="m"
+    )
+    assert [p.inventariado for p in nova.planos] == [True, True]
+
+
+def test_florence_plano_ainda_omitido_fica_marcado_com_uma_rodada_extra() -> None:
+    transporte = TransporteFalso(resposta(_vaso(0)), resposta(), resposta(_vaso(1)))
+    d = decupagem(["q/0.jpg"], ["q/1.jpg"])
+
+    inventarios = converter_do_florence(
+        d, DOIS_PLANOS_FLORENCE, transporte=transporte, modelo="m", job_id="j1"
+    )
+
+    assert len(transporte.chamadas) == 2  # a terceira resposta nunca é pedida
+    assert inventarios[1] == []
+    nova = aplicar_inventario(d, inventarios, motor="florence", modelo="m")
+    assert [p.inventariado for p in nova.planos] == [True, False]
+
+
+def test_gemini_plano_omitido_e_pedido_de_novo_so_ele() -> None:
+    d = decupagem(["q/a.jpg"], ["q/b.jpg"])
+    transporte = TransporteFalso(
+        resposta({"plano": 0, "objetos": [visto("vaso", 0)]}),
+        resposta({"plano": 1, "objetos": [visto("quadro", 0)]}),
+    )
+
+    inventarios = olhar_com_gemini(
+        d,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+        quadro_de=lambda c: c.encode(),
+    )
+
+    assert len(transporte.chamadas) == 2
+    segunda = transporte.chamadas[1]
+    assert segunda.imagens == (b"q/b.jpg",)
+    assert "PLANO 1" in segunda.texto and "PLANO 0" not in segunda.texto
+    assert inventarios[1][0].nome == "quadro"
+
+
+def test_gemini_plano_ainda_omitido_fica_marcado() -> None:
+    d = decupagem(["q/a.jpg"], ["q/b.jpg"])
+    transporte = TransporteFalso(
+        resposta({"plano": 0, "objetos": [visto("vaso", 0)]}), resposta()
+    )
+
+    inventarios = olhar_com_gemini(
+        d, transporte=transporte, modelo="m", job_id="j1", quadro_de=lambda c: b"x"
+    )
+
+    assert len(transporte.chamadas) == 2
+    nova = aplicar_inventario(d, inventarios, motor="gemini", modelo="m")
+    assert [p.inventariado for p in nova.planos] == [True, False]
+
+
+def test_plano_sem_objetos_na_resposta_nao_e_omitido() -> None:
+    transporte = TransporteFalso(
+        resposta(_vaso(0), {"plano": 1, "objetos": []}),
+    )
+    d = decupagem(["q/0.jpg"], ["q/1.jpg"])
+
+    inventarios = converter_do_florence(
+        d, DOIS_PLANOS_FLORENCE, transporte=transporte, modelo="m", job_id="j1"
+    )
+
+    assert len(transporte.chamadas) == 1
+    nova = aplicar_inventario(d, inventarios, motor="florence", modelo="m")
+    assert all(p.inventariado for p in nova.planos)
+
+
+def test_o_campo_do_servidor_fica_fora_do_esquema_do_modelo() -> None:
+    from api.decupagem import CAMPOS_DO_SERVIDOR
+
+    assert "inventariado" in CAMPOS_DO_SERVIDOR
+    assert Plano.model_validate(
+        plano(0, []).model_dump(exclude={"inventariado"})
+    ).inventariado
