@@ -2,6 +2,7 @@
 
 import json
 import threading
+import time
 from typing import Any
 
 import pytest
@@ -468,3 +469,42 @@ def test_uma_falha_cancela_os_lotes_que_ainda_nao_comecaram() -> None:
         )
 
     assert len(chamadas) == 1
+
+
+def test_com_vagas_sobrando_uma_falha_cancela_os_lotes_que_nao_comecaram() -> None:
+    quadros = bruto(
+        *[
+            quadro(
+                i,
+                f"q/{i}.jpg",
+                objetos=[ObjetoDetectado(rotulo="vase", caixa=caixa())],
+            )
+            for i in range(10)
+        ]
+    )
+    iniciados: list[int] = []
+    a_1_falhou = threading.Event()
+
+    class TransporteComUmaLentaEUmaQueFalha:
+        def gerar(self, chamada: Chamada) -> str:
+            plano = int(chamada.texto.split()[1])
+            iniciados.append(plano)
+            if plano == 0:  # lenta: só termina depois de a 1 falhar
+                a_1_falhou.wait(timeout=5)
+                time.sleep(0.2)
+                return resposta({"plano": 0, "objetos": []})
+            a_1_falhou.set()
+            raise AnaliseFalhou("sem capacidade")
+
+    with pytest.raises(AnaliseFalhou, match="sem capacidade"):
+        converter_do_florence(
+            decupagem(*[[f"q/{i}.jpg"] for i in range(10)]),
+            quadros,
+            transporte=TransporteComUmaLentaEUmaQueFalha(),
+            modelo="m",
+            job_id="j1",
+            planos_por_lote=1,
+            paralelismo=2,
+        )
+
+    assert sorted(iniciados) == [0, 1]
