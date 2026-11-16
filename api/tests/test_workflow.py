@@ -227,6 +227,19 @@ def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
     assert 'timeout = "21600s"' in job
 
 
+def test_jobs_de_analise_e_identificacao_recebem_a_mesma_tolerancia_da_fala() -> None:
+    main = MAIN.read_text()
+
+    for nome in ("analise", "identificacao"):
+        job = main[main.index(f'resource "google_cloud_run_v2_job" "{nome}"') :].split(
+            "\nresource "
+        )[0]
+        assert re.search(
+            r'name\s+= "TOLERANCIA_DA_FALA_MS"\s+value\s+= tostring\(var\.tolerancia_da_fala_ms\)',
+            job,
+        ), nome
+
+
 def test_quadros_chave_rodam_depois_da_analise_e_a_falha_deles_nao_derruba_o_job() -> (
     None
 ):

@@ -13,9 +13,11 @@ o GC ou a fala podem ser dela. Estar no perfil do programa ou no catálogo só d
 os apelidos; não confirma nada. O nome sem prova vira palpite.
 """
 
+import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from api.catalogo import Catalogo
 from api.decupagem import Decupagem, FonteDoNome, Intervalo, Pessoa
@@ -26,7 +28,23 @@ from api.texto import normalizar
 from api.transcricao import Transcricao
 
 TOLERANCIA_DA_FALA_MS = 2000  # a fala e a imagem não se alinham ao quadro
+_VARIAVEL_DA_TOLERANCIA = "TOLERANCIA_DA_FALA_MS"
 TIPOS_DE_GC = frozenset({"gc", "tarja"})
+
+
+def tolerancia_da_fala_do_ambiente(
+    ambiente: Mapping[str, str] = os.environ,
+) -> int:
+    """A tolerância da fala (ms) da variável de ambiente, a mesma na análise e na
+    identificação; inteiro de zero para cima, senão `ValueError`."""
+    texto = ambiente.get(_VARIAVEL_DA_TOLERANCIA)
+    if texto is None:
+        return TOLERANCIA_DA_FALA_MS
+    if not texto.isascii() or not texto.isdigit():
+        raise ValueError(
+            f"{_VARIAVEL_DA_TOLERANCIA} deve ser um inteiro de zero para cima: {texto!r}"
+        )
+    return int(texto)
 
 
 @dataclass(frozen=True)
@@ -229,3 +247,25 @@ def identificar(
             )
         )
     return decupagem.model_copy(update={"pessoas": pessoas})
+
+
+def sem_comercial_de_pessoa(decupagem: Decupagem) -> Decupagem:
+    """Tira o comercial cuja marca é o nome de uma pessoa da mesma Decupagem (#434).
+
+    O modelo registra o @ do apresentador na tela como comercial, com o nome dele em
+    `marca`. A correção do editor (`correcoes.py`) não passa por aqui, de propósito.
+    """
+    nomes = {normalizar(p.nome) for p in decupagem.pessoas}
+    return decupagem.model_copy(
+        update={
+            "comerciais": [
+                c for c in decupagem.comerciais if normalizar(c.marca) not in nomes
+            ]
+        }
+    )
+
+
+def identificar_e_pos_processar(decupagem: Decupagem, **kwargs: Any) -> Decupagem:
+    """`identificar` seguido das regras que valem depois dele: a análise e o modelo
+    forte (que nomeia pessoas depois) passam por aqui, para o filtro rodar nas duas."""
+    return sem_comercial_de_pessoa(identificar(decupagem, **kwargs))

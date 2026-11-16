@@ -6799,6 +6799,11 @@
             "title": "Inventario",
             "default": []
           },
+          "inventariado": {
+            "type": "boolean",
+            "title": "Inventariado",
+            "default": true
+          },
           "plano_recorrente": {
             "anyOf": [
               {

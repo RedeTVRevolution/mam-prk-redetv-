@@ -30,7 +30,11 @@ from api.decupagem import Decupagem, Video
 from api.escalonamento import janelas_a_escalonar
 from api.espera import sorteio_uniforme
 from api.gemini import MODELO, AnaliseFalhou, Transporte, analisar
-from api.identificacao import TOLERANCIA_DA_FALA_MS, candidatos_do_video, identificar
+from api.identificacao import (
+    TOLERANCIA_DA_FALA_MS,
+    candidatos_do_video,
+    identificar_e_pos_processar,
+)
 from api.janelas import (
     EstadoJanela,
     Janela,
@@ -50,25 +54,8 @@ from api.programas import Perfis
 from api.progresso_das_janelas import JanelaGravada, JanelasDoJob
 from api.sinais import ContagemDaAnalise
 from api.tempos import aplicar_regra_de_tempos
-from api.texto import normalizar
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA
-
-
-def sem_comercial_de_pessoa(decupagem: Decupagem) -> Decupagem:
-    """Tira o comercial cuja marca é o nome de uma pessoa da mesma Decupagem (#434).
-
-    O modelo registra o @ do apresentador na tela como comercial, com o nome dele em
-    `marca`. A correção do editor (`correcoes.py`) não passa por aqui, de propósito.
-    """
-    nomes = {normalizar(p.nome) for p in decupagem.pessoas}
-    return decupagem.model_copy(
-        update={
-            "comerciais": [
-                c for c in decupagem.comerciais if normalizar(c.marca) not in nomes
-            ]
-        }
-    )
 
 
 def analisar_video(
@@ -125,14 +112,12 @@ def analisar_video(
         return medicao.medir(decupagem, trecho_ms) if medicao else decupagem
 
     def identificar_pessoas(decupagem: Decupagem) -> Decupagem:
-        return sem_comercial_de_pessoa(
-            identificar(
-                decupagem,
-                candidatos=candidatos_do_video(programa, catalogo, perfis),
-                transcricao=transcricao,
-                catalogo=catalogo,
-                tolerancia_ms=tolerancia_da_fala_ms,
-            )
+        return identificar_e_pos_processar(
+            decupagem,
+            candidatos=candidatos_do_video(programa, catalogo, perfis),
+            transcricao=transcricao,
+            catalogo=catalogo,
+            tolerancia_ms=tolerancia_da_fala_ms,
         )
 
     def passo(trecho_ms: tuple[int, int] | None) -> Decupagem:

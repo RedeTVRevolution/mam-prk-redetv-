@@ -25,6 +25,7 @@ from api.clientes_de_nuvem import sessao_autenticada
 from api.correcoes import Correcao
 from api.decupagem import Decupagem
 from api.gemini import Transporte, TransporteVertex
+from api.identificacao import TOLERANCIA_DA_FALA_MS, tolerancia_da_fala_do_ambiente
 from api.juncao_de_pessoas import juntar_sem_nome
 from api.modelo_do_job import RepositorioDeJobs
 from api.modelo_forte import LIMITE_DE_PESSOAS, agrupar, olhar_pessoas_sem_nome
@@ -71,6 +72,7 @@ def executar(
     pasta: Path,
     *,
     limite_de_pessoas: int = LIMITE_DE_PESSOAS,
+    tolerancia_ms: int = TOLERANCIA_DA_FALA_MS,
     perfis: Perfis | None = None,
     correcoes: CorrecoesDaIdentificacao | None = None,
 ) -> str:
@@ -110,6 +112,7 @@ def executar(
             transcricao=transcricoes.ler_transcricao(job_id),
             catalogo=catalogo,
             limite_de_pessoas=limite_de_pessoas,
+            tolerancia_ms=tolerancia_ms,
             ao_falhar=falhas.append,
         )
         # A junção das pessoas sem nome é o último passo, depois do modelo forte: assim
@@ -155,6 +158,7 @@ def main() -> None:
         limite_de_pessoas=int(
             os.environ.get("LIMITE_DE_PESSOAS_DO_MODELO_FORTE", LIMITE_DE_PESSOAS)
         ),
+        tolerancia_ms=tolerancia_da_fala_do_ambiente(),
     )
 
 
