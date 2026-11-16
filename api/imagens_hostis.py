@@ -71,7 +71,7 @@ def _em_pe(imagem: Image.Image) -> Image.Image:
     (SyntaxError, TypeError, struct.error...), a imagem segue sem girar."""
     try:
         return ImageOps.exif_transpose(imagem)
-    except Exception:
+    except Exception:  # noqa: BLE001 - EXIF hostil: qualquer falha vale "sem girar"
         return imagem
 
 
