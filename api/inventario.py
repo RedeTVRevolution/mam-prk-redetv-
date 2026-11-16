@@ -8,9 +8,10 @@ import copy
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.assinatura_do_nome import assinatura
 from api.decupagem import (
@@ -26,7 +27,7 @@ from api.decupagem import (
 )
 from api.espera import sorteio_uniforme
 from api.florence import ObjetosDaDecupagem
-from api.gemini import Chamada, Transporte, gerar_validado
+from api.gemini import Chamada, Transporte, gerar_validado, validar_json
 from api.leitura_da_tela import Caixa
 from api.taxonomia_de_objetos import OUTRO, TEXTO_DOS_TIPOS
 from api.texto import normalizar
@@ -187,18 +188,9 @@ def _em_paralelo[T, R](
         pool.shutdown(wait=True, cancel_futures=True)
 
 
-def _validar_convertida(texto: str) -> RespostaConvertida:
-    try:
-        return RespostaConvertida.model_validate_json(texto)
-    except ValidationError as e:
-        raise ValueError("resposta fora do esquema") from e
-
-
-def _validar_vista(texto: str) -> RespostaVista:
-    try:
-        return RespostaVista.model_validate_json(texto)
-    except ValidationError as e:
-        raise ValueError("resposta fora do esquema") from e
+def _gravar_plano(inventarios: Inventarios, plano: int, itens: list[Any]) -> None:
+    """O final comum dos dois motores: os itens não vazios do plano, com os repetidos unidos."""
+    inventarios[plano] = unir_repetidos([i for i in itens if i])
 
 
 def _caixa_do_quadro(caminho: str, caixa: Caixa) -> CaixaDoQuadro:
@@ -347,7 +339,7 @@ def converter_do_florence(
                 job_id,
                 texto=_texto_do_lote(lote, por_plano, decupagem),
             ),
-            _validar_convertida,
+            partial(validar_json, RespostaConvertida),
             dormir=dormir,
             sortear=sortear,
             relogio=relogio,
@@ -379,7 +371,7 @@ def converter_do_florence(
                 )
                 for o in do_plano.objetos
             ]
-            inventarios[do_plano.plano] = unir_repetidos([i for i in itens if i])
+            _gravar_plano(inventarios, do_plano.plano, itens)
     return inventarios
 
 
@@ -423,7 +415,7 @@ def olhar_com_gemini(
                 imagens=tuple(imagens),
                 texto="\n".join(linhas),
             ),
-            _validar_vista,
+            partial(validar_json, RespostaVista),
             dormir=dormir,
             sortear=sortear,
             relogio=relogio,
@@ -451,7 +443,7 @@ def olhar_com_gemini(
                 )
                 for o in do_plano.objetos
             ]
-            inventarios[do_plano.plano] = unir_repetidos([i for i in itens if i])
+            _gravar_plano(inventarios, do_plano.plano, itens)
     return inventarios
 
 

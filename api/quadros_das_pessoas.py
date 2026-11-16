@@ -18,6 +18,18 @@ TEMPO_LIMITE_S = 120  # um quadro só, mesmo de um vídeo de 4 h (a busca é por
 # seu decodificador; 16 mantém a linha de comando curta e a memória em poucas centenas de MB
 # num vídeo em alta resolução, e já dilui o início do processo.
 INSTANTES_POR_PROCESSO = 16
+# Como o ffmpeg codifica um quadro: sem áudio, um só, JPEG de alta qualidade.
+OPCOES_DO_QUADRO = [
+    "-an",
+    "-frames:v",
+    "1",
+    "-vf",
+    "format=yuvj420p",
+    "-c:v",
+    "mjpeg",
+    "-q:v",
+    "2",
+]
 
 
 def instantes_das_aparicoes(
@@ -65,17 +77,9 @@ def _lote(video: Path, instantes_ms: Sequence[int]) -> list[bytes | None]:
     with tempfile.TemporaryDirectory() as pasta:
         for n in range(len(instantes_ms)):
             comando += [
-                "-an",
+                *OPCOES_DO_QUADRO,
                 "-map",
                 f"{n}:v:0",
-                "-frames:v",
-                "1",
-                "-vf",
-                "format=yuvj420p",
-                "-c:v",
-                "mjpeg",
-                "-q:v",
-                "2",
                 "-f",
                 "image2",
                 "-update",
@@ -124,15 +128,7 @@ def _quadro(video: Path, instante_ms: int) -> bytes:
                 f"{instante_ms / 1000:.3f}",
                 "-i",
                 str(video),
-                "-an",
-                "-frames:v",
-                "1",
-                "-vf",
-                "format=yuvj420p",
-                "-c:v",
-                "mjpeg",
-                "-q:v",
-                "2",
+                *OPCOES_DO_QUADRO,
                 "-f",
                 "image2pipe",
                 "pipe:1",

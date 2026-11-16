@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.catalogo import Catalogo
 from api.decupagem import FORMATO_DO_TEMPO, Decupagem, Pessoa, Rotulo, em_mm_ss
@@ -29,6 +29,7 @@ from api.gemini import (
     Chamada,
     Transporte,
     gerar_validado,
+    validar_json,
 )
 from api.identidade import nao_identificado
 from api.identificacao import (
@@ -220,10 +221,7 @@ def _texto_da_pessoa(grupo: Grupo, instantes: Sequence[int]) -> str:
 
 
 def _validar(texto: str) -> RespostaDaPessoa:
-    try:
-        return RespostaDaPessoa.model_validate_json(texto)
-    except ValidationError as e:  # é um ValueError, mas a mensagem some do traceback
-        raise ValueError("resposta fora do esquema") from e
+    return validar_json(RespostaDaPessoa, texto)
 
 
 def olhar_pessoas_sem_nome(
