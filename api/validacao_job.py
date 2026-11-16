@@ -24,6 +24,7 @@ from api.nuvem import (
     objeto_do_audio,
     objeto_do_proxy,
 )
+from api.sinais import imprimir, registro_da_recusa_da_validacao
 from api.validador import Recusa, validar
 
 TIPO_DO_VIDEO = "video/mp4"
@@ -48,6 +49,11 @@ def executar(
     try:
         aceito = validar(entrada / job_id, saida / job_id, limiar_de_cortes)
     except Recusa as recusa:
+        imprimir(
+            registro_da_recusa_da_validacao(
+                job_id, recusa.codigo, recusa.causa, recusa.stderr
+            )
+        )
         if transitar(
             repositorio,
             job_id,

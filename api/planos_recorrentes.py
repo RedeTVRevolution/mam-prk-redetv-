@@ -109,10 +109,10 @@ def agrupar(
 
 
 def _quadro_chave(plano: Plano) -> str | None:
-    return plano.quadro or (q[len(q) // 2] if (q := _quadros(plano)) else None)
+    return plano.quadro or (q[len(q) // 2] if (q := quadros_do_plano(plano)) else None)
 
 
-def _quadros(plano: Plano) -> list[str]:
+def quadros_do_plano(plano: Plano) -> list[str]:
     return plano.quadros or ([plano.quadro] if plano.quadro else [])
 
 
@@ -149,8 +149,8 @@ def com_os_planos_recorrentes(
     sinais = [sinal(_quadro_chave(p)) for p in planos]
     reais: list[bool] = []
     for a, b in pairwise(planos):
-        antes = sinal(_quadros(a)[-1] if _quadros(a) else None)
-        depois = sinal(_quadros(b)[0] if _quadros(b) else None)
+        antes = sinal(quadros_do_plano(a)[-1] if quadros_do_plano(a) else None)
+        depois = sinal(quadros_do_plano(b)[0] if quadros_do_plano(b) else None)
         reais.append(
             antes is None
             or depois is None

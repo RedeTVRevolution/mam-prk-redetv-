@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from api.assinatura_do_nome import assinatura
-from api.ferramentas.comum import hash_estavel
+from api.ferramentas.comum import estratificar_por_programa, hash_estavel
 from api.taxonomia_de_objetos import OUTRO
 from api.texto import normalizar
 from api.tipo_do_objeto import chave_de_agrupamento, tipo_canonico_de
@@ -90,24 +90,18 @@ def amostra_de_precisao(grupos: Grupos, quantos: int) -> list[dict[str, str]]:
     """`quantos` pares, um por grupo sorteado: só grupos com pelo menos dois nomes diferentes
     (um grupo de nomes iguais não tem o que conferir). O sorteio é estável e estratificado:
     cada programa dá um grupo por rodada, na ordem do hash da chave."""
-    filas = {
-        programa: sorted(
+    pares: dict[str, list[dict[str, str]]] = {}
+    for programa, por_chave in grupos.items():
+        pares[programa] = []
+        for chave in sorted(
             (c for c, nomes in por_chave.items() if len(nomes) >= 2), key=_hash
-        )
-        for programa, por_chave in sorted(grupos.items())
-    }
-    pares: list[dict[str, str]] = []
-    rodada = 0
-    while len(pares) < quantos and any(rodada < len(f) for f in filas.values()):
-        for programa, fila in filas.items():
-            if rodada < len(fila) and len(pares) < quantos:
-                chave = fila[rodada]
-                nomes = sorted(grupos[programa][chave])
-                # O par também é estável: os dois nomes de menor hash dentro do grupo.
-                a, b = sorted(nomes, key=_hash)[:2]
-                pares.append({"programa": programa, "grupo": chave, "a": a, "b": b})
-        rodada += 1
-    return pares
+        ):
+            # O par também é estável: os dois nomes de menor hash dentro do grupo.
+            a, b = sorted(sorted(por_chave[chave]), key=_hash)[:2]
+            pares[programa].append(
+                {"programa": programa, "grupo": chave, "a": a, "b": b}
+            )
+    return estratificar_por_programa(pares, quantos)
 
 
 def amostra_de_cobertura(grupos: Grupos, quantos: int) -> list[dict[str, str]]:

@@ -47,7 +47,7 @@ Exemplos: `exemplos/curl/3-enviar-o-video.sh` e `exemplos/python/3-enviar-o-vide
 
 `GET /v1/jobs/{job_id}` devolve o `estado`: `aguardando_upload` → `validando` → `analisando` → `concluido`, ou `falhou` (com `codigo_falha`) ou `cancelado`. `GET /v1/jobs` lista os seus Jobs (paginado pelo cabeçalho `X-Proximo-Cursor`). `DELETE /v1/jobs/{job_id}` cancela um Job que não terminou.
 
-`codigo_falha`: `formato_invalido`, `arquivo_corrompido`, `codec_nao_suportado`, `duracao_excedida` e `upload_expirado` são do arquivo ou do envio (corrija e registre um vídeo novo); `analise_falhou`, `transcricao_falhou`, `ocr_falhou` e `processamento_interrompido` são do MAM: o time do MAM reprocessa, não precisa reenviar.
+`codigo_falha`: `formato_invalido`, `arquivo_corrompido`, `codec_nao_suportado`, `duracao_excedida` e `upload_expirado` são do arquivo ou do envio (corrija e registre um vídeo novo); `processamento_demorou_demais` é do tempo: a validação estourou o limite e o MAM não reprocessa, então registre o mesmo arquivo de novo, sem exportar; `analise_falhou`, `transcricao_falhou`, `ocr_falhou` e `processamento_interrompido` são do MAM: o time do MAM reprocessa, não precisa reenviar.
 
 Prefira o webhook (passo 5). A consulta é o plano B, com espera de alguns segundos entre as chamadas. Exemplos: `exemplos/curl/4-acompanhar-o-job.sh` e `exemplos/python/4-acompanhar-o-job.py`.
 

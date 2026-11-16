@@ -125,3 +125,14 @@ def test_o_job_exige_job_id_e_projeto_no_ambiente() -> None:
     assert main({"GCP_PROJECT_ID": "p"}) == 2
     ambiente = {"GCP_PROJECT_ID": "p", "JOB_ID": "j", "PUBSUB_TOPICO_EVENTOS": "t"}
     assert main(ambiente) == 2
+
+
+def test_tempo_esgotado_na_validacao_tambem_monta_o_evento_de_fim() -> None:
+    m = Mundo(_job(codigo_falha="processamento_demorou_demais"))
+
+    assert m.avisar() is True
+
+    (mensagem,) = m.publicador.mensagens
+    assert mensagem.evento.codigo_falha == "processamento_demorou_demais"
+    (evento,) = m.eventos.publicados
+    assert evento.codigo_falha == "processamento_demorou_demais"

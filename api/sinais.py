@@ -128,6 +128,27 @@ def registro_da_falha_de_etapa(etapa: str, job_id: str, motivo: str) -> str:
     )
 
 
+def registro_da_recusa_da_validacao(
+    job_id: str, codigo: str, causa: str | None, stderr: str
+) -> str:
+    """Arquivo recusado pela validação, com a causa e o stderr resumido (só aqui, no log).
+
+    Evento próprio, e não `falha_de_etapa`: essa linha alimenta `mam_falhas_por_etapa` e o
+    alerta, e um arquivo ruim enviado por quem usa não é falha do sistema.
+    """
+    return json.dumps(
+        {
+            "severity": "WARNING",
+            "evento": "recusa_da_validacao",
+            "job_id": job_id,
+            "codigo": codigo,
+            "causa": causa,
+            "stderr": stderr,
+        },
+        ensure_ascii=False,
+    )
+
+
 def registro_do_uso_do_modelo(
     modelo: str,
     entrada: int,
