@@ -394,7 +394,11 @@ def test_falha_ao_separar_o_audio_recusa_e_apaga_a_copia_e_o_proxy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     entrada = _gerar(tmp_path / "video.mp4")
-    monkeypatch.setattr(validador, "_separar_audio", lambda copia, saida: None)
+
+    def falhar(copia: Path, saida: Path) -> Path:
+        raise Recusa("arquivo_corrompido", "ffmpeg_saiu_com_erro", "erro")
+
+    monkeypatch.setattr(validador, "_separar_audio", falhar)
 
     assert _recusa(entrada, tmp_path) == "arquivo_corrompido"
     assert list((tmp_path / "saida").iterdir()) == []

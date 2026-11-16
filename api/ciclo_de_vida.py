@@ -274,6 +274,11 @@ def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
             )
         return escolhida
     if job.estado == "falhou":
+        if job.codigo_falha == "processamento_demorou_demais":
+            # A recusa apagou o original da quarentena: nada de onde recomeçar.
+            raise NaoReprocessavel(
+                "O processamento demorou demais na validação: envie o mesmo vídeo de novo"
+            )
         if job.codigo_falha in FALHAS_DO_ARQUIVO or job.codigo_falha is None:
             raise NaoReprocessavel(
                 "A falha é do arquivo: é preciso enviar o vídeo de novo"

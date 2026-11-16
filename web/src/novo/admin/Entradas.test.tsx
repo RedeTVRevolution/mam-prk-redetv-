@@ -213,6 +213,14 @@ test('Reprocessar só aparece na falha de etapa e no concluído com etapa que fa
   expect(within(arquivo).getByText('Envie o arquivo de novo')).toBeTruthy()
 })
 
+test('tempo esgotado na validação: frase própria, sem botão de reprocessar', async () => {
+  jobs = [job({ id: 't1', nome: 'demorou.mp4', estado: 'falhou', codigo_falha: 'processamento_demorou_demais' })]
+  await abrir()
+  const linha = await linhaDe('demorou.mp4')
+  expect(within(linha).queryByRole('button', { name: /^(Reprocessar|Retomar) / })).toBeNull()
+  expect(within(linha).getByText(/O processamento demorou demais\. Envie o mesmo arquivo de novo, sem precisar exportar\./)).toBeTruthy()
+})
+
 test('processamento interrompido entre etapas: retoma da primeira que não concluiu; na validação, pede o arquivo', async () => {
   const concluida = (nome: string) => ({ nome, ...ETAPA_OK })
   jobs = [

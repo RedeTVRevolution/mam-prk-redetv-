@@ -25,13 +25,11 @@ from typing import Literal
 
 from PIL import Image
 
-from api.decupagem import Decupagem, Plano
+from api.decupagem import Decupagem
 from api.objetos_job import hash_do_quadro
+from api.planos_recorrentes import LIMITE_DO_CORTE_REAL, quadros_do_plano
 
 LIMITE_CURTO_MS = 1_000
-# Bits de 64 em que dois quadros podem diferir e ainda contar como "o mesmo quadro".
-# Chute inicial: a pessoa calibra olhando as distâncias da tabela.
-BITS_PARECIDOS = 10
 
 Veredito = Literal["provavelmente falso", "provavelmente real", "sem quadros"]
 
@@ -47,10 +45,6 @@ class LinhaDoDiagnostico:
     distancia_na_saida: int | None
     distancia_dos_vizinhos: int | None
     veredito: Veredito
-
-
-def _quadros(plano: Plano) -> list[str]:
-    return plano.quadros or ([plano.quadro] if plano.quadro else [])
 
 
 def _distancia(a: str | None, b: str | None, ler: Callable[[str], bytes]) -> int | None:
@@ -73,9 +67,9 @@ def diagnosticar(
     for n, plano in enumerate(planos):
         if plano.fim_ms - plano.inicio_ms >= LIMITE_CURTO_MS:
             continue
-        antes = _quadros(planos[n - 1])[-1:] if n > 0 else []
-        depois = _quadros(planos[n + 1])[:1] if n + 1 < len(planos) else []
-        meus = _quadros(plano)
+        antes = quadros_do_plano(planos[n - 1])[-1:] if n > 0 else []
+        depois = quadros_do_plano(planos[n + 1])[:1] if n + 1 < len(planos) else []
+        meus = quadros_do_plano(plano)
         entrada = _distancia(
             antes[0] if antes else None, meus[0] if meus else None, ler_quadro
         )
@@ -88,7 +82,7 @@ def diagnosticar(
         medidas = [d for d in (entrada, saida, vizinhos) if d is not None]
         if not medidas:
             veredito: Veredito = "sem quadros"
-        elif min(medidas) <= BITS_PARECIDOS:
+        elif min(medidas) <= LIMITE_DO_CORTE_REAL:
             veredito = "provavelmente falso"
         else:
             veredito = "provavelmente real"
@@ -142,7 +136,7 @@ def tabela(linhas: Sequence[LinhaDoDiagnostico]) -> str:
     saida.append(
         "veredito — " + ", ".join(f"{k}: {v}" for k, v in sorted(por_veredito.items()))
     )
-    saida.append(f"(distâncias em bits de 64; parecido = até {BITS_PARECIDOS})")
+    saida.append(f"(distâncias em bits de 64; parecido = até {LIMITE_DO_CORTE_REAL})")
     return "\n".join(saida)
 
 

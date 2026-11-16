@@ -43,6 +43,9 @@ CodigoDeFalha = Literal[
     "codec_nao_suportado",
     "duracao_excedida",
     "upload_expirado",
+    # A validação ou a detecção de cortes estourou o tempo: não é defeito do arquivo, mas
+    # o reprocessamento não recomeça pela validação; envie o mesmo arquivo de novo.
+    "processamento_demorou_demais",
     "analise_falhou",
     "transcricao_falhou",
     "ocr_falhou",

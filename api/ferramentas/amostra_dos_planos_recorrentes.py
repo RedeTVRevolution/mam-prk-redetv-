@@ -16,7 +16,7 @@ from pathlib import Path
 from PIL import Image
 
 from api.decupagem import Decupagem, Plano
-from api.ferramentas.comum import hash_estavel
+from api.ferramentas.comum import estratificar_por_programa, hash_estavel
 from api.medir_agrupamento_de_objetos import margem_de_confianca, pares_para_margem
 from api.planos_recorrentes import (
     Sinal,
@@ -49,18 +49,6 @@ class PlanoDaAmostra:
     sinal: Sinal
 
 
-def _por_programa(
-    pares: dict[str, list[dict[str, str]]], quantos: int
-) -> list[dict[str, str]]:
-    """Estratifica: cada programa dá um item por rodada, na ordem já sorteada dele."""
-    sorteados: list[dict[str, str]] = []
-    for rodada in range(max(map(len, pares.values()), default=0)):
-        for programa in sorted(pares):
-            if rodada < len(pares[programa]) and len(sorteados) < quantos:
-                sorteados.append(pares[programa][rodada])
-    return sorteados
-
-
 def amostra_de_precisao(
     planos: Sequence[PlanoDaAmostra], quantos: int
 ) -> list[dict[str, str]]:
@@ -87,7 +75,7 @@ def amostra_de_precisao(
                     "plano_b": b,
                 }
             )
-    return _por_programa(por_programa, quantos)
+    return estratificar_por_programa(por_programa, quantos)
 
 
 def _afastamento(a: Sinal, b: Sinal) -> tuple[int, float]:
@@ -129,7 +117,7 @@ def amostra_de_cobertura(
         por_programa[programa].append(
             {"programa": programa, "video": video, "plano_a": id_a, "plano_b": id_b}
         )
-    return _por_programa(por_programa, quantos)
+    return estratificar_por_programa(por_programa, quantos)
 
 
 def amostras(planos: Sequence[PlanoDaAmostra], quantos: int) -> dict[str, object]:

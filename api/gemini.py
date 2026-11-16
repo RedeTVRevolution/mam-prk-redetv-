@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 import requests
+from pydantic import BaseModel, ValidationError
 
 from api.decupagem import (
     CAMPOS_DO_SERVIDOR,
@@ -417,6 +418,15 @@ def _validar(texto: str, video: Video, registrar: Registrar = imprimir) -> Decup
             "video": video,
         }
     )
+
+
+def validar_json[M: BaseModel](modelo: type[M], texto: str) -> M:
+    """O JSON da resposta no `modelo`; fora do esquema levanta `ValueError` (o
+    `ValidationError` é um, mas a mensagem some do traceback)."""
+    try:
+        return modelo.model_validate_json(texto)
+    except ValidationError as e:
+        raise ValueError("resposta fora do esquema") from e
 
 
 def gerar_validado[T](
