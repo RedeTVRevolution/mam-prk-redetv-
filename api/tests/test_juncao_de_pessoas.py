@@ -66,7 +66,7 @@ def decupagem(
         {
             "versao_esquema": "1.5",
             "video": {"sha256": "a" * 64, "duracao_ms": 900_000},
-            "programa": {"resumo": "", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": list(pautas),
             "pessoas": pessoas,
             "objetos": list(objetos),

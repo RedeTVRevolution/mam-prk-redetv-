@@ -217,7 +217,7 @@ def test_instrucao_pede_pessoa_da_pauta_em_pessoas() -> None:
 def test_devolve_decupagem_valida() -> None:
     t = TransporteFalso(BOA)
     d = _rodar(t)
-    assert d.programa.resumo == "Jornal da noite"
+    assert d.pautas[0].resumo == "Chuva forte em SP"
     assert len(t.chamadas) == 1
 
 
@@ -654,7 +654,7 @@ def test_erros_do_transporte_entram_nas_tentativas() -> None:
         dormir=relogio.dormir,
     )
 
-    assert d.programa.resumo == "Jornal da noite"
+    assert d.pautas[0].resumo == "Chuva forte em SP"
     assert len(sessao.pedidos) == 3
     assert len(relogio.esperas) == 2
 
@@ -915,3 +915,10 @@ def test_validar_json_devolve_o_modelo_da_resposta_valida() -> None:
 def test_validar_json_troca_o_erro_do_pydantic_por_resposta_fora_do_esquema() -> None:
     with pytest.raises(ValueError, match="^resposta fora do esquema$"):
         validar_json(_Modelo, '{"a": "x"}')
+
+
+def test_resposta_nova_sem_resumo_do_programa_passa_pelo_validar() -> None:
+    dados = resposta_em_mm_ss()
+    dados["programa"].pop("resumo", None)
+    d = _validar(json.dumps(dados), VIDEO_CONFIAVEL)
+    assert d.pautas[0].resumo == "Chuva forte em SP"

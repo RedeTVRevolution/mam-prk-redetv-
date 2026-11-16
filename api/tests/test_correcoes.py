@@ -710,7 +710,12 @@ def test_reconciliar_ignora_correcao_desfeita_e_a_da_versao_atual() -> None:
 def test_renomear_troca_o_json_do_modelo_e_o_nome_corrigido_continua() -> None:
     mundo = Mundo(["editor"])
     mundo.corrigir()
-    nova = {**MODELO, "programa": {"resumo": "reprocessado"}}
+    nova = {
+        **MODELO,
+        "programa": {
+            "blocos": [{"inicio_ms": 0, "fim_ms": 1000, "titulo": "Reprocessado"}]
+        },
+    }
     mundo.reprocessar(nova)
 
     decupagem = mundo.decupagem()
@@ -734,7 +739,12 @@ def test_correcao_que_nao_casa_nao_aparece_e_continua_ativa_no_historico() -> No
 def test_versao_modelo_entrega_o_json_novo_cru() -> None:
     mundo = Mundo(["editor"])
     mundo.corrigir()
-    nova = {**MODELO, "programa": {"resumo": "reprocessado"}}
+    nova = {
+        **MODELO,
+        "programa": {
+            "blocos": [{"inicio_ms": 0, "fim_ms": 1000, "titulo": "Reprocessado"}]
+        },
+    }
     mundo.reprocessar(nova)
 
     assert mundo.decupagem("?versao=modelo") == nova

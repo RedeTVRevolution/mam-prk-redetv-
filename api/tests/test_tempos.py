@@ -30,7 +30,6 @@ def decupagem(
             "versao_esquema": "1.2",
             "video": {"sha256": "a" * 64, "duracao_ms": DURACAO_MS},
             "programa": {
-                "resumo": "r",
                 "blocos": [{"inicio_ms": 1_010, "fim_ms": 9_990, "titulo": "B"}],
             },
             "pautas": [
