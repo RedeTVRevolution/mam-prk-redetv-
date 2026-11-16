@@ -20,11 +20,12 @@ const IRREGULARES: Record<string, string> = {
   mães: 'mãe', maes: 'mãe', reis: 'rei', leis: 'lei', bois: 'boi',
   pais: 'pai', heróis: 'herói', herois: 'herói', meses: 'mês',
   países: 'país', paises: 'país', gases: 'gás',
+  árvores: 'árvore', arvores: 'árvore',
 }
 const REGRAS: [string, string][] = [
   ['ões', 'ão'], ['ães', 'ão'], ['ãos', 'ão'], ['oes', 'ao'], ['ns', 'm'],
   ['éis', 'el'], ['eis', 'el'], ['óis', 'ol'], ['ois', 'ol'],
-  ['ais', 'al'], ['uis', 'ul'], ['res', 'r'], ['zes', 'z'], ['s', ''],
+  ['ais', 'al'], ['uis', 'ul'], ['zes', 'z'], ['s', ''],
 ]
 
 function singular(palavra: string): string {
@@ -32,6 +33,8 @@ function singular(palavra: string): string {
   if ([...p].length <= 3 || INVARIAVEIS.has(p)) return p
   const irregular = IRREGULARES[p]
   if (irregular !== undefined) return irregular
+  // Depois de vogal o "-es" cai (flores, mulheres, bares); depois de consoante o "-s" (padres, torres).
+  if (p.endsWith('res')) return /[aeiouáéíóúâêôàãõ]r$/.test(p.slice(0, -2)) ? p.slice(0, -2) : p.slice(0, -1)
   for (const [fim, troca] of REGRAS) if (p.endsWith(fim)) return p.slice(0, p.length - fim.length) + troca
   return p
 }

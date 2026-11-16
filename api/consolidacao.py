@@ -26,8 +26,9 @@ from api.decupagem import (
     Video,
 )
 from api.identidade import identidade_do_comercial
+from api.intervalos import sobrepoe_estrito
 from api.janelas import Janela
-from api.pessoas import LISTAS, unir_pessoas
+from api.pessoas import LISTAS, em_ordem, unir_pessoas
 from api.tempos import aplicar_regra_de_tempos
 
 log = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ _LIMITE_DO_RESUMO = 2000  # tamanho máximo de `Texto` no esquema
 
 
 def _sobrepoe(a: Intervalo, b: Intervalo) -> bool:
-    return a.inicio_ms < b.fim_ms and b.inicio_ms < a.fim_ms
+    return sobrepoe_estrito(a.inicio_ms, a.fim_ms, b.inicio_ms, b.fim_ms)
 
 
 def _dono[T: Intervalo](itens: Sequence[T], janela: Janela, ultima: bool) -> list[T]:
@@ -64,10 +65,6 @@ def _emendar[T: Intervalo](item: T, pares: Sequence[Intervalo]) -> T:
     return item if fim == item.fim_ms else item.model_copy(update={"fim_ms": fim})
 
 
-def _em_ordem[T: Intervalo](itens: Sequence[T]) -> list[T]:
-    return sorted(itens, key=lambda i: (i.inicio_ms, i.fim_ms))
-
-
 def _sem_repetir(itens: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(itens))
 
@@ -92,10 +89,6 @@ def _agrupar_por_sobreposicao[T: Intervalo](
             grupos = [g for g in grupos if not any(g is a for a in alvos)]
             grupos.append(unido)
     return [[i for _, i in g] for g in grupos]
-
-
-def _duracao(i: Intervalo) -> int:
-    return i.fim_ms - i.inicio_ms
 
 
 def consolidar(
@@ -143,7 +136,7 @@ def consolidar(
     pessoas = [
         p.model_copy(
             update={
-                lista: _em_ordem(mantidas.get((p.id, lista), [])) for lista in LISTAS
+                lista: em_ordem(mantidas.get((p.id, lista), [])) for lista in LISTAS
             }
         )
         for p in pessoas
@@ -177,7 +170,7 @@ def consolidar(
 
     def juntar[T: Bloco | Pauta](partes: list[T]) -> T:
         """Início da primeira ao fim da última; título e resumo da parte mais longa."""
-        maior = max(partes, key=_duracao)
+        maior = max(partes, key=lambda i: i.duracao_ms)
         mudancas: dict[str, object] = {
             "inicio_ms": min(p.inicio_ms for p in partes),
             "fim_ms": max(p.fim_ms for p in partes),
@@ -192,7 +185,7 @@ def consolidar(
             mudancas["locais"] = _sem_repetir([i for p in so_pautas for i in p.locais])
         return cast(T, maior.model_copy(update=mudancas))
 
-    pautas = _em_ordem(
+    pautas = em_ordem(
         [
             juntar(g)
             for g in _agrupar_por_sobreposicao(
@@ -203,7 +196,7 @@ def consolidar(
             )
         ]
     )
-    blocos = _em_ordem(
+    blocos = em_ordem(
         [
             juntar(g)
             for g in _agrupar_por_sobreposicao([d.programa.blocos for d in decupagens])
@@ -227,7 +220,7 @@ def consolidar(
             update={
                 "pessoa": pessoa,
                 "relacao": o.relacao if pessoa else None,
-                "ocorrencias": _em_ordem(ocorrencias),
+                "ocorrencias": em_ordem(ocorrencias),
             }
         )
 
@@ -263,7 +256,7 @@ def consolidar(
             comerciais.append(_emendar(c, pares))
     planos = [
         p.model_copy(update={"id": f"pla{n:03d}"})
-        for n, p in enumerate(_em_ordem(planos), 1)
+        for n, p in enumerate(em_ordem(planos), 1)
     ]
 
     achados: list[Objeto] = []
@@ -288,11 +281,11 @@ def consolidar(
         pessoas=pessoas,
         objetos=objetos,
         planos=planos,
-        comerciais=_em_ordem(comerciais),
-        transcricao=_em_ordem(transcricao),
-        textos_na_tela=_em_ordem(textos_na_tela),
-        correcoes_da_transcricao=_em_ordem(correcoes),
-        correcoes_descartadas=_em_ordem(descartadas),
+        comerciais=em_ordem(comerciais),
+        transcricao=em_ordem(transcricao),
+        textos_na_tela=em_ordem(textos_na_tela),
+        correcoes_da_transcricao=em_ordem(correcoes),
+        correcoes_descartadas=em_ordem(descartadas),
     )
     # `model_copy` não valida: valida de novo depois da regra de tempos.
     return Decupagem.model_validate(
