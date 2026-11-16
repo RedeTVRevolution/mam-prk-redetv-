@@ -561,21 +561,17 @@ def test_florence_plano_ainda_omitido_fica_marcado_com_uma_rodada_extra() -> Non
     transporte = TransporteFalso(resposta(_vaso(0)), resposta(), resposta(_vaso(1)))
     d = decupagem(["q/0.jpg"], ["q/1.jpg"])
 
-    faltas: set[int] = set()
     inventarios = converter_do_florence(
         d,
         DOIS_PLANOS_FLORENCE,
         transporte=transporte,
         modelo="m",
         job_id="j1",
-        nao_inventariados=faltas,
     )
 
     assert len(transporte.chamadas) == 2  # a terceira resposta nunca é pedida
-    assert inventarios[1] == []
-    nova = aplicar_inventario(
-        d, inventarios, motor="florence", modelo="m", nao_inventariados=faltas
-    )
+    assert 1 not in inventarios
+    nova = aplicar_inventario(d, inventarios, motor="florence", modelo="m")
     assert [p.inventariado for p in nova.planos] == [True, False]
 
 
@@ -607,20 +603,16 @@ def test_gemini_plano_ainda_omitido_fica_marcado() -> None:
         resposta({"plano": 0, "objetos": [visto("vaso", 0)]}), resposta()
     )
 
-    faltas: set[int] = set()
     inventarios = olhar_com_gemini(
         d,
         transporte=transporte,
         modelo="m",
         job_id="j1",
         quadro_de=lambda c: b"x",
-        nao_inventariados=faltas,
     )
 
     assert len(transporte.chamadas) == 2
-    nova = aplicar_inventario(
-        d, inventarios, motor="gemini", modelo="m", nao_inventariados=faltas
-    )
+    nova = aplicar_inventario(d, inventarios, motor="gemini", modelo="m")
     assert [p.inventariado for p in nova.planos] == [True, False]
 
 
@@ -630,20 +622,16 @@ def test_plano_sem_objetos_na_resposta_nao_e_omitido() -> None:
     )
     d = decupagem(["q/0.jpg"], ["q/1.jpg"])
 
-    faltas: set[int] = set()
     inventarios = converter_do_florence(
         d,
         DOIS_PLANOS_FLORENCE,
         transporte=transporte,
         modelo="m",
         job_id="j1",
-        nao_inventariados=faltas,
     )
 
     assert len(transporte.chamadas) == 1
-    nova = aplicar_inventario(
-        d, inventarios, motor="florence", modelo="m", nao_inventariados=faltas
-    )
+    nova = aplicar_inventario(d, inventarios, motor="florence", modelo="m")
     assert all(p.inventariado for p in nova.planos)
 
 

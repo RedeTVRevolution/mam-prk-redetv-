@@ -6,7 +6,7 @@ texto em português.
 
 import copy
 import time
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Sequence
 from functools import partial
 from typing import Annotated, Any
 
@@ -178,24 +178,19 @@ def _lotes[T](itens: Sequence[T], tamanho: int) -> list[list[T]]:
 
 def _pedir_com_uma_rodada_extra[R: BaseModel](
     lote: list[int], chamar: Callable[[list[int]], R]
-) -> tuple[list[Any], list[int]]:
+) -> list[Any]:
     """Os planos da resposta do lote; o que o modelo omitiu é pedido de novo, só ele, uma
-    vez (#692). Devolve os planos respondidos e os que seguem ausentes."""
+    vez (#692). O plano que segue ausente do resultado é o não inventariado."""
 
     def respondidos(r: R, pedidos: list[int]) -> list[Any]:
         return [p for p in r.planos if p.plano in pedidos]  # type: ignore[attr-defined]
 
     planos = respondidos(chamar(lote), lote)
-    faltam = [i for i in lote if i not in {p.plano for p in planos}]
+    vistos = {p.plano for p in planos}
+    faltam = [i for i in lote if i not in vistos]
     if faltam:
         planos += respondidos(chamar(faltam), faltam)
-        faltam = [i for i in lote if i not in {p.plano for p in planos}]
-    return planos, faltam
-
-
-def _gravar_plano(inventarios: Inventarios, plano: int, itens: list[Any]) -> None:
-    """O final comum dos dois motores: os itens não vazios do plano, com os repetidos unidos."""
-    inventarios[plano] = unir_repetidos([i for i in itens if i])
+    return planos
 
 
 def _caixa_do_quadro(caminho: str, caixa: Caixa) -> CaixaDoQuadro:
@@ -321,18 +316,19 @@ def converter_do_florence(
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
-    nao_inventariados: set[int] | None = None,
 ) -> Inventarios:
     """O resultado bruto do Florence-2 em inventário em português: uma chamada só de
     texto (sem imagem) por lote de planos. As caixas vêm das detecções que o modelo cita
     pelo id. Qualquer lote que esgote as tentativas levanta `AnaliseFalhou`. Os planos que
-    o modelo segue omitindo depois da rodada extra entram em `nao_inventariados` (#692)."""
+    o modelo segue omitindo depois da rodada extra ficam sem chave no resultado (#692)."""
     por_plano: dict[int, list[Any]] = {}
     for q in bruto.quadros:
         por_plano.setdefault(q.plano, []).append(q)
-    inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
-    if nao_inventariados is None:
-        nao_inventariados = set()
+    # Sem chave fica só o plano que o modelo seguiu omitindo (#692): o que não foi pedido
+    # (sem quadros) fica vazio, e o respondido ganha a chave abaixo.
+    inventarios: Inventarios = {
+        i: [] for i in range(len(decupagem.planos)) if i not in por_plano
+    }
     esquema = esquema_obrigatorio(RespostaConvertida)
     lotes = _lotes(
         [i for i in range(len(decupagem.planos)) if i in por_plano], planos_por_lote
@@ -357,8 +353,7 @@ def converter_do_florence(
     respostas = em_paralelo(
         lotes, lambda lote: _pedir_com_uma_rodada_extra(lote, converter), paralelismo
     )
-    for planos, faltam in respostas:
-        nao_inventariados.update(faltam)
+    for planos in respostas:
         for do_plano in planos:
             caixas_por_id: dict[str, CaixaDoQuadro] = {}
             for k, q in enumerate(por_plano[do_plano.plano]):
@@ -381,7 +376,7 @@ def converter_do_florence(
                 )
                 for o in do_plano.objetos
             ]
-            _gravar_plano(inventarios, do_plano.plano, itens)
+            inventarios[do_plano.plano] = unir_repetidos([i for i in itens if i])
     return inventarios
 
 
@@ -397,16 +392,17 @@ def olhar_com_gemini(
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
-    nao_inventariados: set[int] | None = None,
 ) -> Inventarios:
     """Motor `gemini`: o modelo olha os quadros-chave (resolução cheia, sem redução) e
     devolve o mesmo inventário, com as caixas. `quadro_de` lê o JPEG pelo caminho.
-    `nao_inventariados` recebe os planos que o modelo segue omitindo (#692)."""
-    inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
-    if nao_inventariados is None:
-        nao_inventariados = set()
-    esquema = esquema_obrigatorio(RespostaVista)
+    Os planos que o modelo segue omitindo ficam sem chave no resultado (#692)."""
     com_quadros = [i for i, p in enumerate(decupagem.planos) if p.quadros]
+    pedidos = set(com_quadros)
+    # Sem chave fica só o plano que o modelo seguiu omitindo (#692).
+    inventarios: Inventarios = {
+        i: [] for i in range(len(decupagem.planos)) if i not in pedidos
+    }
+    esquema = esquema_obrigatorio(RespostaVista)
 
     def olhar(lote: list[int]) -> RespostaVista:
         imagens: list[bytes] = []
@@ -439,8 +435,7 @@ def olhar_com_gemini(
     respostas = em_paralelo(
         lotes, lambda lote: _pedir_com_uma_rodada_extra(lote, olhar), paralelismo
     )
-    for planos, faltam in respostas:
-        nao_inventariados.update(faltam)
+    for planos in respostas:
         for do_plano in planos:
             quadros = decupagem.planos[do_plano.plano].quadros
             itens = [
@@ -457,7 +452,7 @@ def olhar_com_gemini(
                 )
                 for o in do_plano.objetos
             ]
-            _gravar_plano(inventarios, do_plano.plano, itens)
+            inventarios[do_plano.plano] = unir_repetidos([i for i in itens if i])
     return inventarios
 
 
@@ -467,15 +462,14 @@ def aplicar_inventario(
     *,
     motor: str,
     modelo: str,
-    nao_inventariados: Collection[int] = (),
 ) -> Decupagem:
     """A Decupagem com o inventário de cada plano no lugar do anterior; os planos em
-    `nao_inventariados` (o modelo os omitiu, #692) ficam marcados."""
+    sem chave em `inventarios` (o modelo os omitiu, #692) ficam marcados."""
     planos = [
         p.model_copy(
             update={
                 "inventario": inventarios.get(i, []),
-                "inventariado": i not in nao_inventariados,
+                "inventariado": i in inventarios,
             }
         )
         for i, p in enumerate(decupagem.planos)
