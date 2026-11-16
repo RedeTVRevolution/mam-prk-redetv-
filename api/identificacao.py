@@ -109,10 +109,11 @@ def _nomes_da_pessoa(
 def _ocorrencias(palavras: Sequence[str], nome: Sequence[str]) -> list[tuple[int, int]]:
     """Posições `[inicio, fim)` de `nome` em `palavras`."""
     n = len(nome)
+    alvo = tuple(nome)
     return [
         (i, i + n)
         for i in range(len(palavras) - n + 1)
-        if list(palavras[i : i + n]) == list(nome)
+        if tuple(palavras[i : i + n]) == alvo
     ]
 
 
@@ -161,10 +162,10 @@ def _prova_de_fala(
     pessoa: Pessoa,
     nomes: Sequence[Sequence[str]],
     fluxo: Sequence[tuple[str, int, int]],
+    palavras: Sequence[str],
     tolerancia_ms: int,
     sem_nome: Mapping[str, str],
 ) -> bool:
-    palavras = [w for w, _, _ in fluxo]
     for nome in nomes:
         for i, j in _ocorrencias(palavras, nome):
             inicio_ms, fim_ms = fluxo[i][1], fluxo[j - 1][2]
@@ -218,6 +219,7 @@ def identificar(
     ao grupo dela: as do mesmo grupo são uma pessoa só e não se bloqueiam."""
     sem_nome = sem_nome or {}
     fluxo = _fluxo_de_palavras(transcricao)
+    palavras_da_fala = [w for w, _, _ in fluxo]
     pessoas: list[Pessoa] = []
     for p in decupagem.pessoas:
         if p.origem == "revisao" or nao_identificado(p.nome):
@@ -227,7 +229,9 @@ def identificar(
         fontes: list[FonteDoNome] = []
         if _prova_de_gc(decupagem, p, nomes, sem_nome):
             fontes.append("gc")
-        if _prova_de_fala(decupagem, p, nomes, fluxo, tolerancia_ms, sem_nome):
+        if _prova_de_fala(
+            decupagem, p, nomes, fluxo, palavras_da_fala, tolerancia_ms, sem_nome
+        ):
             fontes.append("fala")
         if not fontes:
             pessoas.append(
