@@ -1668,6 +1668,7 @@ def test_auditoria_firestore_le_um_alem_do_limite(
         FiltroDeAuditoria(limite=limite)
     )
 
+    assert colecao.limite == (limite + 1 if limite is not None else None)
     assert colecao.lidos == lidos
     assert len(pagina.registros) == (50 if limite else 495)
     assert pagina.proximo_cursor == ("r049" if limite else None)
