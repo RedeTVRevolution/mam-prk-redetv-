@@ -151,8 +151,9 @@ def com_quadros_chave(
     pronta = decupagem.model_copy(deep=True)
     # Todos os momentos de uma vez, cada pedido com a sua chave.
     pedidos: dict[Chave, Pedido] = {}
+    alvos_dos_planos = [instantes_alvo(p.inicio_ms, p.fim_ms) for p in pronta.planos]
     for i, plano in enumerate(pronta.planos):
-        for k, alvo in enumerate(instantes_alvo(plano.inicio_ms, plano.fim_ms)):
+        for k, alvo in enumerate(alvos_dos_planos[i]):
             pedidos[("plano", i, k)] = (alvo, plano.inicio_ms, plano.fim_ms)
     for i, pessoa in enumerate(pronta.pessoas):
         for j, aparicao in enumerate(pessoa.na_imagem):
@@ -171,17 +172,17 @@ def com_quadros_chave(
     claros = achar_claros(video, pedidos)
     envios: list[tuple[str, bytes]] = []
 
-    def quadro(chave: Chave, nome: str) -> str | None:
+    def quadro(chave: Chave) -> str | None:
         achado = claros[chave]
         if achado is None:
             return None
-        caminho = caminho_do_quadro(f"{nome}.jpg")
+        caminho = caminho_do_quadro(f"{'-'.join(map(str, chave))}.jpg")
         envios.append((caminho, achado[1]))
         return caminho
 
     for i, plano in enumerate(pronta.planos):
         achados: dict[int, bytes] = {}
-        for k in range(len(instantes_alvo(plano.inicio_ms, plano.fim_ms))):
+        for k in range(len(alvos_dos_planos[i])):
             achado = claros[("plano", i, k)]
             if achado is not None:
                 achados.setdefault(*achado)
@@ -203,9 +204,9 @@ def com_quadros_chave(
                 plano.quadro = caminho
     for i, pessoa in enumerate(pronta.pessoas):
         for j, aparicao in enumerate(pessoa.na_imagem):
-            aparicao.quadro = quadro(("aparicao", i, j), f"aparicao-{i}-{j}")
+            aparicao.quadro = quadro(("aparicao", i, j))
     for i, objeto in enumerate(pronta.objetos):
-        objeto.quadro = quadro(("objeto", i), f"objeto-{i}")
+        objeto.quadro = quadro(("objeto", i))
     em_paralelo(envios, lambda e: gravar(*e), vagas)
     return pronta
 
