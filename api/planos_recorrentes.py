@@ -24,6 +24,7 @@ from PIL import Image
 
 from api.decupagem import Decupagem, Plano
 from api.objetos_job import hash_do_quadro
+from api.paralelo import em_paralelo
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ LIMITE_DO_CORTE_REAL = 10
 LIMITE_DE_COR = 0.25
 _BINS = 4  # por canal: 64 faixas de cor no histograma
 _LADO_DO_HISTOGRAMA = 32
+# Leituras do Storage ao mesmo tempo (#684); o número final sai da medição no dev.
+VAGAS_DE_LEITURA = 8
 
 
 @dataclass(frozen=True)
@@ -146,6 +149,14 @@ def com_os_planos_recorrentes(
                 lidos[caminho] = None
         return lidos[caminho]
 
+    # Lê todos os quadros de uma vez, em paralelo; o cálculo abaixo usa só o que já foi lido.
+    # `sinal` não levanta (quadro que não abre vira None), então nada cancela as outras leituras.
+    caminhos = {
+        c
+        for p in planos
+        for c in (_quadro_chave(p), *quadros_do_plano(p)[:1], *quadros_do_plano(p)[-1:])
+    }
+    em_paralelo(sorted(c for c in caminhos if c), sinal, VAGAS_DE_LEITURA)
     sinais = [sinal(_quadro_chave(p)) for p in planos]
     reais: list[bool] = []
     for a, b in pairwise(planos):

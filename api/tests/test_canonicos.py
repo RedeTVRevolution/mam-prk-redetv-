@@ -1,8 +1,15 @@
 """Enquadramento e ambiente canônicos (#545): o dicionário do acervo."""
 
+from collections.abc import Callable
+
 import pytest
 
-from api.canonicos import ambiente_canonico, enquadramento_canonico
+from api.canonicos import (
+    _AMBIENTES,
+    _ENQUADRAMENTOS,
+    ambiente_canonico,
+    enquadramento_canonico,
+)
 
 
 @pytest.mark.parametrize(
@@ -36,6 +43,10 @@ from api.canonicos import ambiente_canonico, enquadramento_canonico
         ("CORPO INTEIRO", "plano de conjunto"),
         ("", "indefinido"),
         ("câmera subjetiva esquisita", "indefinido"),
+        ("Plano panorâmico", "plano geral"),
+        ("tomada panorâmica", "plano geral"),
+        ("Detalhes das mãos", "detalhe"),
+        ("planos médios", "plano médio"),
     ],
 )
 def test_enquadramento(texto: str, esperado: str) -> None:
@@ -60,9 +71,33 @@ def test_enquadramento(texto: str, esperado: str) -> None:
         ("Aeroporto", "aeroporto"),
         ("estádio de futebol", "estádio"),
         ("sala de estar", "residência"),
+        ("Estúdios da emissora", "estúdio"),
+        ("bastidores do show", "bastidor"),
+        ("casal na praça", "externa"),
+        ("carrossel no parque", "natureza"),
         ("lugar nenhum conhecido", "outro"),
         ("", "outro"),
     ],
 )
 def test_ambiente(texto: str, esperado: str) -> None:
     assert ambiente_canonico(texto) == esperado
+
+
+_TERMOS = [
+    (termo, valor, f)
+    for regras, f in (
+        (_ENQUADRAMENTOS, enquadramento_canonico),
+        (_AMBIENTES, ambiente_canonico),
+    )
+    for termos, valor in regras
+    for termo in termos
+]
+
+
+@pytest.mark.parametrize(("termo", "valor", "f"), _TERMOS)
+def test_termo_nao_casa_so_o_comeco_de_palavra_maior(
+    termo: str, valor: str, f: Callable[[str], str]
+) -> None:
+    assert f(termo) == valor
+    # "campo de futebolx" cai em "campo": o que não pode é seguir no valor do termo inteiro.
+    assert f(termo + "x") != valor

@@ -21,8 +21,10 @@ from PIL import Image, ImageStat
 from api import log_estruturado
 from api.bancos import cliente_do_firestore
 from api.decupagem import Decupagem, caminho_do_quadro
+from api.intervalos import sobrepoe_estrito
 from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import QuadrosStorage, RepositorioFirestore
+from api.paralelo import em_paralelo
 from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros_em_lote
 
@@ -30,6 +32,8 @@ from api.quadros_das_pessoas import extrair_quadros_em_lote
 LIMIAR_DE_ESCURO = 20  # luminância média, de 0 a 255
 DESVIOS_MS = (1_000, -1_000, 2_000, -2_000, 3_000, -3_000)
 FOLGA_DAS_BORDAS_MS = 500
+# Uploads ao mesmo tempo (#684); o número final sai da medição no dev.
+VAGAS_DE_UPLOAD = 8
 
 
 def instantes_alvo(inicio_ms: int, fim_ms: int) -> list[int]:
@@ -131,11 +135,15 @@ def achar_claros(
 
 
 def com_quadros_chave(
-    video: Path, decupagem: Decupagem, gravar: Callable[[str, bytes], None]
+    video: Path,
+    decupagem: Decupagem,
+    gravar: Callable[[str, bytes], None],
+    vagas: int = VAGAS_DE_UPLOAD,
 ) -> Decupagem:
     """A decupagem com `quadro` em cada plano, aparição e objeto.
 
-    `gravar(caminho, jpeg)` guarda o JPEG. Os nomes saem da posição do momento, não do id
+    `gravar(caminho, jpeg)` guarda o JPEG, em até `vagas` ao mesmo tempo, depois de todos os
+    caminhos decididos; a primeira falha sobe e os uploads que não começaram não começam. Os nomes saem da posição do momento, não do id
     que o modelo deu, que não é seguro como nome de objeto. O momento cujo quadro o
     ffmpeg não tira (um instante depois do fim do vídeo) fica sem `quadro`; os outros não
     se perdem por ele.
@@ -161,13 +169,14 @@ def com_quadros_chave(
             primeira.fim_ms,
         )
     claros = achar_claros(video, pedidos)
+    envios: list[tuple[str, bytes]] = []
 
     def quadro(chave: Chave, nome: str) -> str | None:
         achado = claros[chave]
         if achado is None:
             return None
         caminho = caminho_do_quadro(f"{nome}.jpg")
-        gravar(caminho, achado[1])
+        envios.append((caminho, achado[1]))
         return caminho
 
     for i, plano in enumerate(pronta.planos):
@@ -188,7 +197,7 @@ def com_quadros_chave(
                 arquivo = f"plano-{i}-{outros}.jpg"
                 outros += 1
             caminho = caminho_do_quadro(arquivo)
-            gravar(caminho, achados[instante])
+            envios.append((caminho, achados[instante]))
             plano.quadros.append(caminho)
             if instante == representativo:
                 plano.quadro = caminho
@@ -197,6 +206,7 @@ def com_quadros_chave(
             aparicao.quadro = quadro(("aparicao", i, j), f"aparicao-{i}-{j}")
     for i, objeto in enumerate(pronta.objetos):
         objeto.quadro = quadro(("objeto", i), f"objeto-{i}")
+    em_paralelo(envios, lambda e: gravar(*e), vagas)
     return pronta
 
 
@@ -212,7 +222,8 @@ def capa_da_decupagem(decupagem: Decupagem) -> str | None:
     aparicoes = [a for pessoa in decupagem.pessoas for a in pessoa.na_imagem]
     for plano in planos:
         if any(
-            a.inicio_ms < plano.fim_ms and a.fim_ms > plano.inicio_ms for a in aparicoes
+            sobrepoe_estrito(a.inicio_ms, a.fim_ms, plano.inicio_ms, plano.fim_ms)
+            for a in aparicoes
         ):
             return plano.quadro
     return planos[0].quadro if planos else None

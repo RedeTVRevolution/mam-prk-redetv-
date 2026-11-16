@@ -21,10 +21,8 @@ refez).
 
 import time
 from collections.abc import Callable, Sequence
-from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import AbstractContextManager, nullcontext
 from functools import partial
-from threading import Event
 
 from api.catalogo import Catalogo
 from api.consolidacao import consolidar
@@ -32,7 +30,11 @@ from api.decupagem import Decupagem, Video
 from api.escalonamento import janelas_a_escalonar
 from api.espera import sorteio_uniforme
 from api.gemini import MODELO, AnaliseFalhou, Transporte, analisar
-from api.identificacao import TOLERANCIA_DA_FALA_MS, candidatos_do_video, identificar
+from api.identificacao import (
+    TOLERANCIA_DA_FALA_MS,
+    candidatos_do_video,
+    identificar_e_pos_processar,
+)
 from api.janelas import (
     EstadoJanela,
     Janela,
@@ -47,53 +49,13 @@ from api.medicao_dos_textos import (
     TOLERANCIA_DE_QUADROS,
     MedicaoDosTextos,
 )
+from api.paralelo import em_paralelo
 from api.programas import Perfis
 from api.progresso_das_janelas import JanelaGravada, JanelasDoJob
 from api.sinais import ContagemDaAnalise
 from api.tempos import aplicar_regra_de_tempos
-from api.texto import normalizar
 from api.transcricao import Transcricao
 from api.transcricao_na_analise import LIMIAR_DE_SEMELHANCA
-
-
-def _em_paralelo[T](tarefas: Sequence[Callable[[], T]], maximo: int) -> list[T]:
-    """Roda as tarefas, no máximo `maximo` ao mesmo tempo; devolve os resultados na
-    ordem. Depois da primeira falha, as que ainda não começaram não começam."""
-    falhou = Event()
-
-    def rodar(tarefa: Callable[[], T]) -> T:
-        if falhou.is_set():
-            raise CancelledError
-        try:
-            return tarefa()
-        except BaseException:
-            falhou.set()
-            raise
-
-    with ThreadPoolExecutor(max_workers=maximo) as pool:
-        futuros = [pool.submit(rodar, t) for t in tarefas]
-        erros = [f.exception() for f in futuros]
-    # A falha de verdade é a primeira que não é um cancelamento.
-    for erro in erros:
-        if erro and not isinstance(erro, CancelledError):
-            raise erro
-    return [f.result() for f in futuros]
-
-
-def sem_comercial_de_pessoa(decupagem: Decupagem) -> Decupagem:
-    """Tira o comercial cuja marca é o nome de uma pessoa da mesma Decupagem (#434).
-
-    O modelo registra o @ do apresentador na tela como comercial, com o nome dele em
-    `marca`. A correção do editor (`correcoes.py`) não passa por aqui, de propósito.
-    """
-    nomes = {normalizar(p.nome) for p in decupagem.pessoas}
-    return decupagem.model_copy(
-        update={
-            "comerciais": [
-                c for c in decupagem.comerciais if normalizar(c.marca) not in nomes
-            ]
-        }
-    )
 
 
 def analisar_video(
@@ -150,14 +112,12 @@ def analisar_video(
         return medicao.medir(decupagem, trecho_ms) if medicao else decupagem
 
     def identificar_pessoas(decupagem: Decupagem) -> Decupagem:
-        return sem_comercial_de_pessoa(
-            identificar(
-                decupagem,
-                candidatos=candidatos_do_video(programa, catalogo, perfis),
-                transcricao=transcricao,
-                catalogo=catalogo,
-                tolerancia_ms=tolerancia_da_fala_ms,
-            )
+        return identificar_e_pos_processar(
+            decupagem,
+            candidatos=candidatos_do_video(programa, catalogo, perfis),
+            transcricao=transcricao,
+            catalogo=catalogo,
+            tolerancia_ms=tolerancia_da_fala_ms,
         )
 
     def passo(trecho_ms: tuple[int, int] | None) -> Decupagem:
@@ -246,7 +206,11 @@ def analisar_video(
             partial(decupar, janelas[i], resultados[i] if escalonar else None)
             for i in indices
         ]
-        return dict(zip(indices, _em_paralelo(tarefas, max_paralelas), strict=True))
+        return dict(
+            zip(
+                indices, em_paralelo(tarefas, lambda t: t(), max_paralelas), strict=True
+            )
+        )
 
     with etapa("janelas"):
         resultados = decupar_em_paralelo([j.indice for j in janelas])

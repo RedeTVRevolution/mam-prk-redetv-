@@ -191,7 +191,10 @@ class Evento(BaseModel):
 
 
 def montar_evento(
-    job: Job, repositorio: RepositorioDeWebhooks, agora: datetime
+    job: Job,
+    repositorio: RepositorioDeWebhooks,
+    agora: datetime,
+    id: str | None = None,
 ) -> Evento | None:
     """Evento de um job que terminou, se o sistema dono tem webhook. Job de pessoa
     e job cancelado não geram evento."""
@@ -201,7 +204,7 @@ def montar_evento(
         return None
     concluido = job.estado == "concluido"
     return Evento(
-        id=str(uuid.uuid4()),
+        id=id or str(uuid.uuid4()),
         tipo="job.concluido" if concluido else "job.falhou",
         job_id=job.id,
         estado="concluido" if concluido else "falhou",

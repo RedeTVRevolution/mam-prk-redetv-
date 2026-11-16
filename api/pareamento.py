@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Literal, get_args
 
 from api.decupagem import Decupagem
+from api.intervalos import comprimento_da_sobreposicao, sobrepoe_de_verdade
 from api.texto import normalizar
 
 Tipo = Literal[
@@ -62,13 +63,12 @@ class Pareado:
 
 
 def sobreposicao_ms(a: Item, b: Item) -> int:
-    return min(a.fim_ms, b.fim_ms) - max(a.inicio_ms, b.inicio_ms)
+    return comprimento_da_sobreposicao(a.inicio_ms, a.fim_ms, b.inicio_ms, b.fim_ms)
 
 
 def se_sobrepoem(a: Item, b: Item) -> bool:
     """Têm trecho em comum; um item pontual (início = fim) vale se cair no outro."""
-    s = sobreposicao_ms(a, b)
-    return s > 0 or (s == 0 and (a.inicio_ms == a.fim_ms or b.inicio_ms == b.fim_ms))
+    return sobrepoe_de_verdade(a.inicio_ms, a.fim_ms, b.inicio_ms, b.fim_ms)
 
 
 def parear(

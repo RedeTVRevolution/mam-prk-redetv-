@@ -10,12 +10,11 @@ import re
 from typing import Any
 
 from api.decupagem import Ambiente, Enquadramento
+from api.numero import singular
 from api.texto import normalizar
 
-# Termos que só valem como palavra inteira ("media" não casa com "mediante").
-_PALAVRA_INTEIRA = {"media"}
-
-# Começos de palavra do texto normalizado (sem acento nem maiúscula) -> valor.
+# Termos do texto normalizado (sem acento nem maiúscula) -> valor. Cada um casa como
+# palavra inteira, no singular ou no plural: "rio" não casa com "criado" nem "carrossel" com "carro".
 _ENQUADRAMENTOS: list[tuple[tuple[str, ...], Enquadramento]] = [
     (
         ("primeirissimo", "super close", "big close", "extreme close"),
@@ -24,7 +23,7 @@ _ENQUADRAMENTOS: list[tuple[tuple[str, ...], Enquadramento]] = [
     (("detalhe",), "detalhe"),
     (("conjunto", "corpo inteiro"), "plano de conjunto"),
     (("americano",), "plano americano"),
-    (("geral", "aberto", "panoramic", "wide"), "plano geral"),
+    (("geral", "aberto", "panoramico", "panoramica", "wide"), "plano geral"),
     (("medio", "medium", "media"), "plano médio"),
     (
         ("primeiro plano", "close", "fechado", "proximo", "aproximado"),
@@ -88,17 +87,22 @@ _AMBIENTES: list[tuple[tuple[str, ...], Ambiente]] = [
 ]
 
 
-def _regex(termo: str) -> str:
-    return rf"\b{re.escape(termo)}" + (r"\b" if termo in _PALAVRA_INTEIRA else "")
+def _palavras(texto: str) -> tuple[str, ...]:
+    """As palavras no singular; hífen e espaço separam ("close-up" são duas)."""
+    return tuple(singular(p) for p in re.findall(r"\w+", normalizar(texto)))
+
+
+def _contem(palavras: tuple[str, ...], termo: tuple[str, ...]) -> bool:
+    n = len(termo)
+    return any(palavras[i : i + n] == termo for i in range(len(palavras) - n + 1))
 
 
 def _classificar[T](
     texto: str, regras: list[tuple[tuple[str, ...], T]], padrao: T
 ) -> T:
-    normal = normalizar(texto)
-    for trechos, valor in regras:
-        # No começo de uma palavra: "rio" não casa com "criado".
-        if any(re.search(_regex(t), normal) for t in trechos):
+    palavras = _palavras(texto)
+    for termos, valor in regras:
+        if any(_contem(palavras, _palavras(t)) for t in termos):
             return valor
     return padrao
 

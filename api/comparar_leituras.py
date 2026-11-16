@@ -27,6 +27,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from api.intervalos import comprimento_da_sobreposicao
 from api.leitura_da_tela import LeituraDaTela
 from api.medicao_dos_textos import TOLERANCIA_DE_QUADROS, _aparicoes, _normalizar
 
@@ -76,7 +77,7 @@ def aparicoes_por_texto(leitura: LeituraDaTela) -> dict[str, list[Aparicao]]:
 
 
 def _sobreposicao(a: Aparicao, b: Aparicao) -> float:
-    return min(a[1], b[1]) - max(a[0], b[0])
+    return comprimento_da_sobreposicao(a[0], a[1], b[0], b[1])
 
 
 def _mudou(referencia: Aparicao, nova: Aparicao) -> bool:

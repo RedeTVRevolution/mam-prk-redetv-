@@ -80,6 +80,7 @@ def executar(
             f"Não há Decupagem do Job {job_id} no bucket das decupagens."
         )
     inventarios: Inventarios
+    nao_inventariados: set[int] = set()
     if config.motor == "florence":
         bruto = armazenamento.ler_resultado(job_id, config.destino_do_bruto)
         if bruto is None:
@@ -93,6 +94,7 @@ def executar(
             modelo=config.modelo,
             job_id=job_id,
             dormir=dormir,
+            nao_inventariados=nao_inventariados,
         )
     else:
         inventarios = olhar_com_gemini(
@@ -102,9 +104,14 @@ def executar(
             job_id=job_id,
             quadro_de=lambda caminho: armazenamento.ler_quadro(job_id, caminho),
             dormir=dormir,
+            nao_inventariados=nao_inventariados,
         )
     nova = aplicar_inventario(
-        decupagem, inventarios, motor=config.motor, modelo=config.modelo
+        decupagem,
+        inventarios,
+        motor=config.motor,
+        modelo=config.modelo,
+        nao_inventariados=nao_inventariados,
     )
     # Os planos recorrentes (#546) saem dos mesmos quadros-chave, sem modelo.
     nova = com_os_planos_recorrentes(

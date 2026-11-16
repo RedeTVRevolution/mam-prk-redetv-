@@ -154,10 +154,11 @@ def registrar(
     quando: datetime,
     *,
     id: str | None = None,
+    levantar: bool = False,
     **dados: Any,
 ) -> None:
     """Monta e publica o evento. Qualquer falha vai ao log e não ao chamador: a ação já
-    aconteceu e não há o que desfazer."""
+    aconteceu e não há o que desfazer. Quem repete a publicação passa `levantar`."""
     try:
         eventos.publicar(
             EventoDeUso(
@@ -170,4 +171,6 @@ def registrar(
             )
         )
     except Exception:
+        if levantar:
+            raise
         log.exception("não consegui publicar o evento de uso %s", tipo)

@@ -12,7 +12,7 @@ def decupagem(
         {
             "versao_esquema": "1.2",
             "video": {"sha256": "a" * 64, "duracao_ms": 60_000},
-            "programa": {"resumo": "r", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": [
                 {

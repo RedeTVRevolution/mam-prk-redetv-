@@ -15,7 +15,6 @@ def decupagem_valida() -> dict[str, Any]:
         "versao_esquema": "1.2",
         "video": {"sha256": "a" * 64, "duracao_ms": DURACAO_MS},
         "programa": {
-            "resumo": "Jornal da noite",
             "blocos": [{"inicio_ms": 0, "fim_ms": 30_000, "titulo": "Abertura"}],
         },
         "pautas": [
@@ -205,3 +204,23 @@ def test_esquema_do_modelo_traz_a_regra_de_texto_na_tela_por_aparicao() -> None:
     assert "sai e volta são dois itens" in regra
     assert "bloco" in regra
     assert "sai e volta" in esquema["$defs"]["TextoNaTela"]["description"]
+
+
+def test_esquema_do_modelo_nao_traz_o_resumo_do_programa_e_traz_o_da_pauta() -> None:
+    defs = esquema_do_modelo()["$defs"]
+    assert "resumo" not in defs["Programa"]["properties"]
+    assert "resumo" in defs["Pauta"]["properties"]
+
+
+def test_decupagem_nova_sem_resumo_do_programa_valida() -> None:
+    dados = decupagem_valida()
+    dados["programa"].pop("resumo", None)
+    assert Decupagem.model_validate(dados).programa.blocos
+
+
+def test_decupagem_antiga_com_resumo_do_programa_valida_e_nao_o_regrava() -> None:
+    dados = decupagem_valida()
+    dados["programa"]["resumo"] = "Jornal da noite"
+    d = Decupagem.model_validate(dados)
+    assert "resumo" not in d.model_dump(mode="json")["programa"]
+    assert d.pautas[0].resumo == "Chuva forte em SP"

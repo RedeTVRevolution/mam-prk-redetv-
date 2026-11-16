@@ -6,8 +6,7 @@ texto em português.
 
 import copy
 import time
-from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Collection, Sequence
 from functools import partial
 from typing import Annotated, Any
 
@@ -29,6 +28,7 @@ from api.espera import sorteio_uniforme
 from api.florence import ObjetosDaDecupagem
 from api.gemini import Chamada, Transporte, gerar_validado, validar_json
 from api.leitura_da_tela import Caixa
+from api.paralelo import em_paralelo
 from api.taxonomia_de_objetos import OUTRO, TEXTO_DOS_TIPOS
 from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
@@ -65,6 +65,7 @@ PLANOS_POR_LOTE_DO_GEMINI = 4
 # (#402): em série, ~23 chamadas por vídeo estourariam o `timeout` do Job; com 8, são
 # ~3 rodadas. Mais que isso arrisca 429 (falta de capacidade do Flex).
 PARALELISMO_DO_INVENTARIO = 8
+
 
 Inventarios = dict[int, list[ObjetoDoInventario]]
 
@@ -175,17 +176,21 @@ def _lotes[T](itens: Sequence[T], tamanho: int) -> list[list[T]]:
     return [list(itens[i : i + tamanho]) for i in range(0, len(itens), max(tamanho, 1))]
 
 
-def _em_paralelo[T, R](
-    itens: Sequence[T], chamar: Callable[[T], R], paralelismo: int
-) -> list[R]:
-    """`chamar` em cada item, até `paralelismo` ao mesmo tempo, na ordem dos itens. Na
-    primeira falha, os itens que ainda não começaram são cancelados (cada um custaria até
-    um prazo inteiro do Flex) e a falha sobe depois de as chamadas em andamento terminarem."""
-    pool = ThreadPoolExecutor(max_workers=max(paralelismo, 1))
-    try:
-        return list(pool.map(chamar, itens))
-    finally:
-        pool.shutdown(wait=True, cancel_futures=True)
+def _pedir_com_uma_rodada_extra[R: BaseModel](
+    lote: list[int], chamar: Callable[[list[int]], R]
+) -> tuple[list[Any], list[int]]:
+    """Os planos da resposta do lote; o que o modelo omitiu é pedido de novo, só ele, uma
+    vez (#692). Devolve os planos respondidos e os que seguem ausentes."""
+
+    def respondidos(r: R, pedidos: list[int]) -> list[Any]:
+        return [p for p in r.planos if p.plano in pedidos]  # type: ignore[attr-defined]
+
+    planos = respondidos(chamar(lote), lote)
+    faltam = [i for i in lote if i not in {p.plano for p in planos}]
+    if faltam:
+        planos += respondidos(chamar(faltam), faltam)
+        faltam = [i for i in lote if i not in {p.plano for p in planos}]
+    return planos, faltam
 
 
 def _gravar_plano(inventarios: Inventarios, plano: int, itens: list[Any]) -> None:
@@ -316,21 +321,25 @@ def converter_do_florence(
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    nao_inventariados: set[int] | None = None,
 ) -> Inventarios:
     """O resultado bruto do Florence-2 em inventário em português: uma chamada só de
     texto (sem imagem) por lote de planos. As caixas vêm das detecções que o modelo cita
-    pelo id. Qualquer lote que esgote as tentativas levanta `AnaliseFalhou`."""
+    pelo id. Qualquer lote que esgote as tentativas levanta `AnaliseFalhou`. Os planos que
+    o modelo segue omitindo depois da rodada extra entram em `nao_inventariados` (#692)."""
     por_plano: dict[int, list[Any]] = {}
     for q in bruto.quadros:
         por_plano.setdefault(q.plano, []).append(q)
     inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
+    if nao_inventariados is None:
+        nao_inventariados = set()
     esquema = esquema_obrigatorio(RespostaConvertida)
     lotes = _lotes(
         [i for i in range(len(decupagem.planos)) if i in por_plano], planos_por_lote
     )
-    respostas = _em_paralelo(
-        lotes,
-        lambda lote: gerar_validado(
+
+    def converter(lote: list[int]) -> RespostaConvertida:
+        return gerar_validado(
             transporte,
             _chamada(
                 modelo,
@@ -343,13 +352,14 @@ def converter_do_florence(
             dormir=dormir,
             sortear=sortear,
             relogio=relogio,
-        ),
-        paralelismo,
+        )
+
+    respostas = em_paralelo(
+        lotes, lambda lote: _pedir_com_uma_rodada_extra(lote, converter), paralelismo
     )
-    for lote, resposta in zip(lotes, respostas, strict=True):
-        for do_plano in resposta.planos:
-            if do_plano.plano not in lote:
-                continue
+    for planos, faltam in respostas:
+        nao_inventariados.update(faltam)
+        for do_plano in planos:
             caixas_por_id: dict[str, CaixaDoQuadro] = {}
             for k, q in enumerate(por_plano[do_plano.plano]):
                 for n, o in enumerate(q.objetos):
@@ -387,10 +397,14 @@ def olhar_com_gemini(
     dormir: Callable[[float], None] = time.sleep,
     sortear: Callable[[float], float] = sorteio_uniforme,
     relogio: Callable[[], float] = time.monotonic,
+    nao_inventariados: set[int] | None = None,
 ) -> Inventarios:
     """Motor `gemini`: o modelo olha os quadros-chave (resolução cheia, sem redução) e
-    devolve o mesmo inventário, com as caixas. `quadro_de` lê o JPEG pelo caminho."""
+    devolve o mesmo inventário, com as caixas. `quadro_de` lê o JPEG pelo caminho.
+    `nao_inventariados` recebe os planos que o modelo segue omitindo (#692)."""
     inventarios: Inventarios = {i: [] for i in range(len(decupagem.planos))}
+    if nao_inventariados is None:
+        nao_inventariados = set()
     esquema = esquema_obrigatorio(RespostaVista)
     com_quadros = [i for i, p in enumerate(decupagem.planos) if p.quadros]
 
@@ -422,12 +436,12 @@ def olhar_com_gemini(
         )
 
     lotes = _lotes(com_quadros, planos_por_lote)
-    for lote, resposta in zip(
-        lotes, _em_paralelo(lotes, olhar, paralelismo), strict=True
-    ):
-        for do_plano in resposta.planos:
-            if do_plano.plano not in lote:
-                continue
+    respostas = em_paralelo(
+        lotes, lambda lote: _pedir_com_uma_rodada_extra(lote, olhar), paralelismo
+    )
+    for planos, faltam in respostas:
+        nao_inventariados.update(faltam)
+        for do_plano in planos:
             quadros = decupagem.planos[do_plano.plano].quadros
             itens = [
                 _item(
@@ -448,11 +462,22 @@ def olhar_com_gemini(
 
 
 def aplicar_inventario(
-    decupagem: Decupagem, inventarios: Inventarios, *, motor: str, modelo: str
+    decupagem: Decupagem,
+    inventarios: Inventarios,
+    *,
+    motor: str,
+    modelo: str,
+    nao_inventariados: Collection[int] = (),
 ) -> Decupagem:
-    """A Decupagem com o inventário de cada plano no lugar do anterior."""
+    """A Decupagem com o inventário de cada plano no lugar do anterior; os planos em
+    `nao_inventariados` (o modelo os omitiu, #692) ficam marcados."""
     planos = [
-        p.model_copy(update={"inventario": inventarios.get(i, [])})
+        p.model_copy(
+            update={
+                "inventario": inventarios.get(i, []),
+                "inventariado": i not in nao_inventariados,
+            }
+        )
         for i, p in enumerate(decupagem.planos)
     ]
     update: dict[str, Any] = {

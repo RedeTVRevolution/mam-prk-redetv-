@@ -130,24 +130,36 @@ def transporte_do_pubsub(timeout_s: float = 30) -> TransporteRest:
     return transporte_rest(URL_BASE, ESCOPO_DO_PUBSUB, timeout_s)
 
 
+def enviar_o_fim(
+    job: Job,
+    webhooks: RepositorioDeWebhooks,
+    publicador: PublicadorDeEventos,
+    agora: datetime,
+    id: str | None = None,
+) -> bool:
+    """Publica o evento do Job que terminou, se o sistema dono tem webhook. `False` se
+    não há o que enviar (sem webhook); falha do Pub/Sub levanta, para quem repete."""
+    evento = montar_evento(job, webhooks, agora, id)
+    if evento is None or job.sistema is None:
+        return False
+    publicador.publicar(MensagemDeEvento(sistema=job.sistema, evento=evento))
+    return True
+
+
 def publicar_fim(
     job: Job,
     webhooks: RepositorioDeWebhooks,
     publicador: PublicadorDeEventos,
     agora: datetime,
 ) -> bool:
-    """Publica o evento do Job que terminou, se o sistema dono tem webhook. Falha do
-    Pub/Sub vai ao log e não ao chamador: o Job já mudou de estado e quem o mudou não
-    tem o que desfazer. `True` se publicou."""
+    """`enviar_o_fim` para quem não repete: falha do Pub/Sub vai ao log e não ao
+    chamador, porque o Job já mudou de estado e quem o mudou não tem o que desfazer.
+    `True` se publicou."""
     try:
-        evento = montar_evento(job, webhooks, agora)
-        if evento is None or job.sistema is None:
-            return False
-        publicador.publicar(MensagemDeEvento(sistema=job.sistema, evento=evento))
+        return enviar_o_fim(job, webhooks, publicador, agora)
     except Exception:
         log.exception("não consegui publicar o evento de fim do Job %s", job.id)
         return False
-    return True
 
 
 class _RepositorioQueRepassa:
@@ -221,8 +233,15 @@ class RepositorioQuePublicaOFim(_RepositorioQueRepassa):
         return job
 
 
-def registrar_o_fim(eventos: Eventos, job: Job, agora: datetime) -> None:
-    """O evento de uso `fim_de_processamento` do Job que terminou."""
+def registrar_o_fim(
+    eventos: Eventos,
+    job: Job,
+    agora: datetime,
+    id: str | None = None,
+    levantar: bool = False,
+) -> None:
+    """O evento de uso `fim_de_processamento` do Job que terminou. Com `levantar`, a
+    falha da publicação sobe ao chamador (quem repete) em vez de ir só ao log."""
     quem: Quem = (
         ("sistema", job.sistema)
         if job.sistema is not None
@@ -233,6 +252,8 @@ def registrar_o_fim(eventos: Eventos, job: Job, agora: datetime) -> None:
         "fim_de_processamento",
         quem,
         agora,
+        id=id,
+        levantar=levantar,
         job_id=job.id,
         programa=job.programa,
         estado=job.estado,

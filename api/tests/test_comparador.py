@@ -159,7 +159,7 @@ def _decupagem(
     return {
         "versao_esquema": "1.2",
         "video": {"sha256": SHA, "duracao_ms": 600_000},
-        "programa": {"resumo": "r", "blocos": []},
+        "programa": {"blocos": []},
         "pautas": pautas,
         "pessoas": pessoas,
         "planos": [],

@@ -71,6 +71,11 @@ def registro_do_video_concluido(
     )
 
 
+LIMITE_DO_MOTIVO = (
+    300  # caracteres do detalhe de erro que vai ao log e à `AnaliseFalhou`
+)
+
+
 def registro_da_resposta_fora_do_esquema(modelo: str, motivo: str) -> str:
     """Uma linha por resposta recusada, de qualquer chamada ao modelo: a métrica conta as linhas."""
     return json.dumps(
@@ -78,7 +83,7 @@ def registro_da_resposta_fora_do_esquema(modelo: str, motivo: str) -> str:
             "severity": "WARNING",
             "evento": "resposta_fora_do_esquema",
             "modelo": modelo,
-            "motivo": motivo[:300],
+            "motivo": motivo[:LIMITE_DO_MOTIVO],
         },
         ensure_ascii=False,
     )
@@ -94,6 +99,22 @@ def registro_do_erro_http(
         "evento": "erro_http_do_modelo",
         "status": status,
         "codigo": codigo,
+        "mensagem": mensagem,
+        "modelo": modelo,
+    }
+    if etapa:
+        registro["etapa"] = etapa
+    return json.dumps(registro, ensure_ascii=False)
+
+
+def registro_da_falha_de_rede(
+    erro: str, mensagem: str, modelo: str, etapa: str | None = None
+) -> str:
+    """Uma linha por timeout ou queda de conexão com o Vertex, antes de virar `ErroHttp(503)`."""
+    registro: dict[str, object] = {
+        "severity": "WARNING",
+        "evento": "falha_de_rede_do_modelo",
+        "erro": erro,
         "mensagem": mensagem,
         "modelo": modelo,
     }
