@@ -44,6 +44,9 @@ from api.identidade import (
 )
 from api.identidade import identidade_do_nome, nao_identificado
 from api.indice_da_busca import NOME_DA_CATEGORIA
+from api.intervalos import sobrepoe_de_verdade as _de_verdade
+from api.intervalos import sobrepoe_inclusivo
+from api.intervalos import sobrepoe_metade as _metade
 from api.pessoas import LISTAS
 from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, Texto
@@ -1046,7 +1049,7 @@ class Reconciliacao:
 
 
 def sobrepoe(a: tuple[int, int], b: tuple[int, int]) -> bool:
-    return a[0] <= b[1] and b[0] <= a[1]
+    return sobrepoe_inclusivo(a[0], a[1], b[0], b[1])
 
 
 def sobrepoe_metade(a: tuple[int, int], b: tuple[int, int]) -> bool:
@@ -1054,9 +1057,7 @@ def sobrepoe_metade(a: tuple[int, int], b: tuple[int, int]) -> bool:
 
     Um intervalo de duração zero (um instante) conta se cai dentro do outro.
     """
-    sobreposicao = min(a[1], b[1]) - max(a[0], b[0])
-    menor = min(a[1] - a[0], b[1] - b[0])
-    return sobreposicao >= 0 and sobreposicao * 2 >= menor
+    return _metade(a[0], a[1], b[0], b[1])
 
 
 def sobrepoe_de_verdade(a: tuple[int, int], b: tuple[int, int]) -> bool:
@@ -1064,9 +1065,7 @@ def sobrepoe_de_verdade(a: tuple[int, int], b: tuple[int, int]) -> bool:
 
     Um instante (duração zero) conta se cai dentro do outro intervalo.
     """
-    sobreposicao = min(a[1], b[1]) - max(a[0], b[0])
-    instante = a[0] == a[1] or b[0] == b[1]
-    return sobreposicao > 0 or (sobreposicao == 0 and instante)
+    return _de_verdade(a[0], a[1], b[0], b[1])
 
 
 def _ja_traz_o_valor(c: Correcao, item: dict[str, Any]) -> bool:
