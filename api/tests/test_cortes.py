@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from api.cortes import LIMIAR_PADRAO, detectar_cortes
+from api.cortes import LIMIAR_PADRAO, detectar_cortes, ler_cortes
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="sem ffmpeg")
 
@@ -49,3 +49,12 @@ def test_video_de_um_plano_so_nao_tem_cortes(tmp_path: Path) -> None:
 def test_limiar_alto_demais_nao_acha_corte(tmp_path: Path) -> None:
     video = _concatenar(tmp_path / "v.mp4", [("red", 2.0), ("blue", 2.0)])
     assert detectar_cortes(video, 0.99) == []
+
+
+def test_ler_cortes_le_o_pts_time_em_ms_ordenado_sem_repetir_e_sem_zero() -> None:
+    saida = (
+        "frame:1    pts:60   pts_time:6\nlavfi.scene_score=0.9\n"
+        "frame:0    pts:20   pts_time:2\nframe:2    pts:20   pts_time:2\n"
+        "frame:3    pts:0    pts_time:0\n"
+    )
+    assert ler_cortes(saida) == [2_000, 6_000]

@@ -17,8 +17,8 @@ from api.cortes import (
     LIMIAR_PADRAO,
     TEMPO_LIMITE_S,
     CausaDaFalha,
-    DeteccaoFalhou,
-    detectar_cortes,
+    filtro_de_cortes,
+    ler_cortes,
     resumir_stderr,
 )
 from api.modelo_do_job import CodigoDeFalha
@@ -199,54 +199,11 @@ def validar(
     saida.mkdir(parents=True, exist_ok=True)
     copia = saida / "copia_limpa.mp4"
     proxy = saida / "proxy.mp4"
-    comum = ["ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y"]
-    # Mesmo demuxer do ffprobe: o ffmpeg não escolhe o formato pelo conteúdo do original.
-    entrada_mp4 = ["-f", DEMUXERS_ACEITOS]
-    # Regravação sem recodificar: só vídeo e áudio, sem metadados nem capítulos.
-    regravar = _executar(
-        [
-            *comum, *entrada_mp4, "-i", str(entrada),
-            "-map", "0:v", "-map", "0:a?",
-            "-c", "copy", "-map_metadata", "-1", "-map_chapters", "-1",
-            "-movflags", "+faststart", str(copia),
-        ]
-    )  # fmt: skip
-    # Decodifica o arquivo inteiro e gera o proxy na mesma passada.
-    gerar_proxy = _executar(
-        [
-            *comum, "-xerror", "-err_detect", "explode",
-            *entrada_mp4, "-i", str(entrada),
-            "-map", "0:v", "-map", "0:a?",
-            # veryfast: no clipe2, 41% mais rápido que o medium e SSIM de 0,986 contra 0,990.
-            "-vf", "scale=-2:480", "-c:v", "libx264", "-preset", "veryfast",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-map_metadata", "-1", "-map_chapters", "-1",
-            "-movflags", "+faststart", str(proxy),
-        ]
-    )  # fmt: skip
-    for feito in (regravar, gerar_proxy):
-        if feito.returncode != 0:
-            _apagar(copia, proxy)
-            raise _saiu_com_erro(feito)
-    audio = None
-    # A cópia limpa leva as mesmas faixas da entrada: a sondagem dela basta.
-    if any(f.get("codec_type") == "audio" for f in sondagem.get("streams", [])):
-        try:
-            audio = _separar_audio(copia, saida)
-        except Recusa:
-            _apagar(copia, proxy)
-            raise
     try:
-        cortes = detectar_cortes(copia, limiar_de_cortes)
-    except DeteccaoFalhou as e:
-        _apagar(copia, proxy, audio)
-        raise Recusa(
-            "processamento_demorou_demais"
-            if e.causa == "tempo_esgotado"
-            else "arquivo_corrompido",
-            e.causa,
-            e.stderr,
-        ) from e
+        audio, cortes = _gerar_saidas(entrada, copia, proxy, sondagem, limiar_de_cortes)
+    except Recusa:
+        _apagar(copia, proxy, saida / NOME_DO_AUDIO)
+        raise
     return Aceito(
         copia_limpa=copia,
         proxy=proxy,
@@ -259,25 +216,67 @@ def validar(
     )
 
 
+def _gerar_saidas(
+    entrada: Path,
+    copia: Path,
+    proxy: Path,
+    sondagem: dict[str, Any],
+    limiar_de_cortes: float,
+) -> tuple[Path | None, list[int]]:
+    """Grava a cópia limpa, o proxy e o áudio; devolve o áudio (se houver) e os cortes.
+
+    `Recusa` em qualquer falha; quem chama apaga o que já foi gravado.
+    """
+    comum = ["ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y"]
+    # Mesmo demuxer do ffprobe: o ffmpeg não escolhe o formato pelo conteúdo do original.
+    entrada_mp4 = ["-f", DEMUXERS_ACEITOS]
+    # Regravação sem recodificar: só vídeo e áudio, sem metadados nem capítulos.
+    regravar = _executar(
+        [
+            *comum, *entrada_mp4, "-i", str(entrada),
+            "-map", "0:v", "-map", "0:a?",
+            "-c", "copy", "-map_metadata", "-1", "-map_chapters", "-1",
+            "-movflags", "+faststart", str(copia),
+        ]
+    )  # fmt: skip
+    if regravar.returncode != 0:
+        raise _saiu_com_erro(regravar)
+    # A cópia limpa leva as mesmas faixas da entrada: a sondagem dela basta.
+    tem_audio = any(f.get("codec_type") == "audio" for f in sondagem.get("streams", []))
+    audio = copia.parent / NOME_DO_AUDIO if tem_audio else None
+    # Um ffmpeg decodifica o original uma vez e entrega as três saídas: o filtro de
+    # cortes vê os quadros em resolução cheia, antes do `scale` do proxy.
+    processo = _executar(
+        [
+            *comum, "-xerror", "-err_detect", "explode",
+            *entrada_mp4, "-i", str(entrada),
+            "-filter_complex",
+            (
+                "[0:v]split=2[para_cortes][para_proxy];"
+                f"[para_cortes]{filtro_de_cortes(limiar_de_cortes)}[cortes];"
+                "[para_proxy]scale=-2:480[reduzido]"
+            ),
+            # veryfast: no clipe2, 41% mais rápido que o medium e SSIM de 0,986 contra 0,990.
+            "-map", "[reduzido]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-map_metadata", "-1", "-map_chapters", "-1",
+            "-movflags", "+faststart", str(proxy),
+            *(
+                ["-map", "0:a", "-ac", "1", "-ar", str(TAXA_DO_AUDIO_HZ),
+                 "-c:a", "pcm_s16le", "-map_metadata", "-1", str(audio)]
+                if audio
+                else []
+            ),
+            "-map", "[cortes]", "-f", "null", "-",
+        ]
+    )  # fmt: skip
+    if processo.returncode != 0:
+        raise _saiu_com_erro(processo)
+    return audio, ler_cortes(processo.stdout.decode(errors="replace"))
+
+
 def _apagar(*gerados: Path | None) -> None:
     """Apaga o que a validação já gravou."""
     for arquivo in gerados:
         if arquivo is not None:
             arquivo.unlink(missing_ok=True)
-
-
-def _separar_audio(copia: Path, saida: Path) -> Path:
-    """O áudio da cópia limpa em mono e 16 kHz, ao lado dela; `Recusa` se o ffmpeg falha."""
-    audio = saida / NOME_DO_AUDIO
-    extrair = _executar(
-        [
-            "ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y",
-            "-i", str(copia), "-map", "0:a", "-vn",
-            "-ac", "1", "-ar", str(TAXA_DO_AUDIO_HZ), "-c:a", "pcm_s16le",
-            "-map_metadata", "-1", str(audio),
-        ]
-    )  # fmt: skip
-    if extrair.returncode != 0:
-        audio.unlink(missing_ok=True)
-        raise _saiu_com_erro(extrair)
-    return audio

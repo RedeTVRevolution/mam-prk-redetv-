@@ -28,6 +28,24 @@ class DeteccaoFalhou(Exception):
         self.stderr = stderr
 
 
+def filtro_de_cortes(limiar: float) -> str:
+    """O filtro `scene` que imprime o `pts_time` de cada corte no stdout do ffmpeg."""
+    return f"select='gt(scene,{limiar})',metadata=print:file=-"
+
+
+def ler_cortes(saida_do_filtro: str) -> list[int]:
+    """Os instantes dos cortes em ms, em ordem, lidos do `metadata=print` do filtro."""
+    cortes: set[int] = set()
+    for linha in saida_do_filtro.splitlines():
+        # "frame:0    pts:10240   pts_time:1"
+        _, achou, resto = linha.partition("pts_time:")
+        if achou:
+            ms = round(float(resto.split()[0]) * 1000)
+            if ms > 0:
+                cortes.add(ms)
+    return sorted(cortes)
+
+
 def detectar_cortes(video: Path, limiar: float = LIMIAR_PADRAO) -> list[int]:
     """Os instantes dos cortes em ms, em ordem; vazio para um vídeo de um plano só."""
     try:
@@ -35,7 +53,7 @@ def detectar_cortes(video: Path, limiar: float = LIMIAR_PADRAO) -> list[int]:
             [
                 "ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file",
                 "-i", str(video), "-an",
-                "-vf", f"select='gt(scene,{limiar})',metadata=print:file=-",
+                "-vf", filtro_de_cortes(limiar),
                 "-f", "null", "-",
             ],
             check=False,
@@ -48,12 +66,4 @@ def detectar_cortes(video: Path, limiar: float = LIMIAR_PADRAO) -> list[int]:
         raise DeteccaoFalhou("tempo_esgotado", resumir_stderr(e.stderr)) from e
     if r.returncode != 0:
         raise DeteccaoFalhou("ffmpeg_saiu_com_erro", resumir_stderr(r.stderr))
-    cortes: set[int] = set()
-    for linha in r.stdout.splitlines():
-        # "frame:0    pts:10240   pts_time:1"
-        _, achou, resto = linha.partition("pts_time:")
-        if achou:
-            ms = round(float(resto.split()[0]) * 1000)
-            if ms > 0:
-                cortes.add(ms)
-    return sorted(cortes)
+    return ler_cortes(r.stdout)
