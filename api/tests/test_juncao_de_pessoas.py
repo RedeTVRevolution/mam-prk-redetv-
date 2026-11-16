@@ -366,6 +366,9 @@ class _Decupagens:
     def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
         return True
 
+    def copia_limpa_existe(self, job_id: str) -> bool:
+        return True
+
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
         self.gravada = Decupagem.model_validate_json(conteudo)
 
