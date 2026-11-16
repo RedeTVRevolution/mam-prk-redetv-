@@ -1,6 +1,6 @@
 """Erros de infraestrutura que várias camadas levantam e que o handler da aplicação vira 503.
 
-Módulo leve: só a biblioteca padrão e o Google, nada do domínio, para quem lê a lixeira
+Módulo leve: só a biblioteca padrão, o FastAPI e o Google, nada do domínio, para quem lê a lixeira
 (e o Quem conta, #610) não precisar importar o módulo de Jobs.
 """
 

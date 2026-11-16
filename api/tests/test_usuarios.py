@@ -643,3 +643,17 @@ def test_reativar_conta_pendente_responde_409() -> None:
 
     assert resposta.status_code == 409
     assert mundo.papeis.desativada(cris.uid)
+
+
+def test_desativar_conta_pendente_responde_409_e_nao_a_libera() -> None:
+    # Desativar no meio da criação seria desfeito pelo pedido repetido que conclui;
+    # e o desfazer do registro que falha a deixaria ativa ainda pendente.
+    mundo = Mundo(auditoria=AuditoriaQueFalha())
+    with pytest.raises(RuntimeError):
+        mundo.cliente.post(ROTA, json=NOVA, headers=ADMIN)
+    (cris,) = [c for c in mundo.contas.listar() if c.email == NOVA["email"]]
+
+    resposta = mundo.cliente.post(f"{ROTA}/{cris.uid}/desativar", headers=ADMIN)
+
+    assert resposta.status_code == 409
+    assert mundo.papeis.desativada(cris.uid)

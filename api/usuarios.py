@@ -344,6 +344,11 @@ def criar_rotas_dos_usuarios(
         if uid == pessoa.uid:
             raise HTTPException(409, "Você não pode desativar a própria conta")
         conta = achar(uid)
+        # A pendente já está sem acesso; desativá-la seria desfeito pelo pedido que conclui.
+        if papeis.ler(uid).pendente:
+            raise HTTPException(
+                409, "Criação pendente: repita o pedido de criar o usuário"
+            )
         # A marca primeiro: é ela que corta o acesso na hora. Sem registro, a marca
         # sai. O bloqueio no Identity Platform e a revogação dos tokens vêm por
         # último; se falham, o corte já vale e o pedido pode ser repetido.
