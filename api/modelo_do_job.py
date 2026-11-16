@@ -33,6 +33,10 @@ Estado = Literal[
     "falhou",
     "cancelado",
 ]
+# Estados em que o Job terminou. `FIM` dispara webhook e evento de uso; `FIM_OU_CANCELADO`
+# é o que vai para a lixeira e para a lista do painel.
+FIM: frozenset[Estado] = frozenset({"concluido", "falhou"})
+FIM_OU_CANCELADO: frozenset[Estado] = FIM | {"cancelado"}
 CodigoDeFalha = Literal[
     "formato_invalido",
     "arquivo_corrompido",

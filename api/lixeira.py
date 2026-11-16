@@ -20,7 +20,12 @@ from api.catalogo import Catalogo, EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoes
 from api.indice_da_busca import IndiceDaBusca
 from api.marcas import CatalogoDeMarcas
-from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs
+from api.modelo_do_job import (
+    FIM_OU_CANCELADO,
+    FiltroDeJobs,
+    Job,
+    RepositorioDeJobs,
+)
 from api.permissoes import exige, tem_permissao
 from api.texto_como_dado import Texto
 
@@ -29,7 +34,7 @@ log = logging.getLogger(__name__)
 PRAZO_DA_PURGA = timedelta(days=30)
 MOTIVO_MAXIMO = 500
 # Em andamento, o Job ainda escreve nos arquivos: cancelar primeiro.
-ESTADOS_QUE_VAO_PARA_A_LIXEIRA = ("concluido", "falhou", "cancelado")
+ESTADOS_QUE_VAO_PARA_A_LIXEIRA = FIM_OU_CANCELADO
 
 
 class ArquivosContados(BaseModel):
