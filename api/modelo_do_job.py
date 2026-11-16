@@ -276,6 +276,25 @@ class FiltroDeJobs:
     so_os_da_lista: bool = False
 
 
+def um_alem_do_limite[T: _ComId](
+    itens: Iterable[T], limite: int | None
+) -> tuple[list[T], str | None]:
+    """Corta os itens já filtrados e em ordem; só lê um além do limite. Devolve a página e o
+    cursor (o id do último), ou `None` quando não há próxima."""
+    if limite is None:
+        return list(itens), None
+    lidos = list(itertools.islice(itens, limite + 1))
+    if len(lidos) <= limite:
+        return lidos, None
+    pagina = lidos[:limite]
+    return pagina, pagina[-1].id
+
+
+class _ComId(Protocol):
+    @property
+    def id(self) -> str: ...
+
+
 @dataclass(frozen=True)
 class PaginaDeJobs:
     jobs: list[Job]
@@ -284,13 +303,7 @@ class PaginaDeJobs:
     @classmethod
     def de(cls, jobs: Iterable[Job], limite: int | None) -> "PaginaDeJobs":
         """Corta os Jobs já filtrados e em ordem; só lê um além do limite."""
-        if limite is None:
-            return cls(list(jobs))
-        lidos = list(itertools.islice(jobs, limite + 1))
-        if len(lidos) <= limite:
-            return cls(lidos)
-        pagina = lidos[:limite]
-        return cls(pagina, pagina[-1].id)
+        return cls(*um_alem_do_limite(jobs, limite))
 
 
 def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:

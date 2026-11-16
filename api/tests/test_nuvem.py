@@ -8,7 +8,7 @@ import contextlib
 import os
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
@@ -1873,6 +1873,33 @@ def test_marca_de_job_gravado_abortada_repete(
     chaves.marcar_job_gravado("sistema:Legado A", "k1")
 
     assert colecao.criacoes == 3
+
+
+def test_os_tres_lacos_sob_disputa_dao_o_mesmo_503_ao_esgotar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+    agora = datetime(2026, 11, 4, tzinfo=UTC)
+
+    def sempre_aborta() -> _ColecaoQueAborta:
+        return _ColecaoQueAborta(abortos=10**6, depois=None)
+
+    casos: dict[str, Callable[[_ColecaoQueAborta], object]] = {
+        "criar": lambda c: RepositorioFirestore(_ClienteSemRede(c)).criar(_job_novo()),  # type: ignore[arg-type]
+        "reservar": lambda c: RepositorioDeIdempotenciaFirestore(
+            _ClienteSemRede(c)  # type: ignore[arg-type]
+        ).reservar("s", "k", "imp", "j1", agora),
+        "marcar": lambda c: RepositorioDeIdempotenciaFirestore(
+            _ClienteSemRede(c)  # type: ignore[arg-type]
+        ).marcar_job_gravado("s", "k"),
+    }
+    for nome, chamar in casos.items():
+        colecao = sempre_aborta()
+        with pytest.raises(
+            ServicoIndisponivel, match="Firestore disputado: tente de novo"
+        ):
+            chamar(colecao)
+        assert colecao.criacoes == TENTATIVAS_SOB_DISPUTA, nome
 
 
 class _DocumentoDaReservaVencida:

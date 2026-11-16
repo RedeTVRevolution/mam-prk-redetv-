@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -296,3 +297,37 @@ def test_registro_de_auditoria_pessoa_sistema_e_nome_de_sistema() -> None:
     assert (nome.sistema, nome.motivo, nome.detalhes) == ("Purga automática", "m", {})
     assert len({pessoa.id, chave.id, nome.id}) == 3
     assert all(len(r.id) == 32 for r in (pessoa, chave, nome))
+
+
+@pytest.mark.parametrize(
+    ("total", "limite"), [(5, None), (5, 2), (5, 5), (5, 9), (0, 3)]
+)
+def test_a_pagina_de_jobs_e_a_da_auditoria_cortam_igual(
+    total: int, limite: int | None
+) -> None:
+    from api.auditoria import pagina_de
+    from api.modelo_do_job import PaginaDeJobs
+
+    class Item:
+        def __init__(self, id: str) -> None:
+            self.id = id
+
+    def lidos_ate_o_corte(pagina_com: Any) -> tuple[list[str], str | None, int]:
+        lidos = 0
+
+        def fonte() -> Any:
+            nonlocal lidos
+            for n in range(total):
+                lidos += 1
+                yield Item(f"i{n}")
+
+        pagina = pagina_com(fonte())
+        itens = pagina.jobs if hasattr(pagina, "jobs") else pagina.registros
+        return [i.id for i in itens], pagina.proximo_cursor, lidos
+
+    assert lidos_ate_o_corte(lambda f: PaginaDeJobs.de(f, limite)) == lidos_ate_o_corte(
+        lambda f: pagina_de(f, limite)
+    )
+    ids, cursor, lidos = lidos_ate_o_corte(lambda f: pagina_de(f, limite))
+    if limite is not None and limite < total:
+        assert (len(ids), cursor, lidos) == (limite, f"i{limite - 1}", limite + 1)

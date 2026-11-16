@@ -234,21 +234,29 @@ def espera_sob_disputa(rodada: int) -> float:
     return random.uniform(0, limite)
 
 
-def _repetir_sob_disputa[T](
-    na_transacao: Callable[[Any], T], cliente: firestore.Client
-) -> T:
-    # Com muitas chamadas no mesmo documento, o Firestore esgota as tentativas da
-    # transação (ValueError causado por Aborted). Quem perde começa de novo, depois de
-    # uma espera aleatória, e lê o estado que o vencedor deixou. Outro ValueError (um
-    # Job que não passa no modelo, por exemplo) não é disputa e sobe na hora.
+def _repetir_sob_disputa[T](tentar: Callable[[], T]) -> T:
+    # Com muitas chamadas no mesmo documento, o Firestore aborta a operação (`Aborted`) ou
+    # esgota as tentativas da transação (ValueError causado por Aborted). Quem perde começa
+    # de novo, depois de uma espera aleatória, e lê o estado que o vencedor deixou. Outro
+    # ValueError (um Job que não passa no modelo, por exemplo) não é disputa e sobe na hora.
+    # O que decide dentro do laço (`AlreadyExists`, `NotFound`) fica em `tentar`.
     for rodada in range(TENTATIVAS_SOB_DISPUTA):
         try:
-            return na_transacao(cliente.transaction())
+            return tentar()
         except (ValueError, Aborted) as erro:
             if isinstance(erro, ValueError) and not isinstance(erro.__cause__, Aborted):
                 raise
             time.sleep(espera_sob_disputa(rodada))
     raise ServicoIndisponivel("Firestore disputado: tente de novo")
+
+
+def _criar_ou_existir(referencia: Any, dados: dict[str, Any]) -> bool:
+    """`create` atômico: `True` se gravou, `False` se o documento já existia."""
+    try:
+        referencia.create(dados)
+    except AlreadyExists:
+        return False
+    return True
 
 
 # Limites do Firestore depois de expandir a consulta em forma normal disjuntiva:
@@ -364,19 +372,14 @@ class RepositorioFirestore:
         # `Aborted` não diz que outro gravou: o documento estava travado e o `create`
         # pode ter perdido para outro que também aborta. Repete até um gravar
         # (`AlreadyExists` para os outros).
-        for rodada in range(TENTATIVAS_SOB_DISPUTA):
-            try:
-                _documento(self._colecao, job.id).create(job.model_dump())
-            except AlreadyExists:
-                return False
-            except Aborted:
-                time.sleep(espera_sob_disputa(rodada))
-                continue
-            return True
-        raise ServicoIndisponivel("Firestore disputado: tente de novo")
+        return _repetir_sob_disputa(
+            lambda: _criar_ou_existir(
+                _documento(self._colecao, job.id), job.model_dump()
+            )
+        )
 
     def _sob_disputa(self, na_transacao: Callable[[Any], Job | None]) -> Job | None:
-        return _repetir_sob_disputa(na_transacao, self._cliente)
+        return _repetir_sob_disputa(lambda: na_transacao(self._cliente.transaction()))
 
     def transitar(
         self, job_id: str, de: Estado, mudancas: dict[str, Any]
@@ -673,24 +676,16 @@ class RepositorioDeIdempotenciaFirestore:
         # transação aqui esgotaria as tentativas sob essa disputa e daria 500. Se o
         # Firestore aborta o `create` por disputa (`Aborted`), espera um pouco e tenta o
         # `create` de novo, até criar ou receber `AlreadyExists` e ler a que ficou.
-        for rodada in range(TENTATIVAS_SOB_DISPUTA):
-            try:
-                referencia.create(criada.model_dump())
-                return criada, True
-            except AlreadyExists:
-                pass
-            except Aborted:
-                time.sleep(espera_sob_disputa(rodada))
-                continue
-            doc = referencia.get()
-            if doc.exists:
-                existente = Reserva(**(doc.to_dict() or {}))
-                if existente.expira_em > agora:
-                    conferir(existente, impressao)
-                    return existente, False
-            break
-        else:
-            raise ServicoIndisponivel("Firestore disputado: tente de novo")
+        if _repetir_sob_disputa(
+            lambda: _criar_ou_existir(referencia, criada.model_dump())
+        ):
+            return criada, True
+        doc = referencia.get()
+        if doc.exists:
+            existente = Reserva(**(doc.to_dict() or {}))
+            if existente.expira_em > agora:
+                conferir(existente, impressao)
+                return existente, False
         # Vencida (o TTL do Firestore demora a apagar) ou apagada agora: troca pela nova,
         # na transação, para quem chegar junto ver a que ficou.
 
@@ -707,24 +702,22 @@ class RepositorioDeIdempotenciaFirestore:
 
         # Várias repetições na mesma reserva vencida disputam a transação.
         resultado: tuple[Reserva, bool] = _repetir_sob_disputa(
-            trocar_a_vencida, self._cliente
+            lambda: trocar_a_vencida(self._cliente.transaction())
         )
         return resultado
 
     def marcar_job_gravado(self, escopo: str, chave: str) -> None:
         referencia = self._colecao.document(id_da_reserva(escopo, chave))
+
         # As repetições em paralelo leem a reserva enquanto ela é marcada: o Firestore
         # aborta o `update` por disputa (`Aborted`), e ele é repetido como o `create`.
-        for rodada in range(TENTATIVAS_SOB_DISPUTA):
+        def marcar() -> None:
             try:
                 referencia.update({"job_gravado": True})
             except NotFound:
-                return  # a reserva venceu e o TTL a apagou
-            except Aborted:
-                time.sleep(espera_sob_disputa(rodada))
-                continue
-            return
-        raise ServicoIndisponivel("Firestore disputado: tente de novo")
+                pass  # a reserva venceu e o TTL a apagou
+
+        _repetir_sob_disputa(marcar)
 
 
 class ListasDaBuscaFirestore:
@@ -1081,7 +1074,7 @@ class ProgramasFirestore:
             return novo
 
         resultado: Programa | None = _repetir_sob_disputa(
-            trocar_na_transacao, self._cliente
+            lambda: trocar_na_transacao(self._cliente.transaction())
         )
         return resultado
 
@@ -1114,7 +1107,9 @@ class ProgramasFirestore:
             transacao.set(job_ref, novo.model_dump())
             return novo
 
-        resultado: Job | None = _repetir_sob_disputa(levar, self._cliente)
+        resultado: Job | None = _repetir_sob_disputa(
+            lambda: levar(self._cliente.transaction())
+        )
         return resultado
 
     def apagar(self, id: str) -> None:
@@ -1583,6 +1578,46 @@ def _gravar_os_itens(
     )
 
 
+def _gravar_decupagem(
+    cliente: ClienteStorage, bucket: str, job_id: str, conteudo: str
+) -> None:
+    cliente.bucket(bucket).blob(objeto_da_decupagem(job_id)).upload_from_string(
+        conteudo, content_type="application/json"
+    )
+    _gravar_os_itens(cliente, bucket, job_id, conteudo)
+
+
+def _ler_decupagem(
+    cliente: ClienteStorage, bucket: str, job_id: str
+) -> Decupagem | None:
+    blob = cliente.bucket(bucket).blob(objeto_da_decupagem(job_id))
+    try:
+        return Decupagem.model_validate_json(blob.download_as_bytes())
+    except NotFound:
+        return None
+
+
+def _ler_quadro(
+    cliente: ClienteStorage, bucket: str, job_id: str, caminho: str
+) -> bytes:
+    return bytes(
+        cliente.bucket(bucket)
+        .blob(objeto_do_quadro(job_id, caminho))
+        .download_as_bytes()
+    )
+
+
+def _baixar_se_existir(
+    cliente: ClienteStorage, bucket: str, objeto: str, destino: Path
+) -> bool:
+    """Baixa o objeto para `destino`; `False` se ele não existe."""
+    try:
+        cliente.bucket(bucket).blob(objeto).download_to_filename(str(destino))
+    except NotFound:
+        return False
+    return True
+
+
 class DecupagensStorage:
     """A Decupagem no Cloud Storage e o proxy que o Gemini lê: o mesmo adaptador grava e lê."""
 
@@ -1609,10 +1644,7 @@ class DecupagensStorage:
         return f"gs://{self._aceitos}/{objeto_do_proxy(job_id)}"
 
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
-        self._cliente.bucket(self._decupagens).blob(
-            objeto_da_decupagem(job_id)
-        ).upload_from_string(conteudo, content_type="application/json")
-        _gravar_os_itens(self._cliente, self._decupagens, job_id, conteudo)
+        _gravar_decupagem(self._cliente, self._decupagens, job_id, conteudo)
 
     def abrir_decupagem(self, job_id: str) -> Iterator[bytes]:
         blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
@@ -1624,26 +1656,15 @@ class DecupagensStorage:
             raise ServicoIndisponivel from e
 
     def ler_decupagem(self, job_id: str) -> Decupagem | None:
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
-        try:
-            return Decupagem.model_validate_json(blob.download_as_bytes())
-        except NotFound:
-            return None
+        return _ler_decupagem(self._cliente, self._decupagens, job_id)
 
     def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        return bytes(
-            self._cliente.bucket(self._decupagens)
-            .blob(objeto_do_quadro(job_id, caminho))
-            .download_as_bytes()
-        )
+        return _ler_quadro(self._cliente, self._decupagens, job_id, caminho)
 
     def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
-        blob = self._cliente.bucket(self._aceitos).blob(objeto_da_copia_limpa(job_id))
-        try:
-            blob.download_to_filename(str(destino))
-        except NotFound:
-            return False
-        return True
+        return _baixar_se_existir(
+            self._cliente, self._aceitos, objeto_da_copia_limpa(job_id), destino
+        )
 
 
 class TranscricoesStorage:
@@ -1654,12 +1675,9 @@ class TranscricoesStorage:
         self._aceitos = bucket_de_aceitos
 
     def baixar_audio(self, job_id: str, destino: Path) -> bool:
-        blob = self._cliente.bucket(self._aceitos).blob(objeto_do_audio(job_id))
-        try:
-            blob.download_to_filename(str(destino))
-        except NotFound:
-            return False
-        return True
+        return _baixar_se_existir(
+            self._cliente, self._aceitos, objeto_do_audio(job_id), destino
+        )
 
     def gravar_transcricao(self, job_id: str, transcricao: Transcricao) -> None:
         self._cliente.bucket(self._aceitos).blob(
@@ -1740,18 +1758,10 @@ class ObjetosStorage:
         self._decupagens = bucket_de_decupagens
 
     def ler_decupagem(self, job_id: str) -> Decupagem | None:
-        blob = self._cliente.bucket(self._decupagens).blob(objeto_da_decupagem(job_id))
-        try:
-            return Decupagem.model_validate_json(blob.download_as_bytes())
-        except NotFound:
-            return None
+        return _ler_decupagem(self._cliente, self._decupagens, job_id)
 
     def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        return bytes(
-            self._cliente.bucket(self._decupagens)
-            .blob(objeto_do_quadro(job_id, caminho))
-            .download_as_bytes()
-        )
+        return _ler_quadro(self._cliente, self._decupagens, job_id, caminho)
 
     def gravar_resultado(
         self, job_id: str, resultado: ObjetosDaDecupagem, destino: str | None
@@ -1778,10 +1788,7 @@ class ObjetosStorage:
             return None
 
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
-        self._cliente.bucket(self._decupagens).blob(
-            objeto_da_decupagem(job_id)
-        ).upload_from_string(conteudo, content_type="application/json")
-        _gravar_os_itens(self._cliente, self._decupagens, job_id, conteudo)
+        _gravar_decupagem(self._cliente, self._decupagens, job_id, conteudo)
 
     def gravar_texto(self, objeto: str, conteudo: str) -> None:
         """Um JSON solto no bucket das decupagens (a medição do Florence-2, #329)."""
@@ -1928,11 +1935,7 @@ class ArmazenamentoStorage:
         return url
 
     def ler_quadro(self, job_id: str, caminho: str) -> bytes:
-        return bytes(
-            self._cliente.bucket(self._decupagens)
-            .blob(objeto_do_quadro(job_id, caminho))
-            .download_as_bytes()
-        )
+        return _ler_quadro(self._cliente, self._decupagens, job_id, caminho)
 
     def url_do_quadro(self, job_id: str, caminho: str, validade: timedelta) -> str:
         """A mesma URL para o mesmo quadro dentro da janela; um quadro regravado no meio

@@ -3,7 +3,6 @@
 A interface tem acrescentar e consultar; nada altera nem apaga um registro.
 """
 
-import itertools
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,7 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 
 from api.auth import Sistema, Usuario
-from api.modelo_do_job import CursorInvalido
+from api.modelo_do_job import CursorInvalido, um_alem_do_limite
 from api.permissoes import exige
 from api.texto_como_dado import LinhaDaConsulta
 
@@ -187,13 +186,7 @@ class RepositorioDeAuditoriaEmMemoria:
 
 def pagina_de(registros: Any, limite: int | None) -> PaginaDeAuditoria:
     """Corta os registros já filtrados e em ordem; só lê um além do limite."""
-    if limite is None:
-        return PaginaDeAuditoria(list(registros))
-    lidos = list(itertools.islice(registros, limite + 1))
-    if len(lidos) <= limite:
-        return PaginaDeAuditoria(lidos)
-    pagina = lidos[:limite]
-    return PaginaDeAuditoria(pagina, pagina[-1].id)
+    return PaginaDeAuditoria(*um_alem_do_limite(registros, limite))
 
 
 def criar_rotas_da_auditoria(repositorio: RepositorioDeAuditoria) -> APIRouter:
