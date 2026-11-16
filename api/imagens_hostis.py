@@ -16,7 +16,7 @@ from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit
 
 import requests
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 HOST_DO_THUMBNAIL = "encrypted-tbn0.gstatic.com"
 FORMATOS_ACEITOS = {"JPEG", "PNG", "WEBP"}
@@ -85,7 +85,9 @@ def recodificar(
             if largura * altura > max_pixels:
                 raise AcimaDoLimiteDePixels
             imagem.load()
-            colorida = imagem.convert("RGBA")
+            # O celular grava o retrato deitado com `Orientation`; como o EXIF não
+            # sai daqui, o giro tem de ser aplicado antes de descartá-lo.
+            colorida = ImageOps.exif_transpose(imagem).convert("RGBA")
     except (
         UnidentifiedImageError,
         Image.DecompressionBombError,

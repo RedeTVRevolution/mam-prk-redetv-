@@ -101,6 +101,84 @@ def test_o_jpeg_regravado_nao_tem_metadados() -> None:
     assert depois.size == (64, 48)
 
 
+def quadrantes() -> Image.Image:
+    """64x32 com um canto de cada cor: denuncia qualquer giro ou espelhamento."""
+    img = Image.new("RGB", (64, 32))
+    for i, cor in enumerate([(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]):
+        img.paste(
+            cor, ((i % 2) * 32, (i // 2) * 16, (i % 2) * 32 + 32, (i // 2) * 16 + 16)
+        )
+    return img
+
+
+# Orientação EXIF -> operação que a põe em pé (tabela da especificação do EXIF).
+GIROS: dict[int, Image.Transpose | None] = {
+    1: None,
+    2: Image.Transpose.FLIP_LEFT_RIGHT,
+    3: Image.Transpose.ROTATE_180,
+    4: Image.Transpose.FLIP_TOP_BOTTOM,
+    5: Image.Transpose.TRANSPOSE,
+    6: Image.Transpose.ROTATE_270,
+    7: Image.Transpose.TRANSVERSE,
+    8: Image.Transpose.ROTATE_90,
+}
+
+
+def com_orientacao(img: Image.Image, orientacao: int) -> bytes:
+    exif = Image.Exif()
+    exif[0x0112] = orientacao
+    saida = io.BytesIO()
+    img.save(saida, format="JPEG", quality=95, exif=exif)
+    return saida.getvalue()
+
+
+def test_foto_em_retrato_do_celular_sai_em_pe() -> None:
+    entrada = com_orientacao(Image.new("RGB", (400, 200), (200, 30, 30)), 6)
+
+    saida = Image.open(
+        io.BytesIO(recodificar(entrada, max_bytes=10**6, max_pixels=10**6))
+    )
+
+    assert saida.size == (200, 400)
+
+
+@pytest.mark.parametrize("orientacao", range(1, 9))
+def test_as_oito_orientacoes_do_exif_saem_na_orientacao_certa(orientacao: int) -> None:
+    original = quadrantes()
+    giro = GIROS[orientacao]  # FLIP_LEFT_RIGHT vale 0: comparar com None
+    esperado = original if giro is None else original.transpose(giro)
+
+    saida = Image.open(
+        io.BytesIO(
+            recodificar(
+                com_orientacao(original, orientacao),
+                max_bytes=10**6,
+                max_pixels=10**6,
+            )
+        )
+    ).convert("RGB")
+
+    assert saida.size == esperado.size
+    largura, altura = esperado.size
+    for x, y in [
+        (largura // 4, altura // 4),
+        (3 * largura // 4, altura // 4),
+        (largura // 4, 3 * altura // 4),
+        (3 * largura // 4, 3 * altura // 4),
+    ]:
+        real, previsto = saida.getpixel((x, y)), esperado.getpixel((x, y))
+        assert isinstance(real, tuple) and isinstance(previsto, tuple)
+        assert all(abs(a - b) < 40 for a, b in zip(real, previsto, strict=True))
+    assert len(saida.getexif()) == 0
+
+
+def test_conferencia_de_pixels_usa_o_tamanho_original_com_orientacao() -> None:
+    entrada = com_orientacao(Image.new("RGB", (400, 200)), 6)
+
+    with pytest.raises(ImagemRecusada, match="pixels"):
+        recodificar(entrada, max_bytes=10**6, max_pixels=79_999)
+
+
 def test_png_e_webp_viram_jpeg() -> None:
     for formato in ("PNG", "WEBP"):
         saida = recodificar(imagem(formato), max_bytes=10**6, max_pixels=10**6)
