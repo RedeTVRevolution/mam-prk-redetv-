@@ -2,8 +2,10 @@
 
 from datetime import UTC, datetime, timedelta
 
-from api.eventos_de_uso import EventosEmMemoria
-from api.eventos_do_job import PublicadorEmMemoria
+import pytest
+
+from api.eventos_de_uso import EventoDeUso, EventosEmMemoria
+from api.eventos_do_job import MensagemDeEvento, PublicadorEmMemoria
 from api.fim_do_job import avisar_o_fim, main
 from api.jobs import RepositorioEmMemoria
 from api.modelo_do_job import Job
@@ -136,3 +138,113 @@ def test_tempo_esgotado_na_validacao_tambem_monta_o_evento_de_fim() -> None:
     assert mensagem.evento.codigo_falha == "processamento_demorou_demais"
     (evento,) = m.eventos.publicados
     assert evento.codigo_falha == "processamento_demorou_demais"
+
+
+class _FalhaNoPubSub(Exception):
+    pass
+
+
+class PublicadorQueFalha(PublicadorEmMemoria):
+    def __init__(self, falhas: int) -> None:
+        super().__init__()
+        self.falhas = falhas
+
+    def publicar(self, mensagem: MensagemDeEvento) -> None:
+        if self.falhas:
+            self.falhas -= 1
+            raise _FalhaNoPubSub
+        super().publicar(mensagem)
+
+
+class EventosQueFalham(EventosEmMemoria):
+    def __init__(self, falhas: int) -> None:
+        super().__init__()
+        self.falhas = falhas
+
+    def publicar(self, evento: EventoDeUso) -> None:
+        if self.falhas:
+            self.falhas -= 1
+            raise _FalhaNoPubSub
+        super().publicar(evento)
+
+
+def _marcado(m: Mundo) -> bool:
+    return m.jobs.obter("job-1").fim_avisado_no_reprocessamento == 0  # type: ignore[union-attr]
+
+
+def test_falha_no_segundo_evento_repete_so_o_que_nao_saiu() -> None:
+    m = Mundo()
+    m.eventos = EventosQueFalham(1)
+
+    with pytest.raises(_FalhaNoPubSub):
+        m.avisar()
+    assert len(m.publicador.mensagens) == 1 and m.eventos.publicados == []
+    assert not _marcado(m)
+
+    assert m.avisar() is True
+
+    assert len(m.publicador.mensagens) == 1
+    assert len(m.eventos.publicados) == 1
+    assert _marcado(m)
+
+
+def test_falha_no_primeiro_evento_nao_marca_e_a_repeticao_envia_os_dois() -> None:
+    m = Mundo()
+    m.publicador = PublicadorQueFalha(1)
+
+    with pytest.raises(_FalhaNoPubSub):
+        m.avisar()
+    assert m.eventos.publicados == [] and not _marcado(m)
+
+    m.avisar()
+
+    assert len(m.publicador.mensagens) == 1 and len(m.eventos.publicados) == 1
+
+
+def test_o_webhook_do_mesmo_fim_tem_o_mesmo_id_nas_duas_tentativas() -> None:
+    m = Mundo()
+    ids = []
+    for _ in range(2):
+        # A marcação falha depois de publicar: a repetição publica de novo.
+        m.jobs.trocar(
+            "job-1", lambda j: {"fim_webhook_enviado_no_reprocessamento": None}
+        )
+        m.avisar()
+        m.jobs.trocar("job-1", lambda j: {"fim_avisado_no_reprocessamento": None})
+        ids.append(m.publicador.mensagens[-1].evento.id)
+
+    assert ids[0] == ids[1]
+
+
+def test_publicador_falhando_sempre_faz_o_main_sair_com_erro_sem_marcar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    m = Mundo()
+    m.publicador = PublicadorQueFalha(99)
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "JOB_ID": "job-1",
+        "PUBSUB_TOPICO_EVENTOS": "t",
+        "PUBSUB_TOPICO_USO": "u",
+    }
+    from api import fim_do_job
+
+    monkeypatch.setattr(fim_do_job, "cliente_do_firestore", lambda *a, **k: None)
+    monkeypatch.setattr(
+        fim_do_job,
+        "_dependencias",
+        lambda cliente, amb: (m.jobs, m.webhooks, m.publicador, m.eventos),
+    )
+
+    assert fim_do_job.main(ambiente) == 1
+    assert not _marcado(m)
+
+
+def test_sem_webhook_cadastrado_nao_e_erro_e_marca() -> None:
+    m = Mundo(_job(sistema="Outro"))
+
+    assert m.avisar() is True
+
+    assert m.publicador.mensagens == []
+    assert len(m.eventos.publicados) == 1
+    assert _marcado(m)
