@@ -6,7 +6,7 @@ texto em português.
 
 import copy
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from functools import partial
 from typing import Annotated, Any
 
@@ -193,6 +193,12 @@ def _pedir_com_uma_rodada_extra[R: BaseModel](
     return planos
 
 
+def _sem_pedido(decupagem: Decupagem, pedidos: Collection[int]) -> Inventarios:
+    """Sem chave fica só o plano que o modelo seguiu omitindo (#692): o que não foi pedido
+    (sem quadros) fica vazio, e o respondido ganha a chave depois."""
+    return {i: [] for i in range(len(decupagem.planos)) if i not in pedidos}
+
+
 def _caixa_do_quadro(caminho: str, caixa: Caixa) -> CaixaDoQuadro:
     def preso(v: float) -> float:
         return min(max(v, 0.0), 1.0)
@@ -324,11 +330,7 @@ def converter_do_florence(
     por_plano: dict[int, list[Any]] = {}
     for q in bruto.quadros:
         por_plano.setdefault(q.plano, []).append(q)
-    # Sem chave fica só o plano que o modelo seguiu omitindo (#692): o que não foi pedido
-    # (sem quadros) fica vazio, e o respondido ganha a chave abaixo.
-    inventarios: Inventarios = {
-        i: [] for i in range(len(decupagem.planos)) if i not in por_plano
-    }
+    inventarios = _sem_pedido(decupagem, set(por_plano))
     esquema = esquema_obrigatorio(RespostaConvertida)
     lotes = _lotes(
         [i for i in range(len(decupagem.planos)) if i in por_plano], planos_por_lote
@@ -398,10 +400,7 @@ def olhar_com_gemini(
     Os planos que o modelo segue omitindo ficam sem chave no resultado (#692)."""
     com_quadros = [i for i, p in enumerate(decupagem.planos) if p.quadros]
     pedidos = set(com_quadros)
-    # Sem chave fica só o plano que o modelo seguiu omitindo (#692).
-    inventarios: Inventarios = {
-        i: [] for i in range(len(decupagem.planos)) if i not in pedidos
-    }
+    inventarios = _sem_pedido(decupagem, pedidos)
     esquema = esquema_obrigatorio(RespostaVista)
 
     def olhar(lote: list[int]) -> RespostaVista:

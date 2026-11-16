@@ -1,6 +1,6 @@
 # Levantamento: o que a API precisa para rodar no ar (#273)
 
-Comparação das seções "API e segurança" e "Resiliência e duplicidade" do `docs/Plano_MAM.md` com o código (`api/webhook.py`, `api/registrar_webhook.py`, as rotas `/v1`) e com o `infra/`. O texto serve de lista para o PR.
+Comparação das seções "API e segurança" e "Resiliência e duplicidade" do `docs/Plano_MAM.md` com o código (`api/webhook.py`, `registrar_webhook` e `registrar_webhook_main` em `api/webhook.py`, as rotas `/v1`) e com o `infra/`. O texto serve de lista para o PR.
 
 ## Entrou neste ticket
 

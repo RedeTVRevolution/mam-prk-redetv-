@@ -9,6 +9,7 @@ regravada em JPEG sem metadados: o que sai daqui nunca é o arquivo que veio da 
 
 import io
 import ipaddress
+import logging
 import socket
 import time
 from collections.abc import Callable, Iterator
@@ -53,6 +54,8 @@ class SessaoDeDownload(Protocol):
     def get(self, url: str, **kwargs: Any) -> Any: ...
 
 
+log = logging.getLogger(__name__)
+
 Resolvedor = Callable[[str], list[str]]
 
 
@@ -71,7 +74,10 @@ def _em_pe(imagem: Image.Image) -> Image.Image:
     (SyntaxError, TypeError, struct.error...), a imagem segue sem girar."""
     try:
         return ImageOps.exif_transpose(imagem)
-    except Exception:  # noqa: BLE001 - EXIF hostil: qualquer falha vale "sem girar"
+    except Exception as e:  # noqa: BLE001 - EXIF hostil: qualquer falha vale "sem girar"
+        log.warning(
+            "EXIF ilegível, a imagem segue sem girar (%s)", type(e).__qualname__
+        )
         return imagem
 
 

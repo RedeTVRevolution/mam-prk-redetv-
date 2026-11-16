@@ -281,7 +281,7 @@ Regra para todo texto que entra pela API (corpo, consulta, id de caminho e os ca
 O `florence.json` que o Job de objetos grava em `<job>/objetos/`, com, por quadro-chave de cada plano, os objetos detectados (rótulo e caixa normalizada de 0 a 1) e as regiões com legenda, mais o modelo e a revisão. É a matéria-prima do inventário de objetos de cena; ainda não é a lista `objetos` da Decupagem.
 
 **Inventário de objetos**:
-Os objetos de cena de cada plano (`Plano.inventario`), separados de `objetos` (o que a pessoa veste ou segura): nome curto, categoria, cor, marca (só se a legenda citar), as caixas por quadro e o destaque, tudo em português. É preenchido pelo servidor na etapa `inventario_de_objetos`, nunca pela análise. Os objetos de cena usam as categorias `veiculo`, `eletronico`, `produto`, `animal`, `alimento`, `bebida`, `movel`, `decoracao`, `instrumento_musical`, `utensilio`, `documento` e `planta`.
+Os objetos de cena de cada plano (`Plano.inventario`), separados de `objetos` (o que a pessoa veste ou segura): nome curto, categoria, cor, marca (só se a legenda citar), as caixas por quadro e o destaque, tudo em português. É preenchido pelo servidor na etapa `inventario_de_objetos`, nunca pela análise. Os objetos de cena usam as categorias `veiculo`, `eletronico`, `produto`, `animal`, `alimento`, `bebida`, `movel`, `decoracao`, `instrumento_musical`, `utensilio`, `documento` e `planta`. `Plano.inventariado` é falso quando o modelo seguiu omitindo o plano mesmo depois da rodada extra (#692): o plano fica com inventário vazio e marcado, para não passar por plano sem objetos.
 _Evitar_: lista de objetos, detecções
 
 **Destaque**:

@@ -447,3 +447,26 @@ def test_original_que_pinga_um_byte_por_vez_para_no_prazo() -> None:
             relogio=lambda: next(tempo),
         )
     assert lento.raw.leituras <= 12
+
+
+def test_exif_que_levanta_ao_girar_deixa_aviso_e_a_imagem_segue_sem_girar(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def explode(_: Image.Image) -> Image.Image:
+        raise struct.error("exif hostil")
+
+    monkeypatch.setattr("api.imagens_hostis.ImageOps.exif_transpose", explode)
+
+    with caplog.at_level("WARNING", logger="api.imagens_hostis"):
+        saida = Image.open(
+            io.BytesIO(
+                recodificar(
+                    imagem("JPEG", tamanho=(16, 8)), max_bytes=10**6, max_pixels=10**6
+                )
+            )
+        )
+
+    assert saida.size == (16, 8)
+    assert [r.getMessage() for r in caplog.records] == [
+        "EXIF ilegível, a imagem segue sem girar (struct.error)"
+    ]
