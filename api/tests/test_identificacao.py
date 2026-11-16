@@ -7,7 +7,7 @@ import pytest
 
 from api.analise_por_janelas import analisar_video
 from api.catalogo import CatalogoEmMemoria
-from api.decupagem import Decupagem, Video
+from api.decupagem import VERSAO_ESQUEMA, Decupagem, Video
 from api.identificacao import (
     Candidato,
     candidatos_do_video,
@@ -383,7 +383,7 @@ def test_leaozinho_dito_com_o_homem_de_barba_na_imagem_confirma_leao_lobo() -> N
     )
     [leao] = catalogo.achar("Leão Lobo")
     assert p.catalogo_id == leao.id
-    assert d.versao_esquema == "1.5"
+    assert d.versao_esquema == VERSAO_ESQUEMA
 
 
 def test_nelson_rubens_com_fala_e_contexto_sem_o_nome_no_whisper_vira_palpite() -> None:
