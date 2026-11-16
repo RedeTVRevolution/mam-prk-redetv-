@@ -134,14 +134,16 @@ def _falas_do_grupo(
     """As palavras de um locutor; um grupo longo demais vira mais de uma fala."""
     falas: list[Fala] = []
     atual: list[Palavra] = []
-    tamanho = 0
+    corrigido = original = 0  # tamanhos dos dois textos; qualquer um corta o grupo
     for p in ps:
-        mais = len(troca.get(id(p), p.texto)) + 1
-        if atual and tamanho + mais > _CARACTERES_POR_FALA:
+        mais_c = len(troca.get(id(p), p.texto)) + 1
+        mais_o = len(p.texto) + 1
+        if atual and max(corrigido + mais_c, original + mais_o) > _CARACTERES_POR_FALA:
             falas.append(_fala(locutor, atual, troca, limite_ms))
-            atual, tamanho = [], 0
+            atual, corrigido, original = [], 0, 0
         atual.append(p)
-        tamanho += mais
+        corrigido += mais_c
+        original += mais_o
     if atual:
         falas.append(_fala(locutor, atual, troca, limite_ms))
     return falas
