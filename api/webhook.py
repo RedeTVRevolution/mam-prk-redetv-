@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict
 
 from api.espera import espera_com_jitter, sorteio_uniforme
-from api.modelo_do_job import CodigoDeFalha, Job
+from api.modelo_do_job import FIM, CodigoDeFalha, Job
 
 REENTREGAS = 8  # novas tentativas depois da primeira
 ESPERA_BASE_S = 5.0
@@ -195,15 +195,16 @@ def montar_evento(
 ) -> Evento | None:
     """Evento de um job que terminou, se o sistema dono tem webhook. Job de pessoa
     e job cancelado não geram evento."""
-    if job.sistema is None or job.estado not in ("concluido", "falhou"):
+    if job.sistema is None or job.estado not in FIM:
         return None
     if repositorio.obter(job.sistema) is None:
         return None
+    concluido = job.estado == "concluido"
     return Evento(
         id=str(uuid.uuid4()),
-        tipo="job.concluido" if job.estado == "concluido" else "job.falhou",
+        tipo="job.concluido" if concluido else "job.falhou",
         job_id=job.id,
-        estado=job.estado,
+        estado="concluido" if concluido else "falhou",
         codigo_falha=job.codigo_falha,
         data=agora,
     )

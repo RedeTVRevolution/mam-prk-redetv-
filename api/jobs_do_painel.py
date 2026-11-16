@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, parametro, transporte_http
-from api.modelo_do_job import Job, RepositorioDeJobs
+from api.modelo_do_job import FIM_OU_CANCELADO, Job, RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
 
 log = logging.getLogger(__name__)
@@ -37,15 +37,12 @@ class LinhaDoJob:
     atualizado_em: datetime
 
 
-ESTADOS_DE_FIM = ("concluido", "falhou", "cancelado")
-
-
 def linha_do_job(job: Job) -> LinhaDoJob:
     """Os campos que a Revisão e o Custo usam. O dono é o sistema, ou quem criou o Job
     (o mesmo `quem` do evento de uso); `concluido_em` só existe depois do fim. O estado
     segue o vocabulário da consulta agendada: antes do fim, `em_andamento`."""
     sistema = job.sistema is not None
-    fim = job.estado in ESTADOS_DE_FIM
+    fim = job.estado in FIM_OU_CANCELADO
     return LinhaDoJob(
         id=job.id,
         programa=job.programa,

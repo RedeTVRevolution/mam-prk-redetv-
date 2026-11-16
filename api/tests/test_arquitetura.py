@@ -235,3 +235,15 @@ def test_pega_import_do_nome_antigo() -> None:
         "from api.correcoes import sem_controle\nfrom api.busca import _intercalar\n",
         NOMES_QUE_DEIXARAM_DE_SER_PRIVADOS,
     )
+
+
+def test_estados_de_fim_cobrem_o_ciclo_de_vida() -> None:
+    from typing import get_args
+
+    from api.ciclo_de_vida import FINAIS
+    from api.modelo_do_job import FIM, FIM_OU_CANCELADO, Estado
+    from api.painel import ESTADOS_DA_FILA
+
+    assert FINAIS == FIM_OU_CANCELADO
+    assert FIM < FIM_OU_CANCELADO
+    assert set(ESTADOS_DA_FILA) | FIM_OU_CANCELADO == set(get_args(Estado))
