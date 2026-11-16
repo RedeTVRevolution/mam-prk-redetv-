@@ -9,10 +9,16 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
-from api.auth import Chamador, ChamadorAutenticado, Escopo, Sistema, Usuario
+from api.auth import (
+    Chamador,
+    ChamadorAutenticado,
+    Escopo,
+    Sistema,
+    Usuario,
+    papeis_guardados,
+)
 from api.modelo_do_job import Job, RepositorioDeJobs
 from api.papeis import (
-    DocumentoDePapeis,
     Papel,
     Permissao,
     RepositorioDePapeis,
@@ -30,9 +36,7 @@ PERMISSAO_DO_ESCOPO: dict[Escopo, Permissao] = {
 
 def papeis_da_pessoa(request: Request, pessoa: Usuario) -> list[Papel]:
     """Os papéis efetivos, num ponto só para o `/v1/eu` e as rotas nunca discordarem."""
-    guardado: DocumentoDePapeis | None = getattr(
-        request.state, "papeis_guardados", None
-    )
+    guardado = papeis_guardados(request)
     if guardado is not None and guardado.uid == pessoa.uid:
         # Lido pelo middleware neste pedido; só vale para quem pediu.
         guardados = guardado.papeis

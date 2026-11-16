@@ -5,7 +5,6 @@ devolve, e a chave em texto sai uma única vez, na resposta da emissão. A audit
 registra o sistema, o id e os escopos, nunca a chave.
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
@@ -13,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Escopo, Usuario
 from api.chaves import (
     LimiteDeChavesAtivas,
@@ -103,11 +102,9 @@ def criar_rotas_das_chaves(
 
     def registrar(autor: Usuario, acao: Acao, registro: RegistroDeChave) -> None:
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=relogio(),
-                uid=autor.uid,
-                email=autor.email,
+                quem=autor,
                 acao=acao,
                 alvo_tipo="chave",
                 alvo_id=registro.id,

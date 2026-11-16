@@ -8,8 +8,9 @@ from api.auditoria import (
     FiltroDeAuditoria,
     RegistroDeAuditoria,
     RepositorioDeAuditoriaEmMemoria,
+    registro_de_auditoria,
 )
-from api.auth import Usuario
+from api.auth import Sistema, Usuario
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -269,3 +270,29 @@ def test_chave_de_sistema_nao_consulta_a_auditoria() -> None:
     resposta = cliente.get("/v1/admin/auditoria", headers={"X-API-Key": emitida.chave})
 
     assert resposta.status_code == 403
+
+
+def test_registro_de_auditoria_pessoa_sistema_e_nome_de_sistema() -> None:
+    alvo = {
+        "acao": "chave.emitida",
+        "alvo_tipo": "chave",
+        "alvo_id": "c",
+        "alvo_nome": "n",
+    }
+    pessoa = registro_de_auditoria(
+        Usuario(uid="u1", email="Ana@RedeTV.com"),
+        BASE,
+        **alvo,  # type: ignore[arg-type]
+    )
+    chave = registro_de_auditoria(
+        Sistema(sistema="Playout", escopos=["ler"]),
+        BASE,
+        **alvo,  # type: ignore[arg-type]
+    )
+    nome = registro_de_auditoria("Purga automática", BASE, **alvo, motivo="m")  # type: ignore[arg-type]
+
+    assert (pessoa.uid, pessoa.email, pessoa.sistema) == ("u1", "ana@redetv.com", None)
+    assert (chave.uid, chave.email, chave.sistema) == (None, None, "Playout")
+    assert (nome.sistema, nome.motivo, nome.detalhes) == ("Purga automática", "m", {})
+    assert len({pessoa.id, chave.id, nome.id}) == 3
+    assert all(len(r.id) == 32 for r in (pessoa, chave, nome))

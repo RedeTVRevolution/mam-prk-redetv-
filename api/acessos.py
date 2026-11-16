@@ -6,12 +6,16 @@ nova abertura. O download grava um registro por pedido, antes de a URL sair.
 """
 
 import logging
-import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Literal
 
-from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import (
+    FiltroDeAuditoria,
+    RegistroDeAuditoria,
+    RepositorioDeAuditoria,
+    registro_de_auditoria,
+)
 from api.auth import Chamador, Sistema
 from api.erros import ServicoIndisponivel
 from api.jobs import AcaoDeDownload
@@ -20,12 +24,6 @@ from api.modelo_do_job import Job
 JANELA_DA_ABERTURA = timedelta(minutes=30)
 
 log = logging.getLogger(__name__)
-
-
-def _quem(chamador: Chamador) -> dict[str, Any]:
-    if isinstance(chamador, Sistema):
-        return {"sistema": chamador.sistema}
-    return {"uid": chamador.uid, "email": chamador.email}
 
 
 def _e_dele(r: RegistroDeAuditoria, chamador: Chamador) -> bool:
@@ -50,10 +48,9 @@ class AcessosNaAuditoria:
         agora: datetime,
     ) -> None:
         self._auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=agora,
-                **_quem(chamador),
+                quem=chamador,
                 acao=acao,
                 alvo_tipo="job",
                 alvo_id=job.id,

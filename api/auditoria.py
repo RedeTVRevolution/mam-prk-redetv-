@@ -4,6 +4,7 @@ A interface tem acrescentar e consultar; nada altera nem apaga um registro.
 """
 
 import itertools
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal, Protocol, get_args
@@ -12,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, field_validator, model_validator
 
-from api.auth import Usuario
+from api.auth import Sistema, Usuario
 from api.modelo_do_job import CursorInvalido
 from api.permissoes import exige
 from api.texto_como_dado import LinhaDaConsulta
@@ -79,6 +80,36 @@ class RegistroDeAuditoria(BaseModel):
         if so_parte or pessoa == (self.sistema is not None):
             raise ValueError("quem fez é a pessoa (uid e e-mail) ou o sistema")
         return self
+
+
+def registro_de_auditoria(
+    quem: Usuario | Sistema | str,
+    quando: datetime,
+    acao: Acao,
+    alvo_tipo: str,
+    alvo_id: str,
+    alvo_nome: str,
+    motivo: str | None = None,
+    detalhes: dict[str, Any] | None = None,
+) -> RegistroDeAuditoria:
+    """O registro de uma ação: quem fez (pessoa ou sistema), o alvo e o `id` novo."""
+    # Texto é o nome de um sistema sem chave (purga automática, comandos do `make`).
+    de_quem = (
+        {"uid": quem.uid, "email": quem.email}
+        if isinstance(quem, Usuario)
+        else {"sistema": quem if isinstance(quem, str) else quem.sistema}
+    )
+    return RegistroDeAuditoria(
+        id=uuid.uuid4().hex,
+        quando=quando,
+        **de_quem,
+        acao=acao,
+        alvo_tipo=alvo_tipo,
+        alvo_id=alvo_id,
+        alvo_nome=alvo_nome,
+        motivo=motivo,
+        detalhes=detalhes or {},
+    )
 
 
 @dataclass(frozen=True)

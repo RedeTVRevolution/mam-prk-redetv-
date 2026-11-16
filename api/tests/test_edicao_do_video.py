@@ -224,3 +224,14 @@ def test_repetir_o_mesmo_pedido_depois_do_503_dispara_a_indexacao() -> None:
     assert resposta.status_code == 200
     assert mundo.disparo.ids == ["j1"]
     assert len(mundo.auditoria.consultar(FiltroDeAuditoria()).registros) == 1
+
+
+@pytest.mark.parametrize("data", ["2026-11-05", "2026-01-02", "2025-12-31"])
+def test_mes_da_edicao_e_o_que_o_validador_do_job_deriva(data: str) -> None:
+    mundo = Mundo()
+
+    mundo.editar({"data_exibicao": data})
+
+    job = mundo.job()
+    assert job.mes_exibicao == _job(data_exibicao=data).mes_exibicao
+    assert job.mes_exibicao == _job(data_exibicao=date.fromisoformat(data)).mes_exibicao

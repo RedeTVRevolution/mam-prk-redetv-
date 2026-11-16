@@ -181,8 +181,23 @@ async def exigir_autenticacao(
     return await seguinte(request)
 
 
+def chamador_do_pedido(request: Request) -> Chamador | None:
+    """Quem o middleware autenticou; `None` fora de `/v1` ou antes dele."""
+    chamador: Chamador | None = getattr(request.state, "chamador", None)
+    return chamador
+
+
+def papeis_guardados(request: Request) -> DocumentoDePapeis | None:
+    """O documento de papéis que o middleware leu neste pedido (só de pessoa)."""
+    documento: DocumentoDePapeis | None = getattr(
+        request.state, "papeis_guardados", None
+    )
+    return documento
+
+
 def chamador_autenticado(request: Request) -> Chamador:
-    chamador: Chamador = request.state.chamador
+    chamador = chamador_do_pedido(request)
+    assert chamador is not None, "rota de /v1 sem o middleware de autenticação"
     return chamador
 
 

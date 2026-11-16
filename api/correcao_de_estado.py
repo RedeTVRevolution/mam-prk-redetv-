@@ -12,7 +12,6 @@ Comando: `make corrigir-estado JOB=... ESTADO=... MOTIVO=...`. Ambiente:
 import getpass
 import os
 import sys
-import uuid
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Annotated, cast, get_args
@@ -21,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.bancos import cliente_do_firestore
 from api.ciclo_de_vida import (
@@ -60,10 +59,10 @@ def corrigir_estado_com_rastro(
     motivo: str,
     agora: datetime,
     *,
-    autor: dict[str, str],
+    autor: Usuario | str,
 ) -> Job | None:
     """O Job de depois, ou `None` se não existe. `EstadoNaoCorrigivel` sobe.
-    `autor` é `uid` e `email` ou `sistema`."""
+    `autor` é a pessoa ou o nome do sistema."""
     trocado = corrigir_estado(
         repositorio,
         job_id,
@@ -77,10 +76,9 @@ def corrigir_estado_com_rastro(
     antes, depois = trocado
     try:
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=agora,
-                **autor,
+                quem=autor,
                 acao="job.estado_corrigido",
                 alvo_tipo="job",
                 alvo_id=depois.id,
@@ -130,7 +128,7 @@ def criar_rotas_da_correcao_de_estado(
                 pedido.estado,
                 pedido.motivo,
                 relogio(),
-                autor={"uid": pessoa.uid, "email": pessoa.email},
+                autor=pessoa,
             )
         except EstadoNaoCorrigivel as erro:
             raise HTTPException(409, str(erro)) from None
@@ -168,7 +166,7 @@ def main(
             cast(DestinoDaCorrecao, estado),
             motivo,
             relogio(),
-            autor={"sistema": f"{SISTEMA}:{quem or getpass.getuser()}"},
+            autor=f"{SISTEMA}:{quem or getpass.getuser()}",
         )
     except EstadoNaoCorrigivel as erro:
         escrever(f"recusado: {erro}")

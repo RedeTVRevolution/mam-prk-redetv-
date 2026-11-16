@@ -5,7 +5,6 @@ de aprovação" (`/v1/admin/aprovacao`). Vazia por padrão: nada exige aprovaç�
 mudança vale na hora para as correções novas; as pendentes continuam pendentes.
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
@@ -13,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.correcoes import CORRIGIVEIS, RepositorioDeAprovacao, rotulos_dos_tipos
 from api.permissoes import exige
@@ -88,11 +87,9 @@ def criar_rotas_da_aprovacao(
         repositorio.mudar(pedido.tipo, pedido.exige_aprovacao)
         try:
             auditoria.acrescentar(
-                RegistroDeAuditoria(
-                    id=uuid.uuid4().hex,
+                registro_de_auditoria(
                     quando=relogio(),
-                    uid=pessoa.uid,
-                    email=pessoa.email,
+                    quem=pessoa,
                     acao="aprovacao.alterada",
                     alvo_tipo="tipo_de_correcao",
                     alvo_id=pedido.tipo,

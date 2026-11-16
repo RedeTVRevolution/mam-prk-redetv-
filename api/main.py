@@ -43,6 +43,7 @@ from api.auth import (
     VerificadorDeChave,
     VerificadorDeToken,
     VerificadorIdentityPlatform,
+    chamador_do_pedido,
     exigir_autenticacao,
 )
 from api.bancos import cliente_da_colecao, cliente_do_firestore
@@ -438,7 +439,7 @@ def criar_app(
         request: Request, seguinte: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         resposta = await seguinte(request)
-        chamador = getattr(request.state, "chamador", None)
+        chamador = chamador_do_pedido(request)
         if isinstance(chamador, Sistema):
             # O caminho da rota, com `{job_id}` em vez do valor, e com o prefixo.
             rota = getattr(request.scope.get("route"), "path", None)

@@ -7,7 +7,6 @@ A conta nunca é apagada, porque as correções guardam o autor. Cada ação dei
 registro na auditoria.
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Literal, Protocol
@@ -24,8 +23,8 @@ from pydantic import (
 from api.auditoria import (
     Acao,
     FiltroDeAuditoria,
-    RegistroDeAuditoria,
     RepositorioDeAuditoria,
+    registro_de_auditoria,
 )
 from api.auth import Usuario
 from api.erros import ServicoIndisponivel
@@ -219,11 +218,9 @@ def criar_rotas_dos_usuarios(
         detalhes: dict[str, object] | None = None,
     ) -> None:
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=relogio(),
-                uid=autor.uid,
-                email=autor.email,
+                quem=autor,
                 acao=acao,
                 alvo_tipo="usuario",
                 alvo_id=conta.uid,

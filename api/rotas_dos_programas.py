@@ -31,7 +31,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, field_validator
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.catalogo import (
     AndamentoDaRenomeacao,
@@ -193,11 +193,9 @@ def criar_rotas_dos_programas(
         sem = {"renomeacao"}
         try:
             auditoria.acrescentar(
-                RegistroDeAuditoria(
-                    id=uuid.uuid4().hex,
+                registro_de_auditoria(
                     quando=relogio(),
-                    uid=autor.uid,
-                    email=autor.email,
+                    quem=autor,
                     acao=acao,
                     alvo_tipo="programa",
                     alvo_id=programa.id,
@@ -464,11 +462,9 @@ def criar_rotas_dos_programas(
             log.warning("troca %s do programa %s retomada sem confirmar", r.id, id)
             try:
                 auditoria.acrescentar(
-                    RegistroDeAuditoria(
-                        id=uuid.uuid4().hex,
+                    registro_de_auditoria(
                         quando=relogio(),
-                        uid=autor.uid,
-                        email=autor.email,
+                        quem=autor,
                         acao="programa.alterado",
                         alvo_tipo="programa",
                         alvo_id=id,

@@ -6,7 +6,6 @@ não é Administrador. Quem apaga de fato é a purga, depois de 30 dias (ADR 001
 
 import logging
 import math
-import uuid
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal, Protocol
@@ -14,7 +13,7 @@ from typing import Annotated, Literal, Protocol
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, EnvioParaLixeira
 from api.correcoes import RepositorioDeCorrecoes
@@ -27,14 +26,23 @@ from api.modelo_do_job import (
     RepositorioDeJobs,
 )
 from api.permissoes import JobDoPedido, exige, tem_permissao
-from api.texto_como_dado import Texto
+from api.texto_como_dado import Linha, Texto
 
 log = logging.getLogger(__name__)
 
 PRAZO_DA_PURGA = timedelta(days=30)
 MOTIVO_MAXIMO = 500
+# Quem consta no registro da purga que ninguém pediu (o prazo de 30 dias venceu).
+SISTEMA_DA_PURGA = "Purga automática"
 # Em andamento, o Job ainda escreve nos arquivos: cancelar primeiro.
 ESTADOS_QUE_VAO_PARA_A_LIXEIRA = FIM_OU_CANCELADO
+
+
+class PedidoDePurga(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # O nome, digitado: a prova de que a pessoa sabe o que está apagando.
+    nome: Annotated[str, Linha(255)]
 
 
 class ArquivosContados(BaseModel):
@@ -225,11 +233,9 @@ def criar_rotas_da_lixeira(
         impacto: ImpactoDoVideo,
     ) -> None:
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=relogio(),
-                uid=autor.uid,
-                email=autor.email,
+                quem=autor,
                 acao=acao,
                 alvo_tipo="video",
                 alvo_id=job.id,

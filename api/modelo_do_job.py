@@ -215,9 +215,7 @@ class Job(BaseModel):
         dados = dict(dados)
         data = dados.get("data_exibicao")
         if isinstance(data, date | str):
-            dados["mes_exibicao"] = (
-                data.isoformat()[:7] if isinstance(data, date) else data[:7]
-            )
+            dados["mes_exibicao"] = mes_da_data(data)
         etapas = dados.get("etapas")
         if isinstance(etapas, dict):
             dados["etapas"] = {
@@ -226,6 +224,11 @@ class Job(BaseModel):
         if dados.get("etapa_atual") in ETAPAS_QUE_SAIRAM:
             dados["etapa_atual"] = None
         return dados
+
+
+def mes_da_data(data: date | str) -> str:
+    """`AAAA-MM` da data de exibição (`date` ou texto ISO): o `mes_exibicao` do Job."""
+    return data.isoformat()[:7] if isinstance(data, date) else data[:7]
 
 
 def palavras_do_nome(nome: str) -> list[str]:

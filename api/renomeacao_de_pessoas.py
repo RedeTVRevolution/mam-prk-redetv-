@@ -8,7 +8,6 @@ nome da pessoa, só o `catalogo_id` (#417): a renomeação não reindexa nem cop
 busca e o relatório de tempo de tela leem o nome novo do catálogo.
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
@@ -16,7 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.catalogo import (
     AndamentoDaRenomeacao,
@@ -161,11 +160,9 @@ def criar_rotas_da_renomeacao(
         )
         try:
             auditoria.acrescentar(
-                RegistroDeAuditoria(
-                    id=uuid.uuid4().hex,
+                registro_de_auditoria(
                     quando=quando,
-                    uid=autor.uid,
-                    email=autor.email,
+                    quem=autor,
                     acao="pessoa.renomeada",
                     alvo_tipo="pessoa",
                     alvo_id=pessoa.id,

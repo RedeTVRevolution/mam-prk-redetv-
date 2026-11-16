@@ -10,7 +10,6 @@ abertura; filtro novo, sim: é outra coisa vista. As rotas leem só as tabelas r
 import logging
 import threading
 import time
-import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -20,7 +19,11 @@ from typing import Annotated, Any, Literal, get_args
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
-from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import (
+    FiltroDeAuditoria,
+    RepositorioDeAuditoria,
+    registro_de_auditoria,
+)
 from api.auth import Usuario
 from api.cache_curto import CacheCurto
 from api.csv_seguro import csv_em_texto
@@ -103,11 +106,9 @@ class AcessosAoPainel:
     ) -> None:
         try:
             self._auditoria.acrescentar(
-                RegistroDeAuditoria(
-                    id=uuid.uuid4().hex,
+                registro_de_auditoria(
                     quando=self._relogio(),
-                    uid=pessoa.uid,
-                    email=pessoa.email,
+                    quem=pessoa,
                     acao=acao,
                     alvo_tipo="painel",
                     alvo_id="diretoria",

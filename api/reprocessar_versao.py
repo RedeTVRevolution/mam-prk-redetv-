@@ -173,7 +173,7 @@ def _reprocessar(
             c.job_id,
             relogio(),
             "analise",
-            autor={"sistema": SISTEMA},
+            autor=SISTEMA,
             motivo=MOTIVO,
             relogio=relogio,
         )

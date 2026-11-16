@@ -8,24 +8,11 @@ Correções, a fusão de pessoas) regrava os dois campos; só grava se mudaram.
 import logging
 from typing import Any
 
+from api.catalogo_apagado import ids_do_catalogo
 from api.leitura_da_decupagem import LeituraDaDecupagem
 from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs
 
 log = logging.getLogger(__name__)
-
-
-def ids_do_catalogo(entregue: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """Os ids das pessoas e das marcas do catálogo na Decupagem corrigida, sem repetir."""
-
-    def ids(chave: str) -> list[str]:
-        achados = {
-            item["catalogo_id"]
-            for item in entregue.get(chave) or []
-            if isinstance(item, dict) and item.get("catalogo_id")
-        }
-        return sorted(achados)
-
-    return ids("pessoas"), ids("comerciais")
 
 
 def gravar_se_mudou(
@@ -33,7 +20,8 @@ def gravar_se_mudou(
 ) -> bool:
     """Grava os dois campos no Job concluído, numa leitura só e atômica; `False` se não
     mudaram ou se o Job não está mais `concluido`. Levanta a falha do repositório."""
-    pessoas, marcas = ids_do_catalogo(entregue)
+    pessoas = sorted(ids_do_catalogo(entregue, "pessoas"))
+    marcas = sorted(ids_do_catalogo(entregue, "comerciais"))
 
     def mudar(job: "Job") -> dict[str, Any] | None:
         if job.estado != "concluido":

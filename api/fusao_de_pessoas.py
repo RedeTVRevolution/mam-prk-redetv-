@@ -5,7 +5,6 @@ nome e os apelidos dela. A leitura das Decupagens mostra o destino onde havia a 
 `api.quem_conta`); nada gravado é reescrito. As fotos de rosto da origem saem (LGPD).
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
@@ -13,18 +12,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.catalogo import (
     Catalogo,
     FusaoDaPessoa,
     PessoaDoCatalogo,
     nomes_de_busca,
-    prefixo_das_fotos,
 )
 from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
 from api.correcoes import Motivo, RepositorioDeCorrecoes, sem_controle
-from api.fotos_de_referencia import FotosDeReferencia
+from api.fotos_de_referencia import FotosDeReferencia, apagar_fotos_da_pessoa
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
@@ -161,11 +159,9 @@ def criar_rotas_da_fusao(
         )
         try:
             auditoria.acrescentar(
-                RegistroDeAuditoria(
-                    id=uuid.uuid4().hex,
+                registro_de_auditoria(
                     quando=quando,
-                    uid=autor.uid,
-                    email=autor.email,
+                    quem=autor,
                     acao="pessoa.fundida",
                     alvo_tipo="pessoa",
                     alvo_id=origem.id,
@@ -189,10 +185,7 @@ def criar_rotas_da_fusao(
             ao_fundir()
             raise
         # Rosto é dado sensível: as fotos da origem saem, e as do destino ficam.
-        for rosto in origem.rostos:
-            fotos.apagar(rosto.referencia)
-        fotos.apagar_prefixo(prefixo_das_fotos(origem.id))
-        pessoas.definir_rostos(origem.id, [])
+        apagar_fotos_da_pessoa(fotos, pessoas, origem)
         passar_pessoa_nos_jobs(repositorio, origem.id, destino.id)
         ao_fundir()
         return Fundida(

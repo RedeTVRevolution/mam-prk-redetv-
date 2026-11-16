@@ -7,7 +7,6 @@ análise escolhida, o progresso das janelas é apagado antes do disparo, para o 
 rodar de novo em todas elas.
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Protocol
@@ -15,7 +14,7 @@ from typing import Annotated, Protocol
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.ciclo_de_vida import (
     NaoReprocessavel,
@@ -68,13 +67,13 @@ def reprocessar_com_rastro(
     agora: datetime,
     escolhida: str | None,
     *,
-    autor: dict[str, str],
+    autor: Usuario | str,
     motivo: str | None,
     relogio: Callable[[], datetime],
 ) -> Job | None:
     """Muda o Job, registra na auditoria e dispara o Workflows; o Job de depois, ou
     `None` se não existe. `NaoReprocessavel` sobe; falha no registro ou no disparo
-    devolve o Job ao que era e sobe também. `autor` é `uid` e `email` ou `sistema`."""
+    devolve o Job ao que era e sobe também. `autor` é a pessoa ou o nome do sistema."""
     trocado = reprocessar(repositorio, job_id, agora, escolhida)
     if trocado is None:
         return None
@@ -85,10 +84,9 @@ def reprocessar_com_rastro(
         # O Job já mudou: o registro vem antes do disparo, para nunca haver
         # reprocessamento sem rastro.
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=agora,
-                **autor,
+                quem=autor,
                 acao="video.reprocessado",
                 alvo_tipo="job",
                 alvo_id=job.id,
@@ -145,7 +143,7 @@ def criar_rotas_do_reprocessamento(
                 job_id,
                 agora,
                 escolhida,
-                autor={"uid": pessoa.uid, "email": pessoa.email},
+                autor=pessoa,
                 motivo=pedido.motivo if pedido else None,
                 relogio=relogio,
             )

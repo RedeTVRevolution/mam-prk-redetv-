@@ -247,3 +247,30 @@ def test_estados_de_fim_cobrem_o_ciclo_de_vida() -> None:
     assert FINAIS == FIM_OU_CANCELADO
     assert FIM < FIM_OU_CANCELADO
     assert set(ESTADOS_DA_FILA) | FIM_OU_CANCELADO == set(get_args(Estado))
+
+
+def test_request_state_do_chamador_so_se_le_pelas_funcoes_de_acesso() -> None:
+    # A escrita é do middleware; a leitura passa por `chamador_do_pedido` e `papeis_guardados`.
+    lidos = []
+    for arquivo in API.glob("*.py"):
+        for no in ast.walk(ast.parse(arquivo.read_text())):
+            leu_por_atributo = (
+                isinstance(no, ast.Attribute)
+                and isinstance(no.ctx, ast.Load)
+                and no.attr in {"chamador", "papeis_guardados"}
+                and isinstance(no.value, ast.Attribute)
+                and no.value.attr == "state"
+            )
+            leu_por_getattr = (
+                isinstance(no, ast.Call)
+                and isinstance(no.func, ast.Name)
+                and no.func.id == "getattr"
+                and len(no.args) > 1
+                and isinstance(no.args[0], ast.Attribute)
+                and no.args[0].attr == "state"
+                and isinstance(no.args[1], ast.Constant)
+                and no.args[1].value in {"chamador", "papeis_guardados"}
+            )
+            if leu_por_atributo or leu_por_getattr:
+                lidos.append(f"{arquivo.name}:{getattr(no, 'lineno', 0)}")
+    assert [x for x in lidos if not x.startswith("auth.py:")] == []

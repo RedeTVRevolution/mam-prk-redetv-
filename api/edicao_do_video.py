@@ -7,7 +7,6 @@ do BigQuery acumula os anos já copiados (`copia_bigquery.anos`), então a troca
 as linhas do ano antigo na próxima cópia.
 """
 
-import uuid
 from collections.abc import Callable
 from datetime import date, datetime
 from typing import Annotated, Any
@@ -15,10 +14,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.jobs import FUSO_DA_EMISSORA, DisparoDaIndexacao, JobPublico
-from api.modelo_do_job import Indexacao, RepositorioDeJobs
+from api.modelo_do_job import Indexacao, RepositorioDeJobs, mes_da_data
 from api.permissoes import JobDoPedido, exige
 from api.programas import RepositorioDeProgramas
 from api.texto_como_dado import Linha
@@ -101,11 +100,9 @@ def criar_rotas_da_edicao(
             return JobPublico.de(job)
         # O registro vem antes de gravar: nunca há edição sem rastro.
         auditoria.acrescentar(
-            RegistroDeAuditoria(
-                id=uuid.uuid4().hex,
+            registro_de_auditoria(
                 quando=agora,
-                uid=autor.uid,
-                email=autor.email,
+                quem=autor,
                 acao="video.editado",
                 alvo_tipo="job",
                 alvo_id=job.id,
@@ -125,7 +122,7 @@ def criar_rotas_da_edicao(
             if pedido.data_exibicao is not None:
                 # `model_copy` não roda o validador que deriva o mês.
                 mudancas["data_exibicao"] = pedido.data_exibicao
-                mudancas["mes_exibicao"] = pedido.data_exibicao.isoformat()[:7]
+                mudancas["mes_exibicao"] = mes_da_data(pedido.data_exibicao)
             if pedido.programa is not None:
                 mudancas["programa"] = pedido.programa
             return mudancas

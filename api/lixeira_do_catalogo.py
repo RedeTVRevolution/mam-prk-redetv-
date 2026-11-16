@@ -7,30 +7,35 @@ catálogo e mantém o texto. A saída do modelo não é tocada (ADR 0010).
 """
 
 import logging
-import uuid
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import (
+    Acao,
+    RegistroDeAuditoria,
+    RepositorioDeAuditoria,
+    registro_de_auditoria,
+)
 from api.auth import Usuario
 from api.catalogo import (
     Catalogo,
     EnvioParaLixeira,
     PessoaInexistente,
-    prefixo_das_fotos,
 )
 from api.catalogo_apagado import so_o_rosto
 from api.correcoes import RepositorioDeCorrecoes
-from api.fotos_de_referencia import FotosDeReferencia
+from api.fotos_de_referencia import FotosDeReferencia, apagar_fotos_da_pessoa
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.lixeira import (
     PRAZO_DA_PURGA,
+    SISTEMA_DA_PURGA,
     Envio,
     ItemDaLixeira,
+    PedidoDePurga,
     item_da_lixeira,
     login_recente_ou_403,
 )
@@ -45,11 +50,8 @@ from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
 from api.relatorio_de_marcas import ConsultaDeInsercoes, SoMarcasQueContam
 from api.relatorios import ou_503
-from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
-
-SISTEMA_DA_PURGA = "Purga automática"
 
 
 class ImpactoDaPessoa(BaseModel):
@@ -64,13 +66,6 @@ class ImpactoDaMarca(BaseModel):
     # O que o relatório de marcas deixa de contar, pelo nome e pelos apelidos (#597); sem
     # relatório configurado, 0. A busca entra só no texto da tela, sem número.
     insercoes_que_saem_do_relatorio: int = 0
-
-
-class PedidoDePurga(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # O nome, digitado: a prova de que a pessoa sabe o que está apagando.
-    nome: Annotated[str, Linha(255)]
 
 
 class Restaurado(BaseModel):
@@ -88,12 +83,9 @@ def _registro(
     quando: datetime,
     autor: Usuario | None,
 ) -> RegistroDeAuditoria:
-    return RegistroDeAuditoria(
-        id=uuid.uuid4().hex,
+    return registro_de_auditoria(
         quando=quando,
-        uid=autor.uid if autor else None,
-        email=autor.email if autor else None,
-        sistema=None if autor else SISTEMA_DA_PURGA,
+        quem=autor or SISTEMA_DA_PURGA,
         acao=acao,
         alvo_tipo=tipo,
         alvo_id=id,
@@ -291,10 +283,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         ao_mudar()  # antes das fotos: apagá-las não se desfaz
         # Rosto é dado sensível: as fotos saem já, sem esperar a purga, e não voltam.
         # Pela pasta da pessoa também: as fotos da web trocadas antes ficaram lá.
-        for rosto in achada.rostos:
-            fotos.apagar(rosto.referencia)
-        fotos.apagar_prefixo(prefixo_das_fotos(achada.id))
-        pessoas.definir_rostos(achada.id, [])
+        apagar_fotos_da_pessoa(fotos, pessoas, achada)
         envio = envio_de(autor, pedido.motivo)
         lixeira_da_pessoa(achada.id, envio)
         try:
