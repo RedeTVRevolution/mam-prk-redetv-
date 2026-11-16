@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from starlette.datastructures import Headers
@@ -76,7 +77,7 @@ from api.custo_do_painel import FonteDeCusto, faturamento_do_ambiente
 from api.dados_da_purga import dados_do_ambiente
 from api.decupagem import Decupagem
 from api.edicao_do_video import criar_rotas_da_edicao
-from api.erros import ServicoIndisponivel
+from api.erros import ServicoIndisponivel, resposta_de_indisponibilidade
 from api.eventos_de_uso import (
     Eventos,
     SemEventos,
@@ -401,9 +402,12 @@ def criar_app(
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV", dependencies=[Depends(conferir_ids_e_consultas)])
 
+    # `GoogleAPIError` é a base de todo erro do Firestore e do Google: sem isto, a falha
+    # de uma leitura sairia como 500 e o sistema que repete só em 503 não repetiria.
     @app.exception_handler(ServicoIndisponivel)
-    def _indisponivel(_request: Request, _erro: ServicoIndisponivel) -> JSONResponse:
-        return JSONResponse({"detail": "Serviço indisponível"}, status_code=503)
+    @app.exception_handler(GoogleAPIError)
+    def _indisponivel(_request: Request, erro: Exception) -> JSONResponse:
+        return resposta_de_indisponibilidade(erro)
 
     @app.exception_handler(TipoNaoSuportado)
     def _tipo_errado(_request: Request, _erro: TipoNaoSuportado) -> JSONResponse:
