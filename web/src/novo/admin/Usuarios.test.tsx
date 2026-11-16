@@ -107,6 +107,21 @@ test('uma conta sem nome usa o e-mail no botão de ações e a inicial dele no a
   expect(linha.textContent).not.toContain('?')
 })
 
+test('uma conta sem nome usa o e-mail na confirmação, nos avisos e no diálogo de papéis', async () => {
+  lista = [...contas(), { uid: 'u4', email: 'zeca@redetv.com.br', nome: '', papeis: ['consulta'], criada_em: null, ultimo_acesso: null, situacao: 'ativa' }]
+  const usuario = userEvent.setup()
+  await abrir('/admin/usuarios')
+  await abrirMenu(usuario, 'zeca@redetv.com.br')
+  await usuario.click(await screen.findByRole('menuitem', { name: 'Desativar' }))
+  expect(await screen.findByText('Desativar zeca@redetv.com.br? A conta sai na hora. Enter confirma')).toBeTruthy()
+  await usuario.click(screen.getByRole('button', { name: 'Confirmar desativação' }))
+  await screen.findByText('zeca@redetv.com.br foi desativada e saiu do sistema.')
+
+  await abrirMenu(usuario, 'zeca@redetv.com.br')
+  await usuario.click(await screen.findByRole('menuitem', { name: 'Editar papéis' }))
+  expect(within(await screen.findByRole('dialog')).getByText('Papéis de zeca@redetv.com.br')).toBeTruthy()
+})
+
 test('o link Administração só aparece para quem abre alguma aba da área', async () => {
   eu = COMUM
   await abrir('/acervo')

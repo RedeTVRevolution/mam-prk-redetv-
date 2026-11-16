@@ -18,6 +18,9 @@ const COLUNAS = [null, null, 'lg', null, null] as const
 const TODOS = ''
 const CHAVE = ['admin', 'usuarios']
 
+/** A conta sem nome aparece pelo e-mail em todo texto da tela. */
+const rotulo = (c: ContaDaLista) => c.nome || c.email
+
 function ultimoAcesso(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
@@ -121,7 +124,7 @@ function EditarPapeis({ conta, propria, aoFechar, aoSalvar }: { conta: ContaDaLi
   return (
     <Dialog open onOpenChange={(aberto) => !aberto && aoFechar()}>
       <DialogContent className="sm:max-w-md">
-        <DialogTitle>{`Papéis de ${conta.nome}`}</DialogTitle>
+        <DialogTitle>{`Papéis de ${rotulo(conta)}`}</DialogTitle>
         <DialogDescription>{conta.email}</DialogDescription>
         <CaixasDePapeis marcados={papeis} aoMudar={setPapeis} travado={travado} />
         {travado && <p className="text-xs text-muted-foreground">Você não pode tirar o seu próprio papel de Administrador.</p>}
@@ -245,7 +248,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                 <tr key={c.uid} className="hover:bg-card">
                   <td className={CELULA}>
                     <div className="flex min-w-0 items-center gap-2">
-                      <Iniciais nome={c.nome || c.email} />
+                      <Iniciais nome={rotulo(c)} />
                       <div className="grid min-w-0">
                         <span className="truncate">{c.nome}</span>
                         <span className="truncate text-xs text-muted-foreground">{c.email}</span>
@@ -262,7 +265,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                   <td className={cn(CELULA, 'text-right')}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon-sm" aria-label={`Ações de ${c.nome || c.email}`}>
+                        <Button variant="ghost" size="icon-sm" aria-label={`Ações de ${rotulo(c)}`}>
                           <IconDots stroke={1.75} aria-hidden />
                         </Button>
                       </DropdownMenuTrigger>
@@ -290,7 +293,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                             onSelect={() =>
                               void agir(async () => {
                                 await trocar(await api.usuarios.reativar(c.uid))
-                                return `${c.nome} foi reativada.`
+                                return `${rotulo(c)} foi reativada.`
                               })
                             }
                           >
@@ -325,7 +328,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                   >
                     <td colSpan={colunas}className={CELULA}>
                       <div className="flex flex-wrap items-center gap-2 py-1">
-                        <span>{`Desativar ${c.nome}? A conta sai na hora. Enter confirma`}</span>
+                        <span>{`Desativar ${rotulo(c)}? A conta sai na hora. Enter confirma`}</span>
                         <Button
                           type="button"
                           size="sm"
@@ -336,7 +339,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
                             setDesativando(null)
                             void agir(async () => {
                               await trocar(await api.usuarios.desativar(c.uid))
-                              return `${c.nome} foi desativada e saiu do sistema.`
+                              return `${rotulo(c)} foi desativada e saiu do sistema.`
                             })
                           }}
                         >
@@ -376,7 +379,7 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
             await trocar(await api.usuarios.trocarPapeis(emEdicao.uid, papeis))
             setEditando(null)
             setFalha(null)
-            setAviso(`Papéis de ${emEdicao.nome} atualizados.`)
+            setAviso(`Papéis de ${rotulo(emEdicao)} atualizados.`)
           }}
         />
       )}
