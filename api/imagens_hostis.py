@@ -76,7 +76,8 @@ def _em_pe(imagem: Image.Image) -> Image.Image:
         return ImageOps.exif_transpose(imagem)
     except Exception as e:  # noqa: BLE001 - EXIF hostil: qualquer falha vale "sem girar"
         log.warning(
-            "EXIF ilegível, a imagem segue sem girar (%s)", type(e).__qualname__
+            "EXIF ilegível, a imagem segue sem girar (%s)",
+            f"{type(e).__module__}.{type(e).__qualname__}",
         )
         return imagem
 
