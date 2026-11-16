@@ -288,6 +288,16 @@ preencher-catalogo-dos-jobs:
 recalcular-pessoas-dos-jobs:
 	$(MAKE) preencher-catalogo-dos-jobs
 
+# Troca `operador` por `consulta` nos papéis gravados (#664): make migrar-papel-operador.
+# Irreversível. Roda em cada ambiente ANTES do deploy do código novo e de novo logo antes dele,
+# sem atribuir papéis nessa janela; depois do deploy, `["operador"]` viraria sem permissão.
+# Repetir não muda nada.
+migrar-papel-operador:
+	set -a && . ./.env && set +a && \
+	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
+	uv run --locked python -m api.migrar_papel_operador
+
 # Grava `mes_exibicao` nos Jobs antigos que têm data de exibição (#479): make gravar-mes-nos-jobs.
 # Roda no dev depois do deploy e antes de ligar `listagem_por_mes` no Terraform: sem o campo,
 # o Job some da lista por período. Repetir não muda nada.

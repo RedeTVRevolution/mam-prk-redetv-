@@ -86,7 +86,7 @@ class Mundo:
         self.armazenamento.decupagens["j1"] = [BYTES]
         self.chaves = RepositorioDeChavesEmMemoria()
         papeis = RepositorioDePapeisEmMemoria()
-        papeis.salvar("ana", papeis_da_ana or ["editor", "operador"])
+        papeis.salvar("ana", papeis_da_ana or ["editor"])
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso(

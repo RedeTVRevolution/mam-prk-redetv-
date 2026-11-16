@@ -953,9 +953,9 @@ class TestRepositorioDePapeisFirestore:
     def test_grava_e_le_os_papeis_do_uid(
         self, papeis: RepositorioDePapeisFirestore
     ) -> None:
-        papeis.salvar("u1", ["curador", "operador"])
+        papeis.salvar("u1", ["curador", "editor"])
 
-        assert papeis.obter("u1") == ["operador", "curador"]
+        assert papeis.obter("u1") == ["editor", "curador"]
         assert papeis.obter("u2") is None
 
     def test_papel_desconhecido_no_documento_e_ignorado(

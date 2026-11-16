@@ -185,7 +185,6 @@ As permissões são granulares e negadas por padrão: cada rota da API confere a
 | Papel | Pode |
 | --- | --- |
 | Consulta | Buscar, assistir, ver e baixar a decupagem (é o papel da conta nova) |
-| Operador | Igual à Consulta (deixou de enviar e reprocessar no #376) |
 | Editor | Consulta + enviar vídeos, acompanhar, reprocessar o que falhou e corrigir pessoas, pautas, objetos, comerciais e tempos |
 | Curador | Editor + aprovar correções, mesclar pessoas, editar em lote, gerir o catálogo de pessoas e marcas |
 | Diretoria | Consulta + painel de indicadores, só leitura |

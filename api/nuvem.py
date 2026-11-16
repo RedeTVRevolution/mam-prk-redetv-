@@ -78,7 +78,8 @@ from api.modelo_do_job import (
     casa_com_o_filtro,
     paginar_em_python,
 )
-from api.papeis import PAPEIS, DocumentoDePapeis, Papel
+from api.papeis import DocumentoDePapeis, Papel
+from api.papeis import em_ordem as papeis_em_ordem
 from api.programas import (
     NomeEmUso,
     Programa,
@@ -746,7 +747,7 @@ class RepositorioDePapeisFirestore:
         # Sem `papeis` (só a marca `desativada`): a conta segue sem papéis guardados.
         # Papel desconhecido (digitado à mão, papel futuro) não dá permissão nem 500.
         if "papeis" in dados:
-            papeis = [p for p in PAPEIS if p in dados["papeis"]]
+            papeis = papeis_em_ordem(dados["papeis"])
         return DocumentoDePapeis(uid, dados.get("desativada") is True, papeis)
 
     def obter(self, uid: str) -> list[Papel] | None:

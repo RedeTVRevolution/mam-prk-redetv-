@@ -110,7 +110,7 @@ def test_cria_a_conta_com_papeis_manda_o_link_e_audita() -> None:
         json={
             "email": "cris@redetv.com",
             "nome": "Cris",
-            "papeis": ["operador", "consulta"],
+            "papeis": ["editor", "consulta"],
         },
         headers=ADMIN,
     )
@@ -118,9 +118,9 @@ def test_cria_a_conta_com_papeis_manda_o_link_e_audita() -> None:
     assert resposta.status_code == 201
     corpo = resposta.json()
     assert corpo["email"] == "cris@redetv.com"
-    assert corpo["papeis"] == ["consulta", "operador"]
+    assert corpo["papeis"] == ["consulta", "editor"]
     assert mundo.contas.links_enviados == ["cris@redetv.com"]
-    assert mundo.papeis.obter(corpo["uid"]) == ["consulta", "operador"]
+    assert mundo.papeis.obter(corpo["uid"]) == ["consulta", "editor"]
     (registro,) = mundo.registros()
     assert (
         registro.acao,
@@ -134,7 +134,7 @@ def test_cria_a_conta_com_papeis_manda_o_link_e_audita() -> None:
         "cris@redetv.com",
     )
     assert (registro.uid, registro.email) == ("adm", "adm@redetv.com")
-    assert registro.detalhes == {"papeis": ["consulta", "operador"]}
+    assert registro.detalhes == {"papeis": ["consulta", "editor"]}
 
 
 def test_criar_com_e_mail_repetido_devolve_409_sem_registro() -> None:
@@ -204,14 +204,14 @@ def test_da_o_papel_diretoria() -> None:
 
 def test_salvar_os_mesmos_papeis_em_outra_ordem_nao_grava_nem_audita() -> None:
     mundo = Mundo()
-    mundo.papeis.salvar("u2", ["editor", "operador"])
+    mundo.papeis.salvar("u2", ["consulta", "editor"])
 
     resposta = mundo.cliente.put(
-        f"{ROTA}/u2/papeis", json={"papeis": ["operador", "editor"]}, headers=ADMIN
+        f"{ROTA}/u2/papeis", json={"papeis": ["editor", "consulta"]}, headers=ADMIN
     )
 
     assert resposta.status_code == 200
-    assert mundo.papeis.obter("u2") == ["editor", "operador"]
+    assert mundo.papeis.obter("u2") == ["consulta", "editor"]
     assert mundo.registros() == []
 
 
@@ -422,7 +422,7 @@ def test_conta_desconhecida_devolve_404(metodo: str, caminho: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "papeis", [["consulta"], ["operador"], ["editor"], ["curador"], ["diretoria"]]
+    "papeis", [["consulta"], ["editor"], ["curador"], ["diretoria"]]
 )
 def test_sem_usuarios_gerir_devolve_403_em_toda_rota(papeis: list[Papel]) -> None:
     mundo = Mundo(papeis)

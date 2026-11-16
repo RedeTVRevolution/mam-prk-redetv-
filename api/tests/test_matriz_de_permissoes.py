@@ -33,7 +33,6 @@ PAPEIS: dict[str, list[Papel] | None] = {
     "sem_documento": None,
     "sem_papel": [],
     "consulta": ["consulta"],
-    "operador": ["operador"],
     "editor": ["editor"],
     "curador": ["curador"],
     "diretoria": ["diretoria"],

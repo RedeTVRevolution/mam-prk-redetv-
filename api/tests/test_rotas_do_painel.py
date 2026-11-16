@@ -185,7 +185,7 @@ def _diretoria() -> Mundo:
         "/fila",
     ],
 )
-@pytest.mark.parametrize("papel", ["consulta", "operador", "editor", "curador"])
+@pytest.mark.parametrize("papel", ["consulta", "editor", "curador"])
 def test_sem_painel_ver_e_403(rota: str, papel: str) -> None:
     mundo = Mundo([papel])
 
