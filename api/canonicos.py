@@ -97,22 +97,33 @@ def _contem(palavras: tuple[str, ...], termo: tuple[str, ...]) -> bool:
     return any(palavras[i : i + n] == termo for i in range(len(palavras) - n + 1))
 
 
+def _compilar[T](
+    regras: list[tuple[tuple[str, ...], T]],
+) -> list[tuple[tuple[tuple[str, ...], ...], T]]:
+    """Os termos são constantes: as palavras de cada um saem uma vez, no import."""
+    return [(tuple(_palavras(t) for t in termos), valor) for termos, valor in regras]
+
+
+_ENQUADRAMENTOS_EM_PALAVRAS = _compilar(_ENQUADRAMENTOS)
+_AMBIENTES_EM_PALAVRAS = _compilar(_AMBIENTES)
+
+
 def _classificar[T](
-    texto: str, regras: list[tuple[tuple[str, ...], T]], padrao: T
+    texto: str, regras: list[tuple[tuple[tuple[str, ...], ...], T]], padrao: T
 ) -> T:
     palavras = _palavras(texto)
     for termos, valor in regras:
-        if any(_contem(palavras, _palavras(t)) for t in termos):
+        if any(_contem(palavras, termo) for termo in termos):
             return valor
     return padrao
 
 
 def enquadramento_canonico(texto: str) -> Enquadramento:
-    return _classificar(texto, _ENQUADRAMENTOS, "indefinido")
+    return _classificar(texto, _ENQUADRAMENTOS_EM_PALAVRAS, "indefinido")
 
 
 def ambiente_canonico(texto: str) -> Ambiente:
-    return _classificar(texto, _AMBIENTES, "outro")
+    return _classificar(texto, _AMBIENTES_EM_PALAVRAS, "outro")
 
 
 _PADROES = {"ambiente_canonico": "outro", "enquadramento_canonico": "indefinido"}
