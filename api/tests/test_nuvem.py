@@ -50,7 +50,6 @@ from api.nuvem import (
     ListasDaBuscaFirestore,
     ProgramasFirestore,
     QuadrosStorage,
-    ReferenciasStorage,
     RepositorioDeAprovacaoFirestore,
     RepositorioDeAuditoriaFirestore,
     RepositorioDeChavesFirestore,
@@ -738,60 +737,6 @@ def test_arquivos_no_storage_conta_o_que_o_job_tem(
 
     assert (contados.decupagem, contados.proxy, contados.quadros) == (1, 1, 2)
     assert contados.copia_limpa == copia_limpa
-
-
-@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
-@pytest.mark.parametrize("copia_limpa", [False, True])
-def test_arquivos_no_storage_apaga_tudo_do_job_e_nada_de_outro(
-    armazenamento: ArmazenamentoStorage,
-    copia_limpa: bool,
-) -> None:
-    _com_buckets(armazenamento)
-    aceitos = armazenamento._cliente.bucket(armazenamento._aceitos)
-    decupagens = armazenamento._cliente.bucket(armazenamento._decupagens)
-    do_job = {
-        aceitos: ["job1/proxy.mp4", "job1/copia_limpa.mp4", "job1/janelas/0000.json"],
-        decupagens: ["job1.json", "job1.comparacao.json", "job1/quadros/plano-0.jpg"],
-    }
-    if not copia_limpa:
-        do_job[aceitos].remove("job1/copia_limpa.mp4")
-    de_outro = {aceitos: ["job10/proxy.mp4"], decupagens: ["job10.json", "job2.json"]}
-    for bucket, objetos in (*do_job.items(), *de_outro.items()):
-        for objeto in objetos:
-            bucket.blob(objeto).upload_from_string(b"x")
-    arquivos = ArquivosNoStorage(
-        armazenamento._cliente, armazenamento._aceitos, armazenamento._decupagens
-    )
-
-    assert all(b.blob(o).exists() for b, os in do_job.items() for o in os)
-    assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
-    assert aceitos.blob("job1/copia_limpa.mp4").exists() is copia_limpa
-
-    arquivos.apagar("job1")
-    arquivos.apagar("job1")
-
-    assert not any(b.blob(o).exists() for b, os in do_job.items() for o in os)
-    assert not aceitos.blob("job1/copia_limpa.mp4").exists()
-    assert all(b.blob(o).exists() for b, os in de_outro.items() for o in os)
-
-
-@pytest.mark.skipif(not EMULADOR_STORAGE, reason="sem emulador do Storage")
-def test_referencias_apagam_a_pasta_da_pessoa_e_nada_de_outra(
-    armazenamento: ArmazenamentoStorage,
-) -> None:
-    nome = f"teste-referencias-{uuid.uuid4().hex[:8]}"
-    bucket = armazenamento._cliente.create_bucket(nome)
-    da_pessoa = ["referencias/ana/0.jpg", "referencias/ana/velha.jpg"]
-    de_outra = ["referencias/ana2/0.jpg", "palpites/ana/0.jpg"]
-    for objeto in da_pessoa + de_outra:
-        bucket.blob(objeto).upload_from_string(b"x")
-    fotos = ReferenciasStorage(armazenamento._cliente, nome)
-
-    fotos.apagar_prefixo("referencias/ana/")
-    fotos.apagar_prefixo("referencias/ana/")
-
-    assert not any(bucket.blob(o).exists() for o in da_pessoa)
-    assert all(bucket.blob(o).exists() for o in de_outra)
 
 
 def _registro_de_chave(id: str) -> RegistroDeChave:

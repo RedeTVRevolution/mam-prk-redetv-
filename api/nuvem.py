@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, date, datetime, timedelta
+from itertools import batched
 from pathlib import Path
 from typing import Any, Self
 from urllib.parse import quote
@@ -17,7 +18,12 @@ from urllib.parse import quote
 import google.auth
 import google.auth.transport.requests
 import requests
-from google.api_core.exceptions import Aborted, AlreadyExists, NotFound
+from google.api_core.exceptions import (
+    Aborted,
+    AlreadyExists,
+    NotFound,
+    from_http_response,
+)
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.storage import Client as ClienteStorage
@@ -130,6 +136,9 @@ COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB = "tipos_de_objeto_por_job"
 DOCUMENTO_DA_APROVACAO = "aprovacao"
 TAMANHO_DO_PEDACO = 256 * 1024
 _LOTE_DE_LEITURA = 500
+# Limite do lote da API JSON do Storage (o cliente aceita até 1000, a API só 100).
+_LOTE_DE_APAGAR_NO_STORAGE = 100
+_LOTE_DE_ESCRITA = 500  # Limite do WriteBatch do Firestore.
 
 log = logging.getLogger(__name__)
 
@@ -137,6 +146,25 @@ log = logging.getLogger(__name__)
 def _documento(colecao: Any, id: str) -> Any:
     """O documento `id` da coleção; o id não sai do próprio nível (`ValueError`)."""
     return colecao.document(id_conferido(id))
+
+
+def apagar_objetos(cliente: ClienteStorage, blobs: Iterable[Any]) -> None:
+    """Apaga os `blobs` em lotes do Storage. O `NotFound` de um objeto (a regra de 7
+    dias do bucket já o apagou, #502) é aceito; qualquer outro erro sobe, depois de o
+    lote inteiro correr, e a purga se repete."""
+    for lote in batched(blobs, _LOTE_DE_APAGAR_NO_STORAGE):
+        # raise_exception=False: sem isso o cliente só levanta o último erro do lote e
+        # um 404 mascararia um 500 anterior.
+        with cliente.batch(raise_exception=False) as envio:
+            for blob in lote:
+                blob.delete()
+        # ponytail: `_responses` não tem acessor público no cliente (3.17).
+        for resposta in envio._responses:
+            if (
+                resposta.status_code not in range(200, 300)
+                and resposta.status_code != 404
+            ):
+                raise from_http_response(resposta)  # type: ignore[no-untyped-call]
 
 
 def _lidos_em_lote(cliente: Any, colecao: Any, ids: Iterable[str]) -> Iterator[Any]:
@@ -1261,11 +1289,9 @@ class ReferenciasStorage:
             pass
 
     def apagar_prefixo(self, prefixo: str) -> None:
-        for blob in self._cliente.list_blobs(self._bucket, prefix=prefixo):
-            try:
-                blob.delete()
-            except NotFound:
-                pass
+        apagar_objetos(
+            self._cliente, self._cliente.list_blobs(self._bucket, prefix=prefixo)
+        )
 
 
 class RepositorioDeCorrecoesFirestore:
@@ -1274,6 +1300,7 @@ class RepositorioDeCorrecoesFirestore:
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DE_CORRECOES
     ) -> None:
+        self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
     def acrescentar(self, correcao: Correcao) -> None:
@@ -1300,10 +1327,12 @@ class RepositorioDeCorrecoesFirestore:
         }
 
     def purgar(self, job_id: str) -> None:
-        for doc in self._colecao.where(
-            filter=FieldFilter("job_id", "==", job_id)
-        ).stream():
-            doc.reference.delete()
+        consulta = self._colecao.where(filter=FieldFilter("job_id", "==", job_id))
+        for docs in batched(consulta.stream(), _LOTE_DE_ESCRITA):
+            lote = self._cliente.batch()
+            for doc in docs:
+                lote.delete(doc.reference)
+            lote.commit()
 
 
 class RepositorioDeAprovacaoFirestore:
@@ -1659,10 +1688,10 @@ class JanelasStorage:
         ).upload_from_string(janela.model_dump_json(), content_type="application/json")
 
     def apagar(self, job_id: str) -> None:
-        for blob in self._cliente.list_blobs(
-            self._aceitos, prefix=prefixo_das_janelas(job_id)
-        ):
-            blob.delete()
+        apagar_objetos(
+            self._cliente,
+            self._cliente.list_blobs(self._aceitos, prefix=prefixo_das_janelas(job_id)),
+        )
 
 
 class LeiturasStorage:
@@ -1804,16 +1833,17 @@ class ArquivosNoStorage:
         # A regra de 7 dias do bucket pode apagar a cópia limpa ou o áudio entre a
         # listagem e o `delete()`: o objeto que sumiu já está apagado (#502).
         for bucket in (self._aceitos, self._decupagens):
-            for blob in self._cliente.list_blobs(bucket, prefix=f"{job_id}/"):
-                try:
-                    blob.delete()
-                except NotFound:
-                    pass
-        for objeto in (objeto_da_decupagem(job_id), f"{job_id}.comparacao.json"):
-            try:
-                self._cliente.bucket(self._decupagens).blob(objeto).delete()
-            except NotFound:
-                pass
+            apagar_objetos(
+                self._cliente, self._cliente.list_blobs(bucket, prefix=f"{job_id}/")
+            )
+        bucket = self._cliente.bucket(self._decupagens)
+        apagar_objetos(
+            self._cliente,
+            [
+                bucket.blob(objeto_da_decupagem(job_id)),
+                bucket.blob(f"{job_id}.comparacao.json"),
+            ],
+        )
 
 
 # Quadros guardados por instância: uns 50 por página da grade, com folga para o acervo.
