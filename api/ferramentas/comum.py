@@ -1,7 +1,7 @@
 """O que mais de uma ferramenta de linha de comando precisa (#658). Só as ferramentas importam."""
 
 import hashlib
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -41,6 +41,19 @@ def hash_estavel(chave: str, digitos: int) -> int:
     """Os primeiros `digitos` hexadecimais do SHA-256 da chave, como inteiro: o sorteio que
     não muda de uma rodada para outra."""
     return int(hashlib.sha256(chave.encode()).hexdigest()[:digitos], 16)
+
+
+def estratificar_por_programa[T](
+    filas: Mapping[str, Sequence[T]], quantos: int
+) -> list[T]:
+    """Até `quantos` itens: cada programa (em ordem alfabética) dá um por rodada, na ordem
+    já sorteada da sua fila."""
+    sorteados: list[T] = []
+    for rodada in range(max(map(len, filas.values()), default=0)):
+        for programa in sorted(filas):
+            if rodada < len(filas[programa]) and len(sorteados) < quantos:
+                sorteados.append(filas[programa][rodada])
+    return sorteados
 
 
 def percentil(valores: list[float], p: int) -> float:
