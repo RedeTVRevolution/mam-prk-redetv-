@@ -12,6 +12,7 @@ from api.decupagem import (
     CORES_BASE,
     RELACOES_DO_OBJETO,
     VERSAO_ESQUEMA,
+    Decupagem,
     esquema_do_modelo,
 )
 from api.gemini import instrucao
