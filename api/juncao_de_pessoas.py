@@ -22,6 +22,7 @@ from typing import Literal
 from api.correcoes import identidade_da_pessoa
 from api.decupagem import Aparicao, Decupagem, Objeto, OrigemDaJuncao, Pauta, Pessoa
 from api.identidade import nao_identificado
+from api.intervalos import sobrepoe_estrito
 from api.pessoas import LISTAS, em_ordem
 from api.texto import normalizar
 
@@ -132,7 +133,7 @@ def _proibida(a: Pessoa, b: Pessoa, proibidos: Collection[frozenset[str]]) -> bo
     for ja, aa in _pecas(a):
         for jb, ab in _pecas(b):
             if ja == jb and any(
-                x.inicio_ms < y.fim_ms and y.inicio_ms < x.fim_ms
+                sobrepoe_estrito(x.inicio_ms, x.fim_ms, y.inicio_ms, y.fim_ms)
                 for x in aa
                 for y in ab
             ):

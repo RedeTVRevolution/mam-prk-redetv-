@@ -17,6 +17,7 @@ from api.decupagem import (
     Pessoa,
     id_posicional,
 )
+from api.intervalos import sobrepoe_estrito
 from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
 
@@ -343,7 +344,8 @@ def registros_da_decupagem(
 
 def _aparece(pessoa: Pessoa, i: Intervalo) -> bool:
     return any(
-        a.inicio_ms < i.fim_ms and i.inicio_ms < a.fim_ms for a in pessoa.na_imagem
+        sobrepoe_estrito(a.inicio_ms, a.fim_ms, i.inicio_ms, i.fim_ms)
+        for a in pessoa.na_imagem
     )
 
 

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from api.catalogo import Catalogo
 from api.decupagem import Decupagem, FonteDoNome, Intervalo, Pessoa
 from api.identidade import nao_identificado
+from api.intervalos import sobrepoe_com_folga
 from api.programas import Perfis
 from api.texto import normalizar
 from api.transcricao import Transcricao
@@ -72,7 +73,7 @@ def _palavras(texto: str) -> list[str]:
 
 
 def _sobrepoe(a: Intervalo, inicio_ms: int, fim_ms: int, folga_ms: int = 0) -> bool:
-    return a.inicio_ms - folga_ms < fim_ms and inicio_ms < a.fim_ms + folga_ms
+    return sobrepoe_com_folga(a.inicio_ms, a.fim_ms, inicio_ms, fim_ms, folga_ms)
 
 
 def _nomes_da_pessoa(
