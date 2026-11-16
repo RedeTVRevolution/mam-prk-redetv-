@@ -36,6 +36,13 @@ def migrar(colecao: Any, cliente: Any) -> int:
 
 
 def main() -> int:
+    if not os.environ.get("FIRESTORE_BANCO_DE_SEGURANCA"):
+        # Sem ele o cliente cai no banco (default) e a migração "dá certo" nas cópias antigas.
+        print(
+            "FIRESTORE_BANCO_DE_SEGURANCA vazio: rode pelo make migrar-papel-operador",
+            file=sys.stderr,
+        )
+        return 1
     cliente = cliente_da_colecao(os.environ["GCP_PROJECT_ID"], COLECAO_DE_PAPEIS)
     print(f"trocados: {migrar(cliente.collection(COLECAO_DE_PAPEIS), cliente)}")
     return 0

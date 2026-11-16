@@ -2,6 +2,8 @@
 
 from typing import Any
 
+import pytest
+
 from api.migrar_papel_operador import LOTE, migrar
 
 
@@ -79,3 +81,14 @@ def test_grava_em_lotes_de_400() -> None:
 
     assert migrar(banco, banco) == LOTE + 1
     assert banco.lotes == [LOTE, 1]
+
+
+def test_recusa_rodar_sem_o_banco_de_seguranca(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Sem a variável o cliente cairia no banco (default), com as cópias antigas (#664).
+    import api.migrar_papel_operador as script
+
+    monkeypatch.delenv("FIRESTORE_BANCO_DE_SEGURANCA", raising=False)
+    monkeypatch.setattr(
+        script, "cliente_da_colecao", lambda *_: pytest.fail("abriu o banco")
+    )
+    assert script.main() == 1

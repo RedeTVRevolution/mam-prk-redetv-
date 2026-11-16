@@ -295,6 +295,7 @@ recalcular-pessoas-dos-jobs:
 migrar-papel-operador:
 	set -a && . ./.env && set +a && \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
+	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
 	uv run --locked python -m api.migrar_papel_operador
 
 # Grava `mes_exibicao` nos Jobs antigos que têm data de exibição (#479): make gravar-mes-nos-jobs.
