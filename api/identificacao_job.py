@@ -24,7 +24,7 @@ from api.ciclo_de_vida import rodar_etapa
 from api.clientes_de_nuvem import sessao_autenticada
 from api.correcoes import Correcao
 from api.decupagem import Decupagem
-from api.gemini import AnaliseFalhou, Transporte, TransporteVertex
+from api.gemini import Transporte, TransporteVertex
 from api.juncao_de_pessoas import juntar_sem_nome
 from api.modelo_do_job import RepositorioDeJobs
 from api.modelo_forte import LIMITE_DE_PESSOAS, olhar_pessoas_sem_nome
@@ -37,7 +37,6 @@ from api.nuvem import (
     TranscricoesStorage,
 )
 from api.programas import Perfis, perfis_dos_programas
-from api.quadros import FalhaNosQuadros
 from api.quadros_das_pessoas import extrair_quadros
 from api.regras_das_correcoes import pares_proibidos, pessoas_corrigidas
 from api.sinais import imprimir
@@ -92,22 +91,18 @@ def executar(
         def quadros_em(instantes: Sequence[int]) -> list[bytes]:
             return extrair_quadros(copia, instantes)
 
-        try:
-            nova = olhar_pessoas_sem_nome(
-                decupagem,
-                transporte=transporte,
-                quadros_em=quadros_em,
-                job_id=job_id,
-                programa=job.programa,
-                perfis=perfis,
-                transcricao=transcricoes.ler_transcricao(job_id),
-                catalogo=catalogo,
-                limite_de_pessoas=limite_de_pessoas,
-                ao_falhar=falhas.append,
-            )
-        except (AnaliseFalhou, FalhaNosQuadros):
-            # Sem o modelo forte a Decupagem fica como está.
-            return "sem_alteracao"
+        nova = olhar_pessoas_sem_nome(
+            decupagem,
+            transporte=transporte,
+            quadros_em=quadros_em,
+            job_id=job_id,
+            programa=job.programa,
+            perfis=perfis,
+            transcricao=transcricoes.ler_transcricao(job_id),
+            catalogo=catalogo,
+            limite_de_pessoas=limite_de_pessoas,
+            ao_falhar=falhas.append,
+        )
         # A junção das pessoas sem nome é o último passo, depois do modelo forte: assim
         # uma pessoa nomeada por ele nunca absorve outra e o nome nunca se espalha. As
         # separações que uma pessoa fez na tela ainda valem num reprocessamento (#547).

@@ -29,6 +29,7 @@ from api.programas import Perfis
 from api.sinais import (
     Registrar,
     imprimir,
+    registro_da_falha_de_rede,
     registro_da_resposta_fora_do_esquema,
     registro_das_pessoas_fora_da_pauta,
     registro_do_erro_http,
@@ -324,7 +325,16 @@ class TransporteVertex:
                 url, json=corpo, headers=cabecalhos, timeout=chamada.timeout_s
             )
         except (requests.RequestException, OSError) as e:
-            raise ErroHttp(503) from e
+            erro = type(e).__name__
+            self._registrar(
+                registro_da_falha_de_rede(
+                    erro,
+                    str(e)[:300],
+                    chamada.modelo,
+                    self._etapa or chamada.rotulos.get("etapa"),
+                )
+            )
+            raise ErroHttp(503, erro, str(e)[:300]) from e
         if resposta.status_code != 200:
             codigo, mensagem = _erro_do_servico(resposta)
             self._registrar(
@@ -436,12 +446,17 @@ def gerar_validado[T](
     falhas_rede = 0
     falhas_esquema = 0
     inicio = relogio()
+    ultimo_erro = ""
     while True:
         if relogio() - inicio + TIMEOUT_DA_REDE_S > PRAZO_DA_ANALISE_S:
-            raise AnaliseFalhou()
+            detalhe = f"; último erro: {ultimo_erro}" if ultimo_erro else ""
+            raise AnaliseFalhou(
+                f"prazo da análise esgotado ({PRAZO_DA_ANALISE_S:.0f} s){detalhe}"
+            )
         try:
             texto = transporte.gerar(chamada)
         except ErroHttp as e:
+            ultimo_erro = str(e)
             if not repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
                 raise AnaliseFalhou(str(e)) from e
             dormir(
@@ -452,11 +467,14 @@ def gerar_validado[T](
         try:
             return validar(texto)
         except ValueError as e:
+            ultimo_erro = f"resposta fora do esquema: {e}"
             registrar(registro_da_resposta_fora_do_esquema(chamada.modelo, str(e)))
             if ao_fora_do_esquema:
                 ao_fora_do_esquema()
             if falhas_esquema >= TENTATIVAS_ESQUEMA:
-                raise AnaliseFalhou() from e
+                raise AnaliseFalhou(
+                    f"esquema esgotado após {falhas_esquema + 1} respostas; {ultimo_erro}"
+                ) from e
             falhas_esquema += 1
 
 

@@ -102,6 +102,22 @@ def registro_do_erro_http(
     return json.dumps(registro, ensure_ascii=False)
 
 
+def registro_da_falha_de_rede(
+    erro: str, mensagem: str, modelo: str, etapa: str | None = None
+) -> str:
+    """Uma linha por timeout ou queda de conexão com o Vertex, antes de virar `ErroHttp(503)`."""
+    registro: dict[str, object] = {
+        "severity": "WARNING",
+        "evento": "falha_de_rede_do_modelo",
+        "erro": erro,
+        "mensagem": mensagem,
+        "modelo": modelo,
+    }
+    if etapa:
+        registro["etapa"] = etapa
+    return json.dumps(registro, ensure_ascii=False)
+
+
 def registro_das_pessoas_fora_da_pauta(pautas: dict[str, list[str]]) -> str:
     """Uma linha por resposta corrigida: os ids que o modelo citou na pauta sem declará-los
     em `pessoas` e que saíram dela (pauta -> ids). Evento próprio: não conta no alerta."""
