@@ -14,6 +14,7 @@ from api.gemini import Chamada
 from api.tests.test_analise_por_janelas import DURACAO_MS as DURACAO_LONGA_MS
 from api.tests.test_analise_por_janelas import ModeloFalso, mm_ss
 from api.transcricao import Palavra, Transcricao
+from api.transcricao_na_analise import _falas_do_grupo
 
 VIDEO = Video(sha256="d" * 64, duracao_ms=60_000)
 URI = "gs://aceitos/j/proxy.mp4"
@@ -327,3 +328,20 @@ def test_fala_longa_demais_vira_mais_de_uma() -> None:
     assert len(d.transcricao) == 2
     assert all(f.locutor == "Ana" and len(f.texto) <= 2000 for f in d.transcricao)
     assert sum(len(f.texto.split()) for f in d.transcricao) == 400
+
+
+def test_correcoes_que_encurtam_palavras_nao_estouram_o_texto_original() -> None:
+    ps = palavras(*[("abcdefghij", k * 0.1, k * 0.1 + 0.05) for k in range(250)])
+    troca = {id(p): "a" for p in ps}  # corrigido: 499 caracteres; original: 2.749
+
+    falas = _falas_do_grupo("Ana", ps, troca, 60_000)
+
+    assert len(falas) > 1
+    assert all(
+        len(f.texto) <= 2000 and len(f.texto_original or "") <= 2000 for f in falas
+    )
+    assert " ".join(f.texto for f in falas) == " ".join(["a"] * 250)
+    assert " ".join(f.texto_original or "" for f in falas) == " ".join(
+        p.texto for p in ps
+    )
+    assert (falas[0].inicio_ms, falas[-1].fim_ms) == (0, 24_950)
