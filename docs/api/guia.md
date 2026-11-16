@@ -61,7 +61,7 @@ Cabeçalhos: `X-Webhook-Id`, `X-Webhook-Data` e `X-Webhook-Assinatura`. Corpo (J
 
 **Confira a assinatura antes de confiar no corpo**: é o HMAC-SHA256, em hexadecimal, de `<X-Webhook-Data>.<corpo exato>` com o segredo do seu sistema. Recuse (401) data com mais de 5 minutos de diferença do seu relógio. Exemplos: `exemplos/curl/5-verificar-o-webhook.sh` e `exemplos/python/5-verificar-o-webhook.py`.
 
-Como responder: **2xx** é entrega feita; **408, 429 e 5xx** o MAM repete (até 10 tentativas ao todo, com espera crescente de 10 s a 10 min); **outro 4xx** descarta o evento. A entrega é *pelo menos uma vez*: **deduplique pelo `X-Webhook-Id`**, que é o mesmo em toda repetição do evento.
+Como responder: **2xx** é entrega feita; **408, 429 e 5xx** o MAM repete (até 10 tentativas ao todo, com espera crescente de 10 s a 10 min); **outro 4xx** descarta o evento. A entrega é *pelo menos uma vez*: **deduplique pelo `X-Webhook-Id`**, que é o mesmo em toda repetição do evento, inclusive quando o MAM precisa publicar de novo o aviso de um Job que falhou (o id vem do Job e do reprocessamento, não de um sorteio).
 
 ## 6. Buscar o resultado
 
