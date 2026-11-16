@@ -32,7 +32,7 @@ from api.gemini import MODELO, AnaliseFalhou, Transporte, analisar
 from api.identificacao import (
     TOLERANCIA_DA_FALA_MS,
     candidatos_do_video,
-    identificar_e_pos_processar,
+    identificar,
 )
 from api.janelas import (
     EstadoJanela,
@@ -111,7 +111,7 @@ def analisar_video(
         return medicao.medir(decupagem, trecho_ms) if medicao else decupagem
 
     def identificar_pessoas(decupagem: Decupagem) -> Decupagem:
-        return identificar_e_pos_processar(
+        return identificar(
             decupagem,
             candidatos=candidatos_do_video(programa, catalogo, perfis),
             transcricao=transcricao,

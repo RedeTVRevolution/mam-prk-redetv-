@@ -17,7 +17,6 @@ import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from api.catalogo import Catalogo
 from api.decupagem import Decupagem, FonteDoNome, Intervalo, Pessoa
@@ -213,6 +212,7 @@ def identificar(
     """Confere o nome de cada pessoa. Com prova, o nome é `confirmado` (origem
     `modelo_forte`, só as fontes conferidas) e vai para o catálogo; sem prova, é
     `palpite`, sem fontes. A pessoa da revisora e o "não identificado" ficam como estão.
+    Depois, tira o comercial cuja marca é o nome de uma pessoa (`sem_comercial_de_pessoa`).
 
     `sem_nome` leva o id de cada pessoa que, para a regra "outra pessoa sem nome na
     imagem", conta como sem nome mesmo com um nome (o do modelo forte, ainda sem prova)
@@ -250,7 +250,7 @@ def identificar(
                 }
             )
         )
-    return decupagem.model_copy(update={"pessoas": pessoas})
+    return sem_comercial_de_pessoa(decupagem.model_copy(update={"pessoas": pessoas}))
 
 
 def sem_comercial_de_pessoa(decupagem: Decupagem) -> Decupagem:
@@ -267,9 +267,3 @@ def sem_comercial_de_pessoa(decupagem: Decupagem) -> Decupagem:
             ]
         }
     )
-
-
-def identificar_e_pos_processar(decupagem: Decupagem, **kwargs: Any) -> Decupagem:
-    """`identificar` seguido das regras que valem depois dele: a análise e o modelo
-    forte (que nomeia pessoas depois) passam por aqui, para o filtro rodar nas duas."""
-    return sem_comercial_de_pessoa(identificar(decupagem, **kwargs))
