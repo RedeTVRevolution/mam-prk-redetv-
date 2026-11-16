@@ -252,9 +252,7 @@ def test_job_inexistente_da_404() -> None:
     assert Mundo(None).reprocessar().status_code == 404
 
 
-@pytest.mark.parametrize(
-    "papeis", [None, ["consulta"], ["operador"], ["diretoria"], []]
-)
+@pytest.mark.parametrize("papeis", [None, ["consulta"], ["diretoria"], []])
 def test_sem_video_reprocessar_da_403(papeis: list[Papel] | None) -> None:
     mundo = Mundo(_falhou_na_analise(), papeis)
 
@@ -563,7 +561,7 @@ def test_com_as_outras_etapas_o_job_continua_concluido(etapa: str) -> None:
     assert mundo.job().estado == "concluido"
 
 
-@pytest.mark.parametrize("papeis", [None, ["operador"], ["editor"], ["consulta"]])
+@pytest.mark.parametrize("papeis", [None, ["editor"], ["consulta"]])
 def test_sem_a_permissao_da_etapa_escolhida_da_403(papeis: list[Papel] | None) -> None:
     mundo = Mundo(_concluido_completo(), papeis)
 

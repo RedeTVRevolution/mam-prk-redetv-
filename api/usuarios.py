@@ -25,9 +25,9 @@ from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
 from api.erros import ServicoIndisponivel
 from api.papeis import (
-    PAPEIS,
     Papel,
     RepositorioDePapeis,
+    em_ordem,
     papeis_do_usuario,
     papeis_efetivos,
 )
@@ -137,12 +137,8 @@ class UsuarioDaLista(BaseModel):
     situacao: Literal["ativa", "desativada"]
 
 
-def _em_ordem(papeis: list[Papel]) -> list[Papel]:
-    return [p for p in PAPEIS if p in papeis]
-
-
 # Sem repetição e na ordem de `PAPEIS`.
-PapeisPedidos = Annotated[list[Papel], AfterValidator(_em_ordem)]
+PapeisPedidos = Annotated[list[Papel], AfterValidator(em_ordem)]
 
 
 class NovoUsuario(BaseModel):
@@ -287,10 +283,10 @@ def criar_rotas_dos_usuarios(
                 409, "Você não pode tirar de si mesmo o papel de Administrador"
             )
         # Grava pelo guardado: o de emergência pode tirar um papel que a lista mantém.
-        if guardados is None or _em_ordem(guardados) != pedido.papeis:
+        if guardados is None or em_ordem(guardados) != pedido.papeis:
             papeis.salvar(uid, pedido.papeis)
         # Audita só o que mudou de fato (os efetivos).
-        if _em_ordem(antes) == _em_ordem(depois):
+        if em_ordem(antes) == em_ordem(depois):
             return da_lista(conta)
         try:
             registrar(

@@ -9,7 +9,6 @@
   "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o programas.editar",
   "editor": "404",
-  "operador": "403 Sem a permiss\u00e3o programas.editar",
   "sem_documento": "403 Sem a permiss\u00e3o programas.editar",
   "sem_papel": "403 Sem a permiss\u00e3o programas.editar",
   "sem_token": "401"
@@ -24,7 +23,6 @@
   "curador": "409",
   "diretoria": "403 Sem a permiss\u00e3o video.enviar",
   "editor": "409",
-  "operador": "403 Sem a permiss\u00e3o video.enviar",
   "sem_documento": "403 Sem a permiss\u00e3o video.enviar",
   "sem_papel": "403 Sem a permiss\u00e3o video.enviar",
   "sem_token": "401"
@@ -39,7 +37,6 @@
   "curador": "403 Sem a permiss\u00e3o aprovacao.definir",
   "diretoria": "403 Sem a permiss\u00e3o aprovacao.definir",
   "editor": "403 Sem a permiss\u00e3o aprovacao.definir",
-  "operador": "403 Sem a permiss\u00e3o aprovacao.definir",
   "sem_documento": "403 Sem a permiss\u00e3o aprovacao.definir",
   "sem_papel": "403 Sem a permiss\u00e3o aprovacao.definir",
   "sem_token": "401"
@@ -54,7 +51,6 @@
   "curador": "403 Sem a permiss\u00e3o auditoria.ver",
   "diretoria": "403 Sem a permiss\u00e3o auditoria.ver",
   "editor": "403 Sem a permiss\u00e3o auditoria.ver",
-  "operador": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_documento": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_papel": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_token": "401"
@@ -69,7 +65,6 @@
   "curador": "403 Sem a permiss\u00e3o chaves.gerir",
   "diretoria": "403 Sem a permiss\u00e3o chaves.gerir",
   "editor": "403 Sem a permiss\u00e3o chaves.gerir",
-  "operador": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_token": "401"
@@ -84,7 +79,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -99,7 +93,6 @@
   "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o catalogo.apagar",
   "editor": "403 Sem a permiss\u00e3o catalogo.apagar",
-  "operador": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_documento": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_papel": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_token": "401"
@@ -114,7 +107,6 @@
   "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o catalogo.apagar",
   "editor": "403 Sem a permiss\u00e3o catalogo.apagar",
-  "operador": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_documento": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_papel": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_token": "401"
@@ -129,7 +121,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -144,7 +135,6 @@
   "curador": "200",
   "diretoria": "403 Sem a permiss\u00e3o programas.editar",
   "editor": "200",
-  "operador": "403 Sem a permiss\u00e3o programas.editar",
   "sem_documento": "403 Sem a permiss\u00e3o programas.editar",
   "sem_papel": "403 Sem a permiss\u00e3o programas.editar",
   "sem_token": "401"
@@ -159,7 +149,6 @@
   "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o programas.editar",
   "editor": "404",
-  "operador": "403 Sem a permiss\u00e3o programas.editar",
   "sem_documento": "403 Sem a permiss\u00e3o programas.editar",
   "sem_papel": "403 Sem a permiss\u00e3o programas.editar",
   "sem_token": "401"
@@ -174,7 +163,6 @@
   "curador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "diretoria": "403 Sem a permiss\u00e3o usuarios.gerir",
   "editor": "403 Sem a permiss\u00e3o usuarios.gerir",
-  "operador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_token": "401"
@@ -189,7 +177,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -204,7 +191,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -219,7 +205,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -234,7 +219,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o catalogo.fundir",
   "editor": "403 Sem a permiss\u00e3o catalogo.fundir",
-  "operador": "403 Sem a permiss\u00e3o catalogo.fundir",
   "sem_documento": "403 Sem a permiss\u00e3o catalogo.fundir",
   "sem_papel": "403 Sem a permiss\u00e3o catalogo.fundir",
   "sem_token": "401"
@@ -249,7 +233,6 @@
   "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o correcao.aprovar",
   "editor": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "operador": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_documento": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_papel": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_token": "401"
@@ -264,7 +247,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "200",
   "sem_token": "401"
@@ -279,7 +261,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "200",
   "sem_token": "401"
@@ -294,7 +275,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "200",
   "sem_token": "200"
@@ -309,7 +289,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -324,7 +303,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -339,7 +317,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -354,7 +331,6 @@
   "curador": "200",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "200",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -369,7 +345,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -384,7 +359,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -399,7 +373,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -414,7 +387,6 @@
   "curador": "200",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "200",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -429,7 +401,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -444,7 +415,6 @@
   "curador": "404",
   "diretoria": "404",
   "editor": "404",
-  "operador": "404",
   "sem_documento": "404",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -459,7 +429,6 @@
   "curador": "409",
   "diretoria": "409",
   "editor": "409",
-  "operador": "409",
   "sem_documento": "409",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -474,7 +443,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -489,7 +457,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -504,7 +471,6 @@
   "curador": "200",
   "diretoria": "403 Sem a permiss\u00e3o auditoria.ver",
   "editor": "403 Sem a permiss\u00e3o auditoria.ver",
-  "operador": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_documento": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_papel": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_token": "401"
@@ -519,7 +485,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -534,7 +499,6 @@
   "curador": "403 Sem a permiss\u00e3o painel.ver",
   "diretoria": "503",
   "editor": "403 Sem a permiss\u00e3o painel.ver",
-  "operador": "403 Sem a permiss\u00e3o painel.ver",
   "sem_documento": "403 Sem a permiss\u00e3o painel.ver",
   "sem_papel": "403 Sem a permiss\u00e3o painel.ver",
   "sem_token": "401"
@@ -549,7 +513,6 @@
   "curador": "403 Sem a permiss\u00e3o painel.ver",
   "diretoria": "503",
   "editor": "403 Sem a permiss\u00e3o painel.ver",
-  "operador": "403 Sem a permiss\u00e3o painel.ver",
   "sem_documento": "403 Sem a permiss\u00e3o painel.ver",
   "sem_papel": "403 Sem a permiss\u00e3o painel.ver",
   "sem_token": "401"
@@ -564,7 +527,6 @@
   "curador": "403 Sem a permiss\u00e3o painel.ver",
   "diretoria": "503",
   "editor": "403 Sem a permiss\u00e3o painel.ver",
-  "operador": "403 Sem a permiss\u00e3o painel.ver",
   "sem_documento": "403 Sem a permiss\u00e3o painel.ver",
   "sem_papel": "403 Sem a permiss\u00e3o painel.ver",
   "sem_token": "401"
@@ -579,7 +541,6 @@
   "curador": "403 Sem a permiss\u00e3o painel.ver",
   "diretoria": "503",
   "editor": "403 Sem a permiss\u00e3o painel.ver",
-  "operador": "403 Sem a permiss\u00e3o painel.ver",
   "sem_documento": "403 Sem a permiss\u00e3o painel.ver",
   "sem_papel": "403 Sem a permiss\u00e3o painel.ver",
   "sem_token": "401"
@@ -594,7 +555,6 @@
   "curador": "403 Sem a permiss\u00e3o painel.ver",
   "diretoria": "200",
   "editor": "403 Sem a permiss\u00e3o painel.ver",
-  "operador": "403 Sem a permiss\u00e3o painel.ver",
   "sem_documento": "403 Sem a permiss\u00e3o painel.ver",
   "sem_papel": "403 Sem a permiss\u00e3o painel.ver",
   "sem_token": "401"
@@ -609,7 +569,6 @@
   "curador": "403 Sem a permiss\u00e3o painel.ver",
   "diretoria": "503",
   "editor": "403 Sem a permiss\u00e3o painel.ver",
-  "operador": "403 Sem a permiss\u00e3o painel.ver",
   "sem_documento": "403 Sem a permiss\u00e3o painel.ver",
   "sem_papel": "403 Sem a permiss\u00e3o painel.ver",
   "sem_token": "401"
@@ -624,7 +583,6 @@
   "curador": "403 Sem a permiss\u00e3o painel.ver",
   "diretoria": "503",
   "editor": "403 Sem a permiss\u00e3o painel.ver",
-  "operador": "403 Sem a permiss\u00e3o painel.ver",
   "sem_documento": "403 Sem a permiss\u00e3o painel.ver",
   "sem_papel": "403 Sem a permiss\u00e3o painel.ver",
   "sem_token": "401"
@@ -639,7 +597,6 @@
   "curador": "403 Sem a permiss\u00e3o painel.ver",
   "diretoria": "503",
   "editor": "403 Sem a permiss\u00e3o painel.ver",
-  "operador": "403 Sem a permiss\u00e3o painel.ver",
   "sem_documento": "403 Sem a permiss\u00e3o painel.ver",
   "sem_papel": "403 Sem a permiss\u00e3o painel.ver",
   "sem_token": "401"
@@ -654,7 +611,6 @@
   "curador": "200",
   "diretoria": "200",
   "editor": "200",
-  "operador": "200",
   "sem_documento": "200",
   "sem_papel": "200",
   "sem_token": "401"
@@ -669,7 +625,6 @@
   "curador": "200",
   "diretoria": "403 Sem a permiss\u00e3o auditoria.ver",
   "editor": "403 Sem a permiss\u00e3o auditoria.ver",
-  "operador": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_documento": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_papel": "403 Sem a permiss\u00e3o auditoria.ver",
   "sem_token": "401"
@@ -684,7 +639,6 @@
   "curador": "503",
   "diretoria": "503",
   "editor": "503",
-  "operador": "503",
   "sem_documento": "503",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -699,7 +653,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -714,7 +667,6 @@
   "curador": "503",
   "diretoria": "503",
   "editor": "503",
-  "operador": "503",
   "sem_documento": "503",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -729,7 +681,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -744,7 +695,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -759,7 +709,6 @@
   "curador": "403 Sem a permiss\u00e3o chaves.gerir",
   "diretoria": "403 Sem a permiss\u00e3o chaves.gerir",
   "editor": "403 Sem a permiss\u00e3o chaves.gerir",
-  "operador": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_token": "401"
@@ -774,7 +723,6 @@
   "curador": "403 Sem a permiss\u00e3o chaves.gerir",
   "diretoria": "403 Sem a permiss\u00e3o chaves.gerir",
   "editor": "403 Sem a permiss\u00e3o chaves.gerir",
-  "operador": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o chaves.gerir",
   "sem_token": "401"
@@ -789,7 +737,6 @@
   "curador": "403 Sem a permiss\u00e3o job.corrigir_estado",
   "diretoria": "403 Sem a permiss\u00e3o job.corrigir_estado",
   "editor": "403 Sem a permiss\u00e3o job.corrigir_estado",
-  "operador": "403 Sem a permiss\u00e3o job.corrigir_estado",
   "sem_documento": "403 Sem a permiss\u00e3o job.corrigir_estado",
   "sem_papel": "403 Sem a permiss\u00e3o job.corrigir_estado",
   "sem_token": "401"
@@ -804,7 +751,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o catalogo.apagar",
   "editor": "403 Sem a permiss\u00e3o catalogo.apagar",
-  "operador": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_documento": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_papel": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_token": "401"
@@ -819,7 +765,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -834,7 +779,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -849,7 +793,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o catalogo.apagar",
   "editor": "403 Sem a permiss\u00e3o catalogo.apagar",
-  "operador": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_documento": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_papel": "403 Sem a permiss\u00e3o catalogo.apagar",
   "sem_token": "401"
@@ -864,7 +807,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -879,7 +821,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -894,7 +835,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -909,7 +849,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -924,7 +863,6 @@
   "curador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "diretoria": "403 Sem a permiss\u00e3o lixeira.gerir",
   "editor": "403 Sem a permiss\u00e3o lixeira.gerir",
-  "operador": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o lixeira.gerir",
   "sem_token": "401"
@@ -939,7 +877,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o programas.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o programas.editar",
   "sem_documento": "403 Sem a permiss\u00e3o programas.editar",
   "sem_papel": "403 Sem a permiss\u00e3o programas.editar",
   "sem_token": "401"
@@ -954,7 +891,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o programas.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o programas.editar",
   "sem_documento": "403 Sem a permiss\u00e3o programas.editar",
   "sem_papel": "403 Sem a permiss\u00e3o programas.editar",
   "sem_token": "401"
@@ -969,7 +905,6 @@
   "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o programas.editar",
   "editor": "404",
-  "operador": "403 Sem a permiss\u00e3o programas.editar",
   "sem_documento": "403 Sem a permiss\u00e3o programas.editar",
   "sem_papel": "403 Sem a permiss\u00e3o programas.editar",
   "sem_token": "401"
@@ -984,7 +919,6 @@
   "curador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "diretoria": "403 Sem a permiss\u00e3o usuarios.gerir",
   "editor": "403 Sem a permiss\u00e3o usuarios.gerir",
-  "operador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_token": "401"
@@ -999,7 +933,6 @@
   "curador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "diretoria": "403 Sem a permiss\u00e3o usuarios.gerir",
   "editor": "403 Sem a permiss\u00e3o usuarios.gerir",
-  "operador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_token": "401"
@@ -1014,7 +947,6 @@
   "curador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "diretoria": "403 Sem a permiss\u00e3o usuarios.gerir",
   "editor": "403 Sem a permiss\u00e3o usuarios.gerir",
-  "operador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_token": "401"
@@ -1029,7 +961,6 @@
   "curador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "diretoria": "403 Sem a permiss\u00e3o usuarios.gerir",
   "editor": "403 Sem a permiss\u00e3o usuarios.gerir",
-  "operador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_token": "401"
@@ -1044,7 +975,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -1059,7 +989,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -1074,7 +1003,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -1089,7 +1017,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o catalogo.fundir",
   "editor": "403 Sem a permiss\u00e3o catalogo.fundir",
-  "operador": "403 Sem a permiss\u00e3o catalogo.fundir",
   "sem_documento": "403 Sem a permiss\u00e3o catalogo.fundir",
   "sem_papel": "403 Sem a permiss\u00e3o catalogo.fundir",
   "sem_token": "401"
@@ -1104,7 +1031,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o correcao.aprovar",
   "editor": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "operador": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_documento": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_papel": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_token": "401"
@@ -1119,7 +1045,6 @@
   "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o correcao.aprovar",
   "editor": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "operador": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_documento": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_papel": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_token": "401"
@@ -1134,7 +1059,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o video.enviar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o video.enviar",
   "sem_documento": "403 Sem a permiss\u00e3o video.enviar",
   "sem_papel": "403 Sem a permiss\u00e3o video.enviar",
   "sem_token": "401"
@@ -1149,7 +1073,6 @@
   "curador": "422",
   "diretoria": "422",
   "editor": "422",
-  "operador": "422",
   "sem_documento": "422",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
@@ -1164,7 +1087,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -1179,7 +1101,6 @@
   "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o correcao.aprovar",
   "editor": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "operador": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_documento": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_papel": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_token": "401"
@@ -1194,7 +1115,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -1209,7 +1129,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o correcao.aprovar",
   "editor": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "operador": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_documento": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_papel": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_token": "401"
@@ -1224,7 +1143,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -1239,7 +1157,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -1254,7 +1171,6 @@
   "curador": "409",
   "diretoria": "403 Sem a permiss\u00e3o video.reprocessar",
   "editor": "409",
-  "operador": "403 Sem a permiss\u00e3o video.reprocessar",
   "sem_documento": "403 Sem a permiss\u00e3o video.reprocessar",
   "sem_papel": "403 Sem a permiss\u00e3o video.reprocessar",
   "sem_token": "401"
@@ -1269,7 +1185,6 @@
   "curador": "503",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "503",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -1284,7 +1199,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o decupagem.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_documento": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
@@ -1299,7 +1213,6 @@
   "curador": "403 Sem a permiss\u00e3o aprovacao.definir",
   "diretoria": "403 Sem a permiss\u00e3o aprovacao.definir",
   "editor": "403 Sem a permiss\u00e3o aprovacao.definir",
-  "operador": "403 Sem a permiss\u00e3o aprovacao.definir",
   "sem_documento": "403 Sem a permiss\u00e3o aprovacao.definir",
   "sem_papel": "403 Sem a permiss\u00e3o aprovacao.definir",
   "sem_token": "401"
@@ -1314,7 +1227,6 @@
   "curador": "422",
   "diretoria": "403 Sem a permiss\u00e3o programas.editar",
   "editor": "422",
-  "operador": "403 Sem a permiss\u00e3o programas.editar",
   "sem_documento": "403 Sem a permiss\u00e3o programas.editar",
   "sem_papel": "403 Sem a permiss\u00e3o programas.editar",
   "sem_token": "401"
@@ -1329,7 +1241,6 @@
   "curador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "diretoria": "403 Sem a permiss\u00e3o usuarios.gerir",
   "editor": "403 Sem a permiss\u00e3o usuarios.gerir",
-  "operador": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_token": "401"

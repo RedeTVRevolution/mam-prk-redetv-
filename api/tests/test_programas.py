@@ -2,7 +2,7 @@ import tomllib
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -139,8 +139,8 @@ def _cliente(
     return cliente, programas, catalogo
 
 
-def test_consulta_e_operador_recebem_403_em_cada_rota() -> None:
-    for papel in ("consulta", "operador"):
+def test_consulta_recebe_403_em_cada_rota() -> None:
+    for papel in cast(list[Papel], ["consulta"]):
         cliente, programas, _ = _cliente([papel])
         id = programas.listar()[0].id
         corpo = {"nome": "Novo"}

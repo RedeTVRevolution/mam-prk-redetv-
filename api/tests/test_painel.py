@@ -93,7 +93,7 @@ def test_dependencia_deixa_passar_quem_tem_painel_ver(papel: Papel) -> None:
     assert resposta.status_code == 200
 
 
-@pytest.mark.parametrize("papel", ["consulta", "operador", "editor", "curador"])
+@pytest.mark.parametrize("papel", ["consulta", "editor", "curador"])
 def test_dependencia_barra_os_outros_papeis(papel: Papel) -> None:
     resposta = _cliente([papel]).get("/v1/_painel_teste", headers=CABECALHO)
 

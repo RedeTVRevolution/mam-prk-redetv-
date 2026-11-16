@@ -305,7 +305,7 @@ def test_job_nao_concluido_da_409() -> None:
     assert Mundo(["editor"], estado="analisando").corrigir().status_code == 409
 
 
-@pytest.mark.parametrize("papeis", [["consulta"], ["operador"], []])
+@pytest.mark.parametrize("papeis", [["consulta"], []])
 def test_sem_decupagem_editar_da_403(papeis: list[Papel]) -> None:
     mundo = Mundo(papeis)
 
