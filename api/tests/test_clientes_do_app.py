@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import google.auth
 import pytest
 from google.cloud import firestore
 
@@ -44,6 +45,8 @@ def test_o_app_do_ambiente_abre_dois_clientes_do_firestore(
 
     monkeypatch.setattr(firestore, "Client", fabrica)
     monkeypatch.setattr("google.cloud.storage.Client", lambda **_: MagicMock())
+    # Sem credenciais da máquina: o CI não tem ADC.
+    monkeypatch.setattr(google.auth, "default", lambda **_: (MagicMock(), "proj"))
     caminho = Path(api.main.__file__)
     # Uma cópia do módulo: o `api.main` do processo não é remontado.
     spec = importlib.util.spec_from_file_location("api._main_do_ambiente", caminho)

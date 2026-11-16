@@ -203,6 +203,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         return 2
     log_estruturado.configurar(logging.INFO)
     cliente = cliente_do_firestore(projeto, ambiente)
+    auditoria = auditoria_do_firestore(projeto, ambiente)
     busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
     repositorio = RepositorioFirestore(cliente)
     purga = Purga(
@@ -219,7 +220,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
             if busca
             else None
         ),
-        auditoria_do_firestore(projeto, ambiente),
+        auditoria,
         agora_utc,
         apagar_dados=dados_do_ambiente(cliente, ambiente).apagar,
     )
@@ -232,7 +233,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         lambda: purgar_catalogo_vencido(
             CatalogoFirestore(cliente),
             CatalogoDeMarcasFirestore(cliente),
-            auditoria_do_firestore(projeto, ambiente),
+            auditoria,
             agora_utc(),
             PurgasDeMarcaFirestore(cliente),
             VersaoDaLixeiraFirestore(cliente).avancar,
