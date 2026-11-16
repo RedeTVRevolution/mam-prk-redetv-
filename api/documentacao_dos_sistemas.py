@@ -205,7 +205,6 @@ _DECUPAGEM = {
     "versao_decupagem": "9c1f4e0a7b3d2c68a5f0e9d1b4c7a8e2f3d6b0c9a1e4f7d2b5c8a0e3f6d9b2c1",
     "video": {"sha256": "a" * 64, "duracao_ms": 598400},
     "programa": {
-        "resumo": "Edição de terça com bastidores e notícias de famosos.",
         "blocos": [{"inicio_ms": 0, "fim_ms": 9800, "titulo": "Abertura"}],
     },
     "pautas": [

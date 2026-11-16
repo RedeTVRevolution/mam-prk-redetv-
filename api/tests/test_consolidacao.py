@@ -25,7 +25,7 @@ def decupagem(**partes: Any) -> Decupagem:
     base: dict[str, Any] = {
         "versao_esquema": "1.5",
         "video": VIDEO.model_dump(),
-        "programa": {"resumo": "", "blocos": []},
+        "programa": {"blocos": []},
         "pautas": [],
         "pessoas": [],
         "planos": [],
@@ -155,10 +155,9 @@ def test_blocos_que_se_sobrepoem_viram_um() -> None:
     def bloco(inicio: int, fim: int, titulo: str) -> dict[str, Any]:
         return {"inicio_ms": inicio, "fim_ms": fim, "titulo": titulo}
 
-    r0 = decupagem(programa={"resumo": "um", "blocos": [bloco(0, 320_000, "Abertura")]})
+    r0 = decupagem(programa={"blocos": [bloco(0, 320_000, "Abertura")]})
     r1 = decupagem(
         programa={
-            "resumo": "dois",
             "blocos": [
                 bloco(290_000, 400_000, "Abertura"),
                 bloco(500_000, 600_000, "B"),
@@ -172,7 +171,6 @@ def test_blocos_que_se_sobrepoem_viram_um() -> None:
         ("Abertura", 0, 400_000),
         ("B", 500_000, 600_000),
     ]
-    assert d.programa.resumo == "um dois"
 
 
 def test_mesma_pessoa_vira_uma_so_e_nao_identificado_nao() -> None:
@@ -202,7 +200,7 @@ def test_mesma_pessoa_vira_uma_so_e_nao_identificado_nao() -> None:
 def test_video_de_uma_janela_sai_igual_a_entrada_menos_a_renumeracao() -> None:
     unica = janela(0, 0, DURACAO)
     r = decupagem(
-        programa={"resumo": "tudo", "blocos": []},
+        programa={"blocos": []},
         pautas=[pauta("zz", 0, DURACAO, "P", ["q"])],
         pessoas=[pessoa("q", "Ana", [(10, 20)])],
         planos=[plano("abc", 0, 500), plano("def", 500, DURACAO)],

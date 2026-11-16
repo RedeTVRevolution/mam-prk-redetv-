@@ -43,7 +43,7 @@ def _decupagem_com_meio_em(meio_ms: int, meia_largura_ms: int = 250) -> Decupage
         {
             "versao_esquema": "1.3",
             "video": {"sha256": "a" * 64, "duracao_ms": 6_000},
-            "programa": {"resumo": "r", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": [
                 {

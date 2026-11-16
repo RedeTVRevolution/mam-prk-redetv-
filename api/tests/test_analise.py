@@ -314,7 +314,7 @@ def test_decupagem_gravada_e_servida_pela_api_web() -> None:
     resposta = web.get("/v1/jobs/j4/decupagem", headers={"Authorization": "Bearer x"})
 
     assert resposta.status_code == 200
-    assert resposta.json()["programa"]["resumo"] == "Jornal da noite"
+    assert "resumo" not in resposta.json()["programa"]
     assert json.loads(resposta.content)["video"]["sha256"] == SHA
 
 
