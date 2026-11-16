@@ -180,7 +180,6 @@ class Chamada:
     video_uri: str
     esquema: dict[str, Any]
     rotulos: dict[str, str]
-    ferramentas: tuple[()] = ()  # o modelo nunca recebe ferramentas
     # Trecho do vídeo (`videoMetadata.startOffset`/`endOffset`), em ms do início
     # do arquivo; sem ele, o vídeo inteiro. O modelo conta os tempos do arquivo.
     trecho_ms: tuple[int, int] | None = None

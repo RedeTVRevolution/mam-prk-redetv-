@@ -4,7 +4,6 @@ Cada janela decupa o seu núcleo e vê 10 s de contexto de cada lado, limitado
 ao vídeo. Tudo em milissegundos inteiros.
 """
 
-from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -56,30 +55,16 @@ class EstadoJanela:
     erro: str | None
 
 
-@dataclass(frozen=True)
-class Falha:
-    indice: int
-    erro: str | None
-
-
-@dataclass(frozen=True)
-class SituacaoDoJob:
-    prontas: int
-    total: int
-    falha: Falha | None
-    pode_consolidar: bool
-
-
 def _terminal(estado: EstadoJanela) -> bool:
     return estado.situacao in ("concluida", "falhou")
 
 
-def iniciar(estado: EstadoJanela, limite: int = LIMITE_DE_TENTATIVAS) -> EstadoJanela:
+def iniciar(estado: EstadoJanela) -> EstadoJanela:
     """Começa uma tentativa. Reiniciar uma janela em andamento (o serviço caiu)
     também conta; se as tentativas já esgotaram o limite, a janela falha."""
     if _terminal(estado):
         return estado
-    if estado.tentativas >= limite:
+    if estado.tentativas >= LIMITE_DE_TENTATIVAS:
         return replace(estado, situacao="falhou", erro="limite de tentativas esgotado")
     return replace(estado, situacao="em_andamento", tentativas=estado.tentativas + 1)
 
@@ -96,26 +81,12 @@ def concluir(estado: EstadoJanela) -> EstadoJanela:
     return replace(estado, situacao="concluida", erro=None)
 
 
-def falhar(
-    estado: EstadoJanela, erro: str, limite: int = LIMITE_DE_TENTATIVAS
-) -> EstadoJanela:
+def falhar(estado: EstadoJanela, erro: str) -> EstadoJanela:
     """Volta a pendente se ainda há tentativas; senão vai a falhou com o erro."""
     if _terminal(estado):
         return estado
     _exigir_em_andamento(estado)
-    situacao: Situacao = "falhou" if estado.tentativas >= limite else "pendente"
-    return replace(estado, situacao=situacao, erro=erro)
-
-
-def situacao_do_job(estados: Sequence[EstadoJanela]) -> SituacaoDoJob:
-    """Progresso do job. Uma janela falha derruba o job: nunca há decupagem parcial."""
-    falhas = [e for e in estados if e.situacao == "falhou"]
-    primeira = min(falhas, key=lambda e: e.indice, default=None)
-    falha = Falha(primeira.indice, primeira.erro) if primeira else None
-    prontas = sum(e.situacao == "concluida" for e in estados)
-    return SituacaoDoJob(
-        prontas=prontas,
-        total=len(estados),
-        falha=falha,
-        pode_consolidar=bool(estados) and prontas == len(estados),
+    situacao: Situacao = (
+        "falhou" if estado.tentativas >= LIMITE_DE_TENTATIVAS else "pendente"
     )
+    return replace(estado, situacao=situacao, erro=erro)

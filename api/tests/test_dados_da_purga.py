@@ -255,23 +255,18 @@ def test_limpeza_unica_resumida_e_idempotente_sem_tocar_nos_jobs_vivos(
     tipos.registrar(VIDEO_PURGADO, {"sapato": 2})
     tipos.registrar("j1", {"sapato": 3})
     banco.dados["decisoes_legadas"] = {str(n): {"decisao": "a"} for n in range(6)}
-    bq = BigQueryFalso()
     ambiente = AMBIENTE | {"FIRESTORE_COLECAO_DECISOES_DE_SUGESTAO": "decisoes_legadas"}
-    limpar(banco, ambiente, bq)  # type: ignore[arg-type]
+    limpar(banco, ambiente)  # type: ignore[arg-type]
     assert (
         capsys.readouterr().out == "contribuição de tipos: 1; decisões de sugestão: 6\n"
     )
-    limpar(banco, ambiente, bq)  # type: ignore[arg-type]
+    limpar(banco, ambiente)  # type: ignore[arg-type]
     assert (
         capsys.readouterr().out == "contribuição de tipos: 0; decisões de sugestão: 0\n"
     )
     assert banco.dados[COLECAO_DOS_TIPOS_DE_OBJETO]["sapato"]["total"] == 3
     assert set(banco.dados[COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB]) == {"j1"}
     assert banco.dados["decisoes_legadas"] == {}
-    for tabela in ("momentos_atuais", "momentos_antigos", "jobs", "revisao"):
-        assert bq.banco.execute(
-            f"SELECT * FROM `projeto-teste.dados.{tabela}`"
-        ).fetchall() == [("j1",), ("j2",)]
 
 
 def test_limpeza_recusa_video_ainda_vivo_antes_de_apagar(
@@ -282,11 +277,9 @@ def test_limpeza_recusa_video_ainda_vivo_antes_de_apagar(
 
     banco = FirestoreFalso(monkeypatch)
     banco.dados[COLECAO_DE_JOBS] = {VIDEO_PURGADO: {"id": VIDEO_PURGADO}}
-    bq = BigQueryFalso()
     ambiente = AMBIENTE | {"FIRESTORE_COLECAO_DECISOES_DE_SUGESTAO": "decisoes_legadas"}
     with pytest.raises(RuntimeError, match="ainda existe"):
-        limpar(banco, ambiente, bq)  # type: ignore[arg-type]
-    assert bq.chamadas == []
+        limpar(banco, ambiente)  # type: ignore[arg-type]
 
 
 def test_script_da_purga_nao_tem_select_com_where_e_sem_from(

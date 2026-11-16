@@ -68,15 +68,3 @@ def _juntar(base: Pessoa, outra: Pessoa) -> Pessoa:
 
 def em_ordem[T: Intervalo](itens: list[T]) -> list[T]:
     return sorted(itens, key=lambda i: (i.inicio_ms, i.fim_ms))
-
-
-def tempo_de_tela_ms(pessoa: Pessoa) -> int:
-    """Soma das aparições, sem contar duas vezes o trecho sobreposto."""
-    total = 0
-    fim_atual = 0
-    for a in em_ordem(pessoa.na_imagem):
-        inicio = max(a.inicio_ms, fim_atual)
-        if a.fim_ms > inicio:
-            total += a.fim_ms - inicio
-        fim_atual = max(fim_atual, a.fim_ms)
-    return total

@@ -6,15 +6,12 @@ from collections.abc import Mapping
 from google.cloud import firestore
 
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, transporte_http
 from api.nuvem import COLECAO_DE_JOBS, TiposDeObjetoFirestore
 
 VIDEO_PURGADO = "00e156a84e524193b9c430700197050d"
 
 
-def limpar(
-    cliente: firestore.Client, ambiente: Mapping[str, str], transporte: Transporte
-) -> None:
+def limpar(cliente: firestore.Client, ambiente: Mapping[str, str]) -> None:
     """Apaga só os resíduos conhecidos e imprime as quantidades confirmadas."""
     decisoes = cliente.collection(ambiente["FIRESTORE_COLECAO_DECISOES_DE_SUGESTAO"])
     if cliente.collection(COLECAO_DE_JOBS).document(VIDEO_PURGADO).get().exists:
@@ -29,7 +26,7 @@ def limpar(
 
 def main() -> None:
     projeto = os.environ["GCP_PROJECT_ID"]
-    limpar(cliente_do_firestore(projeto), os.environ, transporte_http(projeto))
+    limpar(cliente_do_firestore(projeto), os.environ)
 
 
 if __name__ == "__main__":

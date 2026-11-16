@@ -3,7 +3,7 @@ from collections.abc import Sequence
 import pytest
 
 from api.decupagem import Pessoa
-from api.pessoas import tempo_de_tela_ms, unir_pessoas
+from api.pessoas import unir_pessoas
 
 
 def pessoa(
@@ -127,27 +127,6 @@ def test_mesmo_id_em_janelas_diferentes_nao_e_erro() -> None:
 
 def test_sem_janelas_nao_ha_pessoas() -> None:
     assert unir_pessoas([]) == ([], {})
-
-
-def test_tempo_de_tela_junta_aparicoes_sobrepostas() -> None:
-    ana = pessoa("a", "Ana", imagem=[(0, 4000), (3000, 6000), (10_000, 11_000)])
-
-    assert tempo_de_tela_ms(ana) == 7000
-
-
-def test_tempo_de_tela_ignora_aparicao_contida_e_desordenada() -> None:
-    ana = pessoa("a", "Ana", imagem=[(5000, 6000), (0, 10_000)])
-
-    assert tempo_de_tela_ms(ana) == 10_000
-
-
-def test_tempo_de_tela_nao_conta_mencoes() -> None:
-    ana = pessoa(
-        "a", "Ana", imagem=[(0, 1000)], fala=[(2000, 9000)], texto=[(3000, 9000)]
-    )
-
-    assert tempo_de_tela_ms(ana) == 1000
-    assert tempo_de_tela_ms(pessoa("b", "Bia", fala=[(0, 5000)])) == 0
 
 
 def test_mesma_pessoa_junta_as_fontes_do_nome_sem_repetir() -> None:
