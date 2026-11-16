@@ -532,6 +532,7 @@ def criar_app(
         return catalogo_de_correcoes()
 
     repositorio_de_jobs = repositorio or RepositorioIndisponivel()
+    app.state.jobs = repositorio_de_jobs
     armazenamento_dos_jobs = armazenamento or ArmazenamentoIndisponivel()
     repositorio_de_correcoes = correcoes or RepositorioDeCorrecoesEmMemoria()
     indice_da_busca = indice or IndiceEmMemoria()
@@ -803,9 +804,7 @@ def criar_app(
         )
     )
     # Vale para toda rota com `{job_id}`: o vídeo na lixeira some para quem não é Administrador.
-    app.include_router(
-        v1, dependencies=[Depends(sem_job_na_lixeira(repositorio_de_jobs))]
-    )
+    app.include_router(v1, dependencies=[Depends(sem_job_na_lixeira)])
     # Fora de `/v1`, com o token do Pub/Sub em vez do de pessoa ou sistema.
     if rotas_do_push is not None:
         app.include_router(rotas_do_push)

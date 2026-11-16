@@ -98,10 +98,16 @@ def transitar(
 
 
 def cancelar(
-    repositorio: RepositorioDeJobs, job_id: str, agora: datetime
+    repositorio: RepositorioDeJobs,
+    job_id: str,
+    agora: datetime,
+    lido: Job | None = None,
 ) -> Job | None:
-    """Cancela o Job; cancelar um já cancelado devolve o Job sem mudar nada."""
-    while (job := repositorio.obter(job_id)) is not None:
+    """Cancela o Job; cancelar um já cancelado devolve o Job sem mudar nada. `lido` é o
+    Job que quem chama já leu: vale na primeira volta, e se ele andou a troca falha e o
+    Job é lido de novo."""
+    while (job := lido or repositorio.obter(job_id)) is not None:
+        lido = None
         if job.estado == "cancelado":
             return job
         if job.estado in FINAIS:

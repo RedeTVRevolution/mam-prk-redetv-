@@ -26,7 +26,7 @@ from api.modelo_do_job import (
     Job,
     RepositorioDeJobs,
 )
-from api.permissoes import exige, tem_permissao
+from api.permissoes import JobDoPedido, exige, tem_permissao
 from api.texto_como_dado import Texto
 
 log = logging.getLogger(__name__)
@@ -107,27 +107,18 @@ class Envio(BaseModel):
 
 
 def sem_job_na_lixeira(
-    repositorio: RepositorioDeJobs,
-) -> Callable[[Request, ChamadorAutenticado], None]:
+    request: Request, chamador: ChamadorAutenticado, job: JobDoPedido
+) -> None:
     """Dependência de `/v1`: toda rota com `{job_id}` dá 404 ao Job na lixeira, menos ao
-    Administrador, que o lê para conferir e restaurar. O Job lido fica em
-    `request.state.job_lido`, para a rota não ler de novo."""
-
-    def verificar(request: Request, chamador: ChamadorAutenticado) -> None:
-        job_id = request.path_params.get("job_id")
-        if job_id is None:
-            return
-        job = repositorio.obter(job_id)
-        request.state.job_lido = job
-        if job is None or job.lixeira is None:
-            return
-        if isinstance(chamador, Usuario) and tem_permissao(
-            request, chamador, "lixeira.gerir"
-        ):
-            return
-        raise HTTPException(404, "Job não encontrado")
-
-    return verificar
+    Administrador, que o lê para conferir e restaurar. O Job vem de `JobDoPedido`, o
+    mesmo que a rota recebe."""
+    if job is None or job.lixeira is None:
+        return
+    if isinstance(chamador, Usuario) and tem_permissao(
+        request, chamador, "lixeira.gerir"
+    ):
+        return
+    raise HTTPException(404, "Job não encontrado")
 
 
 def _quem_enviou(job: Job) -> str:

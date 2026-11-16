@@ -19,7 +19,7 @@ from api.auditoria import RegistroDeAuditoria, RepositorioDeAuditoria
 from api.auth import Usuario
 from api.jobs import FUSO_DA_EMISSORA, DisparoDaIndexacao, JobPublico
 from api.modelo_do_job import Indexacao, RepositorioDeJobs
-from api.permissoes import exige
+from api.permissoes import JobDoPedido, exige
 from api.programas import RepositorioDeProgramas
 from api.texto_como_dado import Linha
 
@@ -64,8 +64,8 @@ def criar_rotas_da_edicao(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        job: JobDoPedido,
     ) -> JobPublico:
-        job = repositorio.obter(job_id)
         if job is None:
             raise HTTPException(404, "Job não encontrado")
         if job.estado != "concluido":

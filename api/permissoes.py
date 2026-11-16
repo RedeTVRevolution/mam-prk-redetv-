@@ -5,11 +5,12 @@ Um caso novo de permissão nasce aqui, não numa cópia de `isinstance` + 403 de
 """
 
 from collections.abc import Callable
+from typing import Annotated
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from api.auth import Chamador, ChamadorAutenticado, Escopo, Sistema, Usuario
-from api.modelo_do_job import Job
+from api.modelo_do_job import Job, RepositorioDeJobs
 from api.papeis import (
     DocumentoDePapeis,
     Papel,
@@ -122,6 +123,19 @@ def chave_com_algum(*escopos: Escopo) -> Callable[[ChamadorAutenticado], Chamado
         return chamador
 
     return verificar
+
+
+def job_do_pedido(request: Request) -> Job | None:
+    """O Job de `{job_id}` (None se não existe), lido uma vez por pedido: o FastAPI guarda o
+    resultado da dependência, e a trava da lixeira e a rota recebem o mesmo Job."""
+    job_id = request.path_params.get("job_id")
+    if job_id is None:
+        return None
+    jobs: RepositorioDeJobs = request.app.state.jobs
+    return jobs.obter(job_id)
+
+
+JobDoPedido = Annotated[Job | None, Depends(job_do_pedido)]
 
 
 def de_outro_sistema(chamador: Chamador, job: "Job") -> bool:

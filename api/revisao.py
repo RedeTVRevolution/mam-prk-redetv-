@@ -17,7 +17,7 @@ from pydantic import AwareDatetime, BaseModel
 from api.auth import Usuario
 from api.csv_seguro import csv_em_texto
 from api.modelo_do_job import RepositorioDeJobs
-from api.permissoes import exige, exige_uma_de
+from api.permissoes import JobDoPedido, exige, exige_uma_de
 
 LIMITE_DE_INATIVIDADE_S = 300.0
 
@@ -180,8 +180,8 @@ def criar_rotas_da_revisao(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        job: JobDoPedido,
     ) -> Response:
-        job = jobs.obter(job_id)
         if job is None:
             raise HTTPException(404, "Job não encontrado")
         revisao.aplicar(
@@ -210,8 +210,8 @@ def criar_rotas_da_revisao(
                 )
             ),
         ],
+        job: JobDoPedido,
     ) -> RevisaoDoVideo:
-        job = jobs.obter(job_id)
         if job is None:
             raise HTTPException(404, "Job não encontrado")
         medidas = revisao.do_video(job.id)

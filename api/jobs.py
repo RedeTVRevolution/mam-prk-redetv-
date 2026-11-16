@@ -95,6 +95,7 @@ from api.modelo_do_job import (
     palavras_do_nome,
 )
 from api.permissoes import (
+    JobDoPedido,
     de_outro_sistema,
     enxerga,
     exige,
@@ -936,8 +937,9 @@ def criar_rotas(
         job_id: str,
         request: Request,
         chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> Response:
-        job = enxerga(chamador, repositorio.obter(job_id))
+        job = enxerga(chamador, lido)
         publico = JobPublico.de(job)
         publico.posicao_na_fila_gpu = next(
             (
@@ -954,9 +956,6 @@ def criar_rotas(
             return Response(status_code=304, headers=cabecalhos)
         return JSONResponse(publico.model_dump(mode="json"), headers=cabecalhos)
 
-    def obter_concluido(job_id: str, chamador: Chamador) -> Job:
-        return _concluido(chamador, repositorio.obter(job_id))
-
     def _concluido(chamador: Chamador, lido: Job | None) -> Job:
         job = enxerga(chamador, lido)
         if job.estado != "concluido":
@@ -965,11 +964,13 @@ def criar_rotas(
 
     @rotas.delete("/{job_id}", status_code=202)
     def cancelar(
-        job_id: str, chamador: Annotated[Chamador, Depends(exige_escopo("cancelar"))]
+        job_id: str,
+        chamador: Annotated[Chamador, Depends(exige_escopo("cancelar"))],
+        lido: JobDoPedido,
     ) -> JobPublico:
-        enxerga(chamador, repositorio.obter(job_id))
+        visto = enxerga(chamador, lido)
         try:
-            job = cancelar_job(repositorio, job_id, relogio())
+            job = cancelar_job(repositorio, job_id, relogio(), visto)
         except JaTerminou as terminou:
             raise HTTPException(
                 409, f"Job em {terminou.estado}, não cancelável"
@@ -978,18 +979,22 @@ def criar_rotas(
 
     @rotas.get("/{job_id}/reproducao")
     def reproducao(
-        job_id: str, chamador: Annotated[Chamador, Depends(exige_escopo("ler"))]
+        job_id: str,
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> Reproducao:
-        job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         url = armazenamento.url_de_reproducao(job.id, VALIDADE_DA_REPRODUCAO)
         acessos.abriu(chamador, job)
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_DA_REPRODUCAO)
 
     @rotas.get("/{job_id}/download")
     def baixar_video(
-        job_id: str, chamador: Annotated[Chamador, Depends(exige_escopo("ler"))]
+        job_id: str,
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> DownloadDoVideo:
-        job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         nome = f"{PurePath(job.nome).stem}.480p.mp4"
         url = armazenamento.url_de_download(job.id, nome, VALIDADE_DO_DOWNLOAD)
         # O registro vem antes da resposta: sem ele a URL não sai (503).
@@ -1054,14 +1059,10 @@ def criar_rotas(
     def quadro(
         job_id: str,
         arquivo: Annotated[str, Path(pattern=ARQUIVO_DO_QUADRO)],
-        request: Request,
         chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> Reproducao:
-        # O Job que a dependência da lixeira já leu neste pedido (None se não existe).
-        if hasattr(request.state, "job_lido"):
-            job = _concluido(chamador, request.state.job_lido)
-        else:
-            job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         url = armazenamento.url_do_quadro(
             job.id, caminho_do_quadro(arquivo), VALIDADE_DA_IMAGEM
         )
@@ -1090,9 +1091,10 @@ def criar_rotas(
         job_id: str,
         request: Request,
         chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
         versao: Literal["modelo"] | None = None,
     ) -> StreamingResponse:
-        job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         if versao == "modelo":
             pedacos = iter(armazenamento.abrir_decupagem(job.id))
             # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
@@ -1102,9 +1104,11 @@ def criar_rotas(
 
     @rotas.get("/{job_id}/decupagem/download")
     def baixar_decupagem(
-        job_id: str, chamador: Annotated[Chamador, Depends(exige_escopo("ler"))]
+        job_id: str,
+        chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
+        lido: JobDoPedido,
     ) -> Response:
-        job = obter_concluido(job_id, chamador)
+        job = _concluido(chamador, lido)
         # Indentado como o arquivo que a tela baixava (`web/src/baixar.ts`).
         corpo = json.dumps(_entregue(job), indent=2, ensure_ascii=False).encode()
         acessos.baixou(chamador, job, "decupagem.baixada")
@@ -1142,8 +1146,9 @@ def criar_rotas(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             correcao, versao = registro.corrigir(
                 job,
@@ -1162,8 +1167,9 @@ def criar_rotas(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        lido: JobDoPedido,
     ) -> list[ItemDoHistorico]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         indexacao = job.indexacao
         return com_o_estado_na_busca(
             historico(_ler_correcoes(job.id)),
@@ -1182,8 +1188,9 @@ def criar_rotas(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             desfeita = registro.desfazer(
                 job, correcao_id, corpo.motivo, _autoria(autor)
@@ -1199,13 +1206,14 @@ def criar_rotas(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
         """Fecha a revisão: pede a indexação e a dispara em segundo plano. As ações da
         revisão só gravam Correções; o índice e o BigQuery mudam aqui. O estado vai a
         `pendente` já, para a tela acompanhar até `indexado`; se o disparo falha, a
         `indexacao` volta ao que era (503), para o `pendente` não ficar preso sem execução
         nenhuma. A `versao_pedida` fica: o próximo disparo (ou uma rodada em curso) a atende."""
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         anterior = job.indexacao
         if pedir_indexacao(repositorio, job.id, relogio()) is None:
             raise HTTPException(409, "O vídeo saiu de concluído")
@@ -1225,8 +1233,9 @@ def criar_rotas(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        lido: JobDoPedido,
     ) -> list[ItemDaFila]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         return fila(*ler_modelo(armazenamento, job.id), _ler_correcoes(job.id))
 
     @rotas.post("/{job_id}/fila/{correcao_id}/reaplicar", status_code=201)
@@ -1240,10 +1249,11 @@ def criar_rotas(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
         # Não espera o Curador: só reaponta uma correção que já valia (pendente
         # não vai para a fila), e a original sai da fila quando ela nasce.
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             nova = registro.reaplicar(
                 job, correcao_id, corpo.item_id, corpo.motivo, _autoria(autor)
@@ -1261,8 +1271,9 @@ def criar_rotas(
                 exige("decupagem.editar", "Chave de sistema não corrige a decupagem")
             ),
         ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             descarte = registro.descartar(
                 job, correcao_id, corpo.motivo, _autoria(autor)
@@ -1270,13 +1281,13 @@ def criar_rotas(
         return {"id": descarte.id}
 
     def _decidir(
-        job_id: str,
+        lido: Job | None,
         correcao_id: str,
         autor: Usuario,
         aprovada: bool,
         motivo: str = "",
     ) -> dict[str, str]:
-        job = obter_concluido(job_id, autor)
+        job = _concluido(autor, lido)
         with _erros_das_correcoes():
             decisao = registro.decidir(
                 job, correcao_id, aprovada, motivo, _autoria(autor)
@@ -1291,8 +1302,9 @@ def criar_rotas(
             Usuario,
             Depends(exige("correcao.aprovar", "Chave de sistema não aprova correções")),
         ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        return _decidir(job_id, correcao_id, autor, True)
+        return _decidir(lido, correcao_id, autor, True)
 
     @rotas.post("/{job_id}/correcoes/{correcao_id}/recusar", status_code=201)
     def recusar_correcao(
@@ -1303,7 +1315,8 @@ def criar_rotas(
             Usuario,
             Depends(exige("correcao.aprovar", "Chave de sistema não aprova correções")),
         ],
+        lido: JobDoPedido,
     ) -> dict[str, str]:
-        return _decidir(job_id, correcao_id, autor, False, corpo.motivo)
+        return _decidir(lido, correcao_id, autor, False, corpo.motivo)
 
     return rotas
