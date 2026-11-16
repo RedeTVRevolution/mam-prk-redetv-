@@ -136,6 +136,24 @@ class Ancora(BaseModel):
     fim_ms: int
 
 
+def _inicio_antes_do_fim(inicio: int, fim: int) -> None:
+    if inicio > fim:
+        raise ValueError("início depois do fim")
+
+
+def _intervalo_coerente(self: Any) -> Any:
+    """Validador `after` compartilhado dos modelos com `inicio_ms` e `fim_ms`."""
+    _inicio_antes_do_fim(self.inicio_ms, self.fim_ms)
+    return self
+
+
+def _pessoa_e_relacao_juntas(self: Any) -> Any:
+    """Validador `after` compartilhado: `pessoa` e `relacao` vêm juntas ou nenhuma."""
+    if (self.pessoa is None) != (self.relacao is None):
+        raise ValueError("pessoa e relação vêm juntas ou nenhuma das duas")
+    return self
+
+
 class Ocorrencia(BaseModel):
     """Uma aparição ou menção da pessoa: a lista e o intervalo que a identificam.
 
@@ -147,11 +165,7 @@ class Ocorrencia(BaseModel):
     inicio_ms: Annotated[int, Field(ge=0)]
     fim_ms: Annotated[int, Field(ge=0)]
 
-    @model_validator(mode="after")
-    def _coerente(self) -> Self:
-        if self.inicio_ms > self.fim_ms:
-            raise ValueError("início depois do fim")
-        return self
+    _coerente = model_validator(mode="after")(_intervalo_coerente)
 
 
 class Correcao(BaseModel):
@@ -214,9 +228,14 @@ def tempos_de(valor: str) -> tuple[int, int]:
     if achado is None:
         raise ValueError("tempos fora do formato inicio_ms-fim_ms")
     inicio, fim = int(achado[1]), int(achado[2])
-    if inicio > fim:
-        raise ValueError("início depois do fim")
+    _inicio_antes_do_fim(inicio, fim)
     return inicio, fim
+
+
+_Rotulo = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME),
+]
 
 
 class NovoDesfazer(BaseModel):
@@ -247,9 +266,9 @@ class NovoComercial(BaseModel):
     def _coerente(self) -> Self:
         if self.tipo not in TIPOS_DE_COMERCIAL:
             raise ValueError("tipo de comercial desconhecido")
-        if self.inicio_ms > self.fim_ms:
-            raise ValueError("início depois do fim")
         return self
+
+    _intervalo = model_validator(mode="after")(_intervalo_coerente)
 
 
 class NovaAparicao(BaseModel):
@@ -272,10 +291,10 @@ class NovaAparicao(BaseModel):
     def _texto_sem_controle(cls, valor: str | None) -> str | None:
         return None if valor is None else sem_controle(valor)
 
+    _intervalo = model_validator(mode="after")(_intervalo_coerente)
+
     @model_validator(mode="after")
     def _coerente(self) -> Self:
-        if self.inicio_ms > self.fim_ms:
-            raise ValueError("início depois do fim")
         if self.nome is not None and nao_identificado(self.nome):
             raise ValueError("nome de pessoa nova não pode ser não identificado")
         return self
@@ -286,12 +305,7 @@ class NovaDescricao(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    ambiente: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-        ),
-    ]
+    ambiente: _Rotulo
     acao: (
         Annotated[
             str, StringConstraints(strip_whitespace=True, max_length=LIMITE_DO_TEXTO)
@@ -299,14 +313,7 @@ class NovaDescricao(BaseModel):
         | None
     ) = None
     objetos: Annotated[
-        list[
-            Annotated[
-                str,
-                StringConstraints(
-                    strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-                ),
-            ]
-        ],
+        list[_Rotulo],
         Field(max_length=LIMITE_DE_OBJETOS),
     ] = []
 
@@ -336,12 +343,7 @@ class NovoTexto(BaseModel):
             strip_whitespace=True, min_length=1, max_length=LIMITE_DO_TEXTO
         ),
     ]
-    locutor: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-        ),
-    ]
+    locutor: _Rotulo
 
     @field_validator("texto")
     @classmethod
@@ -359,24 +361,8 @@ class NovoPapelVisual(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    papel: (
-        Annotated[
-            str,
-            StringConstraints(
-                strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-            ),
-        ]
-        | None
-    )
-    visual: (
-        Annotated[
-            str,
-            StringConstraints(
-                strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-            ),
-        ]
-        | None
-    )
+    papel: _Rotulo | None
+    visual: _Rotulo | None
 
     @field_validator("papel", "visual")
     @classmethod
@@ -408,12 +394,6 @@ class NovoTextoNaTela(BaseModel):
         if valor not in TIPOS_DE_TEXTO_NA_TELA:
             raise ValueError("tipo de texto na tela desconhecido")
         return valor
-
-
-_Rotulo = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME),
-]
 
 
 class _AtributosDoObjeto(BaseModel):
@@ -449,13 +429,8 @@ class NovoObjeto(_AtributosDoObjeto):
     inicio_ms: Annotated[int, Field(ge=0)]
     fim_ms: Annotated[int, Field(ge=0)]
 
-    @model_validator(mode="after")
-    def _coerente(self) -> Self:
-        if (self.pessoa is None) != (self.relacao is None):
-            raise ValueError("pessoa e relação vêm juntas ou nenhuma das duas")
-        if self.inicio_ms > self.fim_ms:
-            raise ValueError("início depois do fim")
-        return self
+    _dono = model_validator(mode="after")(_pessoa_e_relacao_juntas)
+    _intervalo = model_validator(mode="after")(_intervalo_coerente)
 
 
 class _DonoDoObjeto(BaseModel):
@@ -466,11 +441,7 @@ class _DonoDoObjeto(BaseModel):
     pessoa: Id | None
     relacao: RelacaoDoObjeto | None
 
-    @model_validator(mode="after")
-    def _os_dois_ou_nenhum(self) -> Self:
-        if (self.pessoa is None) != (self.relacao is None):
-            raise ValueError("pessoa e relação vêm juntas ou nenhuma das duas")
-        return self
+    _os_dois_ou_nenhum = model_validator(mode="after")(_pessoa_e_relacao_juntas)
 
 
 class NovoTextoAcrescentado(NovoTextoNaTela):
@@ -479,11 +450,7 @@ class NovoTextoAcrescentado(NovoTextoNaTela):
     inicio_ms: Annotated[int, Field(ge=0)]
     fim_ms: Annotated[int, Field(ge=0)]
 
-    @model_validator(mode="after")
-    def _coerente(self) -> Self:
-        if self.inicio_ms > self.fim_ms:
-            raise ValueError("início depois do fim")
-        return self
+    _coerente = model_validator(mode="after")(_intervalo_coerente)
 
 
 class NovaPauta(BaseModel):
@@ -491,12 +458,7 @@ class NovaPauta(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    titulo: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-        ),
-    ]
+    titulo: _Rotulo
     resumo: (
         Annotated[
             str,
@@ -520,11 +482,7 @@ class NovaPauta(BaseModel):
     def _resumo(cls, valor: str | None) -> str | None:
         return None if valor is None else _sem_controle_salvo_quebra(valor)
 
-    @model_validator(mode="after")
-    def _coerente(self) -> Self:
-        if self.inicio_ms > self.fim_ms:
-            raise ValueError("início depois do fim")
-        return self
+    _coerente = model_validator(mode="after")(_intervalo_coerente)
 
 
 class NovaJuncao(BaseModel):
@@ -535,12 +493,7 @@ class NovaJuncao(BaseModel):
     ids: Annotated[
         list[Annotated[str, StringConstraints(max_length=40)]], Field(min_length=2)
     ]
-    titulo: Annotated[
-        str,
-        StringConstraints(
-            strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-        ),
-    ]
+    titulo: _Rotulo
 
     @field_validator("titulo")
     @classmethod
@@ -561,14 +514,7 @@ class NovaDivisao(BaseModel):
 
     em_ms: Annotated[int, Field(gt=0)]
     titulos: Annotated[
-        list[
-            Annotated[
-                str,
-                StringConstraints(
-                    strip_whitespace=True, min_length=1, max_length=LIMITE_DO_NOME
-                ),
-            ]
-        ],
+        list[_Rotulo],
         Field(min_length=2, max_length=2),
     ]
 
@@ -1426,6 +1372,15 @@ def _campo_longo(n: NovaCorrecao) -> str:
     return n.valor
 
 
+def _canonizar_como(modelo: type[BaseModel]) -> Callable[[NovaCorrecao], str]:
+    """O valor é o JSON do `modelo`: valida e regrava na forma canônica."""
+
+    def canonizar(n: NovaCorrecao) -> str:
+        return _json_canonico(modelo.model_validate_json(n.valor).model_dump())
+
+    return canonizar
+
+
 def _canonizar_tempos(n: NovaCorrecao) -> str:
     tempos_de(n.valor)
     return n.valor
@@ -1459,40 +1414,6 @@ def _canonizar_limpo(n: NovaCorrecao) -> str:
     if n.valor not in ("true", "false"):
         raise ValueError("o valor de plano.limpo é true ou false")
     return n.valor
-
-
-def _canonizar_descricao(n: NovaCorrecao) -> str:
-    return _json_canonico(NovaDescricao.model_validate_json(n.valor).model_dump())
-
-
-def _canonizar_fala(n: NovaCorrecao) -> str:
-    return _json_canonico(NovoTexto.model_validate_json(n.valor).model_dump())
-
-
-def _canonizar_texto_na_tela(n: NovaCorrecao) -> str:
-    return _json_canonico(NovoTextoNaTela.model_validate_json(n.valor).model_dump())
-
-
-def _canonizar_atributos_do_objeto(n: NovaCorrecao) -> str:
-    return _json_canonico(_AtributosDoObjeto.model_validate_json(n.valor).model_dump())
-
-
-def _canonizar_objeto_acrescentado(n: NovaCorrecao) -> str:
-    return _json_canonico(NovoObjeto.model_validate_json(n.valor).model_dump())
-
-
-def _canonizar_dono_do_objeto(n: NovaCorrecao) -> str:
-    return _json_canonico(_DonoDoObjeto.model_validate_json(n.valor).model_dump())
-
-
-def _canonizar_texto_acrescentado(n: NovaCorrecao) -> str:
-    return _json_canonico(
-        NovoTextoAcrescentado.model_validate_json(n.valor).model_dump()
-    )
-
-
-def _canonizar_pauta_acrescentada(n: NovaCorrecao) -> str:
-    return _json_canonico(NovaPauta.model_validate_json(n.valor).model_dump())
 
 
 def _canonizar_aparicao_nova(n: NovaCorrecao) -> str:
@@ -1847,26 +1768,20 @@ def _identidades_com_o_tipo(c: Correcao) -> set[str]:
     return {c.ancora.identidade, f"{marca}|{c.depois}"}
 
 
-def _acrescentar_comercial(resultado: dict[str, Any], c: Correcao) -> None:
-    resultado.setdefault("comerciais", []).append(
-        {
-            **json.loads(c.depois),
-            "id": c.item_id,
-            "origem": "revisao",
-            "acrescentado": True,
-        }
-    )
+def _acrescentar_na_lista(chave: str) -> Callable[[dict[str, Any], Correcao], None]:
+    """Põe o item acrescentado (o `depois`, marcado como da revisão) na lista `chave`."""
 
+    def acrescentar(resultado: dict[str, Any], c: Correcao) -> None:
+        resultado.setdefault(chave, []).append(
+            {
+                **json.loads(c.depois),
+                "id": c.item_id,
+                "origem": "revisao",
+                "acrescentado": True,
+            }
+        )
 
-def _acrescentar_texto_na_tela(resultado: dict[str, Any], c: Correcao) -> None:
-    resultado.setdefault("textos_na_tela", []).append(
-        {
-            **json.loads(c.depois),
-            "id": c.item_id,
-            "origem": "revisao",
-            "acrescentado": True,
-        }
-    )
+    return acrescentar
 
 
 def _acrescentar_pauta(resultado: dict[str, Any], c: Correcao) -> None:
@@ -1975,13 +1890,13 @@ _COMERCIAL_NOVO = Acrescenta(
     ancora=_ancora_do_comercial_novo,
     acrescenta=lambda c: True,
     atendentes=_todos,
-    aplicar=_acrescentar_comercial,
+    aplicar=_acrescentar_na_lista("comerciais"),
 )
 _TEXTO_NOVO = Acrescenta(
     ancora=_ancora_do_texto_novo,
     acrescenta=lambda c: True,
     atendentes=_do_mesmo_tipo_de_texto,
-    aplicar=_acrescentar_texto_na_tela,
+    aplicar=_acrescentar_na_lista("textos_na_tela"),
 )
 _PAUTA_NOVA = Acrescenta(
     ancora=_ancora_da_pauta_nova,
@@ -2018,10 +1933,6 @@ def _canonizar_juncao(n: NovaCorrecao) -> str:
     if n.item_id != juncao.ids[0]:
         raise ValueError("item_id é o da primeira pauta")
     return _json_canonico(juncao.model_dump())
-
-
-def _canonizar_divisao(n: NovaCorrecao) -> str:
-    return _json_canonico(NovaDivisao.model_validate_json(n.valor).model_dump())
 
 
 def _pautas_em_ordem(modelo: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2335,7 +2246,7 @@ TIPOS: dict[str, Tipo] = {
         acrescenta=_PESSOA_NOVA,
     ),
     "plano.descricao": Tipo(
-        canonizar=_canonizar_descricao,
+        canonizar=_canonizar_como(NovaDescricao),
         rotulo="Descrição do plano",
         legivel=textos.descricao_do_plano,
         tipo_do_item="plano",
@@ -2355,7 +2266,7 @@ TIPOS: dict[str, Tipo] = {
         ja_traz=_ja_traz_o_valor,
     ),
     "fala.texto": Tipo(
-        canonizar=_canonizar_fala,
+        canonizar=_canonizar_como(NovoTexto),
         rotulo="Texto da fala",
         legivel=textos.fala,
         tipo_do_item="fala",
@@ -2395,7 +2306,7 @@ TIPOS: dict[str, Tipo] = {
         ja_traz=_traz_o_papel_visual,
     ),
     "texto_na_tela.texto": Tipo(
-        canonizar=_canonizar_texto_na_tela,
+        canonizar=_canonizar_como(NovoTextoNaTela),
         rotulo="Texto na tela",
         legivel=textos.texto_na_tela,
         tipo_do_item="texto_na_tela",
@@ -2407,7 +2318,7 @@ TIPOS: dict[str, Tipo] = {
         identidades=_identidades_do_texto,
     ),
     "texto_na_tela.acrescentar": Tipo(
-        canonizar=_canonizar_texto_acrescentado,
+        canonizar=_canonizar_como(NovoTextoAcrescentado),
         rotulo="Texto na tela acrescentado",
         legivel=textos.texto_na_tela_acrescentado,
         tipo_do_item="texto_na_tela",
@@ -2418,7 +2329,7 @@ TIPOS: dict[str, Tipo] = {
         acrescenta=_TEXTO_NOVO,
     ),
     "pauta.acrescentar": Tipo(
-        canonizar=_canonizar_pauta_acrescentada,
+        canonizar=_canonizar_como(NovaPauta),
         rotulo="Pauta acrescentada",
         legivel=textos.pauta_acrescentada,
         tipo_do_item="pauta",
@@ -2437,7 +2348,7 @@ TIPOS: dict[str, Tipo] = {
         reestrutura=_JUNTAR,
     ),
     "pauta.dividir": Tipo(
-        canonizar=_canonizar_divisao,
+        canonizar=_canonizar_como(NovaDivisao),
         rotulo="Dividir pauta",
         legivel=textos.pauta_estrutural,
         tipo_do_item="pauta",
@@ -2446,7 +2357,7 @@ TIPOS: dict[str, Tipo] = {
         reestrutura=_DIVIDIR,
     ),
     "objeto.atributos": Tipo(
-        canonizar=_canonizar_atributos_do_objeto,
+        canonizar=_canonizar_como(_AtributosDoObjeto),
         rotulo="Atributos do objeto",
         legivel=textos.atributos_do_objeto,
         tipo_do_item="objeto",
@@ -2457,7 +2368,7 @@ TIPOS: dict[str, Tipo] = {
         identidades=_identidades_do_objeto,
     ),
     "objeto.dono": Tipo(
-        canonizar=_canonizar_dono_do_objeto,
+        canonizar=_canonizar_como(_DonoDoObjeto),
         rotulo="Dono do objeto",
         legivel=textos.dono_do_objeto,
         tipo_do_item="objeto",
@@ -2476,7 +2387,7 @@ TIPOS: dict[str, Tipo] = {
         aplicar_no_item=_marca_o_objeto_removido,
     ),
     "objeto.acrescentar": Tipo(
-        canonizar=_canonizar_objeto_acrescentado,
+        canonizar=_canonizar_como(NovoObjeto),
         rotulo="Objeto acrescentado",
         legivel=textos.objeto_acrescentado,
         tipo_do_item="objeto",
