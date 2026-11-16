@@ -467,3 +467,27 @@ def test_correcao_atendida_mantem_a_origem_e_o_estado_do_modelo() -> None:
         "modelo_forte",
         "confirmado",
     )
+
+
+def test_monta_o_fluxo_de_palavras_uma_vez_com_varias_pessoas() -> None:
+    leitura = whisper(("Leão", 101.0), ("Lobo", 101.5), ("Nelson", 103.0))
+    leituras = 0
+
+    class Contada:
+        @property
+        def palavras(self) -> list[Palavra]:
+            nonlocal leituras
+            leituras += 1
+            return leitura.palavras
+
+    d = decupagem(
+        [
+            pessoa("pes01", "Leão Lobo", [(100_000, 110_000)]),
+            pessoa("pes02", "Nelson", [(100_000, 110_000)]),
+        ]
+    )
+
+    r = identificar(d, transcricao=Contada())  # type: ignore[arg-type]
+
+    assert leituras == 1
+    assert [p.estado_do_nome for p in r.pessoas] == ["confirmado", "confirmado"]

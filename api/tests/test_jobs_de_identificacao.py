@@ -31,11 +31,18 @@ class DecupagensEmMemoria:
         self.atual = atual
         self.com_copia = com_copia
         self.gravada: Decupagem | None = None
+        self.downloads = 0
+        self.consultas = 0
 
     def ler_decupagem(self, job_id: str) -> Decupagem | None:
         return self.atual
 
     def baixar_copia_limpa(self, job_id: str, destino: Path) -> bool:
+        self.downloads += 1
+        return self.com_copia
+
+    def copia_limpa_existe(self, job_id: str) -> bool:
+        self.consultas += 1
         return self.com_copia
 
     def gravar_decupagem(self, job_id: str, conteudo: str) -> None:
@@ -363,3 +370,53 @@ def _separacao(separada: str, outra: str) -> Correcao:
             versao="v", tipo_do_item="pessoa", identidade="x", inicio_ms=0, fim_ms=1
         ),
     )
+
+
+NOMEADA = decupagem([pessoa("pes01", "Leão Lobo", [(100_000, 110_000)])])
+
+
+@pytest.mark.parametrize(
+    ("decupagem_lida", "com_copia", "resultado", "downloads", "gravada"),
+    [
+        (None, True, "sem_alteracao", 0, False),
+        (com_gc(), True, "identificado", 1, True),
+        (com_gc(), False, "sem_alteracao", 1, False),
+        (NOMEADA, True, "identificado", 0, True),
+        (NOMEADA, False, "sem_alteracao", 0, False),
+    ],
+)
+def test_so_baixa_a_copia_limpa_quando_ha_pessoa_sem_nome(
+    decupagem_lida: Decupagem | None,
+    com_copia: bool,
+    resultado: str,
+    downloads: int,
+    gravada: bool,
+    tmp_path: Path,
+) -> None:
+    obtido, decupagens = identificar(
+        decupagem_lida,
+        nome_do_modelo_forte(),
+        com_copia=com_copia,
+        tmp_path=tmp_path,
+    )
+
+    assert obtido == resultado
+    assert decupagens.downloads == downloads
+    assert (decupagens.gravada is not None) == gravada
+    if decupagem_lida is NOMEADA and com_copia:
+        assert decupagens.consultas == 1
+
+
+def test_lista_as_correcoes_uma_vez_so(tmp_path: Path) -> None:
+    chamadas: list[str] = []
+
+    class Contadas:
+        def listar(self, job_id: str) -> list[Correcao]:
+            chamadas.append(job_id)
+            return []
+
+    identificar(
+        com_gc(), nome_do_modelo_forte(), tmp_path=tmp_path, correcoes=Contadas()
+    )
+
+    assert chamadas == ["job-1"]
