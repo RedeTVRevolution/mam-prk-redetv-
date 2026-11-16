@@ -43,11 +43,10 @@ def _carregar(
         exigir_gpu((gpus or _gpus)(), "o Paddle")
     log.info("Leitura da tela em %s", dispositivo)
     pasta = Path(pasta_dos_modelos)
-    nome = DETECTOR
     return PaddleOCR(
         device=DISPOSITIVOS[dispositivo],
-        text_detection_model_name=nome,
-        text_detection_model_dir=str(pasta / nome),
+        text_detection_model_name=DETECTOR,
+        text_detection_model_dir=str(pasta / DETECTOR),
         text_recognition_model_name=RECONHECEDOR,
         text_recognition_model_dir=str(pasta / RECONHECEDOR),
         use_doc_orientation_classify=False,

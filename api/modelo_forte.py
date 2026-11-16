@@ -15,6 +15,7 @@ import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -229,10 +230,6 @@ def _texto_da_pessoa(grupo: Grupo, instantes: Sequence[int]) -> str:
     )
 
 
-def _validar(texto: str) -> RespostaDaPessoa:
-    return validar_json(RespostaDaPessoa, texto)
-
-
 def olhar_pessoas_sem_nome(
     decupagem: Decupagem,
     *,
@@ -276,7 +273,7 @@ def olhar_pessoas_sem_nome(
             resposta = gerar_validado(
                 transporte,
                 chamada,
-                _validar,
+                partial(validar_json, RespostaDaPessoa),
                 dormir=dormir,
                 sortear=sortear,
                 relogio=relogio,
