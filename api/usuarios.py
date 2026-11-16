@@ -21,10 +21,16 @@ from pydantic import (
     StringConstraints,
 )
 
-from api.auditoria import Acao, RegistroDeAuditoria, RepositorioDeAuditoria
+from api.auditoria import (
+    Acao,
+    FiltroDeAuditoria,
+    RegistroDeAuditoria,
+    RepositorioDeAuditoria,
+)
 from api.auth import Usuario
 from api.erros import ServicoIndisponivel
 from api.papeis import (
+    DocumentoDePapeis,
     Papel,
     RepositorioDePapeis,
     em_ordem,
@@ -162,6 +168,15 @@ class PapeisDoUsuario(BaseModel):
     papeis: PapeisPedidos
 
 
+def _criacao_incompleta(documento: DocumentoDePapeis) -> bool:
+    return documento.pendente or (documento.papeis is None and not documento.desativada)
+
+
+def _ja_registrada(auditoria: RepositorioDeAuditoria, uid: str) -> bool:
+    filtro = FiltroDeAuditoria(acao="conta.criada", alvo_id=uid, limite=1)
+    return bool(auditoria.consultar(filtro).registros)
+
+
 def criar_rotas_dos_usuarios(
     contas: ContasDeUsuario,
     papeis: RepositorioDePapeis,
@@ -235,30 +250,36 @@ def criar_rotas_dos_usuarios(
             Depends(exige("usuarios.gerir", "Chave de sistema não gere usuários")),
         ],
     ) -> UsuarioDaLista:
+        concluindo = False
         try:
             conta = contas.criar(pedido.email, pedido.nome)
             # Pendente até o registro: sem ele a conta não fica ativa nem sem rastro.
             papeis.marcar_pendente(conta.uid, True)
         except EmailJaCadastrado:
-            # A conta pendente (criação que falhou no registro) é concluída aqui.
-            pendente = next(
+            # Conclui a criação que falhou: conta pendente, ou sem documento de papéis
+            # e ativa (a marca nem chegou a ser gravada).
+            incompleta = next(
                 (
                     c
                     for c in contas.listar()
                     if c.email.lower() == pedido.email.lower()
-                    and papeis.ler(c.uid).pendente
+                    and _criacao_incompleta(papeis.ler(c.uid))
                 ),
                 None,
             )
-            if pendente is None:
+            if incompleta is None:
                 raise HTTPException(
                     409, "Já existe uma conta com esse e-mail"
                 ) from None
-            conta = pendente
+            conta = incompleta
+            concluindo = True
         papeis.salvar(conta.uid, pedido.papeis)
         # O registro antes do link: se o envio falha, a conta já tem rastro e o
         # link pode ser reenviado. Se o registro falha, a conta segue pendente.
-        registrar(pessoa, "conta.criada", conta, {"papeis": pedido.papeis})
+        # ponytail: dois POSTs simultâneos na conclusão gravariam dois registros;
+        # resolver se a tela de usuários passar a repetir o pedido sozinha.
+        if not (concluindo and _ja_registrada(auditoria, conta.uid)):
+            registrar(pessoa, "conta.criada", conta, {"papeis": pedido.papeis})
         papeis.marcar_pendente(conta.uid, False)
         contas.enviar_link_de_senha(conta.email)
         return da_lista(conta)
@@ -346,6 +367,10 @@ def criar_rotas_dos_usuarios(
         ],
     ) -> UsuarioDaLista:
         conta = achar(uid)
+        if papeis.ler(uid).pendente:
+            raise HTTPException(
+                409, "Criação pendente: repita o pedido de criar o usuário"
+            )
         contas.bloquear(uid, False)
         papeis.marcar_desativada(uid, False)
         try:

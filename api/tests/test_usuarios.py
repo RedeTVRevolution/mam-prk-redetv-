@@ -531,7 +531,11 @@ def test_contas_do_identity_platform_repassa_outras_falhas() -> None:
         ContasIdentityPlatform("proj", sessao).enviar_link_de_senha("a@x.y")
 
 
-NOVA = {"email": "cris@redetv.com", "nome": "Cris", "papeis": ["editor"]}
+NOVA: dict[str, Any] = {
+    "email": "cris@redetv.com",
+    "nome": "Cris",
+    "papeis": ["editor"],
+}
 
 
 class AuditoriaQueFalhaUmaVez(RepositorioDeAuditoriaEmMemoria):
@@ -589,3 +593,53 @@ def test_conta_existente_sem_a_marca_continua_409() -> None:
     )
 
     assert resposta.status_code == 409
+
+
+def test_conta_sem_documento_de_papeis_por_falha_da_marca_e_concluida() -> None:
+    mundo = Mundo()
+    mundo.contas.criar(NOVA["email"], "Cris")  # a marca não chegou a ser gravada
+
+    resposta = mundo.cliente.post(ROTA, json=NOVA, headers=ADMIN)
+
+    assert resposta.status_code == 201
+    assert mundo.papeis.obter(resposta.json()["uid"]) == ["editor"]
+
+
+def test_conta_desativada_sem_papeis_guardados_continua_409() -> None:
+    mundo = Mundo()
+    conta = mundo.contas.criar(NOVA["email"], "Cris")
+    mundo.papeis.marcar_desativada(conta.uid, True)
+
+    assert mundo.cliente.post(ROTA, json=NOVA, headers=ADMIN).status_code == 409
+
+
+class PapeisQueFalhamAoTirarAMarca(RepositorioDePapeisEmMemoria):
+    def marcar_pendente(self, uid: str, pendente: bool) -> None:
+        if not pendente:
+            raise RuntimeError("Firestore fora")
+        super().marcar_pendente(uid, pendente)
+
+
+def test_pedido_repetido_nao_grava_segundo_registro_de_criacao() -> None:
+    mundo = Mundo()
+    mundo.papeis.__class__ = PapeisQueFalhamAoTirarAMarca
+    with pytest.raises(RuntimeError):
+        mundo.cliente.post(ROTA, json=NOVA, headers=ADMIN)
+    mundo.papeis.__class__ = RepositorioDePapeisEmMemoria
+
+    resposta = mundo.cliente.post(ROTA, json=NOVA, headers=ADMIN)
+
+    assert resposta.status_code == 201
+    assert [r.acao for r in mundo.registros()] == ["conta.criada"]
+
+
+def test_reativar_conta_pendente_responde_409() -> None:
+    mundo = Mundo(auditoria=AuditoriaQueFalha())
+    with pytest.raises(RuntimeError):
+        mundo.cliente.post(ROTA, json=NOVA, headers=ADMIN)
+    (cris,) = [c for c in mundo.contas.listar() if c.email == NOVA["email"]]
+
+    resposta = mundo.cliente.post(f"{ROTA}/{cris.uid}/reativar", headers=ADMIN)
+
+    assert resposta.status_code == 409
+    assert mundo.papeis.desativada(cris.uid)
