@@ -359,18 +359,12 @@ AMBIENTE_DO_PUSH = {
 }
 
 
-def _sem_transporte() -> Any:
-    raise AssertionError("o cofre só é lido na entrega")
-
-
 @pytest.mark.parametrize("falta", sorted(AMBIENTE_DO_PUSH))
 def test_rotas_do_push_do_ambiente_sem_configuracao_ficam_desligadas(
     falta: str,
 ) -> None:
     ambiente = {k: v for k, v in AMBIENTE_DO_PUSH.items() if k != falta}
-    rotas = rotas_do_push_do_ambiente(
-        ambiente, RepositorioDeWebhooksEmMemoria, _sem_transporte
-    )
+    rotas = rotas_do_push_do_ambiente(ambiente, RepositorioDeWebhooksEmMemoria())
     assert rotas is None
 
 
@@ -380,7 +374,7 @@ def test_rotas_do_push_do_ambiente_ligadas_no_app_recusam_sem_token(
     from api.main import criar_app
 
     rotas = rotas_do_push_do_ambiente(
-        AMBIENTE_DO_PUSH, RepositorioDeWebhooksEmMemoria, lambda: lambda *a: (404, {})
+        AMBIENTE_DO_PUSH, RepositorioDeWebhooksEmMemoria(), CofreEmMemoria()
     )
     assert rotas is not None
     cliente = TestClient(criar_app(pasta_web=tmp_path, rotas_do_push=rotas))

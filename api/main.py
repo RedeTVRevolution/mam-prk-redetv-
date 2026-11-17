@@ -862,7 +862,7 @@ if _projeto:
         mac=mac_do_ambiente(os.environ),
         # Recebe o push do Pub/Sub e entrega o webhook assinado (#705).
         rotas_do_push=rotas_do_push_do_ambiente(
-            os.environ, lambda: RepositorioDeWebhooksFirestore(_comum)
+            os.environ, RepositorioDeWebhooksFirestore(_comum)
         ),
         revisao=_revisao_espelhada(_comum),
         login_recente=timedelta(

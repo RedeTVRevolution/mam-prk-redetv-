@@ -36,15 +36,10 @@ def test_sistema_fora_do_mapa_nao_tem_segredo() -> None:
     assert CofreSecretManager(SEGREDO, t).obter("Legado") is None
 
 
-def test_segredo_ainda_sem_versao_e_mapa_vazio() -> None:
-    t = Transporte((404, {}))
-    assert CofreSecretManager(SEGREDO, t).obter("Legado") is None
-
-
-@pytest.mark.parametrize("status", [400, 403, 500, 503])
+@pytest.mark.parametrize("status", [400, 403, 404, 500, 503])
 def test_outro_erro_do_secret_manager_nao_vira_sem_segredo(status: int) -> None:
-    # Sem segredo o evento é descartado; erro passageiro tem de virar 503 para o
-    # Pub/Sub tentar de novo (versão desligada é 400 FAILED_PRECONDITION).
+    # Sem segredo o evento é descartado; erro tem de virar 503 para o Pub/Sub tentar
+    # de novo (versão desligada é 400; 404 na entrega é nome errado no ambiente).
     t = Transporte((status, {"error": {"status": "X", "message": "y"}}))
     with pytest.raises(ErroDoCofre):
         CofreSecretManager(SEGREDO, t).obter("Legado")

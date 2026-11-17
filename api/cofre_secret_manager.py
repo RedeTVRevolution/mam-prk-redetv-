@@ -36,22 +36,28 @@ class CofreSecretManager:
         self._transporte = transporte
 
     def _chamar(
-        self, metodo: str, caminho: str, corpo: dict[str, Any] | None
+        self,
+        metodo: str,
+        caminho: str,
+        corpo: dict[str, Any] | None,
+        aceitos: tuple[int, ...] = (200,),
     ) -> tuple[int, dict[str, Any]]:
         status, resposta = self._transporte(metodo, caminho, corpo)
-        if status not in (200, 404):
+        if status not in aceitos:
             detalhe = resposta.get("error", {})
             raise ErroDoCofre(
                 f"Secret Manager respondeu {status}: {detalhe.get('status', '')}".strip()
             )
         return status, resposta
 
-    def _mapa(self) -> dict[str, str]:
+    def _mapa(self, sem_versao_e_vazio: bool = False) -> dict[str, str]:
+        # 404 é segredo sem versão ou nome errado: só o primeiro registro o lê como
+        # vazio. Na entrega, há um registro no Firestore, então o segredo já foi gravado.
+        aceitos = (200, 404) if sem_versao_e_vazio else (200,)
         status, resposta = self._chamar(
-            "GET", f"{self._segredo}/versions/latest:access", None
+            "GET", f"{self._segredo}/versions/latest:access", None, aceitos
         )
         if status == 404:
-            # Segredo ainda sem versão: nenhum sistema registrado.
             return {}
         mapa: dict[str, str] = json.loads(base64.b64decode(resposta["payload"]["data"]))
         return mapa
@@ -60,14 +66,12 @@ class CofreSecretManager:
         return self._mapa().get(sistema)
 
     def guardar(self, sistema: str, segredo: str) -> None:
-        dados = json.dumps(self._mapa() | {sistema: segredo}).encode()
-        status, _ = self._chamar(
+        dados = json.dumps(self._mapa(sem_versao_e_vazio=True) | {sistema: segredo})
+        self._chamar(
             "POST",
             f"{self._segredo}:addVersion",
-            {"payload": {"data": base64.b64encode(dados).decode()}},
+            {"payload": {"data": base64.b64encode(dados.encode()).decode()}},
         )
-        if status != 200:
-            raise ErroDoCofre(f"Secret Manager respondeu {status} ao gravar")
 
 
 def cofre_do_ambiente(

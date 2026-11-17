@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from api.webhook import HttpNoIpValidado
+from api.http_no_ip import HttpNoIpValidado
 
 # Nome que não resolve: se o cliente resolvesse o host de novo, a conexão falharia.
 HOST = "webhook.exemplo.invalid"
