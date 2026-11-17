@@ -292,7 +292,7 @@ PAPEIS_DA_TERRAFORM=(
   roles/compute.networkAdmin # rede mam-validacao dos Jobs e apagar a rede default (#301)
   roles/iam.workloadIdentityPoolAdmin
   roles/cloudbuild.builds.editor
-  roles/secretmanager.admin # apaga o segredo do SerpAPI que saiu do Terraform (#327); depois do publicar que o remove, o papel pode sair
+  roles/secretmanager.admin # cofre do webhook (segredo com CMEK) e o IAM nele (#705)
   roles/cloudscheduler.admin # agendamento diário da purga da lixeira (#145)
   roles/bigquery.admin # dataset, tabelas e IAM no dataset do BigQuery (#260, #279, #280, #285)
   roles/cloudkms.admin # key ring, chave MAC do hash das chaves de API e IAM na chave (#272)
@@ -309,6 +309,11 @@ for role in "${PAPEIS_DA_TERRAFORM[@]}"; do
     --role="$role" --condition=None >/dev/null
   printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$role"
 done
+# O agente de serviço do Secret Manager cifra o cofre do webhook com a chave CMEK (#705);
+# o provider google do Terraform não sabe criá-lo, e o IAM na chave falha sem ele.
+gcloud services enable secretmanager.googleapis.com --project "$P" >/dev/null
+gcloud beta services identity create --service=secretmanager.googleapis.com --project "$P" >/dev/null
+printf '  %s✓%s agente de serviço do Secret Manager\n' "$GREEN" "$RESET"
 gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" --project "$P" \
   --member="user:$ACC" --role=roles/iam.serviceAccountTokenCreator >/dev/null
 say "Testando a impersonação (o IAM leva até um minuto para propagar)..."

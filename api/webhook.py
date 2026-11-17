@@ -6,10 +6,13 @@ sobre os IPs resolvidos. A rede, o DNS e o segredo ficam atrás de portas.
 """
 
 import hmac
+import http.client
 import ipaddress
 import json
 import secrets
 import socket
+import ssl
+import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -218,6 +221,72 @@ class PortaHttp(Protocol):
         pode trocar de resposta entre a checagem e a conexão), com o host da URL no
         SNI e no `Host`. Não segue redirecionamento: um 3xx volta como status."""
         ...
+
+
+# Tempo total do POST, somando as tentativas em cada IP: cabe no ack de 60 s do Pub/Sub,
+# com o cofre e o Firestore.
+PRAZO_DO_POST_S = 30.0
+
+
+class _ConexaoNoIp(http.client.HTTPSConnection):
+    """Conecta no `ip`; o host da URL fica no SNI, na checagem do certificado e no `Host`."""
+
+    def __init__(
+        self, host: str, porta: int, ip: str, contexto: ssl.SSLContext, prazo_s: float
+    ) -> None:
+        super().__init__(host, porta, timeout=prazo_s, context=contexto)
+        self._ip = ip
+        self._contexto = contexto
+
+    def connect(self) -> None:
+        bruto = socket.create_connection((self._ip, self.port), self.timeout)
+        try:
+            self.sock = self._contexto.wrap_socket(bruto, server_hostname=self.host)
+        except BaseException:
+            bruto.close()
+            raise
+
+
+class HttpNoIpValidado:
+    """A `PortaHttp` real, só com a biblioteca padrão."""
+
+    def __init__(
+        self, contexto: ssl.SSLContext | None = None, prazo_s: float = PRAZO_DO_POST_S
+    ) -> None:
+        self._contexto = contexto or ssl.create_default_context()
+        self._prazo_s = prazo_s
+
+    def enviar(
+        self, url: str, ips: list[str], corpo: bytes, cabecalhos: dict[str, str]
+    ) -> int:
+        partes = urlsplit(url)
+        caminho = (partes.path or "/") + (f"?{partes.query}" if partes.query else "")
+        fim = time.monotonic() + self._prazo_s
+        erro: OSError = OSError("nenhum IP para conectar")
+        # IPv4 primeiro: o Cloud Run pode não ter saída IPv6.
+        for ip in sorted(ips, key=lambda ip: ":" in ip):
+            restante = fim - time.monotonic()
+            if restante <= 0:
+                break
+            conexao = _ConexaoNoIp(
+                partes.hostname or "", partes.port or 443, ip, self._contexto, restante
+            )
+            try:
+                conexao.connect()
+            except OSError as e:
+                # Só a conexão que falhou passa ao próximo IP; o POST enviado nunca repete.
+                erro = e
+                conexao.close()
+                continue
+            try:
+                # ponytail: o timeout vale por operação no socket, não para o pedido todo.
+                conexao.request("POST", caminho, body=corpo, headers=cabecalhos)
+                return conexao.getresponse().status
+            except http.client.HTTPException as e:
+                raise OSError(f"resposta inválida do destino: {e!r}") from e
+            finally:
+                conexao.close()
+        raise erro
 
 
 def _repetivel(status: int) -> bool:

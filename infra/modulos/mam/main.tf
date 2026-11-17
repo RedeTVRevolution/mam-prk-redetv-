@@ -1224,6 +1224,19 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "KMS_CHAVE_MAC"
         value = google_kms_crypto_key.chaves_de_api.id
       }
+      # Liga a rota do push do Pub/Sub, que entrega o webhook (api/eventos_do_job.py, #705).
+      env {
+        name  = "PUSH_AUDIENCIA"
+        value = local.push_audiencia
+      }
+      env {
+        name  = "PUSH_CONTA"
+        value = google_service_account.webhook_push.email
+      }
+      env {
+        name  = "WEBHOOK_SEGREDOS"
+        value = google_secret_manager_secret.segredos_do_webhook.id
+      }
     }
   }
   depends_on = [google_project_service.apis]

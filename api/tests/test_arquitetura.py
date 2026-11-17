@@ -42,6 +42,7 @@ FERRAMENTAS = {
     "preencher_planos_recorrentes",
     "regressao",
     "regressao_da_versao",
+    "registrar_webhook",
     "reprocessar_versao",
     "sondar_busca",
 }
