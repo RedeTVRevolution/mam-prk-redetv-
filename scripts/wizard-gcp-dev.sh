@@ -300,6 +300,7 @@ PAPEIS_DA_TERRAFORM=(
   roles/compute.loadBalancerAdmin # balanceador HTTPS na frente do Cloud Run (#294)
   roles/certificatemanager.owner # certificado gerenciado, se o #294 usar o Certificate Manager
   roles/compute.securityAdmin # Cloud Armor (#295) e firewall da rede default (#301)
+  roles/dns.admin # zona e registro A do domínio no Cloud DNS (#699)
   roles/iam.roleAdmin # papel sob medida da Vertex (#302)
   roles/modelarmor.admin # cria o modelo do Model Armor da busca (#232)
 )

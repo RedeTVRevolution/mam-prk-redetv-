@@ -36,13 +36,17 @@ Lista para o wizard (uma vez por projeto, igual ao `scripts/wizard-gcp-dev.sh` d
 
 Com `dominio` vazio (o padrão), nada do balanceador é criado e o endereço segue o `run.app`. Com `dominio` preenchido, o módulo cria o balanceador HTTPS externo global (IP, NEG serverless para o `mam-web`, certificado gerenciado e redirecionamento de HTTP para HTTPS), o Cloud Run passa a aceitar só o tráfego do balanceador e o domínio entra no CORS da quarentena e nos domínios autorizados do login. O Cloud Armor vem no #295.
 
-Depois do `apply`:
+O domínio e o WAF vêm das variáveis do repositório (`DOMINIO` e `WAF_ATIVO`, com `gh variable set`) no CD, e do `.env` com os mesmos nomes à mão (`scripts/deploy-dev.sh`, #699). Vazios: sem balanceador e WAF em prévia. O DNS fica numa zona do Cloud DNS do projeto, com o registro A apontando para o IP do balanceador, tudo no Terraform.
 
-1. Pegue o endereço: `terraform output ip_do_balanceador`.
-2. Crie no DNS do domínio um registro A (`dominio` → esse IP).
-3. Espere o certificado: o Google só o emite depois que o DNS aponta para o IP; costuma levar de 15 minutos a 1 hora e pode chegar a 24 horas. Até lá o HTTPS falha no handshake. Acompanhe com `gcloud compute ssl-certificates list` (`ACTIVE`).
+Para ligar num ambiente que já está no ar, sem nenhum merge na `main` até o fim (um publicar no meio apaga o IP ou fecha o `run.app` antes da hora):
 
-Custo mensal (estimativa pela tabela de preços do Google, a confirmar na calculadora): duas regras de encaminhamento (80 e 443) a cerca de US$ 0,025/hora cada, ~US$ 36; mais ~US$ 0,008 a 0,012 por GB trafegado. IP reservado em uso e certificado gerenciado não custam. O upload e o player vão direto ao Storage, fora do balanceador, então o tráfego dele é só o front e a API.
+1. Crie só o IP, a zona e os registros A (domínio e `www`), como a `mam-terraform` (`GOOGLE_IMPERSONATE_SERVICE_ACCOUNT`) e com as `TF_VAR_*` que o `deploy-dev.sh` exporta, `TF_VAR_dominio` inclusive: `scripts/aplicar-sem-destruir.sh -target=module.mam.google_dns_record_set.dominio -target=module.mam.google_dns_record_set.www` com as mesmas `-var imagem*=pendente` do primeiro apply do `deploy-dev.sh` (depois do `terraform init` dele). O plano só cria esses quatro e liga as APIs novas; nada do serviço muda.
+2. Registre o domínio uma vez, como Owner, apontando para a zona: `gcloud domains registrations register <domínio> --cloud-dns-zone="$(terraform -chdir=infra output -raw zona_dns)" --contact-data-from-file=<arquivo fora do repositório> --contact-privacy=redacted-contact-data --yearly-price="<preço de get-register-parameters>"`. Os dados de contato não entram no repositório. Clique no e-mail de verificação da ICANN, senão o domínio é suspenso. Num domínio de fora, crie no DNS dele dois registros A, o do domínio e o do `www`, para `terraform -chdir=infra output -raw ip_do_balanceador`: o certificado só ativa com os dois apontando para o IP.
+3. Confira que o domínio e o `www` resolvem para o IP (`dig +short <domínio>`). O certificado cobre os dois, e o `www` redireciona para o domínio.
+4. Preencha `DOMINIO` e `WAF_ATIVO` no GitHub e publique. O apply completo cria o balanceador e o Cloud Armor e fecha o `run.app`.
+5. Espere o certificado: o Google só começa a emiti-lo depois que a regra do balanceador existe e o DNS aponta para o IP; costuma levar de 15 minutos a 1 hora e pode chegar a 24 horas. Até lá o HTTPS falha no handshake e a aplicação fica fora do ar. Acompanhe com `gcloud compute ssl-certificates list` (`ACTIVE`).
+
+Custo mensal (estimativa pela tabela de preços do Google, a confirmar na calculadora): duas regras de encaminhamento (80 e 443) a cerca de US$ 0,025/hora cada, ~US$ 36; mais ~US$ 0,008 a 0,012 por GB trafegado. IP reservado em uso e certificado gerenciado não custam. A zona do Cloud DNS custa ~US$ 0,20 por mês, e o domínio `.com`, o preço anual do Cloud Domains. O upload e o player vão direto ao Storage, fora do balanceador, então o tráfego dele é só o front e a API.
 
 Ao ligar o balanceador num ambiente que já tem login, `authorized_domains` passa a ser a lista padrão (`localhost`, `<projeto>.firebaseapp.com`, `<projeto>.web.app`) mais o domínio: qualquer outro domínio posto à mão some.
 
@@ -74,6 +78,7 @@ A `mam-terraform` recebe do wizard os mesmos papéis que tem no dev (`PAPEIS_DA_
 - `roles/compute.loadBalancerAdmin`
 - `roles/certificatemanager.owner`
 - `roles/compute.securityAdmin`
+- `roles/dns.admin`
 - `roles/iam.roleAdmin`
 - `roles/modelarmor.admin`
 
