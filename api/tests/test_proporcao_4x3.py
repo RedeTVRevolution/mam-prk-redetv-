@@ -110,3 +110,19 @@ def test_conferir_sar_recusa_fora_de_um_quarto_a_quatro(sar: str) -> None:
 @pytest.mark.parametrize("sar", ["8:9", "4:1", "1:4", "0:1", "N/A", None])
 def test_conferir_sar_aceita_o_resto(sar: str | None) -> None:
     _conferir_sar(sar)
+
+
+def test_proxy_no_teto_reduz_a_altura_e_mantem_o_aspecto(tmp_path: Path) -> None:
+    # 640x480 com SAR 4:1 = 2560x480 de exibição; no teto de 1920, a altura vai a 360.
+    aceito = validar(_gerar(tmp_path / "v.mp4", "640x480", "4/1"), tmp_path / "saida")
+
+    assert _dimensoes(aceito.proxy)[:2] == (1920, 360)
+
+
+def test_jpeg_no_teto_reduz_a_altura_e_mantem_o_aspecto(tmp_path: Path) -> None:
+    # 1280x720 com SAR 4:1 = 5120x720 de exibição; no teto de 3840, a altura vai a 540.
+    entrada = _gerar(tmp_path / "v.mp4", "1280x720", "4/1")
+    arq = tmp_path / "q.jpg"
+    arq.write_bytes(extrair_quadros(entrada, [500])[0])
+
+    assert _dimensoes(arq)[:2] == (3840, 540)

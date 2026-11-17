@@ -34,7 +34,7 @@ Lista para o wizard (uma vez por projeto, igual ao `scripts/wizard-gcp-dev.sh` d
 
 ## Link de senha
 
-O e-mail de senha abre `<url do app>/redefinir-senha`, página do próprio MAM (o `terraform_data.url_da_acao_de_senha` grava a URL de ação do Identity Platform pela API REST, como a política de senha). Ordem do deploy: a web com a rota nova tem de estar publicada antes de a URL de ação mudar, senão os links quebram; no mesmo apply o `depends_on` no serviço web garante isso.
+O e-mail de senha abre `<url do app>/redefinir-senha`, página do próprio MAM (o `terraform_data.url_da_acao_de_senha` grava a URL de ação do Identity Platform pela API REST, como a política de senha). Ordem do deploy: a web com a rota nova tem de estar publicada antes de a URL de ação mudar, senão os links quebram; no mesmo apply o `depends_on` no serviço web garante isso. O código do link (`oobCode`) vai na URL; a exclusão `codigo-do-link-de-senha` tira dos logs as linhas que o trazem (balanceador, Cloud Run e uvicorn), e é criada antes de a URL mudar.
 
 ## Domínio e balanceador (#294)
 
