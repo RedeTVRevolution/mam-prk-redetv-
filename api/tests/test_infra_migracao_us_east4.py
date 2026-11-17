@@ -22,6 +22,14 @@ TIPOS_QUE_RECRIAM = re.compile(
 # recurso tira todas as instâncias, e o create do iam_member é idempotente.
 MAIS_UM = {"google_project_iam_member.mam"}
 
+# Nasceram depois da troca, já em us-east4: entrar na lista faria o wizard, se rodasse de
+# novo, tirar do estado a chave e o segredo do cofre do webhook (#705).
+CRIADOS_DEPOIS = {
+    "google_kms_crypto_key.segredos_do_webhook",
+    "google_kms_crypto_key_iam_member.secret_manager_cifra",
+    "google_secret_manager_secret.segredos_do_webhook",
+}
+
 
 def _recursos() -> dict[str, str]:
     achados = {}
@@ -76,7 +84,8 @@ def _esperados() -> set[str]:
 
 
 def test_a_lista_do_wizard_e_exatamente_o_que_o_plan_recriaria() -> None:
-    assert set(_enderecos_da_lista()) == {f"module.mam.{k}" for k in _esperados()}
+    esperados = _esperados() - CRIADOS_DEPOIS
+    assert set(_enderecos_da_lista()) == {f"module.mam.{k}" for k in esperados}
 
 
 def test_a_lista_tem_so_enderecos_do_modulo_sem_duplicata_nem_chave() -> None:

@@ -3,6 +3,7 @@
 import base64
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -21,6 +22,7 @@ from api.eventos_do_job import (
     VerificadorDoPushDoGoogle,
     criar_rotas_do_push,
     repositorio_do_ambiente,
+    rotas_do_push_do_ambiente,
 )
 from api.jobs import RepositorioEmMemoria
 from api.modelo_do_job import Job
@@ -348,3 +350,38 @@ def test_verificador_do_google_troca_falha_de_rede_por_servico_indisponivel(
     verificador = VerificadorDoPushDoGoogle("aud", "push@p.iam.gserviceaccount.com")
     with pytest.raises(ServicoIndisponivel):
         verificador.confere("Bearer x")
+
+
+AMBIENTE_DO_PUSH = {
+    "PUSH_AUDIENCIA": "mam-webhook-push",
+    "PUSH_CONTA": "push@p.iam.gserviceaccount.com",
+    "WEBHOOK_SEGREDOS": "projects/p/secrets/s",
+}
+
+
+@pytest.mark.parametrize("falta", sorted(AMBIENTE_DO_PUSH))
+def test_rotas_do_push_do_ambiente_sem_configuracao_ficam_desligadas(
+    falta: str,
+) -> None:
+    ambiente = {k: v for k, v in AMBIENTE_DO_PUSH.items() if k != falta}
+    rotas = rotas_do_push_do_ambiente(ambiente, RepositorioDeWebhooksEmMemoria())
+    assert rotas is None
+
+
+def test_rotas_do_push_do_ambiente_ligadas_no_app_recusam_sem_token(
+    tmp_path: Path,
+) -> None:
+    from api.main import criar_app
+
+    rotas = rotas_do_push_do_ambiente(
+        AMBIENTE_DO_PUSH, RepositorioDeWebhooksEmMemoria(), CofreEmMemoria()
+    )
+    assert rotas is not None
+    cliente = TestClient(criar_app(pasta_web=tmp_path, rotas_do_push=rotas))
+    # 401 e não 405 nem a página da web: a rota existe e confere o token.
+    assert cliente.post(CAMINHO_DO_PUSH, json={}).status_code == 401
+
+
+def test_main_liga_as_rotas_do_push_em_producao() -> None:
+    texto = (Path(__file__).parents[1] / "main.py").read_text()
+    assert "rotas_do_push=rotas_do_push_do_ambiente(" in texto

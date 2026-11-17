@@ -89,7 +89,7 @@ from api.eventos_de_uso import (
     quem_do_chamador,
     registrar,
 )
-from api.eventos_do_job import eventos_do_ambiente
+from api.eventos_do_job import eventos_do_ambiente, rotas_do_push_do_ambiente
 from api.fotos_de_referencia import FotosDeReferencia, FotosEmMemoria
 from api.fusao_de_pessoas import criar_rotas_da_fusao
 from api.gemini import Transporte
@@ -141,6 +141,7 @@ from api.nuvem import (
     RepositorioDeCorrecoesFirestore,
     RepositorioDeIdempotenciaFirestore,
     RepositorioDeRevisaoFirestore,
+    RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
     listagem_por_mes_do_ambiente,
@@ -864,6 +865,10 @@ if _projeto:
             os.environ["BUCKET_DECUPAGENS"],
         ),
         mac=mac_do_ambiente(os.environ),
+        # Recebe o push do Pub/Sub e entrega o webhook assinado (#705).
+        rotas_do_push=rotas_do_push_do_ambiente(
+            os.environ, RepositorioDeWebhooksFirestore(_comum)
+        ),
         revisao=_revisao_espelhada(_comum),
         login_recente=timedelta(
             minutes=float(os.environ.get("PURGA_LOGIN_RECENTE_MIN") or 0)

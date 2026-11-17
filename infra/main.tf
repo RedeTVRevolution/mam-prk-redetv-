@@ -195,6 +195,10 @@ output "chave_mac_kms" {
   value = module.mam.chave_mac_kms
 }
 
+output "webhook_segredos" {
+  value = module.mam.webhook_segredos
+}
+
 output "repositorio" {
   value = module.mam.repositorio
 }

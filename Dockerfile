@@ -100,6 +100,7 @@ COPY api/__init__.py \
      api/canonicos.py \
      api/texto.py \
      api/correcoes.py \
+     api/cofre_secret_manager.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
@@ -107,6 +108,7 @@ COPY api/__init__.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
      api/florence.py \
+     api/http_no_ip.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \
@@ -190,6 +192,7 @@ COPY api/__init__.py \
      api/canonicos.py \
      api/texto.py \
      api/correcoes.py \
+     api/cofre_secret_manager.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
@@ -197,6 +200,7 @@ COPY api/__init__.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
      api/florence.py \
+     api/http_no_ip.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \

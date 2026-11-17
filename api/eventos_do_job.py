@@ -22,6 +22,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from api.clientes_de_nuvem import TransporteRest, transporte_rest
+from api.cofre_secret_manager import cofre_do_ambiente
 from api.erros import ServicoIndisponivel
 from api.eventos_de_uso import (
     Eventos,
@@ -30,6 +31,7 @@ from api.eventos_de_uso import (
     SemEventos,
     registrar,
 )
+from api.http_no_ip import HttpNoIpValidado
 from api.modelo_do_job import (
     FIM,
     Estado,
@@ -433,3 +435,21 @@ def criar_rotas_do_push(
         )
 
     return rotas
+
+
+def rotas_do_push_do_ambiente(
+    ambiente: Mapping[str, str],
+    webhooks: RepositorioDeWebhooks,
+    cofre: Cofre | None = None,
+) -> APIRouter | None:
+    """Com `PUSH_AUDIENCIA`, `PUSH_CONTA` e `WEBHOOK_SEGREDOS` (o Terraform as define na
+    web), a rota que recebe o push e entrega o webhook; sem elas, a rota não existe."""
+    audiencia, conta = ambiente.get("PUSH_AUDIENCIA"), ambiente.get("PUSH_CONTA")
+    if not audiencia or not conta:
+        return None
+    cofre = cofre or cofre_do_ambiente(ambiente)
+    if cofre is None:
+        return None
+    return criar_rotas_do_push(
+        VerificadorDoPushDoGoogle(audiencia, conta), webhooks, cofre, HttpNoIpValidado()
+    )

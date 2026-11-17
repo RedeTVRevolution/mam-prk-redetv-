@@ -104,6 +104,49 @@ resource "google_pubsub_subscription" "eventos_mortos" {
   }
 }
 
+# Cofre do webhook (#705): um segredo só com o mapa `{sistema: segredo}` em JSON, que o
+# `make registrar-webhook` grava (api/cofre_secret_manager.py). Cifrado por uma chave
+# própria (CMEK) na região; a chave não pode ser apagada no Cloud KMS. O agente de
+# serviço do Secret Manager nasce com `gcloud beta services identity create` (wizard).
+resource "google_kms_crypto_key" "segredos_do_webhook" {
+  name     = "segredos-do-webhook"
+  key_ring = google_kms_key_ring.mam.id
+  purpose  = "ENCRYPT_DECRYPT"
+}
+
+resource "google_kms_crypto_key_iam_member" "secret_manager_cifra" {
+  crypto_key_id = google_kms_crypto_key.segredos_do_webhook.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:service-${data.google_project.este.number}@gcp-sa-secretmanager.iam.gserviceaccount.com"
+}
+
+resource "google_secret_manager_secret" "segredos_do_webhook" {
+  secret_id = "mam-segredos-do-webhook"
+  replication {
+    user_managed {
+      replicas {
+        location = var.regiao
+        customer_managed_encryption {
+          kms_key_name = google_kms_crypto_key.segredos_do_webhook.id
+        }
+      }
+    }
+  }
+  depends_on = [google_kms_crypto_key_iam_member.secret_manager_cifra]
+}
+
+# Só a web, que entrega o webhook, lê o segredo; quem registra é a pessoa dona do projeto.
+resource "google_secret_manager_secret_iam_member" "web_le_os_segredos" {
+  secret_id = google_secret_manager_secret.segredos_do_webhook.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.mam["web"].member
+}
+
+output "webhook_segredos" {
+  description = "Segredo com o mapa dos segredos do webhook: WEBHOOK_SEGREDOS no `make registrar-webhook`"
+  value       = google_secret_manager_secret.segredos_do_webhook.id
+}
+
 output "pubsub_topico_eventos" {
   description = "Tópico do fim de Job: PUBSUB_TOPICO_EVENTOS nos Jobs que terminam um Job"
   value       = google_pubsub_topic.eventos_do_job.id
