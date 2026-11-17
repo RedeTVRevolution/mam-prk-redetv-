@@ -30,5 +30,5 @@ resource "terraform_data" "url_da_acao_de_senha" {
 resource "google_logging_project_exclusion" "codigo_do_link_de_senha" {
   name        = "codigo-do-link-de-senha"
   description = "Descarta os logs com o código do link de senha do e-mail (oobCode)."
-  filter      = "httpRequest.requestUrl:\"oobCode=\" OR textPayload:\"oobCode=\""
+  filter      = "httpRequest.requestUrl:\"oobCode=\" OR httpRequest.referer:\"oobCode=\" OR textPayload:\"oobCode=\""
 }

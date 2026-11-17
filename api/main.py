@@ -289,7 +289,9 @@ CABECALHOS_DE_SEGURANCA = {
         "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
     ),
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "strict-origin-when-cross-origin",
+    # Só a origem, também na mesma origem: a URL de /redefinir-senha traz o código do link de
+    # senha, e os JS e CSS da página o levariam no Referer para os logs.
+    "Referrer-Policy": "strict-origin",
     "Strict-Transport-Security": "max-age=31536000",
 }
 

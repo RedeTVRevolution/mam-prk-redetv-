@@ -12,3 +12,4 @@ def test_logs_com_o_codigo_do_link_de_senha_sao_descartados() -> None:
     # O balanceador e o Cloud Run gravam a URL no httpRequest; o uvicorn, no texto do acesso.
     assert 'httpRequest.requestUrl:\\"oobCode=\\"' in LINK
     assert 'textPayload:\\"oobCode=\\"' in LINK
+    assert 'httpRequest.referer:\\"oobCode=\\"' in LINK
