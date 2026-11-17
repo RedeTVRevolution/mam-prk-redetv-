@@ -26,7 +26,7 @@ from api.correcoes import LIMITE_DO_NOME, sem_controle
 from api.erros import lido
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
 from api.permissoes import exige
-from api.rotas_dos_programas import LIMITE_DE_APELIDOS, Apelido
+from api.rotas_dos_programas import LIMITE_DE_APELIDOS, Apelido, apelidos_validos
 from api.texto import chave_da_marca, normalizar
 from api.texto_como_dado import ID_SEGURO, Linha
 
@@ -39,24 +39,18 @@ class MarcaDoCadastro(BaseModel):
     apelidos: list[str]
 
 
-def _apelidos_validos(apelidos: list[str]) -> list[str]:
-    if len(apelidos) > LIMITE_DE_APELIDOS:
-        raise ValueError("apelidos demais")
-    return [sem_controle(a) for a in apelidos]
-
-
 class NovaMarca(BaseModel):
     nome: Nome
     apelidos: list[Apelido] = []
 
     _sem_controle_no_nome = field_validator("nome")(sem_controle)
-    _apelidos_validos = field_validator("apelidos")(_apelidos_validos)
+    _apelidos_validos = field_validator("apelidos")(apelidos_validos)
 
 
 class NovosApelidos(BaseModel):
     apelidos: list[Apelido]
 
-    _apelidos_validos = field_validator("apelidos")(_apelidos_validos)
+    _apelidos_validos = field_validator("apelidos")(apelidos_validos)
 
 
 class PedidoDeJuntar(BaseModel):
@@ -120,19 +114,30 @@ def criar_rotas_do_cadastro_de_marcas(
             raise HTTPException(409, f"{texto} já é a marca {marca.nome}: use Juntar")
 
     def registrar(
-        autor: Usuario, acao: Acao, marca: MarcaDoCatalogo, detalhes: dict[str, object]
+        autor: Usuario,
+        acao: Acao,
+        marca: MarcaDoCatalogo,
+        detalhes: dict[str, object],
+        desfazer: Callable[[], object],
     ) -> None:
-        auditoria.acrescentar(
-            registro_de_auditoria(
-                quando=relogio(),
-                quem=autor,
-                acao=acao,
-                alvo_tipo="marca",
-                alvo_id=marca.id,
-                alvo_nome=marca.nome,
-                detalhes=detalhes,
+        """Grava na auditoria; sem o registro, a mudança é desfeita (e a cópia, descartada)."""
+        descartar()
+        try:
+            auditoria.acrescentar(
+                registro_de_auditoria(
+                    quando=relogio(),
+                    quem=autor,
+                    acao=acao,
+                    alvo_tipo="marca",
+                    alvo_id=marca.id,
+                    alvo_nome=marca.nome,
+                    detalhes=detalhes,
+                )
             )
-        )
+        except Exception:
+            desfazer()
+            descartar()
+            raise
 
     @rotas.get("/marcas/cadastro")
     def listar(_autor: Autor) -> list[MarcaDoCadastro]:
@@ -145,13 +150,13 @@ def criar_rotas_do_cadastro_de_marcas(
         apelidos = _sem_repeticao(nova.nome, nova.apelidos)
         sem_conflito(None, nova.nome, apelidos)
         criada = marcas.acrescentar(nova.nome, apelidos, autor=autor.email or autor.uid)
-        descartar()
-        try:
-            registrar(autor, "marca.criada", criada, {"apelidos": apelidos})
-        except Exception:
-            marcas.apagar(criada.id)
-            descartar()
-            raise
+        registrar(
+            autor,
+            "marca.criada",
+            criada,
+            {"apelidos": apelidos},
+            lambda: marcas.apagar(criada.id),
+        )
         return _publica(criada)
 
     @rotas.put("/marcas/{id_da_marca}/apelidos")
@@ -162,18 +167,13 @@ def criar_rotas_do_cadastro_de_marcas(
         apelidos = _sem_repeticao(antes.nome, pedido.apelidos)
         sem_conflito(antes.id, antes.nome, apelidos)
         nova = marcas.definir_apelidos(antes.id, apelidos)
-        descartar()
-        try:
-            registrar(
-                autor,
-                "marca.alterada",
-                nova,
-                {"apelidos_antes": antes.apelidos, "apelidos_depois": apelidos},
-            )
-        except Exception:
-            marcas.definir_apelidos(antes.id, antes.apelidos)
-            descartar()
-            raise
+        registrar(
+            autor,
+            "marca.alterada",
+            nova,
+            {"apelidos_antes": antes.apelidos, "apelidos_depois": apelidos},
+            lambda: marcas.definir_apelidos(antes.id, antes.apelidos),
+        )
         return _publica(nova)
 
     @rotas.post("/marcas/{id_da_marca}/juntar")
@@ -198,24 +198,19 @@ def criar_rotas_do_cadastro_de_marcas(
                 422, f"A marca ficaria com mais de {LIMITE_DE_APELIDOS} apelidos"
             )
         nova = marcas.definir_apelidos(destino.id, apelidos)
-        descartar()
-        try:
-            registrar(
-                autor,
-                "marca.juntada",
-                nova,
-                {
-                    "outra_id": outra.id,
-                    "outra_nome": outra.nome,
-                    "apelidos_antes": destino.apelidos,
-                    "apelidos_depois": apelidos,
-                },
-            )
-        except Exception:
-            # Sem registro a junção não vale: a outra marca ainda não foi apagada.
-            marcas.definir_apelidos(destino.id, destino.apelidos)
-            descartar()
-            raise
+        # Sem registro a junção não vale: a outra marca ainda não foi apagada.
+        registrar(
+            autor,
+            "marca.juntada",
+            nova,
+            {
+                "outra_id": outra.id,
+                "outra_nome": outra.nome,
+                "apelidos_antes": destino.apelidos,
+                "apelidos_depois": apelidos,
+            },
+            lambda: marcas.definir_apelidos(destino.id, destino.apelidos),
+        )
         marcas.apagar(outra.id)  # sem purga: o nome dela passa a ser apelido desta
         descartar()
         return _publica(nova)

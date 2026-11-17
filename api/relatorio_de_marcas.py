@@ -331,12 +331,11 @@ class SoMarcasQueContam:
         na_lixeira = ids_dos_jobs_na_lixeira(self._jobs)
         somas = [s for s in somas if s.job_id not in na_lixeira]
         # Um Quem conta por operação. O corte vale por texto, antes do agrupamento (que
-        # vem depois, em `_com_rotulos`); a chave sai uma vez por texto distinto.
-        nome = {m: chave_da_marca(m) for m in {s.marca for s in somas}}
+        # vem depois, em `_com_rotulos`); `Cortes` compara pela chave.
         cortes = QuemConta(marcas=self._marcas, purgas=self._purgas).cortes(
-            set(nome.values()), so_a_purga=so_a_purga
+            {s.marca for s in somas}, so_a_purga=so_a_purga
         )
-        cortadas = [s for s in somas if cortes.tem_corte(nome[s.marca])]
+        cortadas = [s for s in somas if cortes.tem_corte(s.marca)]
         criados = (
             {
                 j.id: j.criado_em
@@ -347,7 +346,7 @@ class SoMarcasQueContam:
             if cortadas
             else {}
         )
-        return [s for s in somas if cortes.conta(nome[s.marca], criados.get(s.job_id))]
+        return [s for s in somas if cortes.conta(s.marca, criados.get(s.job_id))]
 
     def _canonicas(self) -> MarcasCanonicas:
         return MarcasCanonicas(lido(self._marcas.todas))

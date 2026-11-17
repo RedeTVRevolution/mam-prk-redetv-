@@ -4,6 +4,7 @@ import { cn } from 'cn'
 import { useId, useState } from 'react'
 import { SessaoExpirada, codigoDoErro, type MarcaCadastrada } from '../../api.ts'
 import { falhaDaAcao, type Falha } from '../../falhaDaAcao.ts'
+import { nomeNormalizado } from '../../painel.ts'
 import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
@@ -11,9 +12,6 @@ import { Aba, CABECALHO, CAMPO, CELULA, Carregando, Erro, TABELA, TopoDaAba, Vaz
 
 const CHAVE = ['admin', 'marcas']
 const LIMITE_DO_NOME = 100
-
-/** Sem maiúscula nem acento, para o filtro achar "magazine" em "Magazine Luiza". */
-const simples = (t: string) => t.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
 
 /** Nome (só na criação) e apelidos da marca; o 409 da API (grafia que já é de outra marca) aparece no próprio diálogo. */
 function Formulario({ marca, aoFechar, aoGravar }: { marca: MarcaCadastrada | null; aoFechar: () => void; aoGravar: () => void }) {
@@ -196,8 +194,8 @@ export default function Marcas() {
   const [juntando, setJuntando] = useState<MarcaCadastrada | null>(null)
   const [filtro, setFiltro] = useState('')
   const lista = carga.data ?? []
-  const procurado = simples(filtro.trim())
-  const visiveis = procurado ? lista.filter((m) => [m.nome, ...m.apelidos].some((t) => simples(t).includes(procurado))) : lista
+  const procurado = nomeNormalizado(filtro)
+  const visiveis = procurado ? lista.filter((m) => [m.nome, ...m.apelidos].some((t) => nomeNormalizado(t).includes(procurado))) : lista
   const recarregar = () => {
     void consultas.invalidateQueries({ queryKey: CHAVE, exact: true })
     // O relatório de marcas agrupa pelo nome certo: refaz com a grafia nova.

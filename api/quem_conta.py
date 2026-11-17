@@ -159,6 +159,8 @@ class QuemConta:
         if self._marcas is None:
             return Cortes(frozenset(), {})
         chaves = {chave_da_marca(t) for t in textos}
+        if not chaves:  # nada a comparar: a lixeira nem é lida
+            return Cortes(frozenset(), {})
         self._resolver_cortes(chaves, self._marcas)
         return Cortes(
             frozenset() if so_a_purga else self._nomes_na_lixeira(self._marcas),
