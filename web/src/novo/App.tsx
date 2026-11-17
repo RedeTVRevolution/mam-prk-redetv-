@@ -3,7 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { lazy, Suspense, useState } from 'react'
 import type { ClienteDaApi } from '../api.ts'
 import type { Autenticador } from '../auth/autenticador.ts'
-import { ACERVO, navegar, seguir, useRota, type Rota } from '../rotas.ts'
+import { ACERVO, seguir, useRota, type Rota } from '../rotas.ts'
 import { useSessao, type Usuario } from '../sessao.ts'
 import { AtalhosProvider } from './Atalhos.tsx'
 import { Acervo } from './acervo/Acervo.tsx'
@@ -19,11 +19,10 @@ import { TelaDoVideo } from './video/TelaDoVideo.tsx'
 const PainelDaDiretoria = lazy(() => import('./painel/PainelDaDiretoria.tsx'))
 const TempoDeTela = lazy(() => import('./relatorios/TempoDeTela.tsx'))
 const Marcas = lazy(() => import('./relatorios/Marcas.tsx'))
-const RedefinirSenha = lazy(() => import('./RedefinirSenha.tsx'))
 
 /** O que a área de trabalho mostra. */
 function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuario; aoSair: () => void }) {
-  if (rota.tipo === 'raiz' || rota.tipo === 'redefinir_senha') return null
+  if (rota.tipo === 'raiz') return null
   // O login recente que a purga pede passa pela saída: a Lixeira guarda o pedido e o reabre na volta.
   if (rota.tipo === 'admin') return <Administracao aba={rota.aba} busca={rota.busca} usuario={usuario} aoEntrarDeNovo={aoSair} />
   // O front só esconde o painel; quem barra é a API.
@@ -75,7 +74,7 @@ function SessaoAtiva({ api, usuario, rota, aoSair }: { api: ClienteDaApi; usuari
   )
 }
 
-function Telas({ autenticador, rota, aviso }: { autenticador: Autenticador; rota: Rota; aviso?: string }) {
+function Telas({ autenticador, rota }: { autenticador: Autenticador; rota: Rota }) {
   const { sessao, saidas, api, sair, reverificar } = useSessao(autenticador)
 
   if (sessao.tipo === 'verificando') {
@@ -86,7 +85,7 @@ function Telas({ autenticador, rota, aviso }: { autenticador: Autenticador; rota
     )
   }
   if (sessao.tipo === 'sem_sessao') {
-    return <Login key={saidas} autenticador={autenticador} aoEntrar={reverificar} aviso={aviso} />
+    return <Login key={saidas} autenticador={autenticador} aoEntrar={reverificar} />
   }
   if (sessao.tipo === 'api_indisponivel') {
     return (
@@ -112,24 +111,9 @@ function Telas({ autenticador, rota, aviso }: { autenticador: Autenticador; rota
 
 export default function App({ autenticador }: { autenticador: Autenticador }) {
   const rota = useRota()
-  const [senhaDefinida, setSenhaDefinida] = useState(false)
-  // Pública e sem sessão: quem abre o link do e-mail ainda não tem senha. Termina no login.
-  if (rota.tipo === 'redefinir_senha') {
-    return (
-      <Suspense>
-        <RedefinirSenha
-          autenticador={autenticador}
-          aoConcluir={() => {
-            setSenhaDefinida(true)
-            navegar('/', { substituir: true })
-          }}
-        />
-      </Suspense>
-    )
-  }
   return (
     <AtalhosProvider>
-      <Telas autenticador={autenticador} rota={rota} aviso={senhaDefinida ? 'Senha definida, entre com a senha nova.' : undefined} />
+      <Telas autenticador={autenticador} rota={rota} />
     </AtalhosProvider>
   )
 }

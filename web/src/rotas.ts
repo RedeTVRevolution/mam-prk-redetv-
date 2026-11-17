@@ -24,7 +24,6 @@ export type Rota =
   | { tipo: 'marcas'; filtros: FiltrosDeMarcas }
   | { tipo: 'painel'; aba: AbaDoPainel; filtros: FiltrosDoPainel }
   | { tipo: 'admin'; aba: string | null; busca: string }
-  | { tipo: 'redefinir_senha' }
   | { tipo: 'nao_encontrada' }
 
 export const ACERVO = '/acervo'
@@ -93,7 +92,6 @@ export function lerRota(caminho: string, busca = ''): Rota {
   const partes = caminho.split('/').filter(Boolean)
   if (partes.length === 0) return { tipo: 'raiz' }
   if (partes.length === 1 && partes[0] === 'acervo') return { tipo: 'acervo', filtros: filtrosDaBusca(busca) }
-  if (partes.length === 1 && partes[0] === 'redefinir-senha') return { tipo: 'redefinir_senha' }
   if (partes.length === 1 && partes[0] === 'busca') return { tipo: 'busca', consulta: consultaDaBusca(busca) }
   if (partes.length === 2 && partes[0] === 'relatorios' && partes[1] === 'tempo-de-tela') {
     return { tipo: 'tempo_de_tela', filtros: filtrosDoRelatorio(busca) }

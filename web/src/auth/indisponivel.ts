@@ -18,13 +18,5 @@ export class AutenticadorIndisponivel implements Autenticador {
     throw new Error('Identity Platform não configurado neste build')
   }
 
-  async verificarCodigoDeSenha(): Promise<string> {
-    throw new Error('Identity Platform não configurado neste build')
-  }
-
-  async redefinirSenha(): Promise<void> {
-    throw new Error('Identity Platform não configurado neste build')
-  }
-
   async sair(): Promise<void> {}
 }

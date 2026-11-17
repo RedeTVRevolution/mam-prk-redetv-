@@ -1,24 +1,20 @@
 import { initializeApp } from '@firebase/app'
 import {
   AuthErrorCodes,
-  confirmPasswordReset,
   getAuth,
   getMultiFactorResolver,
   multiFactor,
   signInWithEmailAndPassword,
   signOut,
   TotpMultiFactorGenerator,
-  verifyPasswordResetCode,
   type Auth,
   type MultiFactorError,
   type MultiFactorResolver,
   type TotpSecret,
 } from '@firebase/auth'
 import {
-  CodigoDeSenhaInvalido,
   ContaBloqueada,
   CredencialInvalida,
-  SenhaRecusada,
   type Autenticador,
   type ResultadoDaSenha,
 } from './autenticador.ts'
@@ -36,28 +32,11 @@ function codigoDoErro(erro: unknown): string | undefined {
   return (erro as { code?: string }).code
 }
 
-const ERROS_DE_CODIGO_DE_SENHA: string[] = [
-  AuthErrorCodes.EXPIRED_OOB_CODE,
-  AuthErrorCodes.INVALID_OOB_CODE,
-  AuthErrorCodes.USER_DISABLED,
-  AuthErrorCodes.USER_DELETED,
-]
-
 function traduzir(erro: unknown): unknown {
   const codigo = codigoDoErro(erro)
   // O bloqueio após tentativas erradas é do próprio Identity Platform.
   if (codigo === AuthErrorCodes.TOO_MANY_ATTEMPTS_TRY_LATER) return new ContaBloqueada()
   if (codigo && ERROS_DE_CREDENCIAL.includes(codigo)) return new CredencialInvalida()
-  return erro
-}
-
-function traduzirCodigoDeSenha(erro: unknown): unknown {
-  const codigo = codigoDoErro(erro)
-  if (codigo && ERROS_DE_CODIGO_DE_SENHA.includes(codigo)) return new CodigoDeSenhaInvalido()
-  // A política de senha é do servidor; a mensagem do SDK diz o que faltou.
-  if (codigo === 'auth/password-does-not-meet-requirements' || codigo === AuthErrorCodes.WEAK_PASSWORD) {
-    return new SenhaRecusada((erro as Error).message)
-  }
   return erro
 }
 
@@ -128,22 +107,6 @@ export class AutenticadorIdentityPlatform implements Autenticador {
     this.segredo = null
     // Token novo, para a API ver o segundo fator. Se ainda faltar, o 401 leva de volta ao login.
     await usuario.getIdToken(true)
-  }
-
-  async verificarCodigoDeSenha(codigo: string): Promise<string> {
-    try {
-      return await verifyPasswordResetCode(this.auth, codigo)
-    } catch (erro) {
-      throw traduzirCodigoDeSenha(erro)
-    }
-  }
-
-  async redefinirSenha(codigo: string, senha: string): Promise<void> {
-    try {
-      await confirmPasswordReset(this.auth, codigo, senha)
-    } catch (erro) {
-      throw traduzirCodigoDeSenha(erro)
-    }
   }
 
   async sair(): Promise<void> {

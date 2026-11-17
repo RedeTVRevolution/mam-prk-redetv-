@@ -36,7 +36,7 @@ export function Campo({ rotulo, icone, children }: { rotulo: string; icone: Reac
 }
 
 /** Login: e-mail e senha, depois o código do autenticador; no primeiro acesso, o cadastro dele. */
-export default function Login({ autenticador, aoEntrar, aviso }: { autenticador: Autenticador; aoEntrar: () => void; aviso?: string }) {
+export default function Login({ autenticador, aoEntrar }: { autenticador: Autenticador; aoEntrar: () => void }) {
   const [etapa, setEtapa] = useState<Etapa>({ tipo: 'senha' })
   const [erro, setErro] = useState<string | null>(null)
   const [codigo, setCodigo] = useState('')
@@ -98,11 +98,6 @@ export default function Login({ autenticador, aoEntrar, aviso }: { autenticador:
             <img src={logo} alt="RedeTV" className="h-7 w-auto" />
             <span className="text-lg font-semibold">MAM</span>
           </div>
-          {aviso && (
-            <p role="status" className="rounded-sm border bg-card px-3 py-2 text-sm">
-              {aviso}
-            </p>
-          )}
           {etapa.tipo === 'senha' ? (
             <form onSubmit={enviarSenha} className="grid gap-4">
               <div>

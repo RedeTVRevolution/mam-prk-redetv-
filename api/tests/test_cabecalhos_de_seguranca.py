@@ -64,7 +64,7 @@ def test_erro_500_nao_tratado_traz_os_cabecalhos(tmp_path: Path) -> None:
 
 def test_valores_combinados() -> None:
     assert CABECALHOS_DE_SEGURANCA["X-Content-Type-Options"] == "nosniff"
-    # Só a origem, nem na mesma origem: a URL de /redefinir-senha traz o código do link.
+    # Só a origem, nem na mesma origem: a URL não vai no Referer.
     assert CABECALHOS_DE_SEGURANCA["Referrer-Policy"] == "strict-origin"
     assert CABECALHOS_DE_SEGURANCA["Strict-Transport-Security"] == "max-age=31536000"
 
