@@ -303,4 +303,5 @@ def test_o_www_resolve_para_o_balanceador_e_redireciona_para_o_dominio() -> None
     )
     assert 'hosts        = ["www.${var.dominio}"]' in mapa
     assert "host_redirect          = var.dominio" in mapa
-    assert "https_redirect         = true" in mapa
+    # O Google recusa https_redirect em mapa ligado ao proxy HTTPS.
+    assert not re.search(r"https_redirect\s*=", mapa)

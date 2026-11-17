@@ -56,8 +56,8 @@ resource "google_compute_url_map" "web" {
   path_matcher {
     name = "www"
     default_url_redirect {
+      # Sem https_redirect: o Google o recusa em mapa de proxy HTTPS, e o esquema já é https.
       host_redirect          = var.dominio
-      https_redirect         = true
       redirect_response_code = "MOVED_PERMANENTLY_DEFAULT"
       strip_query            = false
     }
