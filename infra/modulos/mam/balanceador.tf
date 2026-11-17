@@ -146,6 +146,28 @@ resource "google_dns_record_set" "www" {
   rrdatas      = [google_compute_global_address.balanceador[0].address]
 }
 
+# Os e-mails da conta (link de senha) saem de noreply@ do domínio (#702): registros que o
+# "Customize domain" dos modelos de e-mail do Identity Platform pede, derivados do projeto e do
+# domínio. Depois de publicados, a verificação e o "Apply Custom Domain" são no console
+# (infra/README.md). Um v=spf1 só por nome: o SPF e o token ficam no mesmo conjunto TXT.
+resource "google_dns_record_set" "email_txt" {
+  count        = local.balanceador ? 1 : 0
+  managed_zone = google_dns_managed_zone.mam[0].name
+  name         = google_dns_managed_zone.mam[0].dns_name
+  type         = "TXT"
+  ttl          = 300
+  rrdatas      = ["\"v=spf1 include:_spf.firebasemail.com ~all\"", "\"firebase=${var.projeto}\""]
+}
+
+resource "google_dns_record_set" "email_dkim" {
+  count        = local.balanceador ? 2 : 0
+  managed_zone = google_dns_managed_zone.mam[0].name
+  name         = "firebase${count.index + 1}._domainkey.${google_dns_managed_zone.mam[0].dns_name}"
+  type         = "CNAME"
+  ttl          = 300
+  rrdatas      = ["mail-${replace(var.dominio, ".", "-")}.dkim${count.index + 1}._domainkey.firebasemail.com."]
+}
+
 # O registro A do domínio aponta para este endereço. Nulo sem balanceador.
 output "ip_do_balanceador" {
   value = local.balanceador ? google_compute_global_address.balanceador[0].address : null

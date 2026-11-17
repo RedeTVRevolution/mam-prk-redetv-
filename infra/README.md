@@ -34,7 +34,9 @@ Lista para o wizard (uma vez por projeto, igual ao `scripts/wizard-gcp-dev.sh` d
 
 ## Link de senha
 
-O e-mail de senha abre `<url do app>/redefinir-senha`, página do próprio MAM (o `terraform_data.url_da_acao_de_senha` grava a URL de ação do Identity Platform pela API REST, como a política de senha). Ordem do deploy: a web com a rota nova tem de estar publicada antes de a URL de ação mudar, senão os links quebram; no mesmo apply o `depends_on` no serviço web garante isso. O código do link (`oobCode`) vai na URL; a exclusão `codigo-do-link-de-senha` tira dos logs as linhas que o trazem (balanceador, Cloud Run e uvicorn), e é criada antes de a URL mudar.
+O e-mail de senha abre a página padrão do Google; com `dominio`, o pedido leva o `continueUrl` (`URL_DO_APP` no serviço web, `DOMINIO` no `make criar-contas`) e a página ganha o botão "Continuar", que volta ao MAM. Trocar a URL de ação do Identity Platform para a página `/redefinir-senha` do MAM foi tentado e é recusado pela API (`400 EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED`); o `terraform_data.url_da_acao_de_senha` que fazia isso sai só do estado, por um bloco `removed`, sem apagar nada na nuvem. A exclusão `codigo-do-link-de-senha` continua tirando dos logs as linhas com o código do link (`oobCode`).
+
+Remetente do domínio (#702): com `dominio`, o Terraform publica na zona os registros que o "Customize domain" dos modelos de e-mail pede (TXT com o SPF e `firebase=<projeto>`, e os CNAMEs `firebase1` e `firebase2._domainkey`). Uma vez por ambiente, uma pessoa: no console do Firebase, Authentication → Templates → lápis de um modelo → "Customize domain" com o domínio (a tabela deve bater com os registros publicados); depois do deploy, "Verify" (até 48 h) e, verificado, "Apply Custom Domain". Daí os e-mails saem de `noreply@<domínio>`.
 
 ## Domínio e balanceador (#294)
 

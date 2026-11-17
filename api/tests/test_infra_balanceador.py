@@ -45,7 +45,7 @@ def test_com_dominio_vazio_nenhum_recurso_do_balanceador_nasce() -> None:
     assert {tipo for tipo, _ in blocos} >= set(RECURSOS)
     for tipo, corpo in blocos:
         assert re.search(
-            r"^  count\s*= local\.balanceador \? 1 : 0$", corpo, re.MULTILINE
+            r"^  count\s*= local\.balanceador \? [12] : 0$", corpo, re.MULTILINE
         ), tipo
     assert re.search(r'balanceador\s*= var\.dominio != ""', BALANCEADOR)
 
@@ -306,3 +306,22 @@ def test_o_www_resolve_para_o_balanceador_e_redireciona_para_o_dominio() -> None
     assert "host_redirect          = var.dominio" in mapa
     # O Google recusa https_redirect em mapa ligado ao proxy HTTPS.
     assert not re.search(r"https_redirect\s*=", mapa)
+
+
+def test_o_dominio_verifica_o_remetente_dos_e_mails_da_conta() -> None:
+    # Registros do "Customize domain" dos modelos de e-mail do Identity Platform: o
+    # token do projeto e o SPF no mesmo conjunto TXT (um v=spf1 só) e os dois DKIM.
+    txt = _bloco(BALANCEADOR, 'resource "google_dns_record_set" "email_txt"')
+    dkim = _bloco(BALANCEADOR, 'resource "google_dns_record_set" "email_dkim"')
+
+    assert "count        = local.balanceador ? 1 : 0" in txt
+    assert 'type         = "TXT"' in txt
+    assert '"\\"v=spf1 include:_spf.firebasemail.com ~all\\""' in txt
+    assert '"\\"firebase=${var.projeto}\\""' in txt
+    assert "count        = local.balanceador ? 2 : 0" in dkim
+    assert 'name         = "firebase${count.index + 1}._domainkey.${' in dkim
+    assert 'type         = "CNAME"' in dkim
+    assert (
+        'rrdatas      = ["mail-${replace(var.dominio, ".", "-")}.dkim${count.index + 1}'
+        '._domainkey.firebasemail.com."]'
+    ) in dkim

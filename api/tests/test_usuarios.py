@@ -531,6 +531,30 @@ def test_contas_do_identity_platform_repassa_outras_falhas() -> None:
         ContasIdentityPlatform("proj", sessao).enviar_link_de_senha("a@x.y")
 
 
+def test_link_de_senha_volta_ao_app_pelo_botao_continuar() -> None:
+    sessao = SessaoFalsa(RespostaFalsa({}))
+
+    ContasIdentityPlatform(
+        "proj", sessao, url_do_app="https://mam.exemplo"
+    ).enviar_link_de_senha("a@x.y")
+
+    assert sessao.pedidos[0][2]["json"] == {
+        "requestType": "PASSWORD_RESET",
+        "email": "a@x.y",
+        "continueUrl": "https://mam.exemplo",
+    }
+
+
+def test_link_de_senha_sem_url_do_app_vai_sem_continuar() -> None:
+    # Sem domínio próprio, o run.app não está nos domínios autorizados do Identity
+    # Platform: com o continueUrl, o envio seria recusado.
+    sessao = SessaoFalsa(RespostaFalsa({}))
+
+    ContasIdentityPlatform("proj", sessao).enviar_link_de_senha("a@x.y")
+
+    assert "continueUrl" not in sessao.pedidos[0][2]["json"]
+
+
 NOVA: dict[str, Any] = {
     "email": "cris@redetv.com",
     "nome": "Cris",
