@@ -41,7 +41,7 @@ function Quadro({ job, momento }: { job: string; momento: Momento }) {
   return (
     <span className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-canvas">
       {url && url !== falhou ? (
-        <img src={url} alt="" loading="lazy" decoding="async" onError={() => setFalhou(url)} className="absolute inset-0 size-full object-cover" />
+        <img src={url} alt="" loading="lazy" decoding="async" onError={() => setFalhou(url)} className="absolute inset-0 size-full bg-black object-contain" />
       ) : (
         // Sem quadro (a fala, o GC), o tipo do momento ocupa o lugar.
         <span className={cn('flex flex-col items-center gap-1 text-xs', tipo.cor)}>

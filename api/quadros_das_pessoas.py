@@ -24,7 +24,8 @@ OPCOES_DO_QUADRO = [
     "-frames:v",
     "1",
     "-vf",
-    "format=yuvj420p",
+    # Aplica o SAR antes de gravar: o `<img>` da web ignora o SAR do vídeo anamórfico.
+    r"scale=min(2*round(iw*sar/2)\,3840):ih,setsar=1,format=yuvj420p",
     "-c:v",
     "mjpeg",
     "-q:v",
