@@ -258,6 +258,9 @@ Na tela (modo de catalogação, aba Pautas): `M` marca a pauta em foco, `U` junt
 **Conta local**:
 Usuário criado no próprio sistema de identidade, independente do login do sistema legado da RedeTV.
 
+**Link de senha**:
+O e-mail que define a senha de uma conta nova (primeiro acesso) ou refeita aponta para a página `/redefinir-senha` do MAM, que volta sozinha ao login; a URL de ação do Identity Platform (`terraform_data.url_da_acao_de_senha`) só pode mudar depois de a web com essa rota estar publicada, senão os links quebram.
+
 **Administrador**:
 Papel com todas as permissões, dado automaticamente aos administradores de emergência.
 

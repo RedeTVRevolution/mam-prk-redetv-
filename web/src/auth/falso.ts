@@ -1,5 +1,7 @@
 import {
+  CodigoDeSenhaInvalido,
   CredencialInvalida,
+  SenhaRecusada,
   type Autenticador,
   type ResultadoDaSenha,
 } from './autenticador.ts'
@@ -12,6 +14,7 @@ export interface ContaFalsa {
 }
 
 export const CODIGO_TOTP_FALSO = '123456'
+export const CODIGO_DE_SENHA_FALSO = 'codigo-de-senha'
 
 /** Identity Platform simulado, só para testes. */
 export class AutenticadorFalso implements Autenticador {
@@ -43,6 +46,18 @@ export class AutenticadorFalso implements Autenticador {
 
   async cadastrarTotp(codigo: string): Promise<void> {
     this.concluir(codigo, false)
+  }
+
+  async verificarCodigoDeSenha(codigo: string): Promise<string> {
+    if (codigo !== CODIGO_DE_SENHA_FALSO) throw new CodigoDeSenhaInvalido()
+    return this.contas[0].email
+  }
+
+  // Como o servidor: a política pede 12 caracteres, no mínimo.
+  async redefinirSenha(codigo: string, senha: string): Promise<void> {
+    if (codigo !== CODIGO_DE_SENHA_FALSO) throw new CodigoDeSenhaInvalido()
+    if (senha.length < 12) throw new SenhaRecusada('Senha com menos de 12 caracteres')
+    this.contas[0].senha = senha
   }
 
   async sair(): Promise<void> {

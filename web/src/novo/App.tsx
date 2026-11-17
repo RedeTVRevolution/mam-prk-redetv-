@@ -3,7 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { lazy, Suspense, useState } from 'react'
 import type { ClienteDaApi } from '../api.ts'
 import type { Autenticador } from '../auth/autenticador.ts'
-import { ACERVO, seguir, useRota, type Rota } from '../rotas.ts'
+import { ACERVO, navegar, seguir, useRota, type Rota } from '../rotas.ts'
 import { useSessao, type Usuario } from '../sessao.ts'
 import { AtalhosProvider } from './Atalhos.tsx'
 import { Acervo } from './acervo/Acervo.tsx'
@@ -12,6 +12,7 @@ import { Casca } from './Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from './consultas.ts'
 import Administracao from './admin/Administracao.tsx'
 import Login from './Login.tsx'
+import RedefinirSenha from './RedefinirSenha.tsx'
 import { Button } from './ui/button.tsx'
 import { TelaDoVideo } from './video/TelaDoVideo.tsx'
 
@@ -22,7 +23,7 @@ const Marcas = lazy(() => import('./relatorios/Marcas.tsx'))
 
 /** O que a área de trabalho mostra. */
 function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuario; aoSair: () => void }) {
-  if (rota.tipo === 'raiz') return null
+  if (rota.tipo === 'raiz' || rota.tipo === 'redefinir_senha') return null
   // O login recente que a purga pede passa pela saída: a Lixeira guarda o pedido e o reabre na volta.
   if (rota.tipo === 'admin') return <Administracao aba={rota.aba} busca={rota.busca} usuario={usuario} aoEntrarDeNovo={aoSair} />
   // O front só esconde o painel; quem barra é a API.
@@ -77,6 +78,20 @@ function SessaoAtiva({ api, usuario, rota, aoSair }: { api: ClienteDaApi; usuari
 function Telas({ autenticador }: { autenticador: Autenticador }) {
   const rota = useRota()
   const { sessao, saidas, api, sair, reverificar } = useSessao(autenticador)
+  const [senhaDefinida, setSenhaDefinida] = useState(false)
+
+  // Pública: quem abre o link do e-mail ainda não tem senha. Termina no login, por rota fixa.
+  if (rota.tipo === 'redefinir_senha' && !senhaDefinida) {
+    return (
+      <RedefinirSenha
+        autenticador={autenticador}
+        aoConcluir={() => {
+          setSenhaDefinida(true)
+          navegar('/', { substituir: true })
+        }}
+      />
+    )
+  }
 
   if (sessao.tipo === 'verificando') {
     return (
@@ -86,7 +101,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
     )
   }
   if (sessao.tipo === 'sem_sessao') {
-    return <Login key={saidas} autenticador={autenticador} aoEntrar={reverificar} />
+    return <Login key={saidas} autenticador={autenticador} aoEntrar={reverificar} aviso={senhaDefinida ? 'Senha definida, entre com a senha nova.' : undefined} />
   }
   if (sessao.tipo === 'api_indisponivel') {
     return (
