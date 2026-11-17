@@ -52,7 +52,7 @@ Para ligar num ambiente que já está no ar, sem nenhum merge na `main` até o f
 4. Preencha `DOMINIO` e `WAF_ATIVO` no GitHub e publique. O apply completo cria o balanceador e o Cloud Armor e fecha o `run.app`.
 5. Espere o certificado: o Google só começa a emiti-lo depois que a regra do balanceador existe e o DNS aponta para o IP; costuma levar de 15 minutos a 1 hora e pode chegar a 24 horas. Até lá o HTTPS falha no handshake e a aplicação fica fora do ar. Acompanhe com `gcloud compute ssl-certificates list` (`ACTIVE`).
 
-Custo mensal (estimativa pela tabela de preços do Google, a confirmar na calculadora): as duas regras de encaminhamento (80 e 443) entram no bloco das cinco primeiras, cobrado junto a US$ 0,025/hora, ~US$ 18; mais ~US$ 0,008 a 0,012 por GB trafegado. IP reservado em uso e certificado gerenciado não custam. A zona do Cloud DNS custa ~US$ 0,20 por mês, e o domínio `.com`, o preço anual do Cloud Domains (US$ 12, ~US$ 1 por mês). Com o Cloud Armor (abaixo, ~US$ 12), a borda inteira fica em ~US$ 32 por mês. O upload e o player vão direto ao Storage, fora do balanceador, então o tráfego dele é só o front e a API.
+Custo mensal (estimativa pela tabela de preços do Google, a confirmar na calculadora): as duas regras de encaminhamento (80 e 443) entram no bloco das cinco primeiras, cobrado junto a US$ 0,025/hora, ~US$ 18; mais ~US$ 0,008 a 0,012 por GB trafegado. IP reservado em uso e certificado gerenciado não custam. A zona do Cloud DNS custa ~US$ 0,20 por mês, e o domínio `.com`, o preço anual do Cloud Domains (US$ 12, ~US$ 1 por mês). Com o Cloud Armor (abaixo, ~US$ 16), a borda inteira fica em ~US$ 36 por mês. O upload e o player vão direto ao Storage, fora do balanceador, então o tráfego dele é só o front e a API.
 
 Ao ligar o balanceador num ambiente que já tem login, `authorized_domains` passa a ser a lista padrão (`localhost`, `<projeto>.firebaseapp.com`, `<projeto>.web.app`) mais o domínio: qualquer outro domínio posto à mão some.
 
@@ -100,11 +100,19 @@ Validar sem credencial: `terraform -chdir=infra/ambientes/prod init -backend=fal
 
 Com o balanceador ligado (`dominio` preenchido), o módulo cria a política `mam-web` no serviço de back-end (`modulos/mam/cloud_armor.tf`). Sem `dominio`, nada disso existe. A conta `mam-terraform` precisa de `roles/compute.securityAdmin` (já no wizard).
 
-- **WAF** (SQLi, XSS, LFI, RCE e scanners, regras `v33-stable`, sensibilidade 1): nasce em **prévia** (`waf_ativo = false`): só registra no log do balanceador o que bloquearia. Olhe os logs e ligue com `waf_ativo = true` (403).
+- **WAF** (SQLi, XSS, LFI, RCE e scanners, regras `v33-stable`, sensibilidade 1): nasce em **prévia** (`waf_ativo = false`): só registra no log do balanceador o que bloquearia. Olhe os logs e ligue com `waf_ativo = true` (403). As regras de `local.regras_waf_em_observacao` (RFI, ataques de protocolo, fixação de sessão e `cve-canary`, que pega o Log4j) ficam em prévia mesmo com o WAF ligado: quando os logs mostrarem que não barram ninguém da RedeTV, tire-as dessa lista e publique. A `methodenforcement` fica fora, porque a API usa PATCH e DELETE.
 - **Limite por IP**: `limite_de_requisicoes_por_ip` (padrão 600 por minuto); acima, 429. Um valor só para todas as rotas: as de envio e busca vão direto ao Storage ou são caras no lado do servidor, e separar fica para quando os logs mostrarem necessidade.
-- **IPs da RedeTV**: `ips_da_redetv` (lista de IPs ou CIDRs, até 10: limite do Google por regra). Vazia (o padrão, e o dev): nenhuma regra de IP e todos passam. Preenchida: só esses IPs passam, **em todas as rotas, as `/v1` dos sistemas inclusive** (decisão: os sistemas da RedeTV chamam de dentro da rede; se algum chamar de fora, o IP dele entra na lista). O limite por IP passa a casar só com a lista, e quem está fora cai na regra padrão (403): o Cloud Armor para na primeira regra que casa, e o limite deixa passar quem está abaixo dele. Com a lista preenchida, o teste do `/v1/health` no fim do `deploy-dev.sh` só passa se a máquina do CD estiver na lista.
+- **IPs da RedeTV**: `ips_da_redetv` (lista de IPs ou CIDRs, até 10: limite do Google por regra). Vazia (o padrão, e o dev): nenhuma regra de IP e todos passam. Preenchida: só esses IPs passam, **em todas as rotas, as `/v1` dos sistemas inclusive** (decisão: os sistemas da RedeTV chamam de dentro da rede; se algum chamar de fora, o IP dele entra na lista). A regra 200 deixa de ser o limite por IP e passa a liberar só a lista, sem limite (#366): a emissora inteira sai por poucos IPs de NAT ou VPN, e com limite por IP todo mundo levaria 429. O WAF continua antes dela, para todos, e quem está fora cai na regra padrão (403). Com a lista preenchida, o `deploy-dev.sh` não testa o `/v1/health` (a máquina do CD está fora da lista) e só avisa.
 
-Custo mensal (estimativa pela tabela do Google, a confirmar: US$): política ~US$ 5, mais ~US$ 1 por regra (7 regras, com ou sem lista, ~US$ 12 no total) e ~US$ 0,75 por milhão de requisições avaliadas. A regra de limite por IP é cobrada como as demais.
+Para ligar a restrição (vale no próximo publicar):
+
+1. Junte os IPs de saída da RedeTV e da VPN (no máximo 10 faixas) e confira de dentro de cada rede, em https://ifconfig.me, que o IP que aparece está numa delas. Quem trabalha de fora precisa da VPN antes da troca.
+2. `gh variable set IPS_DA_REDETV --body '["200.1.2.0/24","200.3.4.5/32"]'` (lista JSON; à mão, o mesmo nome no `.env`).
+3. Publique e confira, de dentro da RedeTV e pela VPN, o `/v1/health` e o login no domínio, e de fora, o 403.
+
+Para desligar: `gh variable delete IPS_DA_REDETV` e publique; o domínio volta a aceitar qualquer IP, com o limite por IP. Enquanto a lista estiver vazia, cada publicar avisa no resumo do run que o domínio está aberto.
+
+Custo mensal (estimativa pela tabela do Google, a confirmar: US$): política ~US$ 5, mais ~US$ 1 por regra (11 regras, com ou sem lista, ~US$ 16 no total) e ~US$ 0,75 por milhão de requisições avaliadas. A regra de limite por IP é cobrada como as demais.
 
 ## Chave MAC do Cloud KMS (#272)
 

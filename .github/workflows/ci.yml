@@ -165,6 +165,7 @@ jobs:
       ADMINS_EMERGENCIA: ${{ vars.ADMINS_EMERGENCIA }}
       DOMINIO: ${{ vars.DOMINIO }}
       WAF_ATIVO: ${{ vars.WAF_ATIVO }}
+      IPS_DA_REDETV: ${{ vars.IPS_DA_REDETV }}
       CLOUDSDK_ACTIVE_CONFIG_NAME: default
       TF_IN_AUTOMATION: "1"
       # À mão, cada apply pede confirmação; aqui o CI verde é a aprovação.

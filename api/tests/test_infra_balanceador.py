@@ -192,7 +192,10 @@ def test_as_regras_waf_ficam_em_previa_ate_a_variavel_ligar() -> None:
     lista = _bloco(ARMOR, "locals {")
 
     assert "default     = false" in waf
-    assert re.search(r"preview\s*= !var\.waf_ativo", POLITICA)
+    assert re.search(
+        r"preview\s*= !var\.waf_ativo \|\| contains\(local\.regras_waf_em_observacao, rule\.key\)",
+        POLITICA,
+    )
     assert re.search(r'action\s*= "deny\(403\)"\n\s*preview', POLITICA)
     assert "evaluatePreconfiguredWaf('${rule.key}'" in POLITICA
     assert re.search(
@@ -203,12 +206,21 @@ def test_as_regras_waf_ficam_em_previa_ate_a_variavel_ligar() -> None:
         assert f'"{regra}-v33-stable",' in lista, regra
 
 
+def test_a_regra_que_barra_metodos_fica_fora() -> None:
+    # A API usa PATCH e DELETE. A prévia das regras novas está no cloud_armor.tftest.hcl.
+    assert "methodenforcement" not in ARMOR
+
+
 def test_ha_limite_de_requisicoes_por_ip_por_variavel() -> None:
     limite = _bloco(MAIN, 'variable "limite_de_requisicoes_por_ip"')
     throttle = next(r for p, r in _regras(POLITICA) if p == 200)
 
     assert "type        = number" in limite
-    assert re.search(r'action\s*= "throttle"', throttle)
+    assert re.search(r'action\s*= local\.restringe_ip \? "allow" : "throttle"', throttle)
+    assert re.search(
+        r'dynamic "rate_limit_options" \{\n\s*for_each = local\.restringe_ip \? \[\] : \[1\]',
+        throttle,
+    )
     assert re.search(r"count\s*= var\.limite_de_requisicoes_por_ip", throttle)
     assert 'enforce_on_key = "IP"' in throttle
     assert 'exceed_action  = "deny(429)"' in throttle
@@ -294,34 +306,26 @@ def test_o_dominio_e_o_waf_vem_das_variaveis_do_repositorio() -> None:
     assert "WAF_ATIVO: ${{ vars.WAF_ATIVO }}" in publicar
 
 
-def test_o_www_resolve_para_o_balanceador_e_redireciona_para_o_dominio() -> None:
-    www = _bloco(BALANCEADOR, 'resource "google_dns_record_set" "www"')
-    mapa = _bloco(BALANCEADOR, 'resource "google_compute_url_map" "web"')
+def test_a_lista_de_ips_vem_da_variavel_do_repositorio_e_vazia_por_padrao() -> None:
+    publicar = CI[CI.index("\n  publicar:\n") :]
 
-    assert 'name         = "www.${google_dns_managed_zone.mam[0].dns_name}"' in www
-    assert (
-        "rrdatas      = [google_compute_global_address.balanceador[0].address]" in www
-    )
-    assert 'hosts        = ["www.${var.dominio}"]' in mapa
-    assert "host_redirect          = var.dominio" in mapa
-    # O Google recusa https_redirect em mapa ligado ao proxy HTTPS.
-    assert not re.search(r"https_redirect\s*=", mapa)
+    assert "IPS_DA_REDETV: ${{ vars.IPS_DA_REDETV }}" in publicar
+    assert 'TF_VAR_ips_da_redetv="${IPS_DA_REDETV:-[]}"' in DEPLOY
+    # Pelo jq, como o Terraform: "[ ]" também é lista vazia.
+    assert """RESTRITO=$(jq 'length > 0' <<<"$TF_VAR_ips_da_redetv")""" in DEPLOY
 
 
-def test_o_dominio_verifica_o_remetente_dos_e_mails_da_conta() -> None:
-    # Registros do "Customize domain" dos modelos de e-mail do Identity Platform: o
-    # token do projeto e o SPF no mesmo conjunto TXT (um v=spf1 só) e os dois DKIM.
-    txt = _bloco(BALANCEADOR, 'resource "google_dns_record_set" "email_txt"')
-    dkim = _bloco(BALANCEADOR, 'resource "google_dns_record_set" "email_dkim"')
+def test_com_a_lista_de_ips_o_deploy_nao_testa_o_dominio_e_avisa() -> None:
+    # A máquina do CD fica fora da lista e levaria 403: nem liberar o /v1/health nem pôr
+    # os runners na lista (#366).
+    restrito = DEPLOY.index("if [[ -n $TF_VAR_dominio && $RESTRITO == true ]]; then")
+    aviso = DEPLOY.index("/v1/health não testado: domínio restrito aos IPs da RedeTV", restrito)
+    teste = DEPLOY.index('curl -sSf "$URL/v1/health"', aviso)
 
-    assert "count        = local.balanceador ? 1 : 0" in txt
-    assert 'type         = "TXT"' in txt
-    assert '"\\"v=spf1 include:_spf.firebasemail.com ~all\\""' in txt
-    assert '"\\"firebase=${var.projeto}\\""' in txt
-    assert "count        = local.balanceador ? 2 : 0" in dkim
-    assert 'name         = "firebase${count.index + 1}._domainkey.${' in dkim
-    assert 'type         = "CNAME"' in dkim
-    assert (
-        'rrdatas      = ["mail-${replace(var.dominio, ".", "-")}.dkim${count.index + 1}'
-        '._domainkey.firebasemail.com."]'
-    ) in dkim
+    assert restrito < aviso < teste
+
+
+def test_borda_aberta_aparece_no_resumo_do_run_sem_falhar() -> None:
+    assert 'tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"' in DEPLOY
+    assert "borda desligada: run.app aberto à internet" in DEPLOY
+    assert "domínio aberto a qualquer IP" in DEPLOY
