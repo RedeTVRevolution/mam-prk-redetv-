@@ -5,9 +5,10 @@ redirecionamento."""
 import http.client
 import socket
 import ssl
+import string
 import threading
 import time
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 # Tempo total do POST, somando as tentativas em cada IP: cabe no ack de 60 s do Pub/Sub,
 # com o cofre e o Firestore.
@@ -19,15 +20,25 @@ class _ConexaoNoIp(http.client.HTTPSConnection):
     """Conecta no `ip`; o host da URL fica no SNI, na checagem do certificado e no `Host`."""
 
     def __init__(
-        self, host: str, porta: int, ip: str, contexto: ssl.SSLContext, prazo_s: float
+        self, host: str, porta: int, ip: str, contexto: ssl.SSLContext, fim: float
     ) -> None:
-        super().__init__(host, porta, timeout=prazo_s, context=contexto)
+        super().__init__(host, porta, context=contexto)
         self._ip = ip
         self._contexto = contexto
+        self._fim = fim
+
+    def _restante(self) -> float:
+        # Timeout zero ou negativo levantaria ValueError, e não OSError.
+        return max(self._fim - time.monotonic(), 0.001)
 
     def connect(self) -> None:
-        bruto = socket.create_connection((self._ip, self.port), self.timeout)
+        # Um IP que não responde não come o prazo dos outros; o handshake fica com o
+        # que sobrou (no CPython, o timeout vale para o handshake inteiro).
+        bruto = socket.create_connection(
+            (self._ip, self.port), min(self._restante(), CONEXAO_POR_IP_S)
+        )
         try:
+            bruto.settimeout(self._restante())
             self.sock = self._contexto.wrap_socket(bruto, server_hostname=self.host)
         except BaseException:
             bruto.close()
@@ -56,20 +67,16 @@ class HttpNoIpValidado:
     ) -> int:
         partes = urlsplit(url)
         caminho = (partes.path or "/") + (f"?{partes.query}" if partes.query else "")
+        # A linha do pedido só aceita ASCII: codifica o resto e mantém os escapes.
+        caminho = quote(caminho, safe=string.punctuation)
         fim = time.monotonic() + self._prazo_s
         erro: OSError = OSError("nenhum IP para conectar")
         # IPv4 primeiro: o Cloud Run pode não ter saída IPv6.
         for ip in sorted(ips, key=lambda ip: ":" in ip):
-            restante = fim - time.monotonic()
-            if restante <= 0:
+            if time.monotonic() >= fim:
                 break
-            # Um IP que não responde não come o prazo dos outros.
             conexao = _ConexaoNoIp(
-                partes.hostname or "",
-                partes.port or 443,
-                ip,
-                self._contexto,
-                min(restante, CONEXAO_POR_IP_S),
+                partes.hostname or "", partes.port or 443, ip, self._contexto, fim
             )
             try:
                 conexao.connect()

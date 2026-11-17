@@ -181,3 +181,32 @@ def test_destino_que_goteja_para_no_prazo_total(servidor: Servidor) -> None:
     with pytest.raises(OSError):
         servidor.cliente(prazo_s=0.5).enviar(url, ["127.0.0.1"], b"{}", {})
     assert time.monotonic() - inicio < 2.0
+
+
+def test_caminho_com_acento_vai_codificado(servidor: Servidor) -> None:
+    # A URL registrada pode ter acento; a linha do pedido HTTP só aceita ASCII.
+    url = f"https://{HOST}:{servidor.porta}/notificação%20já?q=é"
+    assert servidor.cliente().enviar(url, ["127.0.0.1"], b"{}", {}) == 200
+    assert servidor.pedidos[0][1] == "/notifica%C3%A7%C3%A3o%20j%C3%A1?q=%C3%A9"
+
+
+def test_tcp_lento_e_handshake_somam_no_prazo_total(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # TCP que demora quase o prazo todo e um destino que nunca termina o TLS: o
+    # handshake só tem o que sobrou, e não um timeout inteiro de novo.
+    escuta = socket.create_server(("127.0.0.1", 0))
+    porta = escuta.getsockname()[1]
+    conectar = socket.create_connection
+
+    def devagar(*args: object, **kw: object) -> object:
+        time.sleep(0.8)
+        return conectar(*args, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(socket, "create_connection", devagar)
+    inicio = time.monotonic()
+    with escuta, pytest.raises(OSError):
+        HttpNoIpValidado(prazo_s=1.0).enviar(
+            f"https://{HOST}:{porta}/", ["127.0.0.1"], b"{}", {}
+        )
+    assert time.monotonic() - inicio < 1.4
