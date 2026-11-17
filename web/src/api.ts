@@ -336,6 +336,24 @@ export interface ClienteDoCadastroDeProgramas {
   criarPessoa(nome: string, apelidos: string[]): Promise<PessoaNoPrograma>
 }
 
+/** Uma marca do catálogo com as grafias que contam como ela (`/v1/catalogo/marcas`). */
+export interface MarcaCadastrada {
+  id: string
+  nome: string
+  apelidos: string[]
+}
+
+/** O cadastro de marcas (exige `catalogo.fundir`). */
+export interface ClienteDoCadastroDeMarcas {
+  listar(): Promise<MarcaCadastrada[]>
+  /** 409 se o nome ou um apelido já é de outra marca. */
+  criar(nome: string, apelidos: string[]): Promise<MarcaCadastrada>
+  /** Troca a lista de apelidos; 409 se algum já é de outra marca. */
+  mudarApelidos(id: string, apelidos: string[]): Promise<MarcaCadastrada>
+  /** `outraId` vira apelido da marca `id` e some da lista; 409 se está na lixeira. */
+  juntar(id: string, outraId: string): Promise<MarcaCadastrada>
+}
+
 export interface ClienteDaApi {
   eu(): Promise<Usuario>
   /** Uma página do acervo; `cursor` é o `proximo` da página anterior. */
@@ -411,6 +429,7 @@ export interface ClienteDaApi {
   aprovacao: ClienteDeAprovacao
   lixeira: ClienteDaLixeira
   cadastroDeProgramas: ClienteDoCadastroDeProgramas
+  cadastroDeMarcas: ClienteDoCadastroDeMarcas
   job(id: string): ClienteDoJob
 }
 
@@ -671,6 +690,12 @@ export function criarClienteDaApi(
         await pedir(`/v1/admin/programas/${encodeURIComponent(id)}`, { apagar: true })
       },
       criarPessoa: (nome, apelidos) => chamar('/v1/admin/programas/pessoas', { post: true, corpo: { nome, apelidos } }),
+    },
+    cadastroDeMarcas: {
+      listar: () => chamar('/v1/catalogo/marcas/cadastro'),
+      criar: (nome, apelidos) => chamar('/v1/catalogo/marcas/cadastro', { post: true, corpo: { nome, apelidos } }),
+      mudarApelidos: (id, apelidos) => chamar(`/v1/catalogo/marcas/${encodeURIComponent(id)}/apelidos`, { put: true, corpo: { apelidos } }),
+      juntar: (id, outraId) => chamar(`/v1/catalogo/marcas/${encodeURIComponent(id)}/juntar`, { post: true, corpo: { outra_id: outraId } }),
     },
     catalogoDeCorrecoes,
     job,
