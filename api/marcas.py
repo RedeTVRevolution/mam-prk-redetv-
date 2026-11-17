@@ -171,8 +171,9 @@ class MarcasCanonicas:
         for grafia in grafias:
             grupos.setdefault(self.grupo(grafia), []).append(grafia)
         rotulos: dict[str, str] = {}
-        for do_grupo in grupos.values():
-            rotulo = self._nomes.get(chave_da_marca(do_grupo[0])) or min(
+        for grupo, do_grupo in grupos.items():
+            # A chave do grupo, não a da primeira grafia: o rótulo não muda com a ordem.
+            rotulo = self._nomes.get(grupo) or min(
                 do_grupo, key=lambda g: (-grafias[g], g)
             )
             rotulos.update(dict.fromkeys(do_grupo, rotulo))

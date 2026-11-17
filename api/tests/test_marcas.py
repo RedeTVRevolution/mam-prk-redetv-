@@ -140,3 +140,18 @@ def test_a_chave_no_nome_vence_a_do_apelido_e_depois_o_menor_id() -> None:
         MarcaDoCatalogo(id="a", nome="RedeTV"),
     ]
     assert MarcasCanonicas(gemeas).rotulos({"redetv": 1}) == {"redetv": "RedeTV"}
+
+
+def test_o_rotulo_nao_depende_da_ordem_das_grafias() -> None:
+    # Duas marcas com a mesma chave no nome; a que perde tem um apelido de outra chave.
+    marcas = [
+        MarcaDoCatalogo(id="a", nome="RedeTV"),
+        MarcaDoCatalogo(id="b", nome="Rede-TV", apelidos=["RTV"]),
+    ]
+    canonicas = MarcasCanonicas(marcas)
+
+    pela_ordem = canonicas.rotulos({"RTV": 1, "redetv": 1})
+    pela_outra = canonicas.rotulos({"redetv": 1, "RTV": 1})
+
+    assert pela_ordem == pela_outra
+    assert set(pela_ordem.values()) == {"RedeTV"}  # o grupo tem um rótulo só

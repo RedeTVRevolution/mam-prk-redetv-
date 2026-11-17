@@ -141,7 +141,11 @@ class QuemConta:
         }
 
     def marcas_canonicas(self) -> MarcasCanonicas:
-        """As marcas do catálogo (fora da lixeira), lidas uma vez por operação."""
+        """As marcas do catálogo (fora da lixeira), lidas uma vez por operação.
+
+        ponytail: `todas()` lê o catálogo inteiro (no Firestore, a coleção toda) a cada busca
+        ou relatório; o teto é o tamanho do catálogo depois de um `make carregar-marcas`
+        (centenas de marcas). Se crescer, uma cópia curta como a do autocompletar."""
         if self._canonicas is None:
             todas = lido(self._marcas.todas) if self._marcas else []
             self._canonicas = MarcasCanonicas(todas)

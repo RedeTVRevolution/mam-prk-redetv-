@@ -1196,9 +1196,10 @@ def _facetas(
 
     ponytail: o Agent Retrieval não devolve contagem por faceta (a API só traz os registros
     e o índice não agrega), então a conta é nossa e vai até `TETO_DE_REGISTROS` (500)
-    candidatos fundidos (cada cláusula traz até 500, já com os filtros e as facetas no
-    índice): o valor que só aparece além deles não entra, e as contagens são de
-    "vídeos entre os 500 melhores registros", não do acervo todo.
+    candidatos fundidos (cada cláusula traz até 500, já com os filtros no índice; a faceta
+    de marca é filtrada aqui, em Python, pela chave da marca, sobre esses mesmos candidatos):
+    o valor que só aparece além deles não entra, e as contagens são de "vídeos entre os 500
+    melhores registros", não do acervo todo.
     """
     # Por chave (a da marca ignora pontuação e acento); o valor e o rótulo são os da primeira.
     por_faceta: dict[str, dict[str, tuple[str, str, set[str]]]] = {
