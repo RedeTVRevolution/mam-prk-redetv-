@@ -12,6 +12,7 @@ import json
 import secrets
 import socket
 import ssl
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -247,6 +248,14 @@ class _ConexaoNoIp(http.client.HTTPSConnection):
             raise
 
 
+def _derrubar(sock: socket.socket) -> None:
+    # `shutdown`, e não `close`: só ele acorda um `recv` parado em outra thread.
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+
+
 class HttpNoIpValidado:
     """A `PortaHttp` real, só com a biblioteca padrão."""
 
@@ -278,13 +287,17 @@ class HttpNoIpValidado:
                 erro = e
                 conexao.close()
                 continue
+            # O timeout do socket vale por operação: um destino que goteja bytes o
+            # renova sempre. No fim do prazo, o vigia derruba a conexão.
+            vigia = threading.Timer(fim - time.monotonic(), _derrubar, [conexao.sock])
+            vigia.start()
             try:
-                # ponytail: o timeout vale por operação no socket, não para o pedido todo.
                 conexao.request("POST", caminho, body=corpo, headers=cabecalhos)
                 return conexao.getresponse().status
             except http.client.HTTPException as e:
                 raise OSError(f"resposta inválida do destino: {e!r}") from e
             finally:
+                vigia.cancel()
                 conexao.close()
         raise erro
 

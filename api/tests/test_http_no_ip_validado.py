@@ -5,6 +5,7 @@ import http.server
 import socket
 import ssl
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -68,11 +69,13 @@ class Servidor:
         self.porta = porta
         self.ca = ca
         self.status = 200
+        self.gotejar_s = 0.0
         self.sni: list[str | None] = []
         self.pedidos: list[tuple[str, str, dict[str, str], bytes]] = []
 
-    def cliente(self) -> HttpNoIpValidado:
-        return HttpNoIpValidado(ssl.create_default_context(cadata=self.ca.decode()))
+    def cliente(self, prazo_s: float = 30.0) -> HttpNoIpValidado:
+        contexto = ssl.create_default_context(cadata=self.ca.decode())
+        return HttpNoIpValidado(contexto, prazo_s)
 
 
 @pytest.fixture
@@ -87,6 +90,15 @@ def servidor(tmp_path: Path) -> Iterator[Servidor]:
             estado.pedidos.append(
                 (self.command, self.path, dict(self.headers.items()), corpo)
             )
+            if estado.gotejar_s:
+                # Um byte por vez, antes da linha de status: o timeout por operação
+                # nunca estoura.
+                fim = time.monotonic() + estado.gotejar_s
+                while time.monotonic() < fim:
+                    self.wfile.write(b"X")
+                    self.wfile.flush()
+                    time.sleep(0.05)
+                return
             self.send_response(estado.status)
             self.send_header("Location", "https://127.0.0.1/interno")
             self.send_header("Content-Length", "0")
@@ -160,3 +172,12 @@ def test_nenhum_ip_conecta_levanta_oserror(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(socket, "create_connection", recusa)
     with pytest.raises(OSError):
         HttpNoIpValidado().enviar(f"https://{HOST}/", ["203.0.113.9"], b"{}", {})
+
+
+def test_destino_que_goteja_para_no_prazo_total(servidor: Servidor) -> None:
+    servidor.gotejar_s = 3.0
+    url = f"https://{HOST}:{servidor.porta}/"
+    inicio = time.monotonic()
+    with pytest.raises(OSError):
+        servidor.cliente(prazo_s=0.5).enviar(url, ["127.0.0.1"], b"{}", {})
+    assert time.monotonic() - inicio < 2.0
