@@ -10,8 +10,8 @@ removed {
   }
 }
 
-# O código do link (`oobCode`) vai na URL de `/redefinir-senha` e vale até ser usado: quem lesse os
-# logs poderia definir a senha da conta. O balanceador e o Cloud Run gravam a URL no httpRequest e
+# O código do link (`oobCode`) vale até ser usado: se uma URL com ele chegar aos logs, quem os lesse
+# poderia definir a senha da conta. O balanceador e o Cloud Run gravam a URL no httpRequest e
 # o uvicorn, no texto do acesso; essas linhas não entram no bucket de logs.
 resource "google_logging_project_exclusion" "codigo_do_link_de_senha" {
   name        = "codigo-do-link-de-senha"

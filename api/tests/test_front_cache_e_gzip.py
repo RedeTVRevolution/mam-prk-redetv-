@@ -40,7 +40,7 @@ def test_assets_versionados_tem_cache_longo_e_imutavel(cliente: TestClient) -> N
         "/",
         "/index.html",
         "/video/abc",
-        "/redefinir-senha?mode=resetPassword&oobCode=x",
+        "/busca?q=x",
         "/sw.js",
     ],
 )
