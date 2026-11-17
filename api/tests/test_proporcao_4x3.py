@@ -90,7 +90,8 @@ def test_jpeg_da_copia_limpa_sai_com_pixel_quadrado(
             assert _dimensoes(arq)[:2] == (esperada, altura)
 
 
-@pytest.mark.parametrize("sar", ["1000/1", "5/1"]  # o x264 nem grava SAR abaixo de 1/…)
+# O x264 nem grava SAR menor que 1/…: o lado 1:N sai só no teste unitário abaixo.
+@pytest.mark.parametrize("sar", ["1000/1", "5/1"])
 def test_sar_extremo_e_recusado(tmp_path: Path, sar: str) -> None:
     entrada = _gerar(tmp_path / "v.mp4", "320x240", sar)
 
