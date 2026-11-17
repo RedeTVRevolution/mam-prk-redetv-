@@ -168,6 +168,16 @@ resource "google_dns_record_set" "email_dkim" {
   rrdatas      = ["mail-${replace(var.dominio, ".", "-")}.dkim${count.index + 1}._domainkey.firebasemail.com."]
 }
 
+# DMARC só observa (p=none): os filtros de e-mail desconfiam de domínio sem ele, e nada é barrado.
+resource "google_dns_record_set" "email_dmarc" {
+  count        = local.balanceador ? 1 : 0
+  managed_zone = google_dns_managed_zone.mam[0].name
+  name         = "_dmarc.${google_dns_managed_zone.mam[0].dns_name}"
+  type         = "TXT"
+  ttl          = 300
+  rrdatas      = ["\"v=DMARC1; p=none\""]
+}
+
 # O registro A do domínio aponta para este endereço. Nulo sem balanceador.
 output "ip_do_balanceador" {
   value = local.balanceador ? google_compute_global_address.balanceador[0].address : null
