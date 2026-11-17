@@ -22,6 +22,16 @@ export CLOUDSDK_ACTIVE_CONFIG_NAME="${CLOUDSDK_ACTIVE_CONFIG_NAME:-mam-dev}"
 export TF_VAR_projeto="$GCP_PROJECT_ID" TF_VAR_regiao="$GCP_REGION" TF_VAR_admins_emergencia="$ADMINS_EMERGENCIA"
 # A borda (#699): sem DOMINIO, sem balanceador. Variável vazia do GitHub chega como "".
 export TF_VAR_dominio="${DOMINIO:-}" TF_VAR_waf_ativo="${WAF_ATIVO:-false}"
+# A lista de IPs da RedeTV (#366), em JSON (["200.1.2.0/24"]); vazia, o domínio fica aberto.
+export TF_VAR_ips_da_redetv="${IPS_DA_REDETV:-[]}"
+RESTRITO=$(jq 'length > 0' <<<"$TF_VAR_ips_da_redetv")
+# Borda aberta não falha o deploy, mas aparece no resumo do run.
+aviso() { echo "Aviso: $1" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}" >&2; }
+if [[ -z $TF_VAR_dominio ]]; then
+  aviso "borda desligada: run.app aberto à internet."
+elif [[ $RESTRITO == false ]]; then
+  aviso "domínio aberto a qualquer IP (IPS_DA_REDETV vazio)."
+fi
 
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
 tf() { terraform -chdir=infra "$@"; }
@@ -188,7 +198,9 @@ URL=$(tf output -raw url)
 # Pela lista inteira: um output nulo (sem balanceador) não fica no estado, e pedido pelo
 # nome o `tf output` falha em vez de dar vazio (deploy de 2026-11-03).
 CERTIFICADO=$(tf output -json | jq -r '.certificado_do_balanceador.value // empty')
-if [[ -n $CERTIFICADO ]] &&
+if [[ -n $TF_VAR_dominio && $RESTRITO == true ]]; then
+  aviso "/v1/health não testado: domínio restrito aos IPs da RedeTV."
+elif [[ -n $CERTIFICADO ]] &&
   [[ $(gc compute ssl-certificates describe "$CERTIFICADO" --global --format='value(managed.status)') != ACTIVE ]]; then
   echo "Aviso: o certificado de $URL ainda não está ativo (registro A para $(tf output -raw ip_do_balanceador); infra/README.md). /v1/health não foi testado." >&2
 else
