@@ -9,6 +9,7 @@ from api.auditoria import RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
 from api.catalogo import EnvioParaLixeira
 from api.jobs import RepositorioEmMemoria
+from api.lixeira_na_leitura import VersaoDaLixeiraEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria, MarcaInexistente
 from api.papeis import RepositorioDePapeisEmMemoria
@@ -30,6 +31,7 @@ class Mundo:
         papeis.salvar("edi", ["editor"])
         self.marcas = CatalogoDeMarcasEmMemoria()
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
+        self.versao = VersaoDaLixeiraEmMemoria()
         self.cliente = TestClient(
             criar_app(
                 VerificadorFalso(
@@ -43,6 +45,7 @@ class Mundo:
                 marcas=self.marcas,
                 auditoria=self.auditoria,
                 relogio=lambda: BASE,
+                versao_da_lixeira=self.versao,
             )
         )
 
@@ -331,3 +334,50 @@ def test_definir_apelidos_no_catalogo_em_memoria() -> None:
     assert marcas.achar("uniaefel") == [atualizada]
     with pytest.raises(MarcaInexistente):
         marcas.definir_apelidos("nao-existe", [])
+
+
+def test_mudar_o_grupo_da_marca_invalida_os_cursores_da_busca() -> None:
+    """O cursor guarda os momentos já filtrados pela marca: apelido novo, apelido
+    retirado ou junção mudam quem é a marca, e a página seguinte não pode seguir velha."""
+    m = Mundo()
+    marca = m.marcas.acrescentar("UNIFAEL", [])
+    outra = m.marcas.acrescentar("UniAefel", [])
+
+    antes = m.versao.atual()
+    assert (
+        m.put(
+            f"/v1/catalogo/marcas/{marca.id}/apelidos", {"apelidos": ["Uni Fael"]}
+        ).status_code
+        == 200
+    )
+    assert m.versao.atual() > antes
+
+    antes = m.versao.atual()
+    assert (
+        m.post(
+            f"/v1/catalogo/marcas/{marca.id}/juntar", {"outra_id": outra.id}
+        ).status_code
+        == 200
+    )
+    assert m.versao.atual() > antes
+
+    antes = m.versao.atual()
+    assert m.post(CADASTRO, {"nome": "Nova", "apelidos": []}).status_code == 201
+    assert m.versao.atual() > antes
+
+
+def test_juntar_que_nao_consegue_apagar_a_outra_desfaz_os_apelidos() -> None:
+    m = Mundo()
+    destino = m.marcas.acrescentar("UNIFAEL", ["Antigo"])
+    outra = m.marcas.acrescentar("UniAefel", [])
+
+    def cai(_: str) -> None:
+        raise RuntimeError("Firestore fora")
+
+    m.marcas.apagar = cai  # type: ignore[method-assign,assignment]
+
+    with pytest.raises(RuntimeError):
+        m.post(f"/v1/catalogo/marcas/{destino.id}/juntar", {"outra_id": outra.id})
+
+    assert m.marcas.obter(destino.id).apelidos == ["Antigo"]  # type: ignore[union-attr]
+    assert m.marcas.obter(outra.id) is not None

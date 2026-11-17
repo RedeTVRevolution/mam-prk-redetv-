@@ -10,7 +10,8 @@ apelido que já é de outra marca dá 409 e manda juntar. Apelido que repete out
 nome, é descartado em silêncio.
 
 Toda mudança vai para a auditoria; sem o registro, a mudança é desfeita. Depois de cada
-escrita, a cópia do autocompletar é descartada (`descartar`).
+escrita, `descartar` joga fora a cópia do autocompletar e invalida os cursores da busca (o
+grupo da marca mudou).
 """
 
 from collections.abc import Callable
@@ -148,6 +149,9 @@ def criar_rotas_do_cadastro_de_marcas(
     @rotas.post("/marcas/cadastro", status_code=201)
     def criar(nova: NovaMarca, autor: Autor) -> MarcaDoCadastro:
         apelidos = _sem_repeticao(nova.nome, nova.apelidos)
+        # ponytail: conferir e criar não é atômico; dois POSTs simultâneos com a mesma
+        # chave criam duas marcas (o rótulo fica com a de menor id; Juntar resolve). Se o
+        # cadastro deixar de ser de um Curador só, reservar a chave numa transação.
         sem_conflito(None, nova.nome, apelidos)
         criada = marcas.acrescentar(nova.nome, apelidos, autor=autor.email or autor.uid)
         registrar(
@@ -211,8 +215,14 @@ def criar_rotas_do_cadastro_de_marcas(
             },
             lambda: marcas.definir_apelidos(destino.id, destino.apelidos),
         )
-        marcas.apagar(outra.id)  # sem purga: o nome dela passa a ser apelido desta
-        descartar()
+        try:
+            marcas.apagar(outra.id)  # sem purga: o nome dela passa a ser apelido desta
+        except Exception:
+            # A outra ficou: sem desfazer, o relatório seguiria com as duas marcas.
+            marcas.definir_apelidos(destino.id, destino.apelidos)
+            raise
+        finally:
+            descartar()
         return _publica(nova)
 
     return rotas

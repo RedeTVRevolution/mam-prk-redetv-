@@ -605,6 +605,7 @@ def criar_app(
             _rotas_das_pessoas,
             repositorio_de_auditoria,
             copia_das_pessoas,
+            versao_da_lixeira.avancar,
         )
     )
     v1.include_router(
