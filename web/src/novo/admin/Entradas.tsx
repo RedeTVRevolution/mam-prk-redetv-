@@ -200,7 +200,7 @@ function Miniatura({ job }: { job: Job }) {
       </span>
     )
   }
-  return <img src={capa} alt="" loading="lazy" decoding="async" className="aspect-video w-[76px] rounded-xs bg-input object-cover" />
+  return <img src={capa} alt="" loading="lazy" decoding="async" className="aspect-video w-[76px] rounded-xs bg-black object-contain" />
 }
 
 function ConfirmarReprocesso({ job, etapa, aoConfirmar, aoCancelar }: { job: Job; etapa: string; aoConfirmar: (motivo: string) => Promise<void>; aoCancelar: () => void }) {

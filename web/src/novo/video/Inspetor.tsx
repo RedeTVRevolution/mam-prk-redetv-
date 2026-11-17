@@ -573,7 +573,7 @@ function Miniatura({ caminho, urlDoQuadro, className }: { caminho: string | null
   const url = achada && achada.caminho === caminho ? urlSegura(achada.url) : null
   return (
     <span aria-hidden className={cn('block shrink-0 overflow-hidden rounded-xs bg-input', className)}>
-      {url && <img src={url} alt="" loading="lazy" className="size-full object-cover" />}
+      {url && <img src={url} alt="" loading="lazy" className="size-full bg-black object-contain" />}
     </span>
   )
 }
