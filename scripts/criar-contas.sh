@@ -41,6 +41,7 @@ for email in ${ADMINS_EMERGENCIA//,/ } ${USUARIOS//,/ }; do
     echo "Falha ao criar $email: $resposta" >&2
     exit 1
   fi
-  chamar ":sendOobCode" "{\"requestType\":\"PASSWORD_RESET\",\"email\":\"$email\"}" >/dev/null
+  # Com domínio próprio, o botão "Continuar" da página do link volta ao MAM (como api/nuvem.py).
+  chamar ":sendOobCode" "{\"requestType\":\"PASSWORD_RESET\",\"email\":\"$email\"${DOMINIO:+,\"continueUrl\":\"https://$DOMINIO\"}}" >/dev/null
   echo "  link para definir a senha enviado"
 done

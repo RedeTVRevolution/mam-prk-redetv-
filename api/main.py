@@ -847,7 +847,9 @@ if _projeto:
         correcoes=RepositorioDeCorrecoesFirestore(_comum),
         aprovacao=RepositorioDeAprovacaoFirestore(_comum),
         auditoria=auditoria_do_firestore(_projeto, cliente=_seguranca),
-        contas=ContasIdentityPlatform(_projeto),
+        contas=ContasIdentityPlatform(
+            _projeto, url_do_app=os.environ.get("URL_DO_APP", "")
+        ),
         # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
         # CPU durante ela. Uma tentativa, no TEMPO_DO_EVENTO_DE_USO_S; a falha vai ao log.
         eventos=eventos_do_ambiente(os.environ),

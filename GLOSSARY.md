@@ -266,7 +266,7 @@ Na tela (modo de catalogação, aba Pautas): `M` marca a pauta em foco, `U` junt
 Usuário criado no próprio sistema de identidade, independente do login do sistema legado da RedeTV.
 
 **Link de senha**:
-O e-mail que define a senha de uma conta nova (primeiro acesso) ou refeita aponta para a página `/redefinir-senha` do MAM, que volta sozinha ao login; a URL de ação do Identity Platform (`terraform_data.url_da_acao_de_senha`) só pode mudar depois de a web com essa rota estar publicada, senão os links quebram.
+O e-mail que define a senha de uma conta nova (primeiro acesso) ou refeita abre a página padrão do Google (Identity Platform); com domínio próprio, ela tem o botão "Continuar", que volta ao login do MAM (`continueUrl`). A URL de ação não muda: o Identity Platform recusa a troca (`EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED`), e ela valeria para todos os e-mails do projeto.
 
 **Administrador**:
 Papel com todas as permissões, dado automaticamente aos administradores de emergência.

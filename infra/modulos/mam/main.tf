@@ -1219,6 +1219,12 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "ADMINS_EMERGENCIA"
         value = var.admins_emergencia
       }
+      # O botão "Continuar" da página do link de senha volta aqui (api/nuvem.py). Só com
+      # domínio próprio: o run.app não está nos domínios autorizados do Identity Platform.
+      env {
+        name  = "URL_DO_APP"
+        value = local.balanceador ? "https://${var.dominio}" : ""
+      }
       # A chave MAC do Cloud KMS que faz o hash das chaves de API (api/mac_kms.py).
       env {
         name  = "KMS_CHAVE_MAC"
