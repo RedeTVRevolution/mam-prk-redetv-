@@ -403,6 +403,8 @@ resource "google_project_service" "apis" {
     "compute.googleapis.com",
     "eventarc.googleapis.com",
     "discoveryengine.googleapis.com", # Ranking API da busca (#232)
+    "dns.googleapis.com",             # zona do domínio (#699)
+    "domains.googleapis.com",         # registro do domínio, feito à mão (#699)
     "firestore.googleapis.com",
     "identitytoolkit.googleapis.com",
     "modelarmor.googleapis.com", # filtro de injeção da consulta da busca (#232)

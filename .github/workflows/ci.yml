@@ -163,6 +163,8 @@ jobs:
       BUCKET_ESTADO_TF: ${{ vars.BUCKET_ESTADO_TF }}
       GOOGLE_IMPERSONATE_SERVICE_ACCOUNT: ${{ vars.GOOGLE_IMPERSONATE_SERVICE_ACCOUNT }}
       ADMINS_EMERGENCIA: ${{ vars.ADMINS_EMERGENCIA }}
+      DOMINIO: ${{ vars.DOMINIO }}
+      WAF_ATIVO: ${{ vars.WAF_ATIVO }}
       CLOUDSDK_ACTIVE_CONFIG_NAME: default
       TF_IN_AUTOMATION: "1"
       # À mão, cada apply pede confirmação; aqui o CI verde é a aprovação.
