@@ -35,13 +35,13 @@ run "sem_a_lista_limite_por_ip_para_todos" {
     condition     = one([for r in google_compute_security_policy.web[0].rule : r.action if r.priority == 2147483647]) == "allow"
     error_message = "Sem a lista, a regra padrão deixa passar."
   }
-  # Com o WAF ligado, as cinco primeiras bloqueiam e as quatro novas ficam em prévia.
+  # Com o WAF ligado, todas bloqueiam.
   assert {
     condition = alltrue([
-      for r in google_compute_security_policy.web[0].rule : r.preview == (r.priority >= 105)
+      for r in google_compute_security_policy.web[0].rule : !r.preview
       if r.priority < 200
     ])
-    error_message = "Com o WAF ligado, as cinco primeiras bloqueiam e as quatro novas ficam em prévia."
+    error_message = "Com o WAF ligado, as nove regras bloqueiam."
   }
   assert {
     condition     = length([for r in google_compute_security_policy.web[0].rule : r if r.priority < 200]) == 9
