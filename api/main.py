@@ -290,7 +290,8 @@ CABECALHOS_DE_SEGURANCA = {
         "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
     ),
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "strict-origin-when-cross-origin",
+    # Só a origem, também na mesma origem: a URL não vai no Referer para os logs.
+    "Referrer-Policy": "strict-origin",
     "Strict-Transport-Security": "max-age=31536000",
 }
 
@@ -602,7 +603,9 @@ def criar_app(
             catalogo_de_marcas,
             relogio,
             _rotas_das_pessoas,
+            repositorio_de_auditoria,
             copia_das_pessoas,
+            versao_da_lixeira.avancar,
         )
     )
     v1.include_router(
@@ -844,7 +847,9 @@ if _projeto:
         correcoes=RepositorioDeCorrecoesFirestore(_comum),
         aprovacao=RepositorioDeAprovacaoFirestore(_comum),
         auditoria=auditoria_do_firestore(_projeto, cliente=_seguranca),
-        contas=ContasIdentityPlatform(_projeto),
+        contas=ContasIdentityPlatform(
+            _projeto, url_do_app=os.environ.get("URL_DO_APP", "")
+        ),
         # O evento de uso sai dentro da requisição, antes da resposta: o Cloud Run só dá
         # CPU durante ela. Uma tentativa, no TEMPO_DO_EVENTO_DE_USO_S; a falha vai ao log.
         eventos=eventos_do_ambiente(os.environ),

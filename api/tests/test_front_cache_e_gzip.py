@@ -34,7 +34,16 @@ def test_assets_versionados_tem_cache_longo_e_imutavel(cliente: TestClient) -> N
     assert resposta.headers["etag"]
 
 
-@pytest.mark.parametrize("caminho", ["/", "/index.html", "/video/abc", "/sw.js"])
+@pytest.mark.parametrize(
+    "caminho",
+    [
+        "/",
+        "/index.html",
+        "/video/abc",
+        "/busca?q=x",
+        "/sw.js",
+    ],
+)
 def test_o_resto_do_front_revalida_pelo_etag(cliente: TestClient, caminho: str) -> None:
     resposta = cliente.get(caminho)
 

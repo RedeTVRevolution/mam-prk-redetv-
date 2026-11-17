@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from api.catalogo import EnvioParaLixeira, novo_id
-from api.texto import normalizar
+from api.texto import chave_da_marca, normalizar
 
 
 class MarcaDoCatalogo(BaseModel):
@@ -63,6 +63,11 @@ class CatalogoDeMarcas(Protocol):
         """`MarcaInexistente` se o id não existe."""
         ...
 
+    def definir_apelidos(self, id: str, apelidos: list[str]) -> MarcaDoCatalogo:
+        """Troca os apelidos (e os nomes de busca com eles); `MarcaInexistente` se o id não
+        existe."""
+        ...
+
     def acrescentar(
         self,
         nome: str,
@@ -107,6 +112,13 @@ class CatalogoDeMarcasEmMemoria:
         if self._marcas.pop(id, None) is None:
             raise MarcaInexistente(id)
 
+    def definir_apelidos(self, id: str, apelidos: list[str]) -> MarcaDoCatalogo:
+        atual = self._marcas.get(id)
+        if atual is None:
+            raise MarcaInexistente(id)
+        self._marcas[id] = atual.model_copy(update={"apelidos": list(apelidos)})
+        return self._marcas[id]
+
     def acrescentar(
         self,
         nome: str,
@@ -124,6 +136,48 @@ class CatalogoDeMarcasEmMemoria:
         )
         self._marcas[marca.id] = marca
         return marca
+
+
+class MarcasCanonicas:
+    """Qual marca um texto de comercial conta (relatório de marcas e busca), pelo catálogo
+    lido uma vez por operação: o nome ou apelido de uma marca do catálogo conta como ela; o
+    texto que só difere em maiúscula, acento, pontuação ou espaço (`chave_da_marca`) é a
+    mesma marca. Se duas marcas têm a mesma chave, vence a que a tem no nome (não no
+    apelido) e, depois, a de menor id."""
+
+    def __init__(self, marcas: Iterable[MarcaDoCatalogo]) -> None:
+        melhor: dict[str, tuple[bool, str, str]] = {}  # chave: só apelido, id, nome
+        for m in marcas:
+            for texto, so_apelido in [
+                (m.nome, False),
+                *((a, True) for a in m.apelidos),
+            ]:
+                candidata = (so_apelido, m.id, m.nome)
+                chave = chave_da_marca(texto)
+                melhor[chave] = min(candidata, melhor.get(chave, candidata))
+        self._nomes = {chave: nome for chave, (_, _, nome) in melhor.items()}
+
+    def grupo(self, texto: str) -> str:
+        """A identidade da marca: a mesma para toda grafia que conta como ela."""
+        chave = chave_da_marca(texto)
+        nome = self._nomes.get(chave)
+        return chave_da_marca(nome) if nome else chave
+
+    def rotulos(self, grafias: Mapping[str, int]) -> dict[str, str]:
+        """Para cada grafia, o rótulo da marca: o nome no catálogo ou, fora dele, a grafia
+        mais frequente do grupo (`grafias` diz quantas vezes cada uma aparece), no empate
+        a primeira em ordem alfabética."""
+        grupos: dict[str, list[str]] = {}
+        for grafia in grafias:
+            grupos.setdefault(self.grupo(grafia), []).append(grafia)
+        rotulos: dict[str, str] = {}
+        for grupo, do_grupo in grupos.items():
+            # A chave do grupo, não a da primeira grafia: o rótulo não muda com a ordem.
+            rotulo = self._nomes.get(grupo) or min(
+                do_grupo, key=lambda g: (-grafias[g], g)
+            )
+            rotulos.update(dict.fromkeys(do_grupo, rotulo))
+        return rotulos
 
 
 def marcas_dos_comerciais(decupagem: Mapping[str, Any]) -> Iterable[str]:

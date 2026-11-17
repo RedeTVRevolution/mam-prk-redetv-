@@ -800,8 +800,11 @@ class ContasIdentityPlatform:
     """As contas do Identity Platform pela API REST de administração (`accounts`).
     Não tem teste contra a nuvem; o corpo dos pedidos e a leitura da resposta têm."""
 
-    def __init__(self, projeto: str, sessao: Any | None = None) -> None:
+    def __init__(
+        self, projeto: str, sessao: Any | None = None, url_do_app: str = ""
+    ) -> None:
         self._base = f"https://identitytoolkit.googleapis.com/v1/projects/{projeto}"
+        self._url_do_app = url_do_app
         self._cabecalhos = {
             "x-goog-user-project": projeto,
             "X-Firebase-Locale": "pt-BR",
@@ -885,11 +888,12 @@ class ContasIdentityPlatform:
         return conta
 
     def enviar_link_de_senha(self, email: str) -> None:
-        self._chamar(
-            "POST",
-            ":sendOobCode",
-            json={"requestType": "PASSWORD_RESET", "email": email},
-        )
+        # O link abre a página padrão do Google; o continueUrl põe nela o botão
+        # "Continuar", que volta ao MAM depois de a senha ser definida.
+        corpo = {"requestType": "PASSWORD_RESET", "email": email}
+        if self._url_do_app:
+            corpo["continueUrl"] = self._url_do_app
+        self._chamar("POST", ":sendOobCode", json=corpo)
 
     def bloquear(self, uid: str, bloqueada: bool) -> None:
         corpo: dict[str, Any] = {"localId": uid, "disableUser": bloqueada}
@@ -1183,6 +1187,12 @@ class CatalogoDeMarcasFirestore:
         if not referencia.get().exists:
             raise MarcaInexistente(id)
         referencia.delete()
+
+    def definir_apelidos(self, id: str, apelidos: list[str]) -> MarcaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise MarcaInexistente(id)
+        return self._gravar(atual.model_copy(update={"apelidos": list(apelidos)}))
 
     def acrescentar(
         self,

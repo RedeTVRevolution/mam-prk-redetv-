@@ -41,7 +41,7 @@ function Miniatura({ job }: { job: Job }) {
   const quadro = (
     <span className="relative block aspect-video w-full overflow-hidden bg-canvas">
       {e.tom !== 'ok' && <span aria-hidden className={cn('absolute inset-x-0 top-0 z-10 h-[3px]', TALLY[e.tom])} />}
-      {url && <img src={url} alt="" loading="lazy" decoding="async" onError={() => setFalhou(url)} className="absolute inset-0 size-full object-cover" />}
+      {url && <img src={url} alt="" loading="lazy" decoding="async" onError={() => setFalhou(url)} className="absolute inset-0 size-full bg-black object-contain" />}
       {job.duracao_s != null && (
         <span className="absolute right-1 bottom-1 rounded-xs bg-black/75 px-1 font-mono text-2xs text-white tabular-nums">{tempo(job.duracao_s * 1000)}</span>
       )}

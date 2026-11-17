@@ -663,3 +663,12 @@ test('Enter com o mesmo texto da URL depois da foto também sai da foto e busca 
   expect(screen.queryByText('pista.png')).toBeNull()
   expect(fotos).toHaveLength(1)
 })
+
+test('o momento de comercial mostra o rótulo Comercial e o motivo com a marca', async () => {
+  resposta = () => HttpResponse.json(resultado({ videos: [video('v1', [{ ...momento(30_000, 33_000, 'Comercial: Sadia (produto em cena)'), tipo: 'comercial' }])] }))
+  await abrir('/busca?q=sadia')
+  await screen.findByText('1 momento em 1 vídeo')
+
+  expect(within(cena(/^v1\.mp4 em 00:30$/)).getByText('Comercial')).toBeTruthy()
+  expect(screen.getByRole('link', { name: /^v1\.mp4 em 00:30$/, description: /Sadia \(produto em cena\)/ })).toBeTruthy()
+})

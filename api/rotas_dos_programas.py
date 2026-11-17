@@ -76,6 +76,13 @@ Apelido = Annotated[
 ]
 
 
+def apelidos_validos(apelidos: list[str]) -> list[str]:
+    """Validador dos apelidos (pessoa do programa e marca): limite e sem controle."""
+    if len(apelidos) > LIMITE_DE_APELIDOS:
+        raise ValueError("apelidos demais")
+    return [sem_controle(a) for a in apelidos]
+
+
 class PessoaNoProgramaPublica(BaseModel):
     pessoa_id: str
     nome: str
@@ -122,13 +129,7 @@ class NovaPessoaDoPrograma(BaseModel):
     apelidos: list[Apelido] = []
 
     _sem_controle_no_nome = field_validator("nome")(sem_controle)
-
-    @field_validator("apelidos")
-    @classmethod
-    def _apelidos_validos(cls, apelidos: list[str]) -> list[str]:
-        if len(apelidos) > LIMITE_DE_APELIDOS:
-            raise ValueError("apelidos demais")
-        return [sem_controle(a) for a in apelidos]
+    _apelidos_validos = field_validator("apelidos")(apelidos_validos)
 
 
 class ImpactoDoPrograma(BaseModel):

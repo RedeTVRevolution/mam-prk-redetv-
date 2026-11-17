@@ -43,6 +43,7 @@ from api.gemini import ErroHttp
 from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
+from api.marcas import CatalogoDeMarcasEmMemoria
 from api.modelo_do_job import CursorInvalido, Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.programas import Programa, ProgramasEmMemoria
@@ -127,6 +128,7 @@ class IndiceEspia(IndiceEmMemoria):
 class Mundo:
     def __init__(self, *respostas: str | Exception) -> None:
         self.catalogo = CatalogoEmMemoria()
+        self.marcas = CatalogoDeMarcasEmMemoria()
         self.sabrina = self.catalogo.acrescentar(
             "Sabrina Sato", "apresentadora", ["Sabrina"]
         ).id
@@ -150,6 +152,7 @@ class Mundo:
             armazenamento=self.armazenamento,
             relogio=relogio,
             cache_de_candidatos=cache,
+            marcas=self.marcas,
         )
 
     def com(self, j: Job, *registros: Registro) -> None:
@@ -1786,21 +1789,6 @@ def test_faceta_de_marca_pessoa_e_tipo_filtra_os_resultados_e_as_contagens() -> 
     assert por_tipo.facetas.programa == []
 
 
-def test_faceta_filtra_no_indice_e_nao_so_entre_os_registros_do_teto() -> None:
-    m = Mundo(pedido(texto_livre="vestido"))
-    # Mais registros que o teto de cada cláusula; o da Adidas fica de fora sem o filtro.
-    m.com(
-        job("j1"),
-        *(objeto(f"n{i}", "j1", i * 1_000, i * 1_000 + 500) for i in range(120)),
-    )
-    m.com(job("j2"), objeto("z", "j2", 0, 1_000, marca="Adidas"))
-
-    r = buscar(m, "vestido", ajustes=Ajustes(marca="Adidas"))
-
-    assert [v.job_id for v in r.videos] == ["j2"]
-    assert all(c.filtros.marca == "Adidas" for c in m.indice.consultas)
-
-
 def test_faceta_de_pessoa_casa_na_imagem_e_como_dona_do_objeto() -> None:
     m = Mundo(pedido(texto_livre="vestido"))
     plano = Registro(
@@ -2596,3 +2584,83 @@ def test_a_rota_conta_a_busca_repetida_no_limite_e_no_evento_a_cada_chamada() ->
     ]
     assert codigos == [200, 200, 429]
     assert [e.tipo for e in eventos.publicados].count("busca") == 2
+
+
+# --- a marca na busca vale pela chave: pontuação, acento e apelido não separam ---------
+
+
+def mundo_das_grafias() -> Mundo:
+    m = Mundo(*[pedido(texto_livre="vestido")] * 4)
+    for i, marca in enumerate(
+        ["RedeTV! Go", "RedeTV Go", "RedeTV! GO", "RedeTV Gol", "RedeTV Go"], 1
+    ):
+        m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000, marca=marca))
+    return m
+
+
+def test_faceta_de_marca_junta_as_grafias_e_usa_a_mais_frequente_como_rotulo() -> None:
+    m = mundo_das_grafias()
+
+    f = buscar(m, "vestido").facetas
+
+    # "RedeTV Go" aparece em 2 registros, as outras em 1 (sem distância de edição:
+    # "RedeTV Gol" é outra marca).
+    assert [(v.valor, v.rotulo, v.videos) for v in f.marca] == [
+        ("RedeTV Go", "RedeTV Go", 4),
+        ("RedeTV Gol", "RedeTV Gol", 1),
+    ]
+
+
+def test_filtro_de_marca_casa_pela_chave_e_nao_vai_ao_indice() -> None:
+    m = mundo_das_grafias()
+
+    r = buscar(m, "vestido", ajustes=Ajustes(marca="RedeTV! GO"))
+
+    assert sorted(v.job_id for v in r.videos) == ["j1", "j2", "j3", "j5"]
+    assert contagens(r.facetas.marca) == {"RedeTV Go": 4}
+    assert all(c.filtros.marca is None for c in m.indice.consultas)
+
+
+def test_apelido_do_catalogo_conta_como_a_marca_na_faceta_e_no_filtro() -> None:
+    m = Mundo(*[pedido(texto_livre="vestido")] * 3)
+    m.marcas.acrescentar("UNIFAEL", ["UniAefel"])
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000, marca="UNIFAEL"))
+    m.com(job("j2"), objeto("b", "j2", 0, 1_000, marca="UniAefel"))
+    m.com(job("j3"), objeto("c", "j3", 0, 1_000, marca="Natura"))
+
+    f = buscar(m, "vestido").facetas
+    pelo_rotulo = buscar(m, "vestido", ajustes=Ajustes(marca="UNIFAEL"))
+    pelo_apelido = buscar(m, "vestido", ajustes=Ajustes(marca="uniaefel"))
+
+    assert contagens(f.marca) == {"UNIFAEL": 2, "Natura": 1}
+    assert sorted(v.job_id for v in pelo_rotulo.videos) == ["j1", "j2"]
+    assert sorted(v.job_id for v in pelo_apelido.videos) == ["j1", "j2"]
+
+
+def test_faceta_de_marca_com_pessoa_so_consulta_o_objeto_com_dono() -> None:
+    m = mundo_das_facetas()
+
+    r = buscar(m, "vestido", ajustes=Ajustes(marca="NIKE", pessoa=m.sabrina))
+
+    assert [v.job_id for v in r.videos] == ["j1"]
+    assert all(
+        (c.filtros.tipo, c.filtros.dono, c.filtros.marca) == ("objeto", m.sabrina, None)
+        for c in m.indice.consultas
+    )
+
+
+def test_o_filtro_de_marca_vale_so_sobre_os_candidatos_do_teto() -> None:
+    # ponytail: o filtro de marca é em Python, sobre os candidatos (até 500); sem campo
+    # normalizado no índice, a marca que só aparece além do teto não é achada.
+    m = Mundo(pedido(texto_livre="vestido"))
+    m.com(
+        job("j1"),
+        *(objeto(f"n{i}", "j1", i * 1_000, i * 1_000 + 500) for i in range(600)),
+    )
+    m.com(job("j2"), objeto("z", "j2", 0, 1_000, marca="Adidas"))
+
+    r = buscar(m, "vestido", ajustes=Ajustes(marca="Adidas"))
+
+    assert all(c.filtros.marca is None for c in m.indice.consultas)
+    assert len(m.indice.consultas) == 1
+    assert r.videos == []  # o teto: a marca pedida ficou fora dos 500 candidatos

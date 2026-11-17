@@ -23,7 +23,7 @@ function mensagemDeErro(falha: unknown) {
       : 'Login indisponível no momento.'
 }
 
-function Campo({ rotulo, icone, children }: { rotulo: string; icone: ReactNode; children: ReactNode }) {
+export function Campo({ rotulo, icone, children }: { rotulo: string; icone: ReactNode; children: ReactNode }) {
   return (
     <label className="grid gap-1 text-xs font-medium">
       {rotulo}

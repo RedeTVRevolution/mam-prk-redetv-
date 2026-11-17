@@ -74,8 +74,7 @@ function SessaoAtiva({ api, usuario, rota, aoSair }: { api: ClienteDaApi; usuari
   )
 }
 
-function Telas({ autenticador }: { autenticador: Autenticador }) {
-  const rota = useRota()
+function Telas({ autenticador, rota }: { autenticador: Autenticador; rota: Rota }) {
   const { sessao, saidas, api, sair, reverificar } = useSessao(autenticador)
 
   if (sessao.tipo === 'verificando') {
@@ -111,9 +110,10 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
 }
 
 export default function App({ autenticador }: { autenticador: Autenticador }) {
+  const rota = useRota()
   return (
     <AtalhosProvider>
-      <Telas autenticador={autenticador} />
+      <Telas autenticador={autenticador} rota={rota} />
     </AtalhosProvider>
   )
 }

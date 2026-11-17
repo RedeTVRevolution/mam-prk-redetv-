@@ -21,7 +21,19 @@ from api.intervalos import sobrepoe_estrito
 from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
 
-TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto"]
+TipoDeRegistro = Literal["plano", "fala", "texto_na_tela", "objeto", "comercial"]
+
+# O tipo de inserção do comercial (`Comercial.tipo`) em palavras, para o texto do registro.
+INSERCAO_POR_EXTENSO = {
+    "intervalo": "intervalo",
+    "merchan_apresentador": "merchan com apresentador",
+    "testemunhal": "testemunhal",
+    "produto_em_cena": "produto em cena",
+    "patrocinio_vinheta": "patrocínio ou vinheta",
+    "sobreposicao_grafica": "sobreposição gráfica",
+    "marca_incidental": "marca incidental",
+    "mencao_editorial": "menção editorial",
+}
 
 
 @dataclass(frozen=True)
@@ -339,6 +351,21 @@ def registros_da_decupagem(
                     **base,
                 )
             )
+    # Um registro por comercial, para a marca ser achada pelo texto, pela evidência e pela
+    # faceta. A cópia do BigQuery tem a linha `comercial` à parte e descarta este.
+    for n, comercial in enumerate(decupagem.comerciais):
+        registros.append(
+            Registro(
+                id=f"{job_id}:comercial:{id_posicional('comerciais', n)}",
+                tipo="comercial",
+                inicio_ms=comercial.inicio_ms,
+                fim_ms=comercial.fim_ms,
+                marca=comercial.marca,
+                texto=f"{comercial.marca} ({INSERCAO_POR_EXTENSO[comercial.tipo]})",
+                quadro=quadro_do_plano(comercial),
+                **base,
+            )
+        )
     return registros
 
 
