@@ -111,9 +111,10 @@ def test_o_endereco_e_o_dominio_com_o_balanceador_e_o_run_app_sem_ele() -> None:
     url = _bloco(MAIN, 'output "url"')
     ip = _bloco(BALANCEADOR, 'output "ip_do_balanceador"')
 
+    assert "local.url_do_app" in url
     assert (
-        'local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri'
-        in url
+        'url_do_app = local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri'
+        in MAIN
     )
     assert re.search(r"local\.balanceador \? .* : null", ip)
 
