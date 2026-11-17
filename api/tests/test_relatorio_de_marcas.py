@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
+from api.catalogo import EnvioParaLixeira
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -21,7 +22,9 @@ from api.chaves import (
 )
 from api.copia_bigquery import ConfigDoBigQuery, CopiaEmMemoria, LinhaDoMomento
 from api.jobs import RepositorioEmMemoria
+from api.lixeira_na_leitura import PurgasDeMarcaEmMemoria
 from api.main import criar_app
+from api.marcas import CatalogoDeMarcasEmMemoria
 from api.modelo_do_job import Job, agora_utc
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.relatorio_de_marcas import (
@@ -34,6 +37,8 @@ from api.relatorio_de_marcas import (
     Insercao,
     InsercoesDaMarca,
     MarcaNoRelatorio,
+    SoMarcasQueContam,
+    em_csv,
     insercoes_da_marca,
     somar,
 )
@@ -45,6 +50,9 @@ from api.tests.test_passadas import AUTORIZACAO
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 ROTA = "/v1/relatorios/marcas"
+ENVIO_DA_LIXEIRA = EnvioParaLixeira(
+    em=BASE, por_uid="u", por_email="u@redetv.com", motivo="teste"
+)
 
 
 def relatorio(insercoes: list[Insercao]) -> list[MarcaNoRelatorio]:
@@ -653,3 +661,151 @@ def test_bigquery_com_varios_tipos_leva_um_parametro_de_array() -> None:
     assert p["parameterValue"] == {
         "arrayValues": [{"value": "intervalo"}, {"value": "testemunhal"}]
     }
+
+
+# --- a marca é a do catálogo: apelido, pontuação e acento não separam (grafias) ---------
+
+
+class SomasFixas:
+    def __init__(self, somas: list[InsercoesDaMarca]) -> None:
+        self._somas = somas
+
+    def somas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        tipos: tuple[str, ...],
+    ) -> list[InsercoesDaMarca]:
+        return list(self._somas)
+
+
+def _soma(
+    job: str, marca: str, n: int = 1, tipo: str = "intervalo"
+) -> InsercoesDaMarca:
+    intervalos = [(i * 10_000, i * 10_000 + 1_000) for i in range(n)]
+    return InsercoesDaMarca(marca, tipo, job, n, 1_000 * n, intervalos)
+
+
+def _so_que_conta(
+    somas: list[InsercoesDaMarca],
+    marcas: CatalogoDeMarcasEmMemoria | None = None,
+) -> SoMarcasQueContam:
+    return SoMarcasQueContam(
+        SomasFixas(somas),
+        marcas or CatalogoDeMarcasEmMemoria(),
+        PurgasDeMarcaEmMemoria(),
+        RepositorioEmMemoria(),
+    )
+
+
+def _ranking(so: SoMarcasQueContam) -> tuple[list[Any], Any]:
+    return so.ranking((), None, None, (), 0, 50)
+
+
+def test_o_apelido_do_catalogo_conta_como_a_marca_em_tudo_inclusive_no_mesmo_video() -> (
+    None
+):
+    marcas = CatalogoDeMarcasEmMemoria()
+    marcas.acrescentar("UNIFAEL", ["UniAefel"])
+    so = _so_que_conta(
+        [
+            _soma("j1", "UNIFAEL", 2),
+            _soma("j1", "UniAefel", 1),  # o mesmo vídeo, a leitura errada do modelo
+            _soma("j2", "UniAefel", 1),
+        ],
+        marcas,
+    )
+
+    lista, total = _ranking(so)
+
+    assert [m.marca for m in lista] == ["UNIFAEL"]
+    unifael = lista[0]
+    assert (unifael.insercoes, unifael.tempo_ms, unifael.videos) == (4, 4_000, 2)
+    assert [(t.tipo, t.insercoes, t.videos) for t in unifael.por_tipo] == [
+        ("intervalo", 4, 2)
+    ]
+    assert (total.marcas, total.insercoes, total.videos) == (1, 4, 2)
+    assert [x.marca for x in relatorio_das_somas(so.somas((), None, None, ()))] == [
+        "UNIFAEL"
+    ]
+
+
+def test_grafia_que_so_difere_na_pontuacao_e_uma_marca_com_o_rotulo_mais_frequente() -> (
+    None
+):
+    so = _so_que_conta(
+        [
+            _soma("j1", "RedeTV! Go", 1),
+            _soma("j2", "RedeTV Go", 1),
+            _soma("j3", "RedeTV Go", 1),
+            _soma("j4", "RedeTV! GO", 1),
+            _soma("j5", "RedeTV Gol", 1),
+            _soma("j5", "RedeTV! Gol", 1),
+        ]
+    )
+
+    lista, total = _ranking(so)
+
+    por_marca = {m.marca: (m.insercoes, m.videos) for m in lista}
+    # "RedeTV Go" tem 2 inserções; "RedeTV! Gol" e "RedeTV Gol" empatam (1 cada) e a
+    # primeira em ordem alfabética dá o rótulo ("RedeTV Gol" vem antes de "RedeTV! Gol").
+    assert por_marca == {"RedeTV Go": (4, 4), "RedeTV Gol": (2, 1)}
+    assert total.marcas == 2
+
+
+def test_o_mesmo_video_nas_duas_grafias_conta_um_video() -> None:
+    so = _so_que_conta(
+        [_soma("j1", "UNIFAEL", 1), _soma("j1", "unifael!", 1)],
+    )
+
+    [marca], total = _ranking(so)
+
+    assert (marca.insercoes, marca.videos, marca.por_tipo[0].videos) == (2, 1, 1)
+    assert total.videos == 1
+    csv_ = em_csv(relatorio_das_somas(so.somas((), None, None, ())))
+    assert csv_.count("UNIFAEL") == 2  # `todos` e o tipo, uma marca só
+
+
+def test_marca_na_lixeira_tira_toda_grafia_com_a_mesma_chave() -> None:
+    marcas = CatalogoDeMarcasEmMemoria()
+    go = marcas.acrescentar("RedeTV Go", [])
+    marcas.definir_lixeira(go.id, ENVIO_DA_LIXEIRA)
+    so = _so_que_conta(
+        [_soma("j1", "RedeTV! GO"), _soma("j2", "RedeTV Go"), _soma("j3", "Natura")],
+        marcas,
+    )
+
+    lista, _ = _ranking(so)
+
+    assert [m.marca for m in lista] == ["Natura"]
+    assert so.insercoes_dos_nomes({"redetv go"}) == 2  # o impacto conta as duas grafias
+
+
+def test_a_lista_da_marca_traz_as_insercoes_de_todas_as_grafias_pelo_rotulo() -> None:
+    marcas = CatalogoDeMarcasEmMemoria()
+    marcas.acrescentar("UNIFAEL", ["UniAefel"])
+    so = _so_que_conta(
+        [
+            _soma("j1", "UNIFAEL", 2),
+            _soma("j2", "UniAefel", 1),
+            _soma("j3", "Natura", 1),
+            _soma("j4", "RedeTV! Go", 1),
+            _soma("j5", "RedeTV Go", 1),
+        ],
+        marcas,
+    )
+
+    da_unifael = so.lista_da_marca("UNIFAEL", (), None, None, (), 0, 10)
+    paginada = so.lista_da_marca("UNIFAEL", (), None, None, (), 1, 1)
+    sem_catalogo = so.lista_da_marca("RedeTV Go", (), None, None, (), 0, 10)
+    pelo_apelido = so.lista_da_marca("uniaefel", (), None, None, (), 0, 10)
+
+    assert [(i.job_id, i.inicio_ms) for i in da_unifael] == [
+        ("j1", 0),
+        ("j1", 10_000),
+        ("j2", 0),
+    ]
+    assert [(i.job_id, i.inicio_ms) for i in paginada] == [("j1", 10_000), ("j2", 0)]
+    assert [i.job_id for i in sem_catalogo] == ["j4", "j5"]
+    assert pelo_apelido == da_unifael

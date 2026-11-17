@@ -7,12 +7,17 @@ inserção e a lista das inserções, com o vídeo e o tempo, vêm junto. A base
 filtros, CSV, erros) é a de `api.relatorios`, a mesma do tempo de tela. A soma é feita no
 BigQuery (#363): ele devolve uma linha por marca, tipo de inserção e vídeo, com os
 intervalos das inserções; o Python só monta a resposta.
+
+A marca é a do catálogo, não o texto da linha: grafias que só diferem em maiúscula, acento,
+pontuação ou espaço contam como uma, e o nome ou apelido de uma marca do catálogo conta como
+ela, inclusive nos vídeos antigos, sem reprocessar (`api.marcas.MarcasCanonicas`). Fora do
+catálogo, o rótulo é a grafia mais frequente do grupo (pelo número de inserções).
 """
 
 import json
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Annotated, Any, Literal, Protocol, get_args
 
@@ -32,7 +37,7 @@ from api.decupagem import Comercial
 from api.erros import lido
 from api.jobs import programas_do_pedido
 from api.lixeira_na_leitura import PurgasDeMarca
-from api.marcas import CatalogoDeMarcas
+from api.marcas import CatalogoDeMarcas, MarcasCanonicas
 from api.modelo_do_job import RepositorioDeJobs
 from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
 from api.quem_conta import QuemConta
@@ -51,7 +56,7 @@ from api.relatorios import (
     recorta,
     resposta_em_csv,
 )
-from api.texto import normalizar
+from api.texto import chave_da_marca
 from api.texto_como_dado import Linha, LinhaDaConsulta
 
 TIPOS_DE_INSERCAO: tuple[str, ...] = get_args(Comercial.model_fields["tipo"].annotation)
@@ -164,11 +169,10 @@ def ranking_em_python(
 
 
 def lista_em_python(
-    somas: list[InsercoesDaMarca], marca: str, depois: int, limite: int
+    dela: list[InsercoesDaMarca], depois: int, limite: int
 ) -> "list[InsercaoNoRelatorio]":
-    """As inserções de uma marca, na ordem do relatório, a partir das somas; a página vai
-    de `depois` a `limite + 1` itens."""
-    dela = [s for s in somas if s.marca == marca]
+    """As inserções de uma marca, na ordem do relatório, a partir das somas dela (todas com
+    o mesmo rótulo); a página vai de `depois` a `limite + 1` itens."""
     lista = relatorio(dela)[0].lista if dela else []
     return lista[depois : depois + limite + 1]
 
@@ -275,7 +279,12 @@ class SoMarcasQueContam:
     `Job.criado_em` no Firestore (não muda com o reprocessamento nem com a recópia), lida em
     lote, uma vez por vídeo, só para as somas que batem com um registro; Job ausente conta
     como anterior; falha de leitura é erro (503), não "Job ausente". O vídeo na lixeira
-    sai também (#619), depois do cache das somas."""
+    sai também (#619), depois do cache das somas.
+
+    Tudo vale pela chave da marca (`chave_da_marca`): a lixeira e a purga cortam todas as
+    grafias que só diferem em maiúscula, acento, pontuação ou espaço. Depois do corte, o
+    texto vira o rótulo da marca (`MarcasCanonicas`), num ponto só: ranking, somas, CSV e a
+    lista da marca saem dele. O catálogo é lido uma vez por operação."""
 
     def __init__(
         self,
@@ -296,18 +305,22 @@ class SoMarcasQueContam:
         ate: date | None,
         tipos: tuple[str, ...],
     ) -> list[InsercoesDaMarca]:
-        return self._que_contam(self._consulta.somas(programas, desde, ate, tipos))
+        return self._com_rotulos(
+            self._que_contam(self._consulta.somas(programas, desde, ate, tipos))
+        )
 
     def insercoes_dos_nomes(self, nomes: set[str]) -> int:
-        """Quantas inserções de todo o histórico, com o texto em `nomes` (normalizados),
-        o relatório contaria se a marca não estivesse na lixeira (#597): as somas sem a
-        exclusão da lixeira, só com o corte das purgas. Cada inserção é uma linha da cópia,
-        com ou sem vínculo no catálogo, então conta uma vez."""
+        """Quantas inserções de todo o histórico, com o texto em `nomes` (nome e apelidos
+        da marca; só a chave deles conta), o relatório contaria se a marca não estivesse na
+        lixeira (#597): as somas sem a exclusão da lixeira, só com o corte das purgas. Cada
+        inserção é uma linha da cópia, com ou sem vínculo no catálogo, então conta uma vez."""
+        chaves = {chave_da_marca(n) for n in nomes}
         somas = self._consulta.somas((), None, None, ())
         return sum(
             s.insercoes
             for s in self._que_contam(
-                [s for s in somas if normalizar(s.marca) in nomes], so_a_purga=True
+                [s for s in somas if chave_da_marca(s.marca) in chaves],
+                so_a_purga=True,
             )
         )
 
@@ -317,8 +330,9 @@ class SoMarcasQueContam:
         # O vídeo na lixeira não conta (#619), lido uma vez por operação (também no impacto).
         na_lixeira = ids_dos_jobs_na_lixeira(self._jobs)
         somas = [s for s in somas if s.job_id not in na_lixeira]
-        # Um Quem conta por operação; `normalizar` uma vez por marca distinta, não por linha.
-        nome = {m: normalizar(m) for m in {s.marca for s in somas}}
+        # Um Quem conta por operação. O corte vale por texto, antes do agrupamento (que
+        # vem depois, em `_com_rotulos`); a chave sai uma vez por texto distinto.
+        nome = {m: chave_da_marca(m) for m in {s.marca for s in somas}}
         cortes = QuemConta(marcas=self._marcas, purgas=self._purgas).cortes(
             set(nome.values()), so_a_purga=so_a_purga
         )
@@ -334,6 +348,22 @@ class SoMarcasQueContam:
             else {}
         )
         return [s for s in somas if cortes.conta(nome[s.marca], criados.get(s.job_id))]
+
+    def _canonicas(self) -> MarcasCanonicas:
+        return MarcasCanonicas(lido(self._marcas.todas))
+
+    def _com_rotulos(
+        self,
+        somas: list[InsercoesDaMarca],
+        canonicas: MarcasCanonicas | None = None,
+    ) -> list[InsercoesDaMarca]:
+        """A marca de cada soma vira o rótulo canônico: o nome no catálogo ou, fora dele, a
+        grafia com mais inserções do grupo."""
+        pesos: dict[str, int] = defaultdict(int)
+        for s in somas:
+            pesos[s.marca] += s.insercoes
+        rotulos = (canonicas or self._canonicas()).rotulos(pesos)
+        return [replace(s, marca=rotulos[s.marca]) for s in somas]
 
     def ranking(
         self,
@@ -358,10 +388,13 @@ class SoMarcasQueContam:
         depois: int,
         limite: int,
     ) -> "list[InsercaoNoRelatorio]":
-        # Só a marca pedida passa pela regra: os Jobs lidos são só os dos vídeos dela.
+        # `marca` é o rótulo que o relatório mostrou. Só a marca pedida passa pela regra: os
+        # Jobs lidos são só os dos vídeos dela (todas as grafias do grupo).
+        canonicas = self._canonicas()
+        grupo = canonicas.grupo(marca)
         somas = self._consulta.somas(programas, desde, ate, tipos)
-        dela = self._que_contam([s for s in somas if s.marca == marca])
-        return lista_em_python(dela, marca, depois, limite)
+        dela = self._que_contam([s for s in somas if canonicas.grupo(s.marca) == grupo])
+        return lista_em_python(self._com_rotulos(dela, canonicas), depois, limite)
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
