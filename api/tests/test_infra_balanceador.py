@@ -216,7 +216,9 @@ def test_ha_limite_de_requisicoes_por_ip_por_variavel() -> None:
     throttle = next(r for p, r in _regras(POLITICA) if p == 200)
 
     assert "type        = number" in limite
-    assert re.search(r'action\s*= local\.restringe_ip \? "allow" : "throttle"', throttle)
+    assert re.search(
+        r'action\s*= local\.restringe_ip \? "allow" : "throttle"', throttle
+    )
     assert re.search(
         r'dynamic "rate_limit_options" \{\n\s*for_each = local\.restringe_ip \? \[\] : \[1\]',
         throttle,
@@ -319,7 +321,9 @@ def test_com_a_lista_de_ips_o_deploy_nao_testa_o_dominio_e_avisa() -> None:
     # A máquina do CD fica fora da lista e levaria 403: nem liberar o /v1/health nem pôr
     # os runners na lista (#366).
     restrito = DEPLOY.index("if [[ -n $TF_VAR_dominio && $RESTRITO == true ]]; then")
-    aviso = DEPLOY.index("/v1/health não testado: domínio restrito aos IPs da RedeTV", restrito)
+    aviso = DEPLOY.index(
+        "/v1/health não testado: domínio restrito aos IPs da RedeTV", restrito
+    )
     teste = DEPLOY.index('curl -sSf "$URL/v1/health"', aviso)
 
     assert restrito < aviso < teste
