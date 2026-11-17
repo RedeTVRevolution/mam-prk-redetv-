@@ -71,7 +71,7 @@ def test_jpeg_da_copia_limpa_sai_com_pixel_quadrado(
     tmp_path: Path,
     tamanho: str,
     sar: str | None,
-    largura: int,  # noqa: ARG001
+    largura: int,
 ) -> None:
     altura = int(tamanho.split("x")[1])
     entrada = _gerar(tmp_path / "v.mp4", tamanho, sar)
