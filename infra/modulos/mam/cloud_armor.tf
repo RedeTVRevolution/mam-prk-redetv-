@@ -8,21 +8,22 @@
 
 locals {
   # A ordem da lista é a das prioridades (100, 101...): regra nova entra no fim.
-  regras_waf = concat([
+  regras_waf = [
     "sqli-v33-stable",
     "xss-v33-stable",
     "lfi-v33-stable",
     "rce-v33-stable",
     "scannerdetection-v33-stable",
-  ], local.regras_waf_em_observacao)
-  # Só registram no log, mesmo com `waf_ativo`, até os logs mostrarem que não barram
-  # ninguém da RedeTV; aí passam para o fim da lista de cima e começam a bloquear.
-  regras_waf_em_observacao = [
     "rfi-v33-stable",
     "protocolattack-v33-stable",
     "sessionfixation-v33-stable",
     "cve-canary",
   ]
+  # Assinaturas que barram uso legítimo saem da regra (opt_out_rule_ids). A 921130 casa
+  # "HTTP/" seguido de número em qualquer parâmetro, como numa busca por "HTTP/2".
+  opcoes_waf = {
+    "protocolattack-v33-stable" = ", 'opt_out_rule_ids': ['owasp-crs-v030301-id921130-protocolattack']"
+  }
   restringe_ip = length(var.ips_da_redetv) > 0
 }
 
@@ -36,10 +37,10 @@ resource "google_compute_security_policy" "web" {
     content {
       priority = rule.value
       action   = "deny(403)"
-      preview  = !var.waf_ativo || contains(local.regras_waf_em_observacao, rule.key)
+      preview  = !var.waf_ativo
       match {
         expr {
-          expression = "evaluatePreconfiguredWaf('${rule.key}', {'sensitivity': 1})"
+          expression = "evaluatePreconfiguredWaf('${rule.key}', {'sensitivity': 1${lookup(local.opcoes_waf, rule.key, "")}})"
         }
       }
       description = "WAF ${rule.key}"

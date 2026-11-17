@@ -192,22 +192,29 @@ def test_as_regras_waf_ficam_em_previa_ate_a_variavel_ligar() -> None:
     lista = _bloco(ARMOR, "locals {")
 
     assert "default     = false" in waf
-    assert re.search(
-        r"preview\s*= !var\.waf_ativo \|\| contains\(local\.regras_waf_em_observacao, rule\.key\)",
-        POLITICA,
-    )
+    assert re.search(r"preview\s*= !var\.waf_ativo\n", POLITICA)
     assert re.search(r'action\s*= "deny\(403\)"\n\s*preview', POLITICA)
     assert "evaluatePreconfiguredWaf('${rule.key}'" in POLITICA
     assert re.search(
         r"for_each\s*= \{ for i, regra in local\.regras_waf : regra => 100 \+ i \}",
         POLITICA,
     )
-    for regra in ("sqli", "xss", "lfi", "rce", "scannerdetection"):
+    for regra in (
+        "sqli",
+        "xss",
+        "lfi",
+        "rce",
+        "scannerdetection",
+        "rfi",
+        "protocolattack",
+        "sessionfixation",
+    ):
         assert f'"{regra}-v33-stable",' in lista, regra
+    assert '"cve-canary",' in lista
 
 
 def test_a_regra_que_barra_metodos_fica_fora() -> None:
-    # A API usa PATCH e DELETE. A prévia das regras novas está no cloud_armor.tftest.hcl.
+    # A API usa PATCH e DELETE. Quais regras bloqueiam está no cloud_armor.tftest.hcl.
     assert "methodenforcement" not in ARMOR
 
 
