@@ -20,6 +20,8 @@ fi
 # A config gcloud do MAM, criada pelo wizard, sem mexer na config ativa. O CD usa a default.
 export CLOUDSDK_ACTIVE_CONFIG_NAME="${CLOUDSDK_ACTIVE_CONFIG_NAME:-mam-dev}"
 export TF_VAR_projeto="$GCP_PROJECT_ID" TF_VAR_regiao="$GCP_REGION" TF_VAR_admins_emergencia="$ADMINS_EMERGENCIA"
+# A borda (#699): sem DOMINIO, sem balanceador. Variável vazia do GitHub chega como "".
+export TF_VAR_dominio="${DOMINIO:-}" TF_VAR_waf_ativo="${WAF_ATIVO:-false}"
 
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
 tf() { terraform -chdir=infra "$@"; }

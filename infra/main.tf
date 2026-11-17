@@ -155,6 +155,10 @@ output "certificado_do_balanceador" {
   value = module.mam.certificado_do_balanceador
 }
 
+output "zona_dns" {
+  value = module.mam.zona_dns
+}
+
 output "ip_do_balanceador" {
   value = module.mam.ip_do_balanceador
 }

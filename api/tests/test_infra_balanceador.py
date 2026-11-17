@@ -9,6 +9,10 @@ INFRA = Path(__file__).parents[2] / "infra"
 MODULO = INFRA / "modulos" / "mam"
 BALANCEADOR = (MODULO / "balanceador.tf").read_text()
 MAIN = (MODULO / "main.tf").read_text()
+DEPLOY = (INFRA.parent / "scripts" / "deploy-dev.sh").read_text()
+WIZARD = (INFRA.parent / "scripts" / "wizard-gcp-dev.sh").read_text()
+README = (INFRA / "README.md").read_text()
+CI = (INFRA.parent / ".github" / "workflows" / "ci.yml").read_text()
 
 RECURSOS = [
     "google_compute_global_address",
@@ -51,7 +55,11 @@ def test_o_certificado_e_gerenciado_para_o_dominio() -> None:
         BALANCEADOR, 'resource "google_compute_managed_ssl_certificate"'
     )
 
-    assert "domains = [var.dominio]" in certificado
+    assert "domains = local.dominios" in certificado
+    assert re.search(
+        r'dominios\s*= \[var\.dominio, "www\.\$\{var\.dominio\}"\]', BALANCEADOR
+    )
+    assert 'md5(join(",", local.dominios))' in certificado
     assert "create_before_destroy = true" in certificado
 
 
@@ -249,3 +257,50 @@ def test_o_cloud_armor_chega_aos_dois_ambientes_e_ao_wizard() -> None:
             assert f'variable "{v}"' in texto, (main, v)
     wizard = (INFRA.parent / "scripts" / "wizard-gcp-dev.sh").read_text()
     assert "roles/compute.securityAdmin" in wizard
+
+
+def test_o_dns_do_dominio_fica_no_cloud_dns_e_aponta_para_o_balanceador() -> None:
+    zona = _bloco(BALANCEADOR, 'resource "google_dns_managed_zone"')
+    registro = _bloco(BALANCEADOR, 'resource "google_dns_record_set"')
+
+    assert re.search(r'dns_name\s*= "\$\{var\.dominio\}\."', zona)
+    assert "managed_zone = google_dns_managed_zone.mam[0].name" in registro
+    assert "name         = google_dns_managed_zone.mam[0].dns_name" in registro
+    assert 'type         = "A"' in registro
+    assert "rrdatas      = [google_compute_global_address.balanceador[0].address]" in (
+        registro
+    )
+    assert 'output "zona_dns"' in (INFRA / "main.tf").read_text()
+    assert "terraform -chdir=infra output -raw zona_dns" in README
+
+
+def test_as_apis_e_o_papel_do_dns_e_do_registro_do_dominio() -> None:
+    apis = _bloco(MAIN, 'resource "google_project_service" "apis"')
+
+    assert '"dns.googleapis.com"' in apis
+    assert '"domains.googleapis.com"' in apis
+    assert re.search(r"^  roles/dns\.admin #", WIZARD, re.MULTILINE)
+    assert "- `roles/dns.admin`" in README
+
+
+def test_o_dominio_e_o_waf_vem_das_variaveis_do_repositorio() -> None:
+    publicar = CI[CI.index("\n  publicar:\n") :]
+
+    # Vazias, as variáveis do GitHub chegam como "": o WAF precisa de um booleano.
+    assert 'TF_VAR_dominio="${DOMINIO:-}"' in DEPLOY
+    assert 'TF_VAR_waf_ativo="${WAF_ATIVO:-false}"' in DEPLOY
+    assert "DOMINIO: ${{ vars.DOMINIO }}" in publicar
+    assert "WAF_ATIVO: ${{ vars.WAF_ATIVO }}" in publicar
+
+
+def test_o_www_resolve_para_o_balanceador_e_redireciona_para_o_dominio() -> None:
+    www = _bloco(BALANCEADOR, 'resource "google_dns_record_set" "www"')
+    mapa = _bloco(BALANCEADOR, 'resource "google_compute_url_map" "web"')
+
+    assert 'name         = "www.${google_dns_managed_zone.mam[0].dns_name}"' in www
+    assert (
+        "rrdatas      = [google_compute_global_address.balanceador[0].address]" in www
+    )
+    assert 'hosts        = ["www.${var.dominio}"]' in mapa
+    assert "host_redirect          = var.dominio" in mapa
+    assert "https_redirect         = true" in mapa
