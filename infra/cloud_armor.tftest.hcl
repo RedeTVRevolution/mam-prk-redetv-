@@ -43,6 +43,21 @@ run "sem_a_lista_limite_por_ip_para_todos" {
     ])
     error_message = "Com o WAF ligado, as nove regras bloqueiam."
   }
+  # "HTTP/" seguido de número casa com buscas legítimas ("HTTP/2"): só essa assinatura sai.
+  assert {
+    condition = one([
+      for r in google_compute_security_policy.web[0].rule : r.match[0].expr[0].expression
+      if r.priority == 106
+    ]) == "evaluatePreconfiguredWaf('protocolattack-v33-stable', {'sensitivity': 1, 'opt_out_rule_ids': ['owasp-crs-v030301-id921130-protocolattack']})"
+    error_message = "A regra de protocolo deixa de fora só a assinatura 921130."
+  }
+  assert {
+    condition = one([
+      for r in google_compute_security_policy.web[0].rule : r.match[0].expr[0].expression
+      if r.priority == 100
+    ]) == "evaluatePreconfiguredWaf('sqli-v33-stable', {'sensitivity': 1})"
+    error_message = "As outras regras ficam sem exclusão."
+  }
   assert {
     condition     = length([for r in google_compute_security_policy.web[0].rule : r if r.priority < 200]) == 9
     error_message = "São nove regras do WAF."

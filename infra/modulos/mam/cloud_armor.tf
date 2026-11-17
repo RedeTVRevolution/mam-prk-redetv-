@@ -19,6 +19,11 @@ locals {
     "sessionfixation-v33-stable",
     "cve-canary",
   ]
+  # Assinaturas que barram uso legítimo saem da regra (opt_out_rule_ids). A 921130 casa
+  # "HTTP/" seguido de número em qualquer parâmetro, como numa busca por "HTTP/2".
+  opcoes_waf = {
+    "protocolattack-v33-stable" = ", 'opt_out_rule_ids': ['owasp-crs-v030301-id921130-protocolattack']"
+  }
   restringe_ip = length(var.ips_da_redetv) > 0
 }
 
@@ -35,7 +40,7 @@ resource "google_compute_security_policy" "web" {
       preview  = !var.waf_ativo
       match {
         expr {
-          expression = "evaluatePreconfiguredWaf('${rule.key}', {'sensitivity': 1})"
+          expression = "evaluatePreconfiguredWaf('${rule.key}', {'sensitivity': 1${lookup(local.opcoes_waf, rule.key, "")}})"
         }
       }
       description = "WAF ${rule.key}"
