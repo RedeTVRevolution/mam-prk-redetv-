@@ -32,6 +32,9 @@ DURACAO_MAXIMA_S = 4 * 3600.0
 NOME_DO_AUDIO = "audio.wav"
 DEMUXERS_ACEITOS = "mov,mp4,m4a,3gp,3g2,mj2"
 TAXA_DO_AUDIO_HZ = 16_000
+# Proxy 480p com pixel quadrado: a largura vem do aspecto de exibição (`dar` = pixels x SAR),
+# não dos pixels de armazenamento. Sem SAR (ou 1:1) dá a mesma largura do antigo `-2:480`.
+FILTRO_DO_PROXY = "scale=2*round(480*dar/2):480,setsar=1"
 # HH:MM:SS:FF, ou HH:MM:SS;FF no drop-frame.
 FORMATO_DO_TIMECODE = re.compile(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d[:;]\d{2}")
 
@@ -254,7 +257,7 @@ def _gerar_saidas(
             (
                 "[0:v]split=2[para_cortes][para_proxy];"
                 f"[para_cortes]{filtro_de_cortes(limiar_de_cortes)}[cortes];"
-                "[para_proxy]scale=-2:480[reduzido]"
+                f"[para_proxy]{FILTRO_DO_PROXY}[reduzido]"
             ),
             # veryfast: no clipe2, 41% mais rápido que o medium e SSIM de 0,986 contra 0,990.
             "-map", "[reduzido]", "-map", "0:a?",
