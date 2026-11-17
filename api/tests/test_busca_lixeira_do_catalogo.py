@@ -639,11 +639,8 @@ def test_marca_na_lixeira_some_da_faceta_pelo_nome_e_pelo_apelido(
     _vestido(cenario, "j2", "NIK")
     _vestido(cenario, "j3", "Adidas")
     busca = cenario.busca()
-    assert sorted(_faceta_de_marcas(busca.buscar("vestido"))) == [
-        "Adidas",
-        "NIK",
-        "Nike",
-    ]
+    # O apelido "NIK" conta como a Nike: uma só entrada na faceta.
+    assert sorted(_faceta_de_marcas(busca.buscar("vestido"))) == ["Adidas", "Nike"]
 
     cenario.marca_na_lixeira(nike.id)
     depois = busca.buscar("vestido")
@@ -651,6 +648,23 @@ def test_marca_na_lixeira_some_da_faceta_pelo_nome_e_pelo_apelido(
     assert _faceta_de_marcas(depois) == ["Adidas"]
     assert sorted(_jobs(depois)) == ["j1", "j2", "j3"]
     assert busca.buscar("vestido", ajustes=Ajustes(marca="NIK")).videos == []
+
+
+def test_marca_na_lixeira_tira_toda_grafia_com_a_mesma_chave(
+    cenario: Cenario,
+) -> None:
+    go = cenario.marcas.acrescentar("RedeTV Go", [])
+    _vestido(cenario, "j1", "RedeTV! GO")
+    _vestido(cenario, "j2", "RedeTV Go")
+    _vestido(cenario, "j3", "RedeTV Gol")
+    busca = cenario.busca()
+    assert _faceta_de_marcas(busca.buscar("vestido")) == ["RedeTV Go", "RedeTV Gol"]
+
+    cenario.marca_na_lixeira(go.id)
+    depois = busca.buscar("vestido")
+
+    assert _faceta_de_marcas(depois) == ["RedeTV Gol"]
+    assert busca.buscar("vestido", ajustes=Ajustes(marca="RedeTV! GO")).videos == []
 
 
 def test_marca_volta_na_hora_ao_restaurar(cenario: Cenario) -> None:

@@ -84,17 +84,13 @@ def test_video_na_lixeira_sai_de_marcas_e_volta_ao_restaurar_com_o_cache_quente(
 ):
     jobs = _jobs()
     cliente = MundoDasMarcas().instancia(repositorio=jobs)
-    assert _nomes_das_marcas(_marcas(cliente)) == [
-        "AB INBEV",
-        "Ambev",
-        "NESTLE",
-        "Natura",
-    ]  # esquenta o cache
+    # esquenta o cache; "AB INBEV" é apelido da Ambev e "NESTLE" é a Nestlé do catálogo
+    assert _nomes_das_marcas(_marcas(cliente)) == ["Ambev", "Natura", "Nestlé"]
 
-    _lixeira(jobs, "j2", ENVIO)  # j2 só tem a Ambev
+    _lixeira(jobs, "j2", ENVIO)  # j2 só tem a Ambev, escrita sem o apelido
     depois = _marcas(cliente)
 
-    assert _nomes_das_marcas(depois) == ["AB INBEV", "NESTLE", "Natura"]
+    assert _nomes_das_marcas(depois) == ["Ambev", "Natura", "Nestlé"]
     assert depois["total"] == {
         "marcas": 3,
         "insercoes": 3,
@@ -102,17 +98,17 @@ def test_video_na_lixeira_sai_de_marcas_e_volta_ao_restaurar_com_o_cache_quente(
         "videos": 1,
     }
     csv_ = cliente.get(ROTA_DAS_MARCAS, params={"formato": "csv"}, headers=ADMIN).text
-    assert "Ambev" not in csv_
+    assert "INBEV" not in csv_ and "Ambev" in csv_
     completo = cliente.get(ROTA_DAS_MARCAS, headers=ADMIN).json()
-    assert [x["marca"] for x in completo["marcas"]] == ["AB INBEV", "NESTLE", "Natura"]
+    assert [x["marca"] for x in completo["marcas"]] == ["Ambev", "Natura", "Nestlé"]
     lista = cliente.get(
         f"{ROTA_DAS_MARCAS}/insercoes", params={"marca": "Ambev"}, headers=ADMIN
     )
-    assert lista.json() == []
+    assert [i["job_id"] for i in lista.json()] == ["j1"]  # só a do apelido, em j1
 
     _lixeira(jobs, "j2", None)
     assert _marcas(cliente)["total"]["insercoes"] == 4
     lista = cliente.get(
         f"{ROTA_DAS_MARCAS}/insercoes", params={"marca": "Ambev"}, headers=ADMIN
     )
-    assert [i["job_id"] for i in lista.json()] == ["j2"]
+    assert [i["job_id"] for i in lista.json()] == ["j1", "j2"]

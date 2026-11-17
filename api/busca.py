@@ -15,7 +15,7 @@ import threading
 import time
 import unicodedata
 import zlib
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, fields, replace
@@ -53,7 +53,7 @@ from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.modelo_do_job import CursorInvalido, Job, RepositorioDeJobs
 from api.numero import com_as_formas, mesma_palavra, singular
 from api.quem_conta import QuemConta
-from api.texto import normalizar
+from api.texto import chave_da_marca, normalizar
 
 log = logging.getLogger(__name__)
 
@@ -555,23 +555,20 @@ class Busca:
 
         def sem_marca_que_nao_conta(achados: list[Registro]) -> list[Registro]:
             """Tira a `marca` que está na lixeira ou que a purga cortou: o registro de Job
-            criado até a purga (Job ausente conta como anterior). Os Jobs só são lidos
-            para as marcas com corte. O registro de comercial, que só vale pela marca, sai inteiro."""
-            cortes = quem_conta.cortes(
-                {normalizar(r.marca) for r in achados if r.marca}
-            )
+            criado até a purga (Job ausente conta como anterior), pela chave da marca (toda
+            grafia que só difere em maiúscula, acento, pontuação ou espaço). Os Jobs só são
+            lidos para as marcas com corte. O registro de comercial, que só vale pela marca,
+            sai inteiro."""
+            cortes = quem_conta.cortes({r.marca for r in achados if r.marca})
             carregar_jobs(
-                r.job_id
-                for r in achados
-                if r.marca and cortes.tem_corte(normalizar(r.marca))
+                r.job_id for r in achados if r.marca and cortes.tem_corte(r.marca)
             )
 
             def sai(r: Registro) -> bool:
                 if not r.marca:
                     return False
-                nome = normalizar(r.marca)
-                dele = jobs[r.job_id] if cortes.tem_corte(nome) else None
-                return not cortes.conta(nome, dele.criado_em if dele else None)
+                dele = jobs[r.job_id] if cortes.tem_corte(r.marca) else None
+                return not cortes.conta(r.marca, dele.criado_em if dele else None)
 
             limpos: list[Registro] = []
             for r in achados:
@@ -582,13 +579,37 @@ class Busca:
                 limpos.append(r)
             return limpos
 
+        # A marca do registro vira o rótulo da marca (`MarcasCanonicas`): o nome no catálogo
+        # (o apelido conta como a marca) ou, fora dele, a grafia com mais registros entre os
+        # candidatos. O rótulo de cada grafia é decidido uma vez por busca, para as cláusulas
+        # concordarem; `grafias` leva a contagem de todas as consultas (veja `contar_grafias`).
+        grafias: Counter[str] = Counter()
+        rotulos: dict[str, str] = {}
+
+        def contar_grafias(achados: Iterable[Registro]) -> None:
+            grafias.update(r.marca for r in achados if r.marca)
+
+        def rotulo_da_marca(grafia: str) -> str:
+            if grafia not in rotulos:
+                pesos = {**grafias, grafia: max(grafias[grafia], 1)}
+                for g, rotulo in quem_conta.marcas_canonicas().rotulos(pesos).items():
+                    rotulos.setdefault(g, rotulo)
+            return rotulos[grafia]
+
+        def com_marca_canonica(achados: list[Registro]) -> list[Registro]:
+            return [
+                replace(r, marca=rotulo_da_marca(r.marca)) if r.marca else r
+                for r in achados
+            ]
+
         def sem_excluidas(c: Consulta, achados: list[Registro]) -> list[Registro]:
-            """Tira de `pessoas`, `dono` e `marca` quem não conta e confere o registro de novo
-            contra os filtros de pessoa, dono e marca da consulta (cláusula e tela): fica só se
-            ainda casa. O texto do registro não muda."""
+            """Tira de `pessoas`, `dono` e `marca` quem não conta, põe o rótulo da marca e
+            confere o registro de novo contra os filtros de pessoa, dono e marca da consulta
+            (cláusula e tela): fica só se ainda casa. O texto do registro não muda."""
             decidir(p for r in achados for p in (*r.pessoas, r.dono))
             limpos = [
-                _sem_quem_nao_conta(r, contam) for r in sem_marca_que_nao_conta(achados)
+                _sem_quem_nao_conta(r, contam)
+                for r in com_marca_canonica(sem_marca_que_nao_conta(achados))
             ]
             return [r for r in limpos if _ainda_casa(r, c.filtros)]
 
@@ -598,7 +619,8 @@ class Busca:
         t_entender = _agora() - inicio
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
-        # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula).
+        # o `_casa` confere o que o índice não exprime (duas pessoas na mesma cláusula) e
+        # faz sozinho o da marca, pela chave (o índice só compara o texto igual).
         # Os Jobs de todas as cláusulas, e depois os nomes dos registros, vêm em lote.
         # As consultas vão ao índice juntas, no máximo `TETO_DE_CONSULTAS_AO_INDICE` de cada
         # vez; cada uma segue com a sua fusão (RRF), e a ordem de antes é a dos resultados.
@@ -617,6 +639,12 @@ class Busca:
         # Depois do cache e antes da fusão (RRF), do corte do ranking e dos vídeos. Em lote
         # de propósito: uma leitura do catálogo para todas as consultas, não uma por consulta.
         decidir(p for a in achados_do_indice for r in a for p in (*r.pessoas, r.dono))
+        # O rótulo de cada marca vem da contagem de todas as consultas, antes do primeiro;
+        # a marca da tela (às vezes um apelido, de um link antigo) vira o rótulo também.
+        for a in achados_do_indice:
+            contar_grafias(a)
+        if facetado.marca:
+            facetado = replace(facetado, marca=rotulo_da_marca(facetado.marca))
         entregues = iter(
             [
                 sem_excluidas(q, a)
@@ -1093,9 +1121,14 @@ def _casa(r: Registro, a: Ajustes) -> bool:
     """O registro passa nas facetas de pessoa, marca e tipo que o editor clicou."""
     return (
         (a.pessoa is None or a.pessoa in r.pessoas or a.pessoa == r.dono)
-        and (a.marca is None or r.marca == a.marca)
+        and (a.marca is None or _mesma_marca(r.marca, a.marca))
         and (a.tipo is None or r.tipo == a.tipo)
     )
+
+
+def _mesma_marca(a: str | None, b: str) -> bool:
+    """Marca é pela chave: "RedeTV! Go" e "RedeTV GO" são a mesma."""
+    return a is not None and chave_da_marca(a) == chave_da_marca(b)
 
 
 def _sem_quem_nao_conta(r: Registro, contam: Collection[str]) -> Registro:
@@ -1111,7 +1144,7 @@ def _ainda_casa(r: Registro, f: Filtros) -> bool:
     return (
         (f.pessoa is None or f.pessoa in r.pessoas)
         and (f.dono is None or f.dono == r.dono)
-        and (f.marca is None or f.marca == r.marca)
+        and (f.marca is None or _mesma_marca(r.marca, f.marca))
     )
 
 
@@ -1126,17 +1159,24 @@ def _com_facetas(c: Consulta, a: Ajustes) -> list[Consulta]:
         if f.tipo not in (None, a.tipo):
             return []
         f = replace(f, tipo=a.tipo)
-    if a.marca is not None:
-        if f.marca not in (None, a.marca):
-            return []
-        f = replace(f, marca=a.marca)
+    # ponytail: a faceta de marca não vai ao índice (ele filtra a marca por texto igual e não
+    # há campo normalizado): vale só em Python, pelo `_casa`, sobre os candidatos da busca
+    # (até `TETO_DE_REGISTROS`), os mesmos sobre os quais a faceta foi contada. Subir de nível
+    # pede um campo de marca normalizada no índice e recriar a coleção.
+    if (
+        a.marca is not None
+        and f.marca is not None
+        and not _mesma_marca(f.marca, a.marca)
+    ):
+        return []
     if a.pessoa is None:
         return [replace(c, filtros=f)]
     filtros: list[Filtros] = []
     if f.tipo in (None, "objeto") and f.dono in (None, a.pessoa):
         filtros.append(replace(f, tipo="objeto", dono=a.pessoa))
-    # Marca só existe no objeto; outra pessoa já filtrada fica para o `_casa`.
-    if f.tipo != "objeto" and f.marca is None:
+    # Marca só existe no objeto: com a faceta de marca só a consulta do objeto com dono.
+    # Outra pessoa já filtrada fica para o `_casa`.
+    if f.tipo != "objeto" and f.marca is None and a.marca is None:
         filtros.append(
             f if f.pessoa not in (None, a.pessoa) else replace(f, pessoa=a.pessoa)
         )
@@ -1160,13 +1200,22 @@ def _facetas(
     índice): o valor que só aparece além deles não entra, e as contagens são de
     "vídeos entre os 500 melhores registros", não do acervo todo.
     """
-    por_faceta: dict[str, dict[str, tuple[str, set[str]]]] = {
+    # Por chave (a da marca ignora pontuação e acento); o valor e o rótulo são os da primeira.
+    por_faceta: dict[str, dict[str, tuple[str, str, set[str]]]] = {
         f: {} for f in ("programa", "mes", "pessoa", "marca", "tipo")
     }
 
-    def contar(faceta: str, valor: str | None, rotulo: str | None, id: str) -> None:
+    def contar(
+        faceta: str,
+        valor: str | None,
+        rotulo: str | None,
+        id: str,
+        chave: str | None = None,
+    ) -> None:
         if valor:
-            por_faceta[faceta].setdefault(valor, (rotulo or valor, set()))[1].add(id)
+            por_faceta[faceta].setdefault(
+                chave or valor, (valor, rotulo or valor, set())
+            )[2].add(id)
 
     # Programa e mês vêm do registro, que é o que o filtro compara (não do Job).
     for r in candidatos:
@@ -1176,13 +1225,19 @@ def _facetas(
             contar("mes", mes.strftime("%Y-%m"), mes.strftime("%m/%Y"), r.job_id)
         for pessoa in dict.fromkeys([*r.pessoas, *([r.dono] if r.dono else [])]):
             contar("pessoa", pessoa, nome(pessoa), r.job_id)
-        contar("marca", r.marca, None, r.job_id)
+        contar(
+            "marca",
+            r.marca,
+            None,
+            r.job_id,
+            chave_da_marca(r.marca) if r.marca else None,
+        )
         contar("tipo", r.tipo, ROTULO_DO_TIPO.get(r.tipo), r.job_id)
 
     def valores(faceta: str, por_mes: bool = False) -> list[ValorDaFaceta]:
         lista = [
             ValorDaFaceta(valor=v, rotulo=rotulo, videos=len(ids))
-            for v, (rotulo, ids) in por_faceta[faceta].items()
+            for v, rotulo, ids in por_faceta[faceta].values()
             # Pessoa que o catálogo não conhece não tem o que mostrar.
             if faceta != "pessoa" or rotulo != v
         ]
