@@ -1,6 +1,7 @@
 """Vídeo 4:3 e anamórfico (SAR diferente de 1:1): proxy e quadros saem com pixel quadrado."""
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -9,6 +10,11 @@ import pytest
 from api.quadros import tirar_quadros
 from api.quadros_das_pessoas import extrair_quadros, extrair_quadros_em_lote
 from api.validador import Recusa, _conferir_sar, validar
+
+# Sem ffmpeg (job backend do CI), roda no job imagem (`make testar-na-imagem`).
+precisa_de_ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None, reason="sem ffmpeg"
+)
 
 
 def _gerar(destino: Path, tamanho: str, sar: str | None) -> Path:
@@ -44,6 +50,7 @@ CASOS = [
 ]
 
 
+@precisa_de_ffmpeg
 @pytest.mark.parametrize(("tamanho", "sar", "largura"), CASOS)
 def test_proxy_sai_com_pixel_quadrado_e_a_largura_do_aspecto_de_exibicao(
     tmp_path: Path, tamanho: str, sar: str | None, largura: int
@@ -57,6 +64,7 @@ def test_proxy_sai_com_pixel_quadrado_e_a_largura_do_aspecto_de_exibicao(
     assert sar_saida in ("1:1", "N/A")
 
 
+@precisa_de_ffmpeg
 def test_quadros_do_proxy_herdam_o_pixel_quadrado(tmp_path: Path) -> None:
     aceito = validar(_gerar(tmp_path / "v.mp4", "720x480", "8/9"), tmp_path / "saida")
 
@@ -66,6 +74,7 @@ def test_quadros_do_proxy_herdam_o_pixel_quadrado(tmp_path: Path) -> None:
     assert _dimensoes(quadros[0])[:2] == (640, 480)
 
 
+@precisa_de_ffmpeg
 @pytest.mark.parametrize(("tamanho", "sar", "largura"), CASOS)
 def test_jpeg_da_copia_limpa_sai_com_pixel_quadrado(
     tmp_path: Path,
@@ -91,6 +100,7 @@ def test_jpeg_da_copia_limpa_sai_com_pixel_quadrado(
 
 
 # O x264 nem grava SAR menor que 1/…: o lado 1:N sai só no teste unitário abaixo.
+@precisa_de_ffmpeg
 @pytest.mark.parametrize("sar", ["1000/1", "5/1"])
 def test_sar_extremo_e_recusado(tmp_path: Path, sar: str) -> None:
     entrada = _gerar(tmp_path / "v.mp4", "320x240", sar)
@@ -112,6 +122,7 @@ def test_conferir_sar_aceita_o_resto(sar: str | None) -> None:
     _conferir_sar(sar)
 
 
+@precisa_de_ffmpeg
 def test_proxy_no_teto_reduz_a_altura_e_mantem_o_aspecto(tmp_path: Path) -> None:
     # 640x480 com SAR 4:1 = 2560x480 de exibição; no teto de 1920, a altura vai a 360.
     aceito = validar(_gerar(tmp_path / "v.mp4", "640x480", "4/1"), tmp_path / "saida")
@@ -119,6 +130,7 @@ def test_proxy_no_teto_reduz_a_altura_e_mantem_o_aspecto(tmp_path: Path) -> None
     assert _dimensoes(aceito.proxy)[:2] == (1920, 360)
 
 
+@precisa_de_ffmpeg
 def test_jpeg_no_teto_reduz_a_altura_e_mantem_o_aspecto(tmp_path: Path) -> None:
     # 1280x720 com SAR 4:1 = 5120x720 de exibição; no teto de 3840, a altura vai a 540.
     entrada = _gerar(tmp_path / "v.mp4", "1280x720", "4/1")

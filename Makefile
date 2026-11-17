@@ -33,7 +33,8 @@ testar-na-imagem:
 	docker run --rm --network host --user root -e TMPDIR=/tmp -e UV_LINK_MODE=copy \
 		-e FIRESTORE_EMULATOR_HOST -e STORAGE_EMULATOR_HOST \
 		-v "$(CURDIR)/api/tests:/app/api/tests:ro" mam-validacao:teste \
-		uv run --locked pytest -q -rs -p no:cacheprovider api/tests/test_validador.py api/tests/test_validacao_job.py
+		uv run --locked pytest -q -rs -p no:cacheprovider api/tests/test_validador.py api/tests/test_validacao_job.py \
+		api/tests/test_proporcao_4x3.py
 
 # Agrupamento de objetos por tipo (#544), em decupagens locais (uma subpasta por programa):
 # diagnóstico antes/depois e as amostras de precisão e cobertura para a pessoa marcar.
