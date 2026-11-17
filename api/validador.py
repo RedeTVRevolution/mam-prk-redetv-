@@ -27,6 +27,7 @@ MARCAS_PERMITIDAS = {b"isom", b"mp41", b"mp42", b"avc1"}
 CODECS_VIDEO = {"h264", "hevc"}
 LADO_CURTO_MAXIMO = 1080  # 1080p, também em retrato
 LADO_LONGO_MAXIMO = 1920
+SAR_MAXIMO = 4  # pixel de 1:4 a 4:1; fora disso a largura de exibição dispara
 DURACAO_MINIMA_S = 1.0
 DURACAO_MAXIMA_S = 4 * 3600.0
 NOME_DO_AUDIO = "audio.wav"
@@ -34,7 +35,11 @@ DEMUXERS_ACEITOS = "mov,mp4,m4a,3gp,3g2,mj2"
 TAXA_DO_AUDIO_HZ = 16_000
 # Proxy 480p com pixel quadrado: a largura vem do aspecto de exibição (`dar` = pixels x SAR),
 # não dos pixels de armazenamento. Sem SAR (ou 1:1) dá a mesma largura do antigo `-2:480`.
-FILTRO_DO_PROXY = "scale=2*round(480*dar/2):480,setsar=1"
+FILTRO_DO_PROXY = (
+    r"scale=min(2*round(480*dar/2)\,LADO_LONGO_MAXIMO):480,setsar=1".replace(
+        "LADO_LONGO_MAXIMO", str(LADO_LONGO_MAXIMO)
+    )
+)
 # HH:MM:SS:FF, ou HH:MM:SS;FF no drop-frame.
 FORMATO_DO_TIMECODE = re.compile(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d[:;]\d{2}")
 
@@ -154,7 +159,18 @@ def _conferir_faixas(sondagem: dict[str, Any]) -> None:
         raise Recusa("arquivo_corrompido") from None
     if lados[0] > LADO_CURTO_MAXIMO or lados[1] > LADO_LONGO_MAXIMO:
         raise Recusa("codec_nao_suportado")
+    _conferir_sar(videos[0].get("sample_aspect_ratio"))
     if audios and audios[0].get("codec_name") != "aac":
+        raise Recusa("codec_nao_suportado")
+
+
+def _conferir_sar(sar: object) -> None:
+    """Recusa o SAR fora de 1/SAR_MAXIMO..SAR_MAXIMO. Ausente, `N/A` ou `0:1` = 1:1."""
+    try:
+        num, den = (int(x) for x in str(sar).split(":"))
+    except ValueError:
+        return
+    if num > 0 and den > 0 and not 1 / SAR_MAXIMO <= num / den <= SAR_MAXIMO:
         raise Recusa("codec_nao_suportado")
 
 

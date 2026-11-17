@@ -8,7 +8,7 @@ import pytest
 
 from api.quadros import tirar_quadros
 from api.quadros_das_pessoas import extrair_quadros, extrair_quadros_em_lote
-from api.validador import validar
+from api.validador import Recusa, _conferir_sar, validar
 
 
 def _gerar(destino: Path, tamanho: str, sar: str | None) -> Path:
@@ -88,3 +88,24 @@ def test_jpeg_da_copia_limpa_sai_com_pixel_quadrado(
             arq = tmp_path / f"q{n}.jpg"
             arq.write_bytes(jpeg)
             assert _dimensoes(arq)[:2] == (esperada, altura)
+
+
+@pytest.mark.parametrize("sar", ["1000/1", "5/1"]  # o x264 nem grava SAR abaixo de 1/…)
+def test_sar_extremo_e_recusado(tmp_path: Path, sar: str) -> None:
+    entrada = _gerar(tmp_path / "v.mp4", "320x240", sar)
+
+    with pytest.raises(Recusa) as erro:
+        validar(entrada, tmp_path / "saida")
+
+    assert erro.value.codigo == "codec_nao_suportado"
+
+
+@pytest.mark.parametrize("sar", ["1:1000", "1:5", "5:1"])
+def test_conferir_sar_recusa_fora_de_um_quarto_a_quatro(sar: str) -> None:
+    with pytest.raises(Recusa):
+        _conferir_sar(sar)
+
+
+@pytest.mark.parametrize("sar", ["8:9", "4:1", "1:4", "0:1", "N/A", None])
+def test_conferir_sar_aceita_o_resto(sar: str | None) -> None:
+    _conferir_sar(sar)
