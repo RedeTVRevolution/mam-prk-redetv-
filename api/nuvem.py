@@ -1184,6 +1184,12 @@ class CatalogoDeMarcasFirestore:
             raise MarcaInexistente(id)
         referencia.delete()
 
+    def definir_apelidos(self, id: str, apelidos: list[str]) -> MarcaDoCatalogo:
+        atual = self.obter(id)
+        if atual is None:
+            raise MarcaInexistente(id)
+        return self._gravar(atual.model_copy(update={"apelidos": list(apelidos)}))
+
     def acrescentar(
         self,
         nome: str,

@@ -17,7 +17,13 @@ from typing import Protocol
 from api.catalogo import PessoaDoCatalogo
 from api.erros import lido
 from api.lixeira_na_leitura import PurgaDeMarca, PurgasDeMarca
-from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
+from api.marcas import (
+    CatalogoDeMarcas,
+    MarcaDoCatalogo,
+    MarcasCanonicas,
+    nomes_de_busca_da_marca,
+)
+from api.texto import chave_da_marca
 
 
 class PessoasEmLote(Protocol):
@@ -47,22 +53,25 @@ class Destino:
 
 @dataclass(frozen=True)
 class Cortes:
-    """A resposta de `QuemConta.cortes` para os nomes pedidos (normalizados)."""
+    """A resposta de `QuemConta.cortes` para os textos de marca pedidos. Tudo vale pela
+    chave da marca (`chave_da_marca`): "RedeTV! GO" sai junto com "RedeTV Go"."""
 
-    fora: frozenset[str]  # nome ou apelido de marca na lixeira: nunca conta
-    por_purga: Mapping[str, datetime]  # o corte da purga mais recente do nome
+    fora: frozenset[str]  # chave de nome ou apelido de marca na lixeira: nunca conta
+    por_purga: Mapping[str, datetime]  # chave: o corte da purga mais recente
 
-    def tem_corte(self, nome: str) -> bool:
-        """O `criado_em` do Job decide: há purga que corta o nome e ele não está na lixeira
+    def tem_corte(self, texto: str) -> bool:
+        """O `criado_em` do Job decide: há purga que corta o texto e ele não está na lixeira
         (na lixeira, não conta de qualquer jeito e o Job não precisa ser lido)."""
-        return nome in self.por_purga and nome not in self.fora
+        chave = chave_da_marca(texto)
+        return chave in self.por_purga and chave not in self.fora
 
-    def conta(self, nome: str, criado_em: datetime | None) -> bool:
+    def conta(self, texto: str, criado_em: datetime | None) -> bool:
         """O texto da marca conta num Job criado em `criado_em` (Job ausente: `None`, conta
         como anterior à purga)."""
-        if nome in self.fora:
+        chave = chave_da_marca(texto)
+        if chave in self.fora:
             return False
-        corte = self.por_purga.get(nome)
+        corte = self.por_purga.get(chave)
         return corte is None or (criado_em is not None and criado_em > corte)
 
 
@@ -79,7 +88,8 @@ class QuemConta:
         self._lidas: dict[str, PessoaDoCatalogo | None] = {}
         self._marcas_lidas: dict[str, MarcaDoCatalogo | None] = {}
         self._na_lixeira: frozenset[str] | None = None
-        self._todas_as_purgas: list[PurgaDeMarca] | None = None
+        self._canonicas: MarcasCanonicas | None = None
+        self._todas_as_purgas: list[tuple[PurgaDeMarca, set[str]]] | None = None
         self._resolvidos: set[str] = set()
         self._cortes: dict[str, datetime] = {}
 
@@ -130,44 +140,64 @@ class QuemConta:
             i for i in pedidos if (m := self._marcas_lidas[i]) and m.lixeira is None
         }
 
-    def cortes(self, nomes: Iterable[str], *, so_a_purga: bool = False) -> Cortes:
-        """O que conta, para os `nomes` normalizados de marca. O corte de um nome é o da
-        purga mais recente que o contém, em qualquer número de consultas. Com `so_a_purga`
-        a lixeira não entra (o impacto mostrado antes de enviar, restaurar ou purgar)."""
+    def marcas_canonicas(self) -> MarcasCanonicas:
+        """As marcas do catálogo (fora da lixeira), lidas uma vez por operação.
+
+        ponytail: `todas()` lê o catálogo inteiro (no Firestore, a coleção toda) a cada busca
+        ou relatório; o teto é o tamanho do catálogo depois de um `make carregar-marcas`
+        (centenas de marcas). Se crescer, uma cópia curta como a do autocompletar."""
+        if self._canonicas is None:
+            todas = lido(self._marcas.todas) if self._marcas else []
+            self._canonicas = MarcasCanonicas(todas)
+        return self._canonicas
+
+    def cortes(self, textos: Iterable[str], *, so_a_purga: bool = False) -> Cortes:
+        """O que conta, para os `textos` de marca (a chave deles é o que se compara). O
+        corte é o da purga mais recente que contém a chave, em qualquer número de consultas.
+        Com `so_a_purga` a lixeira não entra (o impacto mostrado antes de enviar, restaurar
+        ou purgar)."""
         if self._marcas is None:
             return Cortes(frozenset(), {})
-        nomes = set(nomes)
-        self._resolver_cortes(nomes, self._marcas)
+        chaves = {chave_da_marca(t) for t in textos}
+        if not chaves:  # nada a comparar: a lixeira nem é lida
+            return Cortes(frozenset(), {})
+        self._resolver_cortes(chaves, self._marcas)
         return Cortes(
             frozenset() if so_a_purga else self._nomes_na_lixeira(self._marcas),
-            {n: self._cortes[n] for n in nomes if n in self._cortes},
+            {c: self._cortes[c] for c in chaves if c in self._cortes},
         )
 
     def _nomes_na_lixeira(self, marcas: CatalogoDeMarcas) -> frozenset[str]:
         if self._na_lixeira is None:
             self._na_lixeira = frozenset(
-                n for m in lido(marcas.na_lixeira) for n in nomes_de_busca_da_marca(m)
+                chave_da_marca(n)
+                for m in lido(marcas.na_lixeira)
+                for n in nomes_de_busca_da_marca(m)
             )
         return self._na_lixeira
 
-    def _resolver_cortes(self, nomes: set[str], marcas: CatalogoDeMarcas) -> None:
-        """Resolve os nomes ainda não vistos, um a um: só a purga que vale conta (a de uma
-        marca que ainda existe não terminou; a da homônima recriada vale, o id é outro)."""
-        novos = nomes - self._resolvidos
+    def _resolver_cortes(self, chaves: set[str], marcas: CatalogoDeMarcas) -> None:
+        """Resolve as chaves ainda não vistas, uma a uma: só a purga que vale conta (a de
+        uma marca que ainda existe não terminou; a da homônima recriada vale, o id é outro).
+        `PurgaDeMarca.nomes` está gravado normalizado: a chave sai dele."""
+        novos = chaves - self._resolvidos
         if not novos:
             return
         if self._todas_as_purgas is None:
-            self._todas_as_purgas = lido(self._purgas.todas) if self._purgas else []
-        achadas = [p for p in self._todas_as_purgas if novos & set(p.nomes)]
+            todas = lido(self._purgas.todas) if self._purgas else []
+            self._todas_as_purgas = [
+                (p, {chave_da_marca(n) for n in p.nomes}) for p in todas
+            ]
+        achadas = [(p, c & novos) for p, c in self._todas_as_purgas if c & novos]
         _ler_em_lote(
             self._marcas_lidas,
             marcas.obter_varios,
-            (p.marca_id for p in achadas if p.marca_id),
+            (p.marca_id for p, _ in achadas if p.marca_id),
         )
-        for p in achadas:
+        for p, nelas in achadas:
             if p.marca_id is None or self._marcas_lidas[p.marca_id] is None:
-                for n in novos & set(p.nomes):
-                    self._cortes[n] = max(p.em, self._cortes.get(n, p.em))
+                for c in nelas:
+                    self._cortes[c] = max(p.em, self._cortes.get(c, p.em))
         self._resolvidos |= novos
 
 

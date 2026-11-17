@@ -1,4 +1,4 @@
-import { IconBroadcast, IconChecklist, IconHistory, IconInbox, IconKey, IconSettings, IconTrash, IconUsers, type Icon } from '@tabler/icons-react'
+import { IconBroadcast, IconChecklist, IconHistory, IconInbox, IconKey, IconTag, IconSettings, IconTrash, IconUsers, type Icon } from '@tabler/icons-react'
 import { cn } from 'cn'
 import { useEffect } from 'react'
 import { abasPermitidas, type Aba } from '../../administracao.ts'
@@ -10,6 +10,7 @@ import Auditoria from './Auditoria.tsx'
 import Chaves from './Chaves.tsx'
 import Entradas from './Entradas.tsx'
 import Lixeira from './Lixeira.tsx'
+import Marcas from './Marcas.tsx'
 import Programas from './Programas.tsx'
 import RegrasDeAprovacao from './RegrasDeAprovacao.tsx'
 import Usuarios from './Usuarios.tsx'
@@ -20,6 +21,7 @@ const ICONE: Record<string, Icon> = {
   chaves: IconKey,
   aprovacao: IconChecklist,
   programas: IconBroadcast,
+  marcas: IconTag,
   lixeira: IconTrash,
   auditoria: IconHistory,
 }
@@ -40,6 +42,7 @@ function Conteudo({ aba, busca, usuario, aoEntrarDeNovo }: { aba: Aba['aba']; bu
   if (aba === 'chaves') return <Chaves />
   if (aba === 'aprovacao') return <RegrasDeAprovacao />
   if (aba === 'programas') return <Programas />
+  if (aba === 'marcas') return <Marcas />
   if (aba === 'lixeira') return <Lixeira aoEntrarDeNovo={aoEntrarDeNovo} />
   if (aba === 'auditoria') return <Auditoria filtros={filtrosDaAuditoria(busca)} />
   return null

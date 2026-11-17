@@ -1,7 +1,7 @@
 """Cópia das decupagens no BigQuery (#260): um momento por linha, para os relatórios.
 
-As linhas são o recorte do índice da busca (`registros_da_decupagem`) mais um momento por
-comercial (marca e tipo de inserção). Cada gravação troca todas as linhas do Job num
+As linhas são os registros do índice da busca (`registros_da_decupagem`), menos o de
+comercial, mais um momento por comercial com a marca e o tipo de inserção em colunas. Cada gravação troca todas as linhas do Job num
 único MERGE, então repetir dá o mesmo resultado e nunca deixa versões acumuladas.
 """
 
@@ -93,6 +93,8 @@ def linhas_da_decupagem(
             **base,
         )
         for r in registros_da_decupagem(job_id, decupagem, programa, data_de_exibicao)
+        # O comercial tem a linha própria (com o tipo de inserção), logo abaixo.
+        if r.tipo != "comercial"
     ]
     linhas += [
         LinhaDoMomento(

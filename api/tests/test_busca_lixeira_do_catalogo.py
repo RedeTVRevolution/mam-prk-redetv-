@@ -639,11 +639,8 @@ def test_marca_na_lixeira_some_da_faceta_pelo_nome_e_pelo_apelido(
     _vestido(cenario, "j2", "NIK")
     _vestido(cenario, "j3", "Adidas")
     busca = cenario.busca()
-    assert sorted(_faceta_de_marcas(busca.buscar("vestido"))) == [
-        "Adidas",
-        "NIK",
-        "Nike",
-    ]
+    # O apelido "NIK" conta como a Nike: uma só entrada na faceta.
+    assert sorted(_faceta_de_marcas(busca.buscar("vestido"))) == ["Adidas", "Nike"]
 
     cenario.marca_na_lixeira(nike.id)
     depois = busca.buscar("vestido")
@@ -651,6 +648,23 @@ def test_marca_na_lixeira_some_da_faceta_pelo_nome_e_pelo_apelido(
     assert _faceta_de_marcas(depois) == ["Adidas"]
     assert sorted(_jobs(depois)) == ["j1", "j2", "j3"]
     assert busca.buscar("vestido", ajustes=Ajustes(marca="NIK")).videos == []
+
+
+def test_marca_na_lixeira_tira_toda_grafia_com_a_mesma_chave(
+    cenario: Cenario,
+) -> None:
+    go = cenario.marcas.acrescentar("RedeTV Go", [])
+    _vestido(cenario, "j1", "RedeTV! GO")
+    _vestido(cenario, "j2", "RedeTV Go")
+    _vestido(cenario, "j3", "RedeTV Gol")
+    busca = cenario.busca()
+    assert _faceta_de_marcas(busca.buscar("vestido")) == ["RedeTV Go", "RedeTV Gol"]
+
+    cenario.marca_na_lixeira(go.id)
+    depois = busca.buscar("vestido")
+
+    assert _faceta_de_marcas(depois) == ["RedeTV Gol"]
+    assert busca.buscar("vestido", ajustes=Ajustes(marca="RedeTV! GO")).videos == []
 
 
 def test_marca_volta_na_hora_ao_restaurar(cenario: Cenario) -> None:
@@ -902,3 +916,68 @@ def test_pela_api_falha_do_firestore_na_leitura_das_marcas_na_lixeira_e_503() ->
     c.marcas.na_lixeira = cai  # type: ignore[method-assign]
 
     assert _buscar_pela_api(c, "vestido").status_code == 503
+
+
+# --- Comercial: a marca do comercial é achada pela busca e segue a lixeira da marca. ---
+
+
+def _comercial(c: Cenario, job_id: str, marca: str, em: datetime = BASE) -> None:
+    c.m.com(
+        job(job_id, criado_em=em),
+        Registro(
+            id=f"{job_id}:comercial:com000",
+            tipo="comercial",
+            job_id=job_id,
+            inicio_ms=0,
+            fim_ms=1_000,
+            programa="TV Fama",
+            marca=marca,
+            texto=f"{marca} (produto em cena)",
+        ),
+    )
+
+
+def test_comercial_e_achado_pelo_texto_pela_evidencia_marca_e_pela_faceta(
+    cenario: Cenario,
+) -> None:
+    _comercial(cenario, "j1", "Sadia")
+    busca = cenario.busca()
+
+    resultado = busca.buscar("sadia")
+    assert _jobs(resultado) == ["j1"]
+    assert (
+        resultado.videos[0].momentos[0].motivo == "Comercial: Sadia (produto em cena)"
+    )
+    assert _faceta_de_marcas(resultado) == ["Sadia"]
+    assert _jobs(busca.buscar("sadia", ajustes=Ajustes(marca="Sadia"))) == ["j1"]
+    pela_evidencia = Ajustes(evidencias=("marca",))
+    assert _jobs(busca.buscar("sadia", ajustes=pela_evidencia)) == ["j1"]
+    assert busca.buscar("sadia", ajustes=Ajustes(evidencias=("objeto",))).videos == []
+
+
+def test_comercial_de_marca_na_lixeira_sai_inteiro_e_volta_ao_restaurar(
+    cenario: Cenario,
+) -> None:
+    sadia = cenario.marcas.acrescentar("Sadia", [])
+    _comercial(cenario, "j1", "Sadia")
+    busca = cenario.busca()
+    cenario.marca_na_lixeira(sadia.id)
+
+    depois = busca.buscar("sadia")
+    assert depois.videos == []
+    assert _faceta_de_marcas(depois) == []
+
+    cenario.restaurar_marca(sadia.id)
+    assert _jobs(busca.buscar("sadia")) == ["j1"]
+
+
+def test_comercial_de_marca_purgada_so_some_nos_videos_anteriores_a_purga(
+    cenario: Cenario,
+) -> None:
+    sadia = cenario.marcas.acrescentar("Sadia", [])
+    _comercial(cenario, "antigo", "Sadia", BASE)
+    _comercial(cenario, "novo", "Sadia", PURGA + timedelta(days=1))
+    cenario.marca_na_lixeira(sadia.id)
+    cenario.purgar_marca(sadia, PURGA)
+
+    assert _jobs(cenario.busca().buscar("sadia")) == ["novo"]

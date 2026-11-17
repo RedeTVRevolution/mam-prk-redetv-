@@ -399,3 +399,43 @@ def test_quem_conta_nao_importa_o_modulo_de_jobs() -> None:
             importados |= {f"{no.module}.{a.name}" for a in no.names}
 
     assert "api.jobs" not in importados
+
+
+# --- a lixeira e a purga valem pela chave da marca ------------------------------------
+
+
+def test_marca_na_lixeira_corta_toda_grafia_com_a_mesma_chave() -> None:
+    marcas = CatalogoDeMarcasEmMemoria()
+    go = marcas.acrescentar("RedeTV Go", ["UniAefel"])
+    marcas.definir_lixeira(go.id, ENVIO)
+
+    cortes = QuemConta(None, marcas, PurgasDeMarcaEmMemoria()).cortes(
+        {"RedeTV! GO", "unifael", "Uni-Aefel"}
+    )
+
+    assert not cortes.conta("RedeTV! GO", _dias(9))
+    assert not cortes.conta("Uni-Aefel", _dias(9))
+    assert cortes.conta("unifael", _dias(9))  # outra marca: sem distância de edição
+
+
+def test_purga_corta_toda_grafia_com_a_mesma_chave() -> None:
+    marcas, purgas = CatalogoDeMarcasEmMemoria(), PurgasDeMarcaEmMemoria()
+    _purgada(marcas, purgas, "RedeTV Go", [], _dias(3))
+
+    cortes = QuemConta(None, marcas, purgas).cortes({"RedeTV! GO"})
+
+    assert cortes.tem_corte("RedeTV! GO")
+    assert not cortes.conta("RedeTV! GO", _dias(2))
+    assert cortes.conta("RedeTV! GO", _dias(4))
+    assert not cortes.conta("redetv go", None)
+
+
+def test_registro_de_purga_normalizado_vale_pela_chave() -> None:
+    # `PurgaDeMarca.nomes` é gravado por `normalizar` ("redetv! go"): a chave é a mesma.
+    marcas, purgas = CatalogoDeMarcasEmMemoria(), PurgasDeMarcaEmMemoria()
+    _purgada(marcas, purgas, "RedeTV! Go", [], _dias(3))
+    assert purgas.todas()[0].nomes == ["redetv! go"]
+
+    cortes = QuemConta(None, marcas, purgas).cortes({"RedeTV Go"}, so_a_purga=True)
+
+    assert not cortes.conta("RedeTV Go", _dias(2))

@@ -611,7 +611,7 @@ def test_se_o_avanco_falha_a_marca_nao_vai_para_a_lixeira() -> None:
 # --- a marca na lixeira sai do relatório de marcas (#593) --------------------------------
 
 ROTA_DAS_MARCAS = "/v1/relatorios/marcas"
-TODAS_AS_MARCAS = ["AB INBEV", "Ambev", "NESTLE", "Natura"]
+TODAS_AS_MARCAS = ["Ambev", "Natura", "Nestlé"]
 
 
 class MundoDasMarcas:
@@ -669,7 +669,7 @@ def test_marca_na_lixeira_some_pelo_nome_e_pelo_apelido_e_volta_com_o_cache_quen
     m.marcas.definir_lixeira(m.ambev.id, ENVIO)
     depois = _marcas(cliente)
 
-    assert _nomes_das_marcas(depois) == ["NESTLE", "Natura"]  # apelido e maiúscula
+    assert _nomes_das_marcas(depois) == ["Natura", "Nestlé"]  # apelido e maiúscula
     assert depois["total"] == {
         "marcas": 2,
         "insercoes": 2,
@@ -677,9 +677,9 @@ def test_marca_na_lixeira_some_pelo_nome_e_pelo_apelido_e_volta_com_o_cache_quen
         "videos": 1,
     }
     completo = cliente.get(ROTA_DAS_MARCAS, headers=ADMIN).json()
-    assert [x["marca"] for x in completo["marcas"]] == ["NESTLE", "Natura"]
+    assert [x["marca"] for x in completo["marcas"]] == ["Natura", "Nestlé"]
     csv_ = cliente.get(ROTA_DAS_MARCAS, params={"formato": "csv"}, headers=ADMIN).text
-    assert "Ambev" not in csv_ and "INBEV" not in csv_ and "NESTLE" in csv_
+    assert "Ambev" not in csv_ and "INBEV" not in csv_ and "Nestlé" in csv_
     lista = cliente.get(
         f"{ROTA_DAS_MARCAS}/insercoes", params={"marca": "Ambev"}, headers=ADMIN
     )
@@ -692,7 +692,7 @@ def test_marca_na_lixeira_some_pelo_nome_e_pelo_apelido_e_volta_com_o_cache_quen
     lista = cliente.get(
         f"{ROTA_DAS_MARCAS}/insercoes", params={"marca": "Ambev"}, headers=ADMIN
     )
-    assert len(lista.json()) == 1
+    assert len(lista.json()) == 2  # a do apelido "AB INBEV" (j1) e a de "Ambev" (j2)
 
 
 def test_nome_com_acento_na_lixeira_tira_a_grafia_sem_acento() -> None:
@@ -702,7 +702,7 @@ def test_nome_com_acento_na_lixeira_tira_a_grafia_sem_acento() -> None:
 
     m.marcas.definir_lixeira(m.nestle.id, ENVIO)
 
-    assert "NESTLE" not in _nomes_das_marcas(_marcas(cliente))
+    assert "Nestlé" not in _nomes_das_marcas(_marcas(cliente))
 
 
 def test_totais_posicoes_e_paginacao_das_marcas_saem_depois_da_exclusao() -> None:
@@ -718,8 +718,8 @@ def test_totais_posicoes_e_paginacao_das_marcas_saem_depois_da_exclusao() -> Non
         headers=ADMIN,
     )
 
-    assert _nomes_das_marcas(primeira.json()) == ["NESTLE"]
-    assert _nomes_das_marcas(segunda.json()) == ["Natura"]
+    assert _nomes_das_marcas(primeira.json()) == ["Natura"]
+    assert _nomes_das_marcas(segunda.json()) == ["Nestlé"]
     # A posição numérica (o cursor é a posição em base64) conta só as marcas que ficaram:
     # com a Ambev e o apelido dela fora, a próxima página começa na posição 1, não na 3.
     assert posicao_do_cursor(primeira.headers["X-Proximo-Cursor"]) == 1
@@ -737,15 +737,15 @@ def test_video_novo_com_a_marca_na_lixeira_nao_a_faz_contar() -> None:
 
     m.copia.gravar("j3", [_comercial("j3", "Jornal", DIA, "Ambev", "intervalo")])
 
-    assert _nomes_das_marcas(_marcas(m.instancia())) == ["NESTLE", "Natura"]
-    assert _nomes_das_marcas(_marcas(cliente)) == ["NESTLE", "Natura"]
+    assert _nomes_das_marcas(_marcas(m.instancia())) == ["Natura", "Nestlé"]
+    assert _nomes_das_marcas(_marcas(cliente)) == ["Natura", "Nestlé"]
 
 
 def test_marca_purgada_deixa_de_estar_na_lixeira_e_volta_a_contar() -> None:
     m = MundoDasMarcas()
     cliente = m.instancia()
     m.marcas.definir_lixeira(m.nestle.id, ENVIO)
-    assert "NESTLE" not in _nomes_das_marcas(_marcas(cliente))
+    assert "Nestlé" not in _nomes_das_marcas(_marcas(cliente))
 
     m.marcas.apagar(m.nestle.id)
 
@@ -788,7 +788,7 @@ def test_com_a_consulta_real_o_curador_envia_restaura_e_purga_a_marca_sem_escrev
         MarcasComCache(MarcasBigQuery(CONFIG_DAS_MARCAS, transporte), CacheCurto()),
         versao_da_lixeira=versao,
     )
-    todas = ["AB INBEV", "Ambev", "NESTLE"]
+    todas = ["Ambev", "Nestlé"]
     assert _nomes_das_marcas(_marcas(cliente)) == todas
     inicial = versao.atual()
 
@@ -799,7 +799,7 @@ def test_com_a_consulta_real_o_curador_envia_restaura_e_purga_a_marca_sem_escrev
     depois_do_envio = versao.atual()
     assert depois_do_envio > inicial  # enviar troca a versão
     enviado = _marcas(cliente)
-    assert _nomes_das_marcas(enviado) == ["NESTLE"]
+    assert _nomes_das_marcas(enviado) == ["Nestlé"]
     assert enviado["total"]["insercoes"] == 1
 
     restaurada = cliente.post(f"{LIXEIRA}/marcas/{m.ambev.id}/restaurar", headers=ADMIN)
@@ -814,7 +814,7 @@ def test_com_a_consulta_real_o_curador_envia_restaura_e_purga_a_marca_sem_escrev
     assert purgada.status_code == 200
     # Purgada, não está mais na lixeira; os Jobs não existem aqui, então contam como
     # anteriores à purga (#595) e as ocorrências da Ambev e do apelido seguem fora.
-    assert _nomes_das_marcas(_marcas(cliente)) == ["NESTLE"]
+    assert _nomes_das_marcas(_marcas(cliente)) == ["Nestlé"]
 
     assert len(transporte.corpos) == 1  # o cache guardou a soma sem exclusão
     escritas = ("INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "DROP")
@@ -907,7 +907,7 @@ def test_marca_purgada_nao_conta_no_job_criado_antes_e_conta_no_criado_depois() 
     corpo = _marcas(MundoDaPurga().instancia())
 
     # j1 (antes): "AB INBEV" fora; j2 (depois): "Ambev" fica. As outras não mudam.
-    assert _nomes_das_marcas(corpo) == ["Ambev", "NESTLE", "Natura"]
+    assert _nomes_das_marcas(corpo) == ["Ambev", "Natura", "Nestlé"]
     assert corpo["total"]["insercoes"] == 3
 
 
@@ -1085,7 +1085,7 @@ def test_com_a_consulta_real_e_o_registro_no_firestore_o_corte_vale_no_ranking()
 
     cliente = m.instancia(consulta, purgas_de_marca=purgas)
 
-    assert _nomes_das_marcas(_marcas(cliente)) == ["Ambev", "NESTLE"]
+    assert _nomes_das_marcas(_marcas(cliente)) == ["Ambev", "Nestlé"]
 
 
 def test_falha_real_do_firestore_na_leitura_do_job_vira_503() -> None:
@@ -1159,8 +1159,12 @@ def test_registro_orfao_nao_corta_a_marca_restaurada_depois_de_apagar_falhar() -
     assert len(purgas.todas()) == 1
     cliente.post(f"{LIXEIRA}/marcas/{ambev.id}/restaurar", headers=ADMIN)
 
-    assert "Ambev" in _nomes_das_marcas(_marcas(cliente))
-    assert "AB INBEV" in _nomes_das_marcas(_marcas(cliente))
+    nomes = _nomes_das_marcas(_marcas(cliente))
+    assert "Ambev" in nomes
+    assert "AB INBEV" not in nomes  # o apelido conta como a Ambev
+    assert {x["marca"]: x["insercoes"] for x in _marcas(cliente)["marcas"]}[
+        "Ambev"
+    ] == 2
 
 
 def test_registro_sem_id_de_marca_continua_valendo() -> None:

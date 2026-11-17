@@ -1353,6 +1353,19 @@ class TestCatalogoDeMarcasFirestore:
         with pytest.raises(MarcaInexistente):
             marcas.definir_lixeira(m.id, envio)
 
+    def test_definir_apelidos_mantem_os_nomes_de_busca(
+        self, marcas: CatalogoDeMarcasFirestore
+    ) -> None:
+        m = marcas.acrescentar("UNIFAEL", ["Velho"])
+
+        nova = marcas.definir_apelidos(m.id, ["UniAefel"])
+
+        assert nova.apelidos == ["UniAefel"]
+        assert marcas.achar("uniaefel") == [nova]
+        assert marcas.achar("velho") == []
+        with pytest.raises(MarcaInexistente):
+            marcas.definir_apelidos("nao-existe", [])
+
     def test_na_lixeira_traz_so_as_marcas_com_lixeira_inclusive_a_gravada_com_null(
         self, marcas: CatalogoDeMarcasFirestore
     ) -> None:

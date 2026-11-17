@@ -41,6 +41,7 @@ from api.tests.test_sinal_do_programa import _historico, _sinal
 
 DECUPAGEM = EXEMPLOS[0].decupagem
 DIA = date(2026, 10, 30)
+DECUPAGEM_SEM_COMERCIAIS = linhas_da_decupagem("j1", DECUPAGEM, "Exemplo", DIA, BASE)
 
 
 def _linhas(gravado_em: Any = None) -> list[LinhaDoMomento]:
@@ -85,6 +86,29 @@ def test_uma_linha_por_momento_com_pessoa_marca_e_texto() -> None:
     for c, linha in zip(decupagem.comerciais, por_tipo["comercial"], strict=True):
         assert (linha.marca, linha.tipo_de_insercao) == (c.marca, c.tipo)
         assert (linha.inicio_ms, linha.fim_ms) == (c.inicio_ms, c.fim_ms)
+
+
+def test_comercial_vira_uma_linha_so_no_bigquery_mesmo_com_registro_na_busca() -> None:
+    """O índice da busca tem um registro por comercial, mas a cópia não o soma de novo:
+    o relatório de marcas conta cada comercial uma vez."""
+    comerciais = [
+        Comercial(
+            inicio_ms=i * 1000,
+            fim_ms=i * 1000 + 500,
+            marca=marca,
+            tipo="produto_em_cena",
+            evidencias=["produto"],
+        )
+        for i, marca in enumerate(["Sadia", "Itaú"], start=1)
+    ]
+    decupagem = DECUPAGEM.model_copy(update={"comerciais": comerciais})
+    linhas = linhas_da_decupagem("j1", decupagem, "Exemplo", DIA, BASE)
+    do_comercial = [x for x in linhas if x.tipo == "comercial"]
+    assert [(x.marca, x.tipo_de_insercao) for x in do_comercial] == [
+        ("Sadia", "produto_em_cena"),
+        ("Itaú", "produto_em_cena"),
+    ]
+    assert len(linhas) == len(DECUPAGEM_SEM_COMERCIAIS) + 2
 
 
 def test_gravar_duas_vezes_deixa_as_mesmas_linhas() -> None:

@@ -32,6 +32,10 @@ Lista para o wizard (uma vez por projeto, igual ao `scripts/wizard-gcp-dev.sh` d
 - [ ] O Identity Platform inicializado pelo Owner (etapa 7 do wizard), antes do primeiro apply.
 - [ ] Os e-mails dos administradores de emergência e as imagens publicadas no Artifact Registry do projeto.
 
+## Link de senha
+
+O e-mail de senha abre `<url do app>/redefinir-senha`, página do próprio MAM (o `terraform_data.url_da_acao_de_senha` grava a URL de ação do Identity Platform pela API REST, como a política de senha). Ordem do deploy: a web com a rota nova tem de estar publicada antes de a URL de ação mudar, senão os links quebram; no mesmo apply o `depends_on` no serviço web garante isso. O código do link (`oobCode`) vai na URL; a exclusão `codigo-do-link-de-senha` tira dos logs as linhas que o trazem (balanceador, Cloud Run e uvicorn), e é criada antes de a URL mudar.
+
 ## Domínio e balanceador (#294)
 
 Com `dominio` vazio (o padrão), nada do balanceador é criado e o endereço segue o `run.app`. Com `dominio` preenchido, o módulo cria o balanceador HTTPS externo global (IP, NEG serverless para o `mam-web`, certificado gerenciado e redirecionamento de HTTP para HTTPS), o Cloud Run passa a aceitar só o tráfego do balanceador e o domínio entra no CORS da quarentena e nos domínios autorizados do login. O Cloud Armor vem no #295.

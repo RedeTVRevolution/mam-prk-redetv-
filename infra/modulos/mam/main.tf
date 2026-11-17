@@ -2944,8 +2944,12 @@ output "limite_de_falhas_por_etapa" {
 }
 
 # O endereço do MAM: o domínio, com o balanceador; sem ele, o run.app.
+locals {
+  url_do_app = local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri
+}
+
 output "url" {
-  value = local.balanceador ? "https://${var.dominio}" : google_cloud_run_v2_service.web.uri
+  value = local.url_do_app
 }
 
 # Para as ferramentas locais: o deploy-dev envia as imagens a este repositório, e o

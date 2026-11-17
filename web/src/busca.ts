@@ -30,8 +30,8 @@ export interface ConsultaDaBusca {
   ordem: OrdemDaBusca
 }
 
-export type TipoDeMomento = 'plano' | 'fala' | 'texto_na_tela' | 'objeto'
-const TIPOS_DE_MOMENTO: string[] = ['plano', 'fala', 'texto_na_tela', 'objeto']
+export type TipoDeMomento = 'plano' | 'fala' | 'texto_na_tela' | 'objeto' | 'comercial'
+const TIPOS_DE_MOMENTO: string[] = ['plano', 'fala', 'texto_na_tela', 'objeto', 'comercial']
 const MES = /^(\d{4})-(0[1-9]|1[0-2])$/
 
 export interface Destaque {

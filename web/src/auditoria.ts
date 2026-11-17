@@ -30,6 +30,9 @@ export const FRASE_DA_ACAO = {
   'programa.criado': 'Criou o programa',
   'programa.alterado': 'Alterou o programa',
   'programa.apagado': 'Apagou o programa',
+  'marca.criada': 'Cadastrou a marca',
+  'marca.alterada': 'Trocou os apelidos da marca',
+  'marca.juntada': 'Juntou outra marca nesta',
   'video.editado': 'Editou a data de exibição ou o programa do vídeo',
 } as const
 
@@ -202,6 +205,12 @@ export function detalhesEmFrases(r: RegistroDeAuditoria): string[] {
         : []
     case 'job.estado_corrigido':
       return typeof d.de === 'string' && typeof d.para === 'string' ? [`Estado: de ${rotuloDoEstado(d.de)} para ${rotuloDoEstado(d.para)}`] : []
+    case 'marca.criada':
+      return [`Apelidos: ${lista(d.apelidos)}`]
+    case 'marca.alterada':
+      return [`Antes: ${lista(d.apelidos_antes)}`, `Depois: ${lista(d.apelidos_depois)}`]
+    case 'marca.juntada':
+      return [`Juntou: ${String(d.outra_nome ?? '—')}`, `Apelidos depois: ${lista(d.apelidos_depois)}`]
     case 'painel.aberto':
     case 'painel.exportado':
       return [`Filtro: ${filtro(d.filtro)}`]

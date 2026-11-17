@@ -24,7 +24,10 @@ OPCOES_DO_QUADRO = [
     "-frames:v",
     "1",
     "-vf",
-    "format=yuvj420p",
+    # Aplica o SAR antes de gravar: o `<img>` da web ignora o SAR do vídeo anamórfico.
+    # O teto 3840 (2 x 1920, o maior lado aceito) segura a largura com o SAR alto que o validador
+    # aceita; no teto, a altura desce junto, para não achatar a imagem.
+    r"scale=w=min(2*round(iw*sar/2)\,3840):h=2*round(ih*min(1\,3840/(iw*sar))/2),setsar=1,format=yuvj420p",
     "-c:v",
     "mjpeg",
     "-q:v",

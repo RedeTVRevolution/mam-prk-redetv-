@@ -23,7 +23,7 @@ function mensagemDeErro(falha: unknown) {
       : 'Login indisponível no momento.'
 }
 
-function Campo({ rotulo, icone, children }: { rotulo: string; icone: ReactNode; children: ReactNode }) {
+export function Campo({ rotulo, icone, children }: { rotulo: string; icone: ReactNode; children: ReactNode }) {
   return (
     <label className="grid gap-1 text-xs font-medium">
       {rotulo}
@@ -36,7 +36,7 @@ function Campo({ rotulo, icone, children }: { rotulo: string; icone: ReactNode; 
 }
 
 /** Login: e-mail e senha, depois o código do autenticador; no primeiro acesso, o cadastro dele. */
-export default function Login({ autenticador, aoEntrar }: { autenticador: Autenticador; aoEntrar: () => void }) {
+export default function Login({ autenticador, aoEntrar, aviso }: { autenticador: Autenticador; aoEntrar: () => void; aviso?: string }) {
   const [etapa, setEtapa] = useState<Etapa>({ tipo: 'senha' })
   const [erro, setErro] = useState<string | null>(null)
   const [codigo, setCodigo] = useState('')
@@ -98,6 +98,11 @@ export default function Login({ autenticador, aoEntrar }: { autenticador: Autent
             <img src={logo} alt="RedeTV" className="h-7 w-auto" />
             <span className="text-lg font-semibold">MAM</span>
           </div>
+          {aviso && (
+            <p role="status" className="rounded-sm border bg-card px-3 py-2 text-sm">
+              {aviso}
+            </p>
+          )}
           {etapa.tipo === 'senha' ? (
             <form onSubmit={enviarSenha} className="grid gap-4">
               <div>

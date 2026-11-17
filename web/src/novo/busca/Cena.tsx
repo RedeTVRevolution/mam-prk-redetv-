@@ -1,4 +1,4 @@
-import { IconBox, IconMessage, IconMovie, IconTextCaption, type Icon } from '@tabler/icons-react'
+import { IconBadgeTm, IconBox, IconMessage, IconMovie, IconTextCaption, type Icon } from '@tabler/icons-react'
 import { useQuery } from '@tanstack/react-query'
 import { cn } from 'cn'
 import { useId, useState, type MouseEvent } from 'react'
@@ -21,6 +21,7 @@ const TIPOS: Record<TipoDeMomento, { rotulo: string; cor: string; Icone: Icon }>
   fala: { rotulo: 'Fala', cor: 'text-tipo-fala', Icone: IconMessage },
   texto_na_tela: { rotulo: 'GC', cor: 'text-tipo-texto', Icone: IconTextCaption },
   objeto: { rotulo: 'Objeto', cor: 'text-tipo-objeto', Icone: IconBox },
+  comercial: { rotulo: 'Comercial', cor: 'text-tipo-marca', Icone: IconBadgeTm },
 }
 
 /** O quadro do momento: a URL assinada vem na resposta (chave de sistema) ou pela rota do quadro. */
@@ -40,7 +41,7 @@ function Quadro({ job, momento }: { job: string; momento: Momento }) {
   return (
     <span className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-canvas">
       {url && url !== falhou ? (
-        <img src={url} alt="" loading="lazy" decoding="async" onError={() => setFalhou(url)} className="absolute inset-0 size-full object-cover" />
+        <img src={url} alt="" loading="lazy" decoding="async" onError={() => setFalhou(url)} className="absolute inset-0 size-full bg-black object-contain" />
       ) : (
         // Sem quadro (a fala, o GC), o tipo do momento ocupa o lugar.
         <span className={cn('flex flex-col items-center gap-1 text-xs', tipo.cor)}>
