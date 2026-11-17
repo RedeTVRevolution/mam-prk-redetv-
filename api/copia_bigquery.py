@@ -93,6 +93,8 @@ def linhas_da_decupagem(
             **base,
         )
         for r in registros_da_decupagem(job_id, decupagem, programa, data_de_exibicao)
+        # O comercial tem a linha própria (com o tipo de inserção), logo abaixo.
+        if r.tipo != "comercial"
     ]
     linhas += [
         LinhaDoMomento(

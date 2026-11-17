@@ -99,6 +99,7 @@ ROTULO_DO_TIPO: dict[str, str] = {
     "fala": "Fala",
     "texto_na_tela": "GC",
     "objeto": "Objeto",
+    "comercial": "Comercial",
 }
 
 Ordem = Literal["relevancia", "data"]
@@ -555,7 +556,7 @@ class Busca:
         def sem_marca_que_nao_conta(achados: list[Registro]) -> list[Registro]:
             """Tira a `marca` que está na lixeira ou que a purga cortou: o registro de Job
             criado até a purga (Job ausente conta como anterior). Os Jobs só são lidos
-            para as marcas com corte."""
+            para as marcas com corte. O registro de comercial, que só vale pela marca, sai inteiro."""
             cortes = quem_conta.cortes(
                 {normalizar(r.marca) for r in achados if r.marca}
             )
@@ -572,7 +573,12 @@ class Busca:
                 dele = jobs[r.job_id] if cortes.tem_corte(nome) else None
                 return not cortes.conta(nome, dele.criado_em if dele else None)
 
-            return [replace(r, marca=None) if sai(r) else r for r in achados]
+            # O comercial só existe pela marca: sem ela, sai inteiro.
+            return [
+                replace(r, marca=None) if sai(r) else r
+                for r in achados
+                if not (r.tipo == "comercial" and sai(r))
+            ]
 
         def sem_excluidas(c: Consulta, achados: list[Registro]) -> list[Registro]:
             """Tira de `pessoas`, `dono` e `marca` quem não conta e confere o registro de novo
@@ -956,6 +962,7 @@ class Busca:
                 ("gc", "texto_na_tela"),
                 ("objeto", "objeto"),
                 ("marca", "objeto"),
+                ("marca", "comercial"),
                 ("citada", "fala"),
                 ("citada", "texto_na_tela"),
             )
@@ -1310,6 +1317,8 @@ def _motivo(r: Registro, nome: Callable[[str | None], str | None]) -> str:
         )
         dono = nome(r.dono)
         return f"Objeto: {peca} · {dono}" if dono else f"Objeto: {peca}"
+    if r.tipo == "comercial":
+        return f"Comercial: {r.texto}"
     if r.tipo == "fala":
         return f"Fala: '{r.texto}'"
     if r.tipo == "texto_na_tela":

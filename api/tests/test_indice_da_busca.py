@@ -2,7 +2,12 @@ import json
 from dataclasses import asdict
 from typing import Any
 
-from api.decupagem import CATEGORIAS_DE_OBJETO, Decupagem, ObjetoDoInventario
+from api.decupagem import (
+    CATEGORIAS_DE_OBJETO,
+    Comercial,
+    Decupagem,
+    ObjetoDoInventario,
+)
 from api.ferramentas.exemplos_da_busca import (
     EXEMPLOS,
     OUTRA,
@@ -413,3 +418,49 @@ def test_o_plano_leva_os_rotulos_canonicos_e_o_texto_original_na_descricao() -> 
 
     for trecho in ("Estúdio de TV", "estúdio", "Close-up", "primeiro plano"):
         assert trecho in (achado or "")
+
+
+def _com_comerciais() -> Decupagem:
+    return EXEMPLOS[0].decupagem.model_copy(
+        update={
+            "comerciais": [
+                Comercial(
+                    inicio_ms=1_000,
+                    fim_ms=3_000,
+                    marca="Itaú",
+                    tipo="produto_em_cena",
+                    evidencias=["produto"],
+                ),
+                Comercial(
+                    inicio_ms=5_000,
+                    fim_ms=6_000,
+                    marca="Sadia",
+                    tipo="merchan_apresentador",
+                    evidencias=["fala"],
+                ),
+            ]
+        }
+    )
+
+
+def test_cada_comercial_vira_um_registro_com_a_marca_e_o_tipo_de_insercao() -> None:
+    registros = registros_da_decupagem("j1", _com_comerciais(), "Exemplo", None)
+    comerciais = [r for r in registros if r.tipo == "comercial"]
+    assert [(r.marca, r.texto, r.inicio_ms, r.fim_ms) for r in comerciais] == [
+        ("Itaú", "Itaú (produto em cena)", 1_000, 3_000),
+        ("Sadia", "Sadia (merchan com apresentador)", 5_000, 6_000),
+    ]
+    assert len({r.id for r in registros}) == len(registros)
+
+
+def test_texto_sem_acento_nem_maiuscula_acha_o_comercial_e_o_filtro_de_marca_tambem() -> (
+    None
+):
+    indice = IndiceEmMemoria()
+    indice.gravar("j1", registros_da_decupagem("j1", _com_comerciais(), None, None))
+    por_texto = indice.buscar(Consulta(texto="ITAU"))
+    assert [(r.tipo, r.marca) for r in por_texto] == [("comercial", "Itaú")]
+    por_filtro = indice.buscar(
+        Consulta(filtros=Filtros(tipo="comercial", marca="Sadia"))
+    )
+    assert [r.marca for r in por_filtro] == ["Sadia"]

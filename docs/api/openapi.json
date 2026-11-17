@@ -2909,7 +2909,8 @@
                     "plano",
                     "fala",
                     "texto_na_tela",
-                    "objeto"
+                    "objeto",
+                    "comercial"
                   ],
                   "type": "string"
                 },
@@ -5791,7 +5792,8 @@
               "plano",
               "fala",
               "texto_na_tela",
-              "objeto"
+              "objeto",
+              "comercial"
             ],
             "title": "Tipo"
           },
