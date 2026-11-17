@@ -3,6 +3,7 @@ import { useEffect, useState, type SubmitEvent } from 'react'
 import logo from '../assets/redetv-logo.png'
 import { CodigoDeSenhaInvalido, SenhaRecusada, type Autenticador } from '../auth/autenticador.ts'
 import { seguir } from '../rotas.ts'
+import { Campo } from './Login.tsx'
 import { Button } from './ui/button.tsx'
 
 // Igual à `politica_de_senha` de infra/modulos/mam/main.tf; quem recusa é o servidor.
@@ -22,6 +23,10 @@ function mensagemDeErro(falha: unknown) {
   if (falha instanceof CodigoDeSenhaInvalido) return 'Link vencido ou já usado. Peça um novo link ao administrador.'
   if (falha instanceof SenhaRecusada) return `A senha não atende à regra: ${falha.message}`
   return 'Não foi possível definir a senha agora. Tente de novo.'
+}
+
+function Alerta({ children }: { children: string }) {
+  return <p role="alert" className="rounded-sm border border-destructive/40 bg-destructive/12 px-3 py-2 text-sm text-destructive">{children}</p>
 }
 
 /** Página do link do e-mail de senha (conta nova ou refeita): define a senha e volta ao login, sem sessão. */
@@ -60,20 +65,16 @@ export default function RedefinirSenha({ autenticador, aoConcluir }: { autentica
   }
 
   const campo = (nome: string, rotulo: string) => (
-    <label className="grid gap-1 text-xs font-medium">
-      {rotulo}
-      <span className="flex h-10 items-center gap-2 rounded-sm border border-strong bg-input px-3 focus-within:border-primary">
-        <IconLock size={16} className="shrink-0 text-muted-foreground" aria-hidden />
-        <input
-          name={nome}
-          aria-label={rotulo}
-          type={verSenha ? 'text' : 'password'}
-          required
-          autoComplete="new-password"
-          className="min-w-0 flex-1 bg-transparent text-sm font-normal outline-none"
-        />
-      </span>
-    </label>
+    <Campo rotulo={rotulo} icone={<IconLock size={16} className="shrink-0 text-muted-foreground" aria-hidden />}>
+      <input
+        name={nome}
+        aria-label={rotulo}
+        type={verSenha ? 'text' : 'password'}
+        required
+        autoComplete="new-password"
+        className="min-w-0 flex-1 bg-transparent text-sm font-normal outline-none"
+      />
+    </Campo>
   )
 
   return (
@@ -90,9 +91,7 @@ export default function RedefinirSenha({ autenticador, aoConcluir }: { autentica
         )}
         {estado.tipo === 'invalido' && (
           <div className="grid gap-4">
-            <p role="alert" className="rounded-sm border border-destructive/40 bg-destructive/12 px-3 py-2 text-sm text-destructive">
-              {estado.mensagem}
-            </p>
+            <Alerta>{estado.mensagem}</Alerta>
             <a href="/" onClick={(e) => seguir(e, '/')} className="justify-self-start text-sm text-link hover:underline">
               Ir ao login
             </a>
@@ -119,11 +118,7 @@ export default function RedefinirSenha({ autenticador, aoConcluir }: { autentica
             <Button type="submit" size="lg">
               Definir senha
             </Button>
-            {erro && (
-              <p role="alert" className="rounded-sm border border-destructive/40 bg-destructive/12 px-3 py-2 text-sm text-destructive">
-                {erro}
-              </p>
-            )}
+            {erro && <Alerta>{erro}</Alerta>}
           </form>
         )}
       </div>

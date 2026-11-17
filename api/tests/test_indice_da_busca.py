@@ -1,6 +1,6 @@
 import json
 from dataclasses import asdict
-from typing import Any
+from typing import Any, get_args
 
 from api.decupagem import (
     CATEGORIAS_DE_OBJETO,
@@ -17,6 +17,7 @@ from api.ferramentas.exemplos_da_busca import (
     _pessoa,
 )
 from api.indice_da_busca import (
+    INSERCAO_POR_EXTENSO,
     NOME_DA_CATEGORIA,
     Consulta,
     Filtros,
@@ -464,3 +465,8 @@ def test_texto_sem_acento_nem_maiuscula_acha_o_comercial_e_o_filtro_de_marca_tam
         Consulta(filtros=Filtros(tipo="comercial", marca="Sadia"))
     )
     assert [r.marca for r in por_filtro] == ["Sadia"]
+
+
+def test_todo_tipo_de_insercao_tem_nome_por_extenso() -> None:
+    tipos = get_args(Comercial.model_fields["tipo"].annotation)
+    assert set(INSERCAO_POR_EXTENSO) == set(tipos)

@@ -12,7 +12,6 @@ import { Casca } from './Casca.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from './consultas.ts'
 import Administracao from './admin/Administracao.tsx'
 import Login from './Login.tsx'
-import RedefinirSenha from './RedefinirSenha.tsx'
 import { Button } from './ui/button.tsx'
 import { TelaDoVideo } from './video/TelaDoVideo.tsx'
 
@@ -20,6 +19,7 @@ import { TelaDoVideo } from './video/TelaDoVideo.tsx'
 const PainelDaDiretoria = lazy(() => import('./painel/PainelDaDiretoria.tsx'))
 const TempoDeTela = lazy(() => import('./relatorios/TempoDeTela.tsx'))
 const Marcas = lazy(() => import('./relatorios/Marcas.tsx'))
+const RedefinirSenha = lazy(() => import('./RedefinirSenha.tsx'))
 
 /** O que a área de trabalho mostra. */
 function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuario; aoSair: () => void }) {
@@ -75,23 +75,8 @@ function SessaoAtiva({ api, usuario, rota, aoSair }: { api: ClienteDaApi; usuari
   )
 }
 
-function Telas({ autenticador }: { autenticador: Autenticador }) {
-  const rota = useRota()
+function Telas({ autenticador, rota, aviso }: { autenticador: Autenticador; rota: Rota; aviso?: string }) {
   const { sessao, saidas, api, sair, reverificar } = useSessao(autenticador)
-  const [senhaDefinida, setSenhaDefinida] = useState(false)
-
-  // Pública: quem abre o link do e-mail ainda não tem senha. Termina no login, por rota fixa.
-  if (rota.tipo === 'redefinir_senha' && !senhaDefinida) {
-    return (
-      <RedefinirSenha
-        autenticador={autenticador}
-        aoConcluir={() => {
-          setSenhaDefinida(true)
-          navegar('/', { substituir: true })
-        }}
-      />
-    )
-  }
 
   if (sessao.tipo === 'verificando') {
     return (
@@ -101,7 +86,7 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
     )
   }
   if (sessao.tipo === 'sem_sessao') {
-    return <Login key={saidas} autenticador={autenticador} aoEntrar={reverificar} aviso={senhaDefinida ? 'Senha definida, entre com a senha nova.' : undefined} />
+    return <Login key={saidas} autenticador={autenticador} aoEntrar={reverificar} aviso={aviso} />
   }
   if (sessao.tipo === 'api_indisponivel') {
     return (
@@ -126,9 +111,25 @@ function Telas({ autenticador }: { autenticador: Autenticador }) {
 }
 
 export default function App({ autenticador }: { autenticador: Autenticador }) {
+  const rota = useRota()
+  const [senhaDefinida, setSenhaDefinida] = useState(false)
+  // Pública e sem sessão: quem abre o link do e-mail ainda não tem senha. Termina no login.
+  if (rota.tipo === 'redefinir_senha') {
+    return (
+      <Suspense>
+        <RedefinirSenha
+          autenticador={autenticador}
+          aoConcluir={() => {
+            setSenhaDefinida(true)
+            navegar('/', { substituir: true })
+          }}
+        />
+      </Suspense>
+    )
+  }
   return (
     <AtalhosProvider>
-      <Telas autenticador={autenticador} />
+      <Telas autenticador={autenticador} rota={rota} aviso={senhaDefinida ? 'Senha definida, entre com a senha nova.' : undefined} />
     </AtalhosProvider>
   )
 }

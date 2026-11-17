@@ -573,12 +573,14 @@ class Busca:
                 dele = jobs[r.job_id] if cortes.tem_corte(nome) else None
                 return not cortes.conta(nome, dele.criado_em if dele else None)
 
-            # O comercial só existe pela marca: sem ela, sai inteiro.
-            return [
-                replace(r, marca=None) if sai(r) else r
-                for r in achados
-                if not (r.tipo == "comercial" and sai(r))
-            ]
+            limpos: list[Registro] = []
+            for r in achados:
+                if sai(r):
+                    if r.tipo == "comercial":
+                        continue  # O comercial só existe pela marca: sem ela, sai inteiro.
+                    r = replace(r, marca=None)
+                limpos.append(r)
+            return limpos
 
         def sem_excluidas(c: Consulta, achados: list[Registro]) -> list[Registro]:
             """Tira de `pessoas`, `dono` e `marca` quem não conta e confere o registro de novo
