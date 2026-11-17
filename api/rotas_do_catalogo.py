@@ -3,7 +3,8 @@
 `GET` com `decupagem.ver` busca por prefixo (veja `achar_nomes`); `POST` com
 `decupagem.editar` acrescenta o nome digitado como "a revisar", para o Curador
 conferir, ou devolve o que já existe com esse nome. O catálogo é pequeno: a busca
-corre em memória, sobre uma cópia que vale poucos segundos.
+corre em memória, sobre uma cópia que vale poucos segundos. O cadastro de marcas do
+Curador (apelidos e juntar) fica em `api.cadastro_de_marcas`.
 """
 
 from collections.abc import Callable
@@ -14,7 +15,9 @@ from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, field_validator
 
 from api.achar_nomes import IndiceDeNomes, achar_por_prefixo
+from api.auditoria import RepositorioDeAuditoria
 from api.auth import Usuario
+from api.cadastro_de_marcas import criar_rotas_do_cadastro_de_marcas
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.correcoes import LIMITE_DO_NOME, sem_controle
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
@@ -64,6 +67,7 @@ def criar_rotas_do_catalogo(
     marcas: CatalogoDeMarcas,
     relogio: Callable[[], datetime],
     fusao: Callable[[Callable[[], None]], APIRouter],
+    auditoria: RepositorioDeAuditoria,
     copia_das_pessoas: CopiaCurta[PessoaDoCatalogo] | None = None,
 ) -> APIRouter:
     """`fusao` monta as rotas de fundir pessoas (#209); recebe como descartar a cópia
@@ -149,4 +153,9 @@ def criar_rotas_do_catalogo(
         return marca_achada(criada)
 
     rotas.include_router(fusao(copia_das_pessoas.descartar))
+    rotas.include_router(
+        criar_rotas_do_cadastro_de_marcas(
+            marcas, auditoria, relogio, copia_das_marcas.descartar
+        )
+    )
     return rotas

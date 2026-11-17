@@ -603,6 +603,7 @@ def criar_app(
             catalogo_de_marcas,
             relogio,
             _rotas_das_pessoas,
+            repositorio_de_auditoria,
             copia_das_pessoas,
         )
     )

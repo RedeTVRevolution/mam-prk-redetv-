@@ -63,6 +63,11 @@ class CatalogoDeMarcas(Protocol):
         """`MarcaInexistente` se o id não existe."""
         ...
 
+    def definir_apelidos(self, id: str, apelidos: list[str]) -> MarcaDoCatalogo:
+        """Troca os apelidos (e os nomes de busca com eles); `MarcaInexistente` se o id não
+        existe."""
+        ...
+
     def acrescentar(
         self,
         nome: str,
@@ -106,6 +111,13 @@ class CatalogoDeMarcasEmMemoria:
     def apagar(self, id: str) -> None:
         if self._marcas.pop(id, None) is None:
             raise MarcaInexistente(id)
+
+    def definir_apelidos(self, id: str, apelidos: list[str]) -> MarcaDoCatalogo:
+        atual = self._marcas.get(id)
+        if atual is None:
+            raise MarcaInexistente(id)
+        self._marcas[id] = atual.model_copy(update={"apelidos": list(apelidos)})
+        return self._marcas[id]
 
     def acrescentar(
         self,

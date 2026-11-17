@@ -195,6 +195,20 @@
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.ver",
   "sem_token": "401"
  },
+ "GET /v1/catalogo/marcas/cadastro": {
+  "administrador": "200",
+  "chave_so_cancelar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_so_criar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_so_ler": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_todos": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "consulta": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "curador": "200",
+  "diretoria": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "editor": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_documento": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_papel": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_token": "401"
+ },
  "GET /v1/catalogo/pessoas": {
   "administrador": "422",
   "chave_so_cancelar": "403 Chave sem o escopo ler",
@@ -993,6 +1007,34 @@
   "sem_papel": "403 Sem a permiss\u00e3o decupagem.editar",
   "sem_token": "401"
  },
+ "POST /v1/catalogo/marcas/cadastro": {
+  "administrador": "422",
+  "chave_so_cancelar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_so_criar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_so_ler": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_todos": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "consulta": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "curador": "422",
+  "diretoria": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "editor": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_documento": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_papel": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_token": "401"
+ },
+ "POST /v1/catalogo/marcas/{id_da_marca}/juntar": {
+  "administrador": "422",
+  "chave_so_cancelar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_so_criar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_so_ler": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_todos": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "consulta": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "curador": "422",
+  "diretoria": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "editor": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_documento": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_papel": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_token": "401"
+ },
  "POST /v1/catalogo/pessoas": {
   "administrador": "422",
   "chave_so_cancelar": "403 Chave de sistema n\u00e3o corrige a decupagem",
@@ -1243,6 +1285,20 @@
   "editor": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_documento": "403 Sem a permiss\u00e3o usuarios.gerir",
   "sem_papel": "403 Sem a permiss\u00e3o usuarios.gerir",
+  "sem_token": "401"
+ },
+ "PUT /v1/catalogo/marcas/{id_da_marca}/apelidos": {
+  "administrador": "422",
+  "chave_so_cancelar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_so_criar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_so_ler": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "chave_todos": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
+  "consulta": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "curador": "422",
+  "diretoria": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "editor": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_documento": "403 Sem a permiss\u00e3o catalogo.fundir",
+  "sem_papel": "403 Sem a permiss\u00e3o catalogo.fundir",
   "sem_token": "401"
  }
 }
