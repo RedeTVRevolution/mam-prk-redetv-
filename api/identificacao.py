@@ -13,6 +13,7 @@ o GC ou a fala podem ser dela. Estar no perfil do programa ou no catálogo só d
 os apelidos; não confirma nada. O nome sem prova vira palpite.
 """
 
+import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -20,12 +21,29 @@ from dataclasses import dataclass
 from api.catalogo import Catalogo
 from api.decupagem import Decupagem, FonteDoNome, Intervalo, Pessoa
 from api.identidade import nao_identificado
+from api.intervalos import sobrepoe_com_folga
 from api.programas import Perfis
 from api.texto import normalizar
 from api.transcricao import Transcricao
 
 TOLERANCIA_DA_FALA_MS = 2000  # a fala e a imagem não se alinham ao quadro
+_VARIAVEL_DA_TOLERANCIA = "TOLERANCIA_DA_FALA_MS"
 TIPOS_DE_GC = frozenset({"gc", "tarja"})
+
+
+def tolerancia_da_fala_do_ambiente(
+    ambiente: Mapping[str, str] = os.environ,
+) -> int:
+    """A tolerância da fala (ms) da variável de ambiente, a mesma na análise e na
+    identificação; inteiro de zero para cima, senão `ValueError`."""
+    texto = ambiente.get(_VARIAVEL_DA_TOLERANCIA)
+    if texto is None:
+        return TOLERANCIA_DA_FALA_MS
+    if not texto.isascii() or not texto.isdigit():
+        raise ValueError(
+            f"{_VARIAVEL_DA_TOLERANCIA} deve ser um inteiro de zero para cima: {texto!r}"
+        )
+    return int(texto)
 
 
 @dataclass(frozen=True)
@@ -72,7 +90,7 @@ def _palavras(texto: str) -> list[str]:
 
 
 def _sobrepoe(a: Intervalo, inicio_ms: int, fim_ms: int, folga_ms: int = 0) -> bool:
-    return a.inicio_ms - folga_ms < fim_ms and inicio_ms < a.fim_ms + folga_ms
+    return sobrepoe_com_folga(a.inicio_ms, a.fim_ms, inicio_ms, fim_ms, folga_ms)
 
 
 def _nomes_da_pessoa(
@@ -90,10 +108,11 @@ def _nomes_da_pessoa(
 def _ocorrencias(palavras: Sequence[str], nome: Sequence[str]) -> list[tuple[int, int]]:
     """Posições `[inicio, fim)` de `nome` em `palavras`."""
     n = len(nome)
+    alvo = tuple(nome)
     return [
         (i, i + n)
         for i in range(len(palavras) - n + 1)
-        if list(palavras[i : i + n]) == list(nome)
+        if tuple(palavras[i : i + n]) == alvo
     ]
 
 
@@ -141,19 +160,11 @@ def _prova_de_fala(
     decupagem: Decupagem,
     pessoa: Pessoa,
     nomes: Sequence[Sequence[str]],
-    transcricao: Transcricao | None,
+    fluxo: Sequence[tuple[str, int, int]],
+    palavras: Sequence[str],
     tolerancia_ms: int,
     sem_nome: Mapping[str, str],
 ) -> bool:
-    if transcricao is None:
-        return False
-    # (palavra, início, fim) de cada palavra do Whisper, já separada em palavras.
-    fluxo = [
-        (w, round(p.inicio_s * 1000), round(p.fim_s * 1000))
-        for p in transcricao.palavras
-        for w in _palavras(p.texto)
-    ]
-    palavras = [w for w, _, _ in fluxo]
     for nome in nomes:
         for i, j in _ocorrencias(palavras, nome):
             inicio_ms, fim_ms = fluxo[i][1], fluxo[j - 1][2]
@@ -164,6 +175,17 @@ def _prova_de_fala(
             ):
                 return True
     return False
+
+
+def _fluxo_de_palavras(transcricao: Transcricao | None) -> list[tuple[str, int, int]]:
+    """(palavra, início, fim) de cada palavra do Whisper, já separada em palavras."""
+    if transcricao is None:
+        return []
+    return [
+        (w, round(p.inicio_s * 1000), round(p.fim_s * 1000))
+        for p in transcricao.palavras
+        for w in _palavras(p.texto)
+    ]
 
 
 def _no_catalogo(catalogo: Catalogo, pessoa: Pessoa) -> str | None:
@@ -190,11 +212,14 @@ def identificar(
     """Confere o nome de cada pessoa. Com prova, o nome é `confirmado` (origem
     `modelo_forte`, só as fontes conferidas) e vai para o catálogo; sem prova, é
     `palpite`, sem fontes. A pessoa da revisora e o "não identificado" ficam como estão.
+    Depois, tira o comercial cuja marca é o nome de uma pessoa (`sem_comercial_de_pessoa`).
 
     `sem_nome` leva o id de cada pessoa que, para a regra "outra pessoa sem nome na
     imagem", conta como sem nome mesmo com um nome (o do modelo forte, ainda sem prova)
     ao grupo dela: as do mesmo grupo são uma pessoa só e não se bloqueiam."""
     sem_nome = sem_nome or {}
+    fluxo = _fluxo_de_palavras(transcricao)
+    palavras_da_fala = [w for w, _, _ in fluxo]
     pessoas: list[Pessoa] = []
     for p in decupagem.pessoas:
         if p.origem == "revisao" or nao_identificado(p.nome):
@@ -204,7 +229,9 @@ def identificar(
         fontes: list[FonteDoNome] = []
         if _prova_de_gc(decupagem, p, nomes, sem_nome):
             fontes.append("gc")
-        if _prova_de_fala(decupagem, p, nomes, transcricao, tolerancia_ms, sem_nome):
+        if _prova_de_fala(
+            decupagem, p, nomes, fluxo, palavras_da_fala, tolerancia_ms, sem_nome
+        ):
             fontes.append("fala")
         if not fontes:
             pessoas.append(
@@ -223,4 +250,20 @@ def identificar(
                 }
             )
         )
-    return decupagem.model_copy(update={"pessoas": pessoas})
+    return sem_comercial_de_pessoa(decupagem.model_copy(update={"pessoas": pessoas}))
+
+
+def sem_comercial_de_pessoa(decupagem: Decupagem) -> Decupagem:
+    """Tira o comercial cuja marca é o nome de uma pessoa da mesma Decupagem (#434).
+
+    O modelo registra o @ do apresentador na tela como comercial, com o nome dele em
+    `marca`. A correção do editor (`correcoes.py`) não passa por aqui, de propósito.
+    """
+    nomes = {normalizar(p.nome) for p in decupagem.pessoas}
+    return decupagem.model_copy(
+        update={
+            "comerciais": [
+                c for c in decupagem.comerciais if normalizar(c.marca) not in nomes
+            ]
+        }
+    )

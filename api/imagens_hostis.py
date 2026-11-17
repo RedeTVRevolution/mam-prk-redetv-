@@ -9,6 +9,7 @@ regravada em JPEG sem metadados: o que sai daqui nunca é o arquivo que veio da 
 
 import io
 import ipaddress
+import logging
 import socket
 import time
 from collections.abc import Callable, Iterator
@@ -16,7 +17,7 @@ from typing import Any, Protocol
 from urllib.parse import urljoin, urlsplit
 
 import requests
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 HOST_DO_THUMBNAIL = "encrypted-tbn0.gstatic.com"
 FORMATOS_ACEITOS = {"JPEG", "PNG", "WEBP"}
@@ -53,6 +54,8 @@ class SessaoDeDownload(Protocol):
     def get(self, url: str, **kwargs: Any) -> Any: ...
 
 
+log = logging.getLogger(__name__)
+
 Resolvedor = Callable[[str], list[str]]
 
 
@@ -63,6 +66,20 @@ def resolver_dns(host: str) -> list[str]:
         ]
     except OSError as e:
         raise ImagemRecusada("host não resolve") from e
+
+
+def _em_pe(imagem: Image.Image) -> Image.Image:
+    """O celular grava o retrato deitado com `Orientation`; como o EXIF não sai daqui,
+    o giro é aplicado antes de descartá-lo. O EXIF é hostil: se ler ou regravar falhar
+    (SyntaxError, TypeError, struct.error...), a imagem segue sem girar."""
+    try:
+        return ImageOps.exif_transpose(imagem)
+    except Exception as e:  # noqa: BLE001 - EXIF hostil: qualquer falha vale "sem girar"
+        log.warning(
+            "EXIF ilegível, a imagem segue sem girar (%s)",
+            f"{type(e).__module__}.{type(e).__qualname__}",
+        )
+        return imagem
 
 
 def recodificar(
@@ -85,7 +102,7 @@ def recodificar(
             if largura * altura > max_pixels:
                 raise AcimaDoLimiteDePixels
             imagem.load()
-            colorida = imagem.convert("RGBA")
+            colorida = _em_pe(imagem).convert("RGBA")
     except (
         UnidentifiedImageError,
         Image.DecompressionBombError,

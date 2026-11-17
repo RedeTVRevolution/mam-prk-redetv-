@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 
 from api.catalogo import Catalogo, PessoaDoCatalogo
-from api.gemini import MODO_STANDARD, Chamada, Transporte
+from api.gemini import MODO_STANDARD, Chamada, Transporte, validar_json
 from api.texto import normalizar
 from api.texto_como_dado import sanear
 
@@ -164,8 +164,5 @@ def termo_da_foto(jpeg: bytes, *, transporte: Transporte, job_id: str = "busca")
         timeout_s=TEMPO_DA_CONSULTA_S,
         modo=MODO_STANDARD,
     )
-    try:
-        termo = _TermoDaFoto.model_validate_json(transporte.gerar(chamada)).termo
-    except ValidationError as e:
-        raise ValueError("resposta fora do esquema") from e
+    termo = validar_json(_TermoDaFoto, transporte.gerar(chamada)).termo
     return sanear(termo, MAXIMO_DO_TERMO_DA_FOTO)

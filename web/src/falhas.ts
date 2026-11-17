@@ -5,6 +5,7 @@ export const FRASES_DE_FALHA: Record<string, string> = {
   codec_nao_suportado: 'O vídeo usa um codec que não aceitamos. Envie em H.264.',
   duracao_excedida: 'O vídeo é mais longo do que o limite aceito. Envie um vídeo mais curto.',
   upload_expirado: 'O envio não terminou a tempo. Envie o vídeo de novo.',
+  processamento_demorou_demais: 'O processamento demorou demais. Envie o mesmo arquivo de novo, sem precisar exportar.',
   analise_falhou: 'Não foi possível decupar o vídeo. Tente enviar de novo; se repetir, chame o suporte.',
   transcricao_falhou: 'Não foi possível transcrever a fala do vídeo. Tente enviar de novo; se repetir, chame o suporte.',
   ocr_falhou: 'Não foi possível ler os textos na tela do vídeo. Tente enviar de novo; se repetir, chame o suporte.',

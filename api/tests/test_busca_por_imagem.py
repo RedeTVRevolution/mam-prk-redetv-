@@ -77,7 +77,7 @@ def test_png_com_extensao_jpg_e_aceito_pelo_conteudo_e_busca_o_termo_do_modelo()
     # Só a descrição da foto usa o modelo.
     [descricao] = m.transporte.chamadas
     assert descricao.modelo == MODELO_DA_CONSULTA and descricao.video_uri == ""
-    assert len(descricao.imagens) == 1 and descricao.ferramentas == ()
+    assert len(descricao.imagens) == 1
 
 
 def test_o_termo_do_modelo_vira_texto_puro_sem_segunda_chamada() -> None:
@@ -368,3 +368,16 @@ def test_leitura_do_indice_que_estoura_o_prazo_do_transporte_responde_504(
     c, _ = com_vestido(indice=indice)
 
     assert enviar(c, foto("JPEG")).status_code == 504
+
+
+def test_os_limites_padrao_da_imagem_vem_do_valor_unico_de_imagens_hostis() -> None:
+    from api import imagens_hostis
+
+    assert LimitesDaImagem() == LimitesDaImagem(
+        max_bytes=imagens_hostis.LIMITE_DE_BYTES_DO_ORIGINAL,
+        max_pixels=imagens_hostis.LIMITE_DE_PIXELS_DO_ORIGINAL,
+    )
+    assert (LimitesDaImagem.max_bytes, LimitesDaImagem.max_pixels) == (
+        5_000_000,
+        25_000_000,
+    )

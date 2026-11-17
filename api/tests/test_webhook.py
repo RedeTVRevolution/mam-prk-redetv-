@@ -9,9 +9,10 @@ from api.modelo_do_job import Job
 from api.webhook import (
     CofreEmMemoria,
     RepositorioDeWebhooksEmMemoria,
+    Resultado,
     UrlInvalida,
     assinar,
-    entregar,
+    entregar_uma_vez,
     montar_evento,
     registrar_webhook,
     registrar_webhook_main,
@@ -202,23 +203,14 @@ class HttpFalso:
 def _entregar(
     a: Ambiente,
     http: HttpFalso,
-    esperas: list[float] | None = None,
     resolver: Callable[[str], list[str]] = _publico,
-) -> bool:
+) -> Resultado:
     evento = montar_evento(_job(), a.webhooks, AGORA)
     assert evento is not None
     registro = a.webhooks.obter("Legado")
     assert registro is not None
-    esperas = [] if esperas is None else esperas
-    return entregar(
-        evento,
-        registro,
-        a.cofre,
-        http,
-        resolver=resolver,
-        dormir=esperas.append,
-        sortear=lambda teto: teto,
-        relogio=lambda: AGORA,
+    return entregar_uma_vez(
+        evento, registro, a.cofre, http, resolver=resolver, relogio=lambda: AGORA
     )
 
 
@@ -226,7 +218,7 @@ def test_entrega_assinada_como_o_cliente_confere() -> None:
     a = Ambiente()
     http = HttpFalso(204)
 
-    assert _entregar(a, http)
+    assert _entregar(a, http) == "entregue"
 
     url, corpo, cab = http.chamadas[0]
     assert url == URL
@@ -239,74 +231,42 @@ def test_entrega_assinada_como_o_cliente_confere() -> None:
     assert dados["job_id"] == "job-1"
 
 
-def test_2xx_encerra_a_entrega() -> None:
-    http = HttpFalso(200)
-
-    assert _entregar(Ambiente(), http)
-    assert len(http.chamadas) == 1
-
-
 @pytest.mark.parametrize("status", [400, 401, 404, 410])
-def test_4xx_nao_repete(status: int) -> None:
+def test_4xx_descarta(status: int) -> None:
     http = HttpFalso(status)
 
-    assert not _entregar(Ambiente(), http)
+    assert _entregar(Ambiente(), http) == "descartar"
     assert len(http.chamadas) == 1
 
 
 @pytest.mark.parametrize("status", [408, 429, 500, 503])
-def test_408_429_e_5xx_repetem_com_o_mesmo_id(status: int) -> None:
-    http = HttpFalso(status, status, 200)
-    esperas: list[float] = []
+def test_408_429_e_5xx_pedem_repetir(status: int) -> None:
+    http = HttpFalso(status)
 
-    assert _entregar(Ambiente(), http, esperas)
-
-    ids = {c[2]["X-Webhook-Id"] for c in http.chamadas}
-    assert len(http.chamadas) == 3 and len(ids) == 1
-    assert len(esperas) == 2
+    assert _entregar(Ambiente(), http) == "repetir"
+    assert len(http.chamadas) == 1
 
 
-def test_falha_de_rede_repete() -> None:
-    http = HttpFalso(ConnectionError(), 200)
+def test_falha_de_rede_pede_repetir() -> None:
+    http = HttpFalso(ConnectionError())
 
-    assert _entregar(Ambiente(), http)
-    assert len(http.chamadas) == 2
-
-
-def test_desiste_no_limite_com_esperas_crescentes_dentro_do_teto() -> None:
-    from api.webhook import ESPERA_TETO_S, REENTREGAS
-
-    http = HttpFalso(*[500] * 100)
-    esperas: list[float] = []
-
-    assert not _entregar(Ambiente(), http, esperas)
-
-    assert len(http.chamadas) == REENTREGAS + 1
-    assert esperas == sorted(esperas) and esperas[0] < esperas[-1]
-    assert max(esperas) <= ESPERA_TETO_S
+    assert _entregar(Ambiente(), http) == "repetir"
 
 
-def test_dns_fora_do_ar_na_entrega_repete() -> None:
-    respostas: list[list[str] | OSError] = [socket.gaierror(), ["93.184.216.34"]]
-
+def test_dns_fora_do_ar_na_entrega_pede_repetir() -> None:
     def resolver(host: str) -> list[str]:
-        r = respostas.pop(0)
-        if isinstance(r, OSError):
-            raise r
-        return r
+        raise socket.gaierror()
 
     http = HttpFalso(200)
-    esperas: list[float] = []
 
-    assert _entregar(Ambiente(), http, esperas, resolver)
-    assert len(http.chamadas) == 1 and len(esperas) == 1
+    assert _entregar(Ambiente(), http, resolver) == "repetir"
+    assert http.chamadas == []
 
 
 def test_host_que_passa_a_resolver_para_ip_privado_nao_e_chamado() -> None:
-    a = Ambiente()
     http = HttpFalso()
 
-    assert not _entregar(a, http, resolver=lambda host: ["10.0.0.9"])
+    assert _entregar(Ambiente(), http, lambda host: ["10.0.0.9"]) == "descartar"
     assert http.chamadas == []
 
 

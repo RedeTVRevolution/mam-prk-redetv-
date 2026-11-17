@@ -43,6 +43,9 @@ CodigoDeFalha = Literal[
     "codec_nao_suportado",
     "duracao_excedida",
     "upload_expirado",
+    # A validação ou a detecção de cortes estourou o tempo: não é defeito do arquivo, mas
+    # o reprocessamento não recomeça pela validação; envie o mesmo arquivo de novo.
+    "processamento_demorou_demais",
     "analise_falhou",
     "transcricao_falhou",
     "ocr_falhou",
@@ -188,7 +191,11 @@ class Job(BaseModel):
     inicio_da_passada: datetime | None = None
     # Em qual `reprocessamentos` o fim `falhou` deste Job já foi avisado (webhook e evento de
     # uso) por `api.fim_do_job`, o caminho do `falhou` que o Workflows grava; `None` se nunca.
+    # Só é gravado depois dos dois eventos abaixo: se um falhar, o Job de aviso repete só
+    # o que ainda não saiu (#691).
     fim_avisado_no_reprocessamento: int | None = None
+    fim_webhook_enviado_no_reprocessamento: int | None = None
+    fim_uso_enviado_no_reprocessamento: int | None = None
     # `None` fora da lixeira. Na lixeira o Job só o Administrador enxerga; nada é apagado.
     lixeira: EnvioParaLixeira | None = None
     # Os `catalogo_id` que aparecem na Decupagem entregue (Correções aplicadas, pessoas

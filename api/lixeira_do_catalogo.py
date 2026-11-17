@@ -34,6 +34,7 @@ from api.lixeira import (
     PRAZO_DA_PURGA,
     SISTEMA_DA_PURGA,
     Envio,
+    IdENome,
     ItemDaLixeira,
     PedidoDePurga,
     item_da_lixeira,
@@ -66,11 +67,6 @@ class ImpactoDaMarca(BaseModel):
     # O que o relatório de marcas deixa de contar, pelo nome e pelos apelidos (#597); sem
     # relatório configurado, 0. A busca entra só no texto da tela, sem número.
     insercoes_que_saem_do_relatorio: int = 0
-
-
-class Restaurado(BaseModel):
-    id: str
-    nome: str
 
 
 def _registro(
@@ -337,7 +333,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             Usuario,
             Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
         ],
-    ) -> Restaurado:
+    ) -> IdENome:
         achada = pessoa(id_da_pessoa)
         if achada.lixeira is None:
             raise HTTPException(409, "A pessoa não está na lixeira")
@@ -356,7 +352,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         except Exception:
             lixeira_da_pessoa(achada.id, achada.lixeira)
             raise
-        return Restaurado(id=achada.id, nome=achada.nome)
+        return IdENome(id=achada.id, nome=achada.nome)
 
     @rotas.post("/marcas/{id_da_marca}/restaurar")
     def restaurar_marca(
@@ -365,7 +361,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             Usuario,
             Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
         ],
-    ) -> Restaurado:
+    ) -> IdENome:
         achada = marca(id_da_marca)
         if achada.lixeira is None:
             raise HTTPException(409, "A marca não está na lixeira")
@@ -383,14 +379,14 @@ def criar_rotas_da_lixeira_do_catalogo(
         except Exception:
             lixeira_da_marca(achada.id, achada.lixeira)
             raise
-        return Restaurado(id=achada.id, nome=achada.nome)
+        return IdENome(id=achada.id, nome=achada.nome)
 
     def purgar(
         tipo: Literal["pessoa", "marca"],
         achada: Any,
         pedido: PedidoDePurga,
         autor: Usuario,
-    ) -> Restaurado:
+    ) -> IdENome:
         login_recente_ou_403(autor, relogio(), login_recente)
         if achada.lixeira is None:
             raise HTTPException(409, "Só se purga o que está na lixeira")
@@ -418,7 +414,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         except (PessoaInexistente, MarcaInexistente):
             raise HTTPException(409, "O item já saiu da lixeira") from None
         ao_mudar()
-        return Restaurado(id=achada.id, nome=achada.nome)
+        return IdENome(id=achada.id, nome=achada.nome)
 
     @rotas.post("/pessoas/{id_da_pessoa}/purgar")
     def purgar_pessoa(
@@ -428,7 +424,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             Usuario,
             Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
         ],
-    ) -> Restaurado:
+    ) -> IdENome:
         return purgar("pessoa", pessoa(id_da_pessoa), pedido, autor)
 
     @rotas.post("/marcas/{id_da_marca}/purgar")
@@ -439,7 +435,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             Usuario,
             Depends(exige("lixeira.gerir", "Chave de sistema não mexe na lixeira")),
         ],
-    ) -> Restaurado:
+    ) -> IdENome:
         return purgar("marca", marca(id_da_marca), pedido, autor)
 
     return rotas

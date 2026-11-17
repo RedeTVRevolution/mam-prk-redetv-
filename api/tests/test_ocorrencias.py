@@ -5,7 +5,6 @@ from typing import Any
 
 from api.correcoes import versao_do_modelo
 from api.decupagem import Pessoa
-from api.pessoas import tempo_de_tela_ms
 from api.tests.test_correcoes import MODELO, Mundo
 
 
@@ -47,7 +46,7 @@ def test_nao_e_tira_o_tempo_de_tela_da_pessoa() -> None:
     _nao_e(mundo)
 
     ana = Pessoa.model_validate(_pessoa(mundo, "Ana Souza"))
-    assert tempo_de_tela_ms(ana) == 0
+    assert ana.na_imagem == []
 
 
 def test_pessoa_sem_nenhuma_ocorrencia_some_da_decupagem() -> None:
@@ -367,4 +366,4 @@ def test_o_modelo_cru_nao_muda_e_tela_de_tempo_cai() -> None:
 
     assert cru["pessoas"][0]["na_imagem"][0]["inicio_ms"] == 1000
     ana = Pessoa.model_validate(_pessoa(mundo, "Ana Souza"))
-    assert tempo_de_tela_ms(ana) == 0
+    assert ana.na_imagem == []

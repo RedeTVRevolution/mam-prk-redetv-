@@ -217,7 +217,7 @@ def test_a_foto_vai_ao_modelo_da_consulta_e_volta_um_termo_saneado() -> None:
     [chamada] = transporte.chamadas
     assert chamada.modelo == "gemini-3.5-flash-lite"
     assert chamada.imagens == (b"jpeg",) and chamada.video_uri == ""
-    assert chamada.ferramentas == () and chamada.timeout_s == TEMPO_DA_CONSULTA_S
+    assert chamada.timeout_s == TEMPO_DA_CONSULTA_S
     assert chamada.rotulos["etapa"] == "descricao_da_foto"
     assert chamada.modo == "standard"  # a busca por foto também fica sem Flex (#402)
     assert (

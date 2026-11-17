@@ -24,6 +24,7 @@ from PIL import Image
 
 from api.decupagem import Decupagem, Plano
 from api.objetos_job import hash_do_quadro
+from api.paralelo import em_paralelo
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,8 @@ LIMITE_DO_CORTE_REAL = 10
 LIMITE_DE_COR = 0.25
 _BINS = 4  # por canal: 64 faixas de cor no histograma
 _LADO_DO_HISTOGRAMA = 32
+# Leituras do Storage ao mesmo tempo (#684); o número final sai da medição no dev.
+VAGAS_DE_LEITURA = 8
 
 
 @dataclass(frozen=True)
@@ -109,10 +112,10 @@ def agrupar(
 
 
 def _quadro_chave(plano: Plano) -> str | None:
-    return plano.quadro or (q[len(q) // 2] if (q := _quadros(plano)) else None)
+    return plano.quadro or (q[len(q) // 2] if (q := quadros_do_plano(plano)) else None)
 
 
-def _quadros(plano: Plano) -> list[str]:
+def quadros_do_plano(plano: Plano) -> list[str]:
     return plano.quadros or ([plano.quadro] if plano.quadro else [])
 
 
@@ -129,28 +132,40 @@ def com_os_planos_recorrentes(
     """
     planos = sorted(decupagem.planos, key=lambda p: p.inicio_ms)
 
-    lidos: dict[str, Sinal | None] = {}
+    def ler(caminho: str) -> Sinal | None:
+        try:
+            return sinal_do_quadro(Image.open(BytesIO(ler_quadro(caminho))))
+        except Exception:  # noqa: BLE001 - quadro que falta ou não abre só tira o plano do grupo
+            log.warning("quadro %s não abriu; o plano fica sem grupo", caminho)
+            return None
+
+    # Cada quadro é lido uma vez (o do meio de um plano é, no plano de um quadro só, o das
+    # duas bordas), todos em paralelo; o cálculo abaixo só consulta o que já foi lido.
+    # `ler` não levanta (quadro que não abre vira None), então nada cancela as outras leituras.
+    caminhos = sorted(
+        {
+            c
+            for p in planos
+            for c in (
+                _quadro_chave(p),
+                *quadros_do_plano(p)[:1],
+                *quadros_do_plano(p)[-1:],
+            )
+            if c
+        }
+    )
+    lidos = dict(
+        zip(caminhos, em_paralelo(caminhos, ler, VAGAS_DE_LEITURA), strict=True)
+    )
 
     def sinal(caminho: str | None) -> Sinal | None:
-        """Cada quadro é lido uma vez: o do meio de um plano é, no plano de um quadro só, o
-        das duas bordas."""
-        if caminho is None:
-            return None
-        if caminho not in lidos:
-            try:
-                lidos[caminho] = sinal_do_quadro(
-                    Image.open(BytesIO(ler_quadro(caminho)))
-                )
-            except Exception:  # noqa: BLE001 - quadro que falta ou não abre só tira o plano do grupo
-                log.warning("quadro %s não abriu; o plano fica sem grupo", caminho)
-                lidos[caminho] = None
-        return lidos[caminho]
+        return None if caminho is None else lidos.get(caminho)
 
     sinais = [sinal(_quadro_chave(p)) for p in planos]
     reais: list[bool] = []
     for a, b in pairwise(planos):
-        antes = sinal(_quadros(a)[-1] if _quadros(a) else None)
-        depois = sinal(_quadros(b)[0] if _quadros(b) else None)
+        antes = sinal(quadros_do_plano(a)[-1] if quadros_do_plano(a) else None)
+        depois = sinal(quadros_do_plano(b)[0] if quadros_do_plano(b) else None)
         reais.append(
             antes is None
             or depois is None

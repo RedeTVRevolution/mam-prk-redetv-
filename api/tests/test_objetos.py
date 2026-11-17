@@ -11,6 +11,7 @@ from api.decupagem import (
     CATEGORIAS_DE_OBJETO,
     CORES_BASE,
     RELACOES_DO_OBJETO,
+    VERSAO_ESQUEMA,
     Decupagem,
     esquema_do_modelo,
 )
@@ -156,7 +157,7 @@ def test_resposta_simulada_com_carro_sem_dono_e_produto_no_telao_sai_em_14() -> 
 
     d = _rodar(TransporteFalso(_resposta_com_objetos(carro, produto)))
 
-    assert d.versao_esquema == "1.5"
+    assert d.versao_esquema == VERSAO_ESQUEMA
     assert [(o.categoria, o.pessoa, o.detalhe) for o in d.objetos] == [
         ("veiculo", None, None),
         ("produto", None, "no telão"),

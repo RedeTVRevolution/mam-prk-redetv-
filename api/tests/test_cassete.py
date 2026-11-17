@@ -110,7 +110,7 @@ def test_resposta_gravada_passa_no_esquema_e_nos_invariantes_de_primeira() -> No
     )
 
     assert d.versao_esquema == VERSAO_ESQUEMA
-    assert d.programa.resumo
+    assert d.programa.blocos
     assert len(transporte.chamadas) == 1
 
 

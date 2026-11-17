@@ -7,8 +7,9 @@ from typing import Any
 
 import pytest
 import requests
+from pydantic import BaseModel
 
-from api.decupagem import Video, esquema_do_modelo
+from api.decupagem import VERSAO_ESQUEMA, Video, esquema_do_modelo
 from api.gemini import (
     INSTRUCAO,
     MODO_FLEX,
@@ -22,6 +23,7 @@ from api.gemini import (
     _validar,
     analisar,
     instrucao,
+    validar_json,
 )
 from api.tests.programas_de_teste import perfis_da_tv_fama
 from api.tests.test_decupagem import DURACAO_MS, decupagem_valida
@@ -215,16 +217,15 @@ def test_instrucao_pede_pessoa_da_pauta_em_pessoas() -> None:
 def test_devolve_decupagem_valida() -> None:
     t = TransporteFalso(BOA)
     d = _rodar(t)
-    assert d.programa.resumo == "Jornal da noite"
+    assert d.pautas[0].resumo == "Chuva forte em SP"
     assert len(t.chamadas) == 1
 
 
-def test_chamada_leva_job_como_rotulo_e_nenhuma_ferramenta() -> None:
+def test_chamada_leva_job_como_rotulo() -> None:
     t = TransporteFalso(BOA)
     _rodar(t)
     c = t.chamadas[0]
     assert c.rotulos == {"job_id": JOB}
-    assert c.ferramentas == ()
     assert c.video_uri == VIDEO
     assert c.esquema["additionalProperties"] is False
     assert "video" not in c.esquema["properties"]
@@ -269,7 +270,7 @@ def test_bloco_video_vem_da_quarentena_e_nao_do_modelo() -> None:
 
 def test_versao_e_origem_vem_do_servidor() -> None:
     d = _rodar(TransporteFalso(BOA))
-    assert d.versao_esquema == "1.5"
+    assert d.versao_esquema == VERSAO_ESQUEMA
     assert d.pessoas[0].origem == "modelo"
 
 
@@ -652,7 +653,7 @@ def test_erros_do_transporte_entram_nas_tentativas() -> None:
         dormir=relogio.dormir,
     )
 
-    assert d.programa.resumo == "Jornal da noite"
+    assert d.pautas[0].resumo == "Chuva forte em SP"
     assert len(sessao.pedidos) == 3
     assert len(relogio.esperas) == 2
 
@@ -852,3 +853,71 @@ def test_analise_falhou_leva_o_erro_http_do_servico() -> None:
     t = TransporteFalso(ErroHttp(400, "INVALID_ARGUMENT", "esquema recusado"))
     with pytest.raises(AnaliseFalhou, match="400 INVALID_ARGUMENT: esquema recusado"):
         _rodar(t)
+
+
+def test_prazo_esgotado_diz_o_prazo_e_o_ultimo_erro_e_difere_do_timeout_de_rede() -> (
+    None
+):
+    relogio = Relogio()
+
+    class TransporteLento(TransporteFalso):
+        def gerar(self, chamada: Chamada) -> str:
+            relogio.agora += TIMEOUT_DA_REDE_S
+            return super().gerar(chamada)
+
+    with pytest.raises(AnaliseFalhou) as prazo:
+        _rodar(TransporteLento(*[ErroHttp(429)] * 6, BOA), relogio)
+    with pytest.raises(AnaliseFalhou) as rede:
+        _rodar(TransporteFalso(*[ErroHttp(503, "Timeout", "lento")] * 6))
+
+    assert "prazo" in str(prazo.value) and "HTTP 429" in str(prazo.value)
+    assert "prazo" not in str(rede.value) and "Timeout" in str(rede.value)
+
+
+def test_esquema_esgotado_diz_que_o_modelo_nao_respeitou_o_esquema() -> None:
+    with pytest.raises(AnaliseFalhou, match="esquema"):
+        _rodar(TransporteFalso("{}", "{}", "{}"))
+
+
+def test_timeout_de_rede_deixa_linha_de_log_com_evento_proprio_antes_do_503() -> None:
+    linhas: list[str] = []
+    transporte = TransporteVertex(
+        "p", SessaoFalsa(requests.Timeout("lento")), registrar=linhas.append
+    )
+
+    with pytest.raises(ErroHttp) as erro:
+        transporte.gerar(_chamada())
+
+    [registro] = [json.loads(linha) for linha in linhas]
+    assert registro["evento"] == "falha_de_rede_do_modelo"
+    assert (
+        registro["erro"] == "Timeout" and registro["modelo"] == "gemini-3.5-flash-lite"
+    )
+    assert erro.value.status == 503 and "Timeout" in str(erro.value)
+
+
+def test_esquema_esgotado_corta_o_detalhe_da_mensagem() -> None:
+    muitos_erros = json.dumps({"transcricao": [{"x": i} for i in range(1000)]})
+    with pytest.raises(AnaliseFalhou) as e:
+        _rodar(TransporteFalso(muitos_erros, muitos_erros, muitos_erros))
+    assert len(str(e.value)) < 1000
+
+
+class _Modelo(BaseModel):
+    a: int
+
+
+def test_validar_json_devolve_o_modelo_da_resposta_valida() -> None:
+    assert validar_json(_Modelo, '{"a": 1}') == _Modelo(a=1)
+
+
+def test_validar_json_troca_o_erro_do_pydantic_por_resposta_fora_do_esquema() -> None:
+    with pytest.raises(ValueError, match="^resposta fora do esquema$"):
+        validar_json(_Modelo, '{"a": "x"}')
+
+
+def test_resposta_nova_sem_resumo_do_programa_passa_pelo_validar() -> None:
+    dados = resposta_em_mm_ss()
+    dados["programa"].pop("resumo", None)
+    d = _validar(json.dumps(dados), VIDEO_CONFIAVEL)
+    assert d.pautas[0].resumo == "Chuva forte em SP"

@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from api.taxonomia_de_objetos import OUTRO
 
-VersaoEsquema = Literal["1.2", "1.3", "1.4", "1.5"]
-VERSAO_ESQUEMA: VersaoEsquema = "1.5"  # o mypy cobra se o tipo mudar sozinho
+VersaoEsquema = Literal["1.2", "1.3", "1.4", "1.5", "1.6"]
+VERSAO_ESQUEMA: VersaoEsquema = "1.6"  # o mypy cobra se o tipo mudar sozinho
 
 Texto = Annotated[str, Field(max_length=2000)]
 Rotulo = Annotated[str, Field(max_length=200)]
@@ -67,8 +67,15 @@ class Bloco(Intervalo):
 
 
 class Programa(_Estrito):
-    resumo: Texto
     blocos: list[Bloco]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sem_resumo_antigo(cls, dados: Any) -> Any:
+        """As versões anteriores gravaram `resumo`, que ninguém lê (#680): sai ao ler."""
+        if isinstance(dados, dict):
+            return {k: v for k, v in dados.items() if k != "resumo"}
+        return dados
 
 
 class Pauta(Intervalo):
@@ -367,6 +374,9 @@ class Plano(Intervalo):
     quadros: list[str] = []
     # O inventário de objetos (#244): preenchido pelo servidor, fora do esquema da análise.
     inventario: list[ObjetoDoInventario] = []
+    # `False` quando o modelo pulou o plano mesmo depois de pedido de novo (#692): o
+    # `inventario` vazio então não quer dizer "sem objetos". Decupagem antiga: `True`.
+    inventariado: bool = True
     # O grupo de planos da mesma câmera e do mesmo enquadramento (#546), um id curto por
     # vídeo; `None` no plano sem par. O servidor grava, o modelo não conhece.
     plano_recorrente: Id | None = None
@@ -564,6 +574,7 @@ CAMPOS_DO_SERVIDOR = frozenset(
         "motivo",
         "correcoes_descartadas",
         "inventario",
+        "inventariado",
         "inventario_gerado_por",
         "plano_recorrente",
         "versao_pipeline",

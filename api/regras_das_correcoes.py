@@ -284,7 +284,7 @@ def _id_no_catalogo(
         ):
             raise CatalogoIdInvalido(novo.catalogo_id)
         return achado.id
-    if catalogo is None or not entrada.acha_no_catalogo:
+    if catalogo is None or entrada.catalogo_de != "pessoas":
         return None
     achadas = catalogo.achar(novo.valor)
     return achadas[0].id if len(achadas) == 1 else None

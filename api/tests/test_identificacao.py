@@ -3,10 +3,17 @@
 import json
 from typing import Any
 
+import pytest
+
 from api.analise_por_janelas import analisar_video
 from api.catalogo import CatalogoEmMemoria
-from api.decupagem import Decupagem, Video
-from api.identificacao import Candidato, candidatos_do_video, identificar
+from api.decupagem import VERSAO_ESQUEMA, Decupagem, Video
+from api.identificacao import (
+    Candidato,
+    candidatos_do_video,
+    identificar,
+    tolerancia_da_fala_do_ambiente,
+)
 from api.programas import PerfilDoPrograma, PessoaDoPerfil, perfis_dos_programas
 from api.tests.programas_de_teste import cadastro_com_tv_fama
 from api.tests.test_correcoes import Mundo
@@ -47,7 +54,7 @@ def decupagem(
         {
             "versao_esquema": "1.3",
             "video": {"sha256": "a" * 64, "duracao_ms": 600_000},
-            "programa": {"resumo": "", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": pessoas,
             "planos": [],
@@ -327,7 +334,7 @@ def _resposta_do_modelo(nome: str, fontes: list[str]) -> str:
     """O que o Gemini devolve para um vídeo de 6 min: o homem de barba nomeado."""
     return json.dumps(
         {
-            "programa": {"resumo": "", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": [
                 {
@@ -376,7 +383,7 @@ def test_leaozinho_dito_com_o_homem_de_barba_na_imagem_confirma_leao_lobo() -> N
     )
     [leao] = catalogo.achar("Leão Lobo")
     assert p.catalogo_id == leao.id
-    assert d.versao_esquema == "1.5"
+    assert d.versao_esquema == VERSAO_ESQUEMA
 
 
 def test_nelson_rubens_com_fala_e_contexto_sem_o_nome_no_whisper_vira_palpite() -> None:
@@ -467,3 +474,39 @@ def test_correcao_atendida_mantem_a_origem_e_o_estado_do_modelo() -> None:
         "modelo_forte",
         "confirmado",
     )
+
+
+def test_monta_o_fluxo_de_palavras_uma_vez_com_varias_pessoas() -> None:
+    leitura = whisper(("Leão", 101.0), ("Lobo", 101.5), ("Nelson", 103.0))
+    leituras = 0
+
+    class Contada:
+        @property
+        def palavras(self) -> list[Palavra]:
+            nonlocal leituras
+            leituras += 1
+            return leitura.palavras
+
+    d = decupagem(
+        [
+            pessoa("pes01", "Leão Lobo", [(100_000, 110_000)]),
+            pessoa("pes02", "Nelson", [(100_000, 110_000)]),
+        ]
+    )
+
+    r = identificar(d, transcricao=Contada())  # type: ignore[arg-type]
+
+    assert leituras == 1
+    assert [p.estado_do_nome for p in r.pessoas] == ["confirmado", "confirmado"]
+
+
+def test_tolerancia_da_fala_vem_do_ambiente_e_o_padrao_e_2000() -> None:
+    assert tolerancia_da_fala_do_ambiente({}) == 2000
+    assert tolerancia_da_fala_do_ambiente({"TOLERANCIA_DA_FALA_MS": "3500"}) == 3500
+    assert tolerancia_da_fala_do_ambiente({"TOLERANCIA_DA_FALA_MS": "0"}) == 0
+
+
+@pytest.mark.parametrize("valor", ["-1", "abc", "1.5", ""])
+def test_tolerancia_da_fala_invalida_e_recusada(valor: str) -> None:
+    with pytest.raises(ValueError, match="TOLERANCIA_DA_FALA_MS"):
+        tolerancia_da_fala_do_ambiente({"TOLERANCIA_DA_FALA_MS": valor})

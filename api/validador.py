@@ -1,7 +1,8 @@
 """Validador da quarentena: camadas 4 a 7 de Entradas hostis.
 
 Devolve a cópia limpa, o proxy de reprodução e o SHA-256, ou levanta `Recusa`
-com um código. A saída das ferramentas nunca sai daqui.
+com um código. A saída das ferramentas (stderr resumido) vai só para o log: a `Recusa`
+a leva em `stderr`, e o Job de validação a registra; ela nunca chega ao Job nem ao cliente.
 """
 
 import hashlib
@@ -12,7 +13,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from api.cortes import LIMIAR_PADRAO, DeteccaoFalhou, detectar_cortes
+from api.cortes import (
+    LIMIAR_PADRAO,
+    TEMPO_LIMITE_S,
+    CausaDaFalha,
+    filtro_de_cortes,
+    ler_cortes,
+    resumir_stderr,
+)
 from api.modelo_do_job import CodigoDeFalha
 
 MARCAS_PERMITIDAS = {b"isom", b"mp41", b"mp42", b"avc1"}
@@ -21,7 +29,6 @@ LADO_CURTO_MAXIMO = 1080  # 1080p, também em retrato
 LADO_LONGO_MAXIMO = 1920
 DURACAO_MINIMA_S = 1.0
 DURACAO_MAXIMA_S = 4 * 3600.0
-TEMPO_LIMITE_S = 7200
 NOME_DO_AUDIO = "audio.wav"
 DEMUXERS_ACEITOS = "mov,mp4,m4a,3gp,3g2,mj2"
 TAXA_DO_AUDIO_HZ = 16_000
@@ -30,9 +37,24 @@ FORMATO_DO_TIMECODE = re.compile(r"([01]\d|2[0-3]):[0-5]\d:[0-5]\d[:;]\d{2}")
 
 
 class Recusa(Exception):
-    def __init__(self, codigo: CodigoDeFalha) -> None:
+    """A mensagem é só o código; `causa` e `stderr` são para o log."""
+
+    def __init__(
+        self,
+        codigo: CodigoDeFalha,
+        causa: CausaDaFalha | None = None,
+        stderr: str = "",
+    ) -> None:
         super().__init__(codigo)
         self.codigo = codigo
+        self.causa = causa
+        self.stderr = stderr
+
+
+def _saiu_com_erro(r: subprocess.CompletedProcess[bytes]) -> Recusa:
+    return Recusa(
+        "arquivo_corrompido", "ffmpeg_saiu_com_erro", resumir_stderr(r.stderr)
+    )
 
 
 @dataclass(frozen=True)
@@ -56,8 +78,11 @@ def _executar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
             stdin=subprocess.DEVNULL,
             timeout=TEMPO_LIMITE_S,
         )
-    except subprocess.TimeoutExpired:
-        raise Recusa("arquivo_corrompido") from None
+    except subprocess.TimeoutExpired as e:
+        # Estourar o tempo não é defeito do arquivo: pede novo envio, sem exportar.
+        raise Recusa(
+            "processamento_demorou_demais", "tempo_esgotado", resumir_stderr(e.stderr)
+        ) from e
 
 
 def _sha256(arquivo: Path) -> str:
@@ -91,7 +116,7 @@ def _sondar(entrada: Path) -> dict[str, Any]:
         ]
     )  # fmt: skip
     if resultado.returncode != 0:
-        raise Recusa("arquivo_corrompido")
+        raise _saiu_com_erro(resultado)
     try:
         sondagem: dict[str, Any] = json.loads(resultado.stdout)
     except ValueError:
@@ -174,43 +199,11 @@ def validar(
     saida.mkdir(parents=True, exist_ok=True)
     copia = saida / "copia_limpa.mp4"
     proxy = saida / "proxy.mp4"
-    comum = ["ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y"]
-    # Mesmo demuxer do ffprobe: o ffmpeg não escolhe o formato pelo conteúdo do original.
-    entrada_mp4 = ["-f", DEMUXERS_ACEITOS]
-    # Regravação sem recodificar: só vídeo e áudio, sem metadados nem capítulos.
-    regravar = _executar(
-        [
-            *comum, *entrada_mp4, "-i", str(entrada),
-            "-map", "0:v", "-map", "0:a?",
-            "-c", "copy", "-map_metadata", "-1", "-map_chapters", "-1",
-            "-movflags", "+faststart", str(copia),
-        ]
-    )  # fmt: skip
-    # Decodifica o arquivo inteiro e gera o proxy na mesma passada.
-    gerar_proxy = _executar(
-        [
-            *comum, "-xerror", "-err_detect", "explode",
-            *entrada_mp4, "-i", str(entrada),
-            "-map", "0:v", "-map", "0:a?",
-            # veryfast: no clipe2, 41% mais rápido que o medium e SSIM de 0,986 contra 0,990.
-            "-vf", "scale=-2:480", "-c:v", "libx264", "-preset", "veryfast",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-map_metadata", "-1", "-map_chapters", "-1",
-            "-movflags", "+faststart", str(proxy),
-        ]
-    )  # fmt: skip
-    if regravar.returncode != 0 or gerar_proxy.returncode != 0:
-        raise _corrompido(copia, proxy)
-    audio = None
-    # A cópia limpa leva as mesmas faixas da entrada: a sondagem dela basta.
-    if any(f.get("codec_type") == "audio" for f in sondagem.get("streams", [])):
-        audio = _separar_audio(copia, saida)
-        if audio is None:
-            raise _corrompido(copia, proxy)
     try:
-        cortes = detectar_cortes(copia, limiar_de_cortes)
-    except DeteccaoFalhou:
-        raise _corrompido(copia, proxy, audio) from None
+        audio, cortes = _gerar_saidas(entrada, copia, proxy, sondagem, limiar_de_cortes)
+    except Recusa:
+        _apagar(copia, proxy, saida / NOME_DO_AUDIO)
+        raise
     return Aceito(
         copia_limpa=copia,
         proxy=proxy,
@@ -223,26 +216,67 @@ def validar(
     )
 
 
-def _corrompido(*gerados: Path | None) -> Recusa:
-    """Apaga o que a validação já gravou e devolve a recusa."""
+def _gerar_saidas(
+    entrada: Path,
+    copia: Path,
+    proxy: Path,
+    sondagem: dict[str, Any],
+    limiar_de_cortes: float,
+) -> tuple[Path | None, list[int]]:
+    """Grava a cópia limpa, o proxy e o áudio; devolve o áudio (se houver) e os cortes.
+
+    `Recusa` em qualquer falha; quem chama apaga o que já foi gravado.
+    """
+    comum = ["ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y"]
+    # Mesmo demuxer do ffprobe: o ffmpeg não escolhe o formato pelo conteúdo do original.
+    entrada_mp4 = ["-f", DEMUXERS_ACEITOS]
+    # Regravação sem recodificar: só vídeo e áudio, sem metadados nem capítulos.
+    regravar = _executar(
+        [
+            *comum, *entrada_mp4, "-i", str(entrada),
+            "-map", "0:v", "-map", "0:a?",
+            "-c", "copy", "-map_metadata", "-1", "-map_chapters", "-1",
+            "-movflags", "+faststart", str(copia),
+        ]
+    )  # fmt: skip
+    if regravar.returncode != 0:
+        raise _saiu_com_erro(regravar)
+    # A cópia limpa leva as mesmas faixas da entrada: a sondagem dela basta.
+    tem_audio = any(f.get("codec_type") == "audio" for f in sondagem.get("streams", []))
+    audio = copia.parent / NOME_DO_AUDIO if tem_audio else None
+    # Um ffmpeg decodifica o original uma vez e entrega as três saídas: o filtro de
+    # cortes vê os quadros em resolução cheia, antes do `scale` do proxy.
+    processo = _executar(
+        [
+            *comum, "-xerror", "-err_detect", "explode",
+            *entrada_mp4, "-i", str(entrada),
+            "-filter_complex",
+            (
+                "[0:v]split=2[para_cortes][para_proxy];"
+                f"[para_cortes]{filtro_de_cortes(limiar_de_cortes)}[cortes];"
+                "[para_proxy]scale=-2:480[reduzido]"
+            ),
+            # veryfast: no clipe2, 41% mais rápido que o medium e SSIM de 0,986 contra 0,990.
+            "-map", "[reduzido]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-map_metadata", "-1", "-map_chapters", "-1",
+            "-movflags", "+faststart", str(proxy),
+            *(
+                ["-map", "0:a", "-ac", "1", "-ar", str(TAXA_DO_AUDIO_HZ),
+                 "-c:a", "pcm_s16le", "-map_metadata", "-1", str(audio)]
+                if audio
+                else []
+            ),
+            "-map", "[cortes]", "-f", "null", "-",
+        ]
+    )  # fmt: skip
+    if processo.returncode != 0:
+        raise _saiu_com_erro(processo)
+    return audio, ler_cortes(processo.stdout.decode(errors="replace"))
+
+
+def _apagar(*gerados: Path | None) -> None:
+    """Apaga o que a validação já gravou."""
     for arquivo in gerados:
         if arquivo is not None:
             arquivo.unlink(missing_ok=True)
-    return Recusa("arquivo_corrompido")
-
-
-def _separar_audio(copia: Path, saida: Path) -> Path | None:
-    """O áudio da cópia limpa em mono e 16 kHz, ao lado dela; `None` se o ffmpeg falha."""
-    audio = saida / NOME_DO_AUDIO
-    extrair = _executar(
-        [
-            "ffmpeg", "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-y",
-            "-i", str(copia), "-map", "0:a", "-vn",
-            "-ac", "1", "-ar", str(TAXA_DO_AUDIO_HZ), "-c:a", "pcm_s16le",
-            "-map_metadata", "-1", str(audio),
-        ]
-    )  # fmt: skip
-    if extrair.returncode != 0:
-        audio.unlink(missing_ok=True)
-        return None
-    return audio

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 import requests
+from pydantic import BaseModel, ValidationError
 
 from api.decupagem import (
     CAMPOS_DO_SERVIDOR,
@@ -27,8 +28,10 @@ from api.decupagem import (
 from api.espera import espera_com_jitter, sorteio_uniforme
 from api.programas import Perfis
 from api.sinais import (
+    LIMITE_DO_MOTIVO,
     Registrar,
     imprimir,
+    registro_da_falha_de_rede,
     registro_da_resposta_fora_do_esquema,
     registro_das_pessoas_fora_da_pauta,
     registro_do_erro_http,
@@ -177,7 +180,6 @@ class Chamada:
     video_uri: str
     esquema: dict[str, Any]
     rotulos: dict[str, str]
-    ferramentas: tuple[()] = ()  # o modelo nunca recebe ferramentas
     # Trecho do vídeo (`videoMetadata.startOffset`/`endOffset`), em ms do início
     # do arquivo; sem ele, o vídeo inteiro. O modelo conta os tempos do arquivo.
     trecho_ms: tuple[int, int] | None = None
@@ -217,7 +219,9 @@ def _erro_do_servico(resposta: Any) -> tuple[str, str]:
         return "", ""
     if not isinstance(erro, dict):
         return "", ""
-    return str(erro.get("status") or "")[:50], str(erro.get("message") or "")[:300]
+    return str(erro.get("status") or "")[:50], str(erro.get("message") or "")[
+        :LIMITE_DO_MOTIVO
+    ]
 
 
 class AnaliseFalhou(Exception):
@@ -324,7 +328,16 @@ class TransporteVertex:
                 url, json=corpo, headers=cabecalhos, timeout=chamada.timeout_s
             )
         except (requests.RequestException, OSError) as e:
-            raise ErroHttp(503) from e
+            erro = type(e).__name__
+            self._registrar(
+                registro_da_falha_de_rede(
+                    erro,
+                    str(e)[:LIMITE_DO_MOTIVO],
+                    chamada.modelo,
+                    self._etapa or chamada.rotulos.get("etapa"),
+                )
+            )
+            raise ErroHttp(503, erro, str(e)[:LIMITE_DO_MOTIVO]) from e
         if resposta.status_code != 200:
             codigo, mensagem = _erro_do_servico(resposta)
             self._registrar(
@@ -419,6 +432,15 @@ def _validar(texto: str, video: Video, registrar: Registrar = imprimir) -> Decup
     )
 
 
+def validar_json[M: BaseModel](modelo: type[M], texto: str) -> M:
+    """O JSON da resposta no `modelo`; fora do esquema levanta `ValueError` (o
+    `ValidationError` é um, mas a mensagem some do traceback)."""
+    try:
+        return modelo.model_validate_json(texto)
+    except ValidationError as e:
+        raise ValueError("resposta fora do esquema") from e
+
+
 def gerar_validado[T](
     transporte: Transporte,
     chamada: Chamada,
@@ -436,14 +458,19 @@ def gerar_validado[T](
     falhas_rede = 0
     falhas_esquema = 0
     inicio = relogio()
+    ultimo_erro = ""
     while True:
         if relogio() - inicio + TIMEOUT_DA_REDE_S > PRAZO_DA_ANALISE_S:
-            raise AnaliseFalhou()
+            detalhe = f"; último erro: {ultimo_erro}" if ultimo_erro else ""
+            raise AnaliseFalhou(
+                f"prazo da análise esgotado ({PRAZO_DA_ANALISE_S:.0f} s){detalhe}"
+            )
         try:
             texto = transporte.gerar(chamada)
         except ErroHttp as e:
+            ultimo_erro = str(e)[:LIMITE_DO_MOTIVO]
             if not repetivel(e.status) or falhas_rede >= TENTATIVAS_REDE:
-                raise AnaliseFalhou(str(e)) from e
+                raise AnaliseFalhou(str(e)[:LIMITE_DO_MOTIVO]) from e
             dormir(
                 espera_com_jitter(falhas_rede, BACKOFF_BASE_S, BACKOFF_TETO_S, sortear)
             )
@@ -452,11 +479,14 @@ def gerar_validado[T](
         try:
             return validar(texto)
         except ValueError as e:
+            ultimo_erro = f"resposta fora do esquema: {str(e)[:LIMITE_DO_MOTIVO]}"
             registrar(registro_da_resposta_fora_do_esquema(chamada.modelo, str(e)))
             if ao_fora_do_esquema:
                 ao_fora_do_esquema()
             if falhas_esquema >= TENTATIVAS_ESQUEMA:
-                raise AnaliseFalhou() from e
+                raise AnaliseFalhou(
+                    f"esquema esgotado após {falhas_esquema + 1} respostas; {ultimo_erro}"
+                ) from e
             falhas_esquema += 1
 
 

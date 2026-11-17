@@ -728,3 +728,21 @@ def test_reprocessamento_fecha_exatamente_sete_dias_apos_o_envio(
         assert mundo.job() == job
         assert mundo.disparo.disparos == []
         assert mundo.auditoria.consultar(FiltroDeAuditoria()).registros == []
+
+
+def test_tempo_esgotado_na_validacao_nao_reprocessa_e_pede_o_mesmo_envio() -> None:
+    mundo = Mundo(
+        _job(
+            "falhou",
+            codigo_falha="processamento_demorou_demais",
+            etapas={"validacao": _etapa("falhou")},
+        )
+    )
+
+    resposta = mundo.reprocessar()
+
+    assert resposta.status_code == 409
+    detalhe = resposta.json()["detail"]
+    assert "demorou demais" in detalhe and "envie" in detalhe
+    assert "do arquivo" not in detalhe
+    assert mundo.disparo.disparos == []

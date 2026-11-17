@@ -1,6 +1,7 @@
 """O agrupamento dos planos recorrentes (#546), em quadros gerados na hora."""
 
 import io
+import time
 from typing import Any
 
 import pytest
@@ -50,7 +51,7 @@ def _decupagem(planos: list[dict[str, Any]]) -> Decupagem:
         {
             "versao_esquema": "1.5",
             "video": {"sha256": "a" * 64, "duracao_ms": 100_000},
-            "programa": {"resumo": "r", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": [],
             "planos": planos,
@@ -217,3 +218,27 @@ def test_repetir_da_o_mesmo_resultado_e_a_contagem_mostra_planos_e_grupos() -> N
 
     assert duas == uma
     assert contagem(uma) == {"planos": 2, "grupos": 1}
+
+
+def test_os_quadros_sao_lidos_em_paralelo_e_o_resultado_nao_muda() -> None:
+    import threading
+
+    planos = [_plano(f"p{i}", i, c) for i, c in enumerate(["a1", "b1", "a2", "c1"])]
+    emandamento = 0
+    pico = 0
+    trava = threading.Lock()
+
+    def ler(caminho: str) -> bytes:
+        nonlocal emandamento, pico
+        with trava:
+            emandamento += 1
+            pico = max(pico, emandamento)
+        time.sleep(0.05)
+        with trava:
+            emandamento -= 1
+        return _QUADROS[caminho]
+
+    pronta = com_os_planos_recorrentes(_decupagem(planos), ler)
+
+    assert [p.plano_recorrente for p in pronta.planos] == ["rec01", None, "rec01", None]
+    assert pico > 1

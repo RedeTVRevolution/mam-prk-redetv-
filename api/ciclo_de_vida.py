@@ -216,6 +216,7 @@ def rodar_etapa(
 
 
 # Falhas do próprio arquivo: refazer o processamento não as conserta.
+FALHA_DO_ARQUIVO = "A falha é do arquivo: é preciso enviar o vídeo de novo"
 FALHAS_DO_ARQUIVO: frozenset[CodigoDeFalha] = frozenset(
     {
         "formato_invalido",
@@ -274,10 +275,13 @@ def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
             )
         return escolhida
     if job.estado == "falhou":
-        if job.codigo_falha in FALHAS_DO_ARQUIVO or job.codigo_falha is None:
+        if job.codigo_falha == "processamento_demorou_demais":
+            # A recusa apagou o original da quarentena: nada de onde recomeçar.
             raise NaoReprocessavel(
-                "A falha é do arquivo: é preciso enviar o vídeo de novo"
+                "O processamento demorou demais na validação: envie o mesmo vídeo de novo"
             )
+        if job.codigo_falha in FALHAS_DO_ARQUIVO or job.codigo_falha is None:
+            raise NaoReprocessavel(FALHA_DO_ARQUIVO)
     elif job.estado != "concluido":
         raise NaoReprocessavel(f"Job em {job.estado}, não reprocessável")
     falhas = [
@@ -286,13 +290,8 @@ def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
         if (r := job.etapas.get(e)) and r.resultado == "falhou"
     ]
     if job.estado == "falhou":
-        partida = (
-            falhas[0]
-            if falhas
-            else ETAPA_DA_FALHA.get(job.codigo_falha)
-            if job.codigo_falha
-            else None
-        )
+        assert job.codigo_falha is not None  # sem código, já levantou acima
+        partida = falhas[0] if falhas else ETAPA_DA_FALHA.get(job.codigo_falha)
         if partida is None and job.codigo_falha == "processamento_interrompido":
             # O Workflows caiu entre duas etapas, sem etapa em andamento para fechar:
             # recomeça da primeira que não concluiu.
@@ -309,9 +308,7 @@ def etapa_de_partida(job: Job, escolhida: str | None = None) -> NomeDaEtapa:
                 "O processamento parou na validação do arquivo: envie o vídeo de novo"
             )
         if partida is None or partida == "validacao":
-            raise NaoReprocessavel(
-                "A falha é do arquivo: é preciso enviar o vídeo de novo"
-            )
+            raise NaoReprocessavel(FALHA_DO_ARQUIVO)
         return partida
     if not falhas or falhas[0] not in ETAPAS_DEPOIS_DO_CONCLUIDO:
         raise NaoReprocessavel("Job concluído sem etapa que tenha falhado")

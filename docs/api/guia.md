@@ -47,7 +47,7 @@ Exemplos: `exemplos/curl/3-enviar-o-video.sh` e `exemplos/python/3-enviar-o-vide
 
 `GET /v1/jobs/{job_id}` devolve o `estado`: `aguardando_upload` → `validando` → `analisando` → `concluido`, ou `falhou` (com `codigo_falha`) ou `cancelado`. `GET /v1/jobs` lista os seus Jobs (paginado pelo cabeçalho `X-Proximo-Cursor`). `DELETE /v1/jobs/{job_id}` cancela um Job que não terminou.
 
-`codigo_falha`: `formato_invalido`, `arquivo_corrompido`, `codec_nao_suportado`, `duracao_excedida` e `upload_expirado` são do arquivo ou do envio (corrija e registre um vídeo novo); `analise_falhou`, `transcricao_falhou`, `ocr_falhou` e `processamento_interrompido` são do MAM: o time do MAM reprocessa, não precisa reenviar.
+`codigo_falha`: `formato_invalido`, `arquivo_corrompido`, `codec_nao_suportado`, `duracao_excedida` e `upload_expirado` são do arquivo ou do envio (corrija e registre um vídeo novo); `processamento_demorou_demais` é do tempo: a validação estourou o limite e o MAM não reprocessa, então registre o mesmo arquivo de novo, sem exportar; `analise_falhou`, `transcricao_falhou`, `ocr_falhou` e `processamento_interrompido` são do MAM: o time do MAM reprocessa, não precisa reenviar.
 
 Prefira o webhook (passo 5). A consulta é o plano B, com espera de alguns segundos entre as chamadas. Exemplos: `exemplos/curl/4-acompanhar-o-job.sh` e `exemplos/python/4-acompanhar-o-job.py`.
 
@@ -61,7 +61,7 @@ Cabeçalhos: `X-Webhook-Id`, `X-Webhook-Data` e `X-Webhook-Assinatura`. Corpo (J
 
 **Confira a assinatura antes de confiar no corpo**: é o HMAC-SHA256, em hexadecimal, de `<X-Webhook-Data>.<corpo exato>` com o segredo do seu sistema. Recuse (401) data com mais de 5 minutos de diferença do seu relógio. Exemplos: `exemplos/curl/5-verificar-o-webhook.sh` e `exemplos/python/5-verificar-o-webhook.py`.
 
-Como responder: **2xx** é entrega feita; **408, 429 e 5xx** o MAM repete (até 10 tentativas ao todo, com espera crescente de 10 s a 10 min); **outro 4xx** descarta o evento. A entrega é *pelo menos uma vez*: **deduplique pelo `X-Webhook-Id`**, que é o mesmo em toda repetição do evento.
+Como responder: **2xx** é entrega feita; **408, 429 e 5xx** o MAM repete (até 10 tentativas ao todo, com espera crescente de 10 s a 10 min); **outro 4xx** descarta o evento. A entrega é *pelo menos uma vez*: **deduplique pelo `X-Webhook-Id`**, que é o mesmo em toda repetição do evento, inclusive quando o MAM precisa publicar de novo o aviso de um Job que falhou (o id vem do Job e do reprocessamento, não de um sorteio).
 
 ## 6. Buscar o resultado
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Alvos `ocr` e `ocr-gpu` do Dockerfile: baixa para /modelos o detector pedido (`$1`) e o
-# reconhecedor, nas revisões fixadas, e confere o SHA-256 de cada arquivo. O detector é
-# escolhido pelo ARG do alvo; os dois aceitos estão aqui, e um nome outro falha. Só o
+# reconhecedor, nas revisões fixadas, e confere o SHA-256 de cada arquivo. O Dockerfile
+# escreve o detector na linha; o aceito está aqui, e um nome outro falha. Só o
 # urllib do Python da imagem base: a imagem não tem curl.
 set -eu
 
@@ -16,15 +16,8 @@ PP-OCRv5_server_det)
 af5876933d8806a1b50d895867e0781e135cd92ff37381992828fc8d1b842d28 inference.json
 28fb721efc3634fc8aa677e474b9602cb815a91cf569ef357a7a553d7b3ce685 inference.yml"
     ;;
-PP-OCRv5_mobile_det)
-    DETECTOR_REVISAO=0d63e78e2b680928f6b1747d76a08db6e645efb7
-    HASHES="afa1820cb16c1fd0dad589d0f8b389139061c1ef6d68019685fd07be997dda5b inference.pdiparams
-7ac1c33f377ba58561f4b89d3180b6add2b7c5c60a4edac90fa4e0ceccdc6665 config.json
-05feef1acb00aa4cd7362b15f7f501fc4f99d7b1fa73c1c871e0c7b1504b0f5c inference.json
-98069072e1b6b37d727fd9d9f11725faa46d6ea0de012f2ed26caea011c37699 inference.yml"
-    ;;
 *)
-    echo "Detector desconhecido: ${1:-} (PP-OCRv5_server_det ou PP-OCRv5_mobile_det)" >&2
+    echo "Detector desconhecido: ${1:-} (PP-OCRv5_server_det)" >&2
     exit 1
     ;;
 esac

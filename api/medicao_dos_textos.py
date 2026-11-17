@@ -14,6 +14,7 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 
 from api.decupagem import Decupagem, TextoNaTela
+from api.intervalos import comprimento_da_sobreposicao
 from api.leitura_da_tela import LeituraDaTela, LinhaLida
 from api.texto import sem_acento
 
@@ -57,7 +58,7 @@ def _aparicoes(
 
 
 def _sobreposicao(a: tuple[int, int], b: tuple[int, int]) -> int:
-    return min(a[1], b[1]) - max(a[0], b[0])
+    return comprimento_da_sobreposicao(a[0], a[1], b[0], b[1])
 
 
 def _distancia(texto: TextoNaTela, aparicao: _Aparicao) -> tuple[int, int]:

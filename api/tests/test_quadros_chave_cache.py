@@ -43,7 +43,7 @@ def _decupagem_com_meio_em(meio_ms: int, meia_largura_ms: int = 250) -> Decupage
         {
             "versao_esquema": "1.3",
             "video": {"sha256": "a" * 64, "duracao_ms": 6_000},
-            "programa": {"resumo": "r", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": [
                 {
@@ -157,3 +157,21 @@ def test_falha_passageira_do_instante_ganha_uma_rodada_extra_para_todos_os_momen
     assert pronta.pessoas[0].na_imagem[0].quadro == "quadros/aparicao-0-0.jpg"
     assert pronta.objetos[0].quadro == "quadros/objeto-0.jpg"
     assert lotes == [[3_000], [3_000]]
+
+
+def test_acrescentar_um_pedido_de_outra_fonte_nao_muda_os_quadros_dos_demais(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Os pedidos têm chave (tipo, posição...): o resultado de um não depende dos outros (#683)."""
+    from api.quadros_chave import achar_claros
+
+    _com_ffmpeg_falso(monkeypatch, escuros={1_000}, ausentes=set())
+    plano = ("plano", 0, 0)
+    objeto = ("objeto", 0)
+    sozinho = achar_claros(Path("v.mp4"), {plano: (1_000, 0, 6_000)})
+    com_extra = achar_claros(
+        Path("v.mp4"), {objeto: (4_000, 3_000, 5_000), plano: (1_000, 0, 6_000)}
+    )
+    assert com_extra[plano] == sozinho[plano]
+    assert com_extra[plano] is not None
+    assert set(com_extra) == {plano, objeto}

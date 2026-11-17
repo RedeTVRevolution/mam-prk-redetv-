@@ -1,6 +1,7 @@
 """Imagens da web como entrada hostil (#111): imagens sintéticas."""
 
 import io
+import struct
 from typing import Any, Self
 
 import pytest
@@ -99,6 +100,123 @@ def test_o_jpeg_regravado_nao_tem_metadados() -> None:
     assert "exif" not in depois.info and "icc_profile" not in depois.info
     assert len(depois.getexif()) == 0
     assert depois.size == (64, 48)
+
+
+def quadrantes() -> Image.Image:
+    """64x32 com um canto de cada cor: denuncia qualquer giro ou espelhamento."""
+    img = Image.new("RGB", (64, 32))
+    for i, cor in enumerate([(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]):
+        img.paste(
+            cor, ((i % 2) * 32, (i // 2) * 16, (i % 2) * 32 + 32, (i // 2) * 16 + 16)
+        )
+    return img
+
+
+# Orientação EXIF -> operação que a põe em pé (tabela da especificação do EXIF).
+GIROS: dict[int, Image.Transpose | None] = {
+    1: None,
+    2: Image.Transpose.FLIP_LEFT_RIGHT,
+    3: Image.Transpose.ROTATE_180,
+    4: Image.Transpose.FLIP_TOP_BOTTOM,
+    5: Image.Transpose.TRANSPOSE,
+    6: Image.Transpose.ROTATE_270,
+    7: Image.Transpose.TRANSVERSE,
+    8: Image.Transpose.ROTATE_90,
+}
+
+
+def com_orientacao(img: Image.Image, orientacao: int) -> bytes:
+    exif = Image.Exif()
+    exif[0x0112] = orientacao
+    saida = io.BytesIO()
+    img.save(saida, format="JPEG", quality=95, exif=exif)
+    return saida.getvalue()
+
+
+def test_foto_em_retrato_do_celular_sai_em_pe() -> None:
+    entrada = com_orientacao(Image.new("RGB", (400, 200), (200, 30, 30)), 6)
+
+    saida = Image.open(
+        io.BytesIO(recodificar(entrada, max_bytes=10**6, max_pixels=10**6))
+    )
+
+    assert saida.size == (200, 400)
+
+
+@pytest.mark.parametrize("orientacao", range(1, 9))
+def test_as_oito_orientacoes_do_exif_saem_na_orientacao_certa(orientacao: int) -> None:
+    original = quadrantes()
+    giro = GIROS[orientacao]  # FLIP_LEFT_RIGHT vale 0: comparar com None
+    esperado = original if giro is None else original.transpose(giro)
+
+    saida = Image.open(
+        io.BytesIO(
+            recodificar(
+                com_orientacao(original, orientacao),
+                max_bytes=10**6,
+                max_pixels=10**6,
+            )
+        )
+    ).convert("RGB")
+
+    assert saida.size == esperado.size
+    largura, altura = esperado.size
+    for x, y in [
+        (largura // 4, altura // 4),
+        (3 * largura // 4, altura // 4),
+        (largura // 4, 3 * altura // 4),
+        (3 * largura // 4, 3 * altura // 4),
+    ]:
+        real, previsto = saida.getpixel((x, y)), esperado.getpixel((x, y))
+        assert isinstance(real, tuple) and isinstance(previsto, tuple)
+        assert all(abs(a - b) < 40 for a, b in zip(real, previsto, strict=True))
+    assert len(saida.getexif()) == 0
+
+
+def test_conferencia_de_pixels_usa_o_tamanho_original_com_orientacao() -> None:
+    entrada = com_orientacao(Image.new("RGB", (400, 200)), 6)
+
+    with pytest.raises(ImagemRecusada, match="pixels"):
+        recodificar(entrada, max_bytes=10**6, max_pixels=79_999)
+
+
+def com_exif_hostil(formato: str, etiqueta: int | None) -> bytes:
+    """Orientation=6 mais uma etiqueta com tipo ASCII (o Pillow não a grava, então o
+    bloco TIFF é montado à mão); `None`: bloco que não é TIFF."""
+    if etiqueta is None:
+        exif = b"Exif\x00\x00bad"
+    else:
+        entradas = sorted(
+            [
+                (0x0112, 3, 1, struct.pack("<HH", 6, 0)),
+                (etiqueta, 2, 2, b"x\x00\x00\x00"),
+            ]
+        )
+        ifd = struct.pack("<H", len(entradas)) + b"".join(
+            struct.pack("<HHI", tag, tipo, n) + valor
+            for tag, tipo, n, valor in entradas
+        )
+        exif = b"Exif\x00\x00II*\x00\x08\x00\x00\x00" + ifd + b"\x00\x00\x00\x00"
+    saida = io.BytesIO()
+    Image.new("RGB", (16, 8)).save(saida, format=formato, exif=exif)
+    return saida.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("formato", "etiqueta"),
+    [("PNG", None), ("JPEG", 282), ("PNG", 282), ("JPEG", 259), ("PNG", 259)],
+)
+def test_exif_hostil_nao_derruba_e_a_imagem_segue_sem_girar(
+    formato: str, etiqueta: int | None
+) -> None:
+    entrada = com_exif_hostil(formato, etiqueta)
+
+    saida = Image.open(
+        io.BytesIO(recodificar(entrada, max_bytes=10**6, max_pixels=10**6))
+    )
+
+    assert saida.format == "JPEG"
+    assert saida.size == (16, 8)
 
 
 def test_png_e_webp_viram_jpeg() -> None:
@@ -329,3 +447,26 @@ def test_original_que_pinga_um_byte_por_vez_para_no_prazo() -> None:
             relogio=lambda: next(tempo),
         )
     assert lento.raw.leituras <= 12
+
+
+def test_exif_que_levanta_ao_girar_deixa_aviso_e_a_imagem_segue_sem_girar(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def explode(_: Image.Image) -> Image.Image:
+        raise struct.error("exif hostil")
+
+    monkeypatch.setattr("api.imagens_hostis.ImageOps.exif_transpose", explode)
+
+    with caplog.at_level("WARNING", logger="api.imagens_hostis"):
+        saida = Image.open(
+            io.BytesIO(
+                recodificar(
+                    imagem("JPEG", tamanho=(16, 8)), max_bytes=10**6, max_pixels=10**6
+                )
+            )
+        )
+
+    assert saida.size == (16, 8)
+    assert [r.getMessage() for r in caplog.records] == [
+        "EXIF ilegível, a imagem segue sem girar (struct.error)"
+    ]

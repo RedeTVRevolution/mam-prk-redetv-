@@ -8,20 +8,19 @@ o papel e a proximidade no tempo.
 
 O que proíbe a junção: duas pessoas da mesma janela com aparições sobrepostas (o
 modelo as viu juntas e as listou separadas) e a separação que uma pessoa fez na
-tela. Os pares na faixa ambígua não se juntam: o juiz do modelo (`julgar`) foi
-desligado em 10/11/2026 por precisão de 50% no dev, 3 de 6 certos (#547); o
-parâmetro fica como ponto de religar.
+tela. Os pares na faixa ambígua não se juntam: o juiz do modelo foi
+desligado em 10/11/2026 por precisão de 50% no dev, 3 de 6 certos (#547), e removido.
 """
 
 import re
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Collection
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Literal
 
 from api.correcoes import identidade_da_pessoa
 from api.decupagem import Aparicao, Decupagem, Objeto, OrigemDaJuncao, Pauta, Pessoa
 from api.identidade import nao_identificado
+from api.intervalos import sobrepoe_estrito
 from api.pessoas import LISTAS, em_ordem
 from api.texto import normalizar
 
@@ -37,8 +36,6 @@ LIMITE_DE_PARES = (
     20  # pares por vídeo na chamada ao modelo; os de menor pontuação ficam
 )
 
-Veredito = Literal["sim", "nao", "incerto"]
-Juiz = Callable[[Sequence[tuple[Pessoa, Pessoa]]], Sequence[Veredito]]
 _SEM_PALAVRA = frozenset(
     [
         "de",
@@ -132,7 +129,7 @@ def _proibida(a: Pessoa, b: Pessoa, proibidos: Collection[frozenset[str]]) -> bo
     for ja, aa in _pecas(a):
         for jb, ab in _pecas(b):
             if ja == jb and any(
-                x.inicio_ms < y.fim_ms and y.inicio_ms < x.fim_ms
+                sobrepoe_estrito(x.inicio_ms, x.fim_ms, y.inicio_ms, y.fim_ms)
                 for x in aa
                 for y in ab
             ):
@@ -191,20 +188,12 @@ def juntar_sem_nome(
     *,
     proibidos: Collection[frozenset[str]] = (),
     corrigidas: Collection[str] = (),
-    julgar: Juiz | None = None,
 ) -> Decupagem:
     """Une as pessoas sem nome que são a mesma. `proibidos` são pares de chaves
     (`chave_da_pessoa`) que uma pessoa separou na tela; `corrigidas`, as chaves das
     pessoas com Correção em vigor (renomeada, confirmada...): não se unem a ninguém, ou
-    o nome dado a uma se espalharia pela juntada; `julgar` decide a faixa
-    ambígua (sem ele, ninguém nela é unido)."""
-    candidatas, arestas, duvidosas = planejar(decupagem, proibidos, corrigidas)
-    if julgar is not None and duvidosas:
-        perguntadas = duvidosas[:LIMITE_DE_PARES]
-        vereditos = julgar([(e.a, e.b) for e in perguntadas])
-        arestas += [
-            e for e, v in zip(perguntadas, vereditos, strict=False) if v == "sim"
-        ]
+    o nome dado a uma se espalharia pela juntada. Ninguém na faixa ambígua é unido."""
+    candidatas, arestas, _ = planejar(decupagem, proibidos, corrigidas)
     if not arestas:
         return decupagem
 

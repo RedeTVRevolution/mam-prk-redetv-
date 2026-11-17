@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from api import validador
+from api.cortes import detectar_cortes
 from api.modelo_do_job import CodigoDeFalha
 from api.validador import Recusa, validar
 
@@ -390,37 +391,100 @@ def test_video_sem_audio_nao_gera_arquivo_de_audio(tmp_path: Path) -> None:
     assert not (tmp_path / "saida" / "audio.wav").exists()
 
 
-def test_falha_ao_separar_o_audio_recusa_e_apaga_a_copia_e_o_proxy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    entrada = _gerar(tmp_path / "video.mp4")
-    monkeypatch.setattr(validador, "_separar_audio", lambda copia, saida: None)
-
-    assert _recusa(entrada, tmp_path) == "arquivo_corrompido"
-    assert list((tmp_path / "saida").iterdir()) == []
-
-
-def test_os_dois_ffmpeg_que_leem_o_original_forcam_o_demuxer_do_ffprobe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    entrada = _padrao_da_redetv(tmp_path / "video.mp4")
-    assert "data" in _faixas(entrada)  # a trilha tmcd da RedeTV
+def _espiar_executar(
+    monkeypatch: pytest.MonkeyPatch, trocar: Any = None
+) -> list[list[str]]:
+    """Registra os comandos de `_executar`; `trocar(args)` pode devolver outro comando."""
     comandos: list[list[str]] = []
     executar = validador._executar
 
     def espiar(args: list[str]) -> subprocess.CompletedProcess[bytes]:
+        args = trocar(args) if trocar else args
         comandos.append(args)
         return executar(args)
 
     monkeypatch.setattr(validador, "_executar", espiar)
+    return comandos
+
+
+def test_falha_de_uma_saida_do_processo_unico_recusa_e_apaga_o_que_gravou(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entrada = _gerar(tmp_path / "video.mp4")
+    saida = tmp_path / "saida"
+
+    def quebrar_o_audio(args: list[str]) -> list[str]:
+        # Só a saída do áudio aponta para uma pasta que não existe.
+        return [
+            str(saida / "sem_pasta" / "a.wav") if a == str(saida / "audio.wav") else a
+            for a in args
+        ]
+
+    _espiar_executar(monkeypatch, quebrar_o_audio)
+
+    with pytest.raises(Recusa) as erro:
+        validar(entrada, saida)
+
+    assert erro.value.codigo == "arquivo_corrompido"
+    assert erro.value.causa == "ffmpeg_saiu_com_erro"
+    assert list(saida.iterdir()) == []
+
+
+def _cortes_conhecidos(destino: Path) -> Path:
+    """Quatro planos de cor (cortes em 2, 3,5 e 6 s), áudio e faixa de timecode."""
+    cores = [("red", 2.0), ("blue", 1.5), ("green", 2.5), ("white", 1)]
+    entradas: list[str] = []
+    for cor, d in cores:
+        entradas += ["-f", "lavfi", "-i", f"color={cor}:s=320x240:r=10:d={d}"]
+    entradas += ["-f", "lavfi", "-i", "sine=d=7"]
+    ligacao = "".join(f"[{i}]" for i in range(len(cores)))
+    _ffmpeg(
+        *entradas, "-filter_complex", f"{ligacao}concat=n={len(cores)}:v=1:a=0[v]",
+        "-map", "[v]", "-map", f"{len(cores)}:a", "-c:v", "libx264",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-timecode", "01:00:00:00", str(destino),
+    )  # fmt: skip
+    return destino
+
+
+def test_processo_unico_tem_os_mesmos_cortes_e_audio_do_caminho_de_antes(
+    tmp_path: Path,
+) -> None:
+    entrada = _cortes_conhecidos(tmp_path / "video.mp4")
+    assert "data" in _faixas(entrada)
+
+    aceito = validar(entrada, tmp_path / "saida")
+
+    # O caminho de antes: cortes e áudio lidos da cópia limpa, em ffmpeg separados.
+    assert list(aceito.cortes_ms) == detectar_cortes(aceito.copia_limpa)
+    assert len(aceito.cortes_ms) == 3
+    antigo = tmp_path / "audio_antigo.wav"
+    _ffmpeg(
+        "-i", str(aceito.copia_limpa), "-map", "0:a", "-vn", "-ac", "1", "-ar", "16000",
+        "-c:a", "pcm_s16le", "-map_metadata", "-1", str(antigo),
+    )  # fmt: skip
+    assert aceito.audio is not None
+    assert aceito.audio.read_bytes() == antigo.read_bytes()
+
+
+def test_o_ffmpeg_que_decodifica_o_original_e_um_so_com_tres_saidas_e_forca_o_demuxer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entrada = _padrao_da_redetv(tmp_path / "video.mp4")
+    assert "data" in _faixas(entrada)  # a trilha tmcd da RedeTV
+    comandos = _espiar_executar(monkeypatch)
 
     aceito = validar(entrada, tmp_path / "saida")
 
     assert aceito.timecode_origem == "01:00:00:00"
     lendo_o_original = [c for c in comandos if str(entrada) in c]
     assert {c[0] for c in lendo_o_original} == {"ffprobe", "ffmpeg"}
-    assert len([c for c in lendo_o_original if c[0] == "ffmpeg"]) == 2
+    ffmpegs = [c for c in lendo_o_original if c[0] == "ffmpeg"]
+    assert len(ffmpegs) == 2  # a regravação sem recodificar e o processo único
     for comando in lendo_o_original:
         assert comando[comando.index("-f") + 1] == "mov,mp4,m4a,3gp,3g2,mj2"
         if comando[0] == "ffmpeg":
             assert comando.index("-f") < comando.index("-i")
+    (unico,) = [c for c in ffmpegs if "-c" not in c or "copy" not in c]
+    assert str(aceito.proxy) in unico
+    assert str(aceito.audio) in unico
+    assert "null" in unico  # a saída do filtro de cortes

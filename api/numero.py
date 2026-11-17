@@ -16,11 +16,13 @@ _IRREGULARES = {
     "mães": "mãe", "maes": "mãe", "reis": "rei", "leis": "lei", "bois": "boi",
     "pais": "pai", "heróis": "herói", "herois": "herói", "meses": "mês",
     "países": "país", "paises": "país", "gases": "gás",
+    "árvores": "árvore", "arvores": "árvore",
 }  # fmt: skip
+_VOGAL_R = r"[aeiouáéíóúâêôàãõ]r$"
 _REGRAS = (
     ("ões", "ão"), ("ães", "ão"), ("ãos", "ão"), ("oes", "ao"), ("ns", "m"),
     ("éis", "el"), ("eis", "el"), ("óis", "ol"), ("ois", "ol"),
-    ("ais", "al"), ("uis", "ul"), ("res", "r"), ("zes", "z"), ("s", ""),
+    ("ais", "al"), ("uis", "ul"), ("zes", "z"), ("s", ""),
 )  # fmt: skip
 
 
@@ -31,6 +33,9 @@ def singular(palavra: str) -> str:
         return p
     if p in _IRREGULARES:
         return _IRREGULARES[p]
+    if p.endswith("res"):
+        # Depois de vogal o "-es" cai (flores, mulheres, bares); depois de consoante o "-s" (padres, torres).
+        return p[:-2] if re.search(_VOGAL_R, p[:-2]) else p[:-1]
     for fim, troca in _REGRAS:
         if p.endswith(fim):
             return p[: -len(fim)] + troca

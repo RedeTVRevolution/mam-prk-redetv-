@@ -22,7 +22,7 @@ from api import (
 from api.agent_retrieval import MODELO_DO_EMBEDDING
 from api.decupagem import VERSAO_ESQUEMA
 
-VERSAO_PIPELINE = "2026.11.13"
+VERSAO_PIPELINE = "2026.11.16"
 
 
 def _hash(texto: str) -> str:
@@ -42,7 +42,7 @@ def manifesto() -> dict[str, Any]:
         "modos": {
             "analise": gemini.MODO_FLEX,
             "inventario": gemini.MODO_FLEX,
-            "modelo_forte": gemini.MODO_STANDARD,
+            "modelo_forte": modelo_forte.MODO_DO_MODELO_FORTE,
         },
         "instrucoes": {
             "analise": _hash(gemini.INSTRUCAO),

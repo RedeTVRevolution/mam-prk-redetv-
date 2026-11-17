@@ -10,7 +10,6 @@ import ipaddress
 import json
 import secrets
 import socket
-import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -20,12 +19,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
-from api.espera import espera_com_jitter, sorteio_uniforme
 from api.modelo_do_job import FIM, CodigoDeFalha, Job
 
-REENTREGAS = 8  # novas tentativas depois da primeira
-ESPERA_BASE_S = 5.0
-ESPERA_TETO_S = 3600.0
 # Um evento assinado há mais que isto é tratado pelo cliente como repetido.
 TOLERANCIA_DA_DATA = timedelta(minutes=5)
 
@@ -191,7 +186,10 @@ class Evento(BaseModel):
 
 
 def montar_evento(
-    job: Job, repositorio: RepositorioDeWebhooks, agora: datetime
+    job: Job,
+    repositorio: RepositorioDeWebhooks,
+    agora: datetime,
+    id: str | None = None,
 ) -> Evento | None:
     """Evento de um job que terminou, se o sistema dono tem webhook. Job de pessoa
     e job cancelado não geram evento."""
@@ -201,7 +199,7 @@ def montar_evento(
         return None
     concluido = job.estado == "concluido"
     return Evento(
-        id=str(uuid.uuid4()),
+        id=id or str(uuid.uuid4()),
         tipo="job.concluido" if concluido else "job.falhou",
         job_id=job.id,
         estado="concluido" if concluido else "falhou",
@@ -284,40 +282,6 @@ def _corpo(evento: Evento) -> bytes:
     return json.dumps(
         evento.model_dump(mode="json"), separators=(",", ":"), sort_keys=True
     ).encode()
-
-
-def entregar(
-    evento: Evento,
-    registro: RegistroDeWebhook,
-    cofre: Cofre,
-    http: PortaHttp,
-    *,
-    resolver: Resolvedor = resolver_dns,
-    dormir: Callable[[float], None] = time.sleep,
-    sortear: Callable[[float], float] = sorteio_uniforme,
-    relogio: Callable[[], datetime],
-) -> bool:
-    """Entrega o evento; `True` se algum POST teve 2xx. Reentregas levam o mesmo id
-    de evento e uma data e assinatura novas. A URL é conferida de novo, sobre o IP
-    resolvido, antes de cada tentativa; DNS fora do ar conta como falha passageira."""
-    segredo = cofre.obter(registro.sistema)
-    if segredo is None:
-        return False
-    corpo = _corpo(evento)
-    falhas = 0
-    while True:
-        try:
-            status = _tentar(evento, registro, segredo, corpo, http, resolver, relogio)
-        except HostNaoResolve:
-            status = 503
-        except UrlInvalida:
-            return False
-        if 200 <= status < 300:
-            return True
-        if not _repetivel(status) or falhas >= REENTREGAS:
-            return False
-        dormir(espera_com_jitter(falhas, ESPERA_BASE_S, ESPERA_TETO_S, sortear))
-        falhas += 1
 
 
 def registrar_webhook_main(

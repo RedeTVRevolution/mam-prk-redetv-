@@ -1204,14 +1204,13 @@
               "application/json": {
                 "schema": {},
                 "example": {
-                  "versao_esquema": "1.5",
+                  "versao_esquema": "1.6",
                   "versao_decupagem": "9c1f4e0a7b3d2c68a5f0e9d1b4c7a8e2f3d6b0c9a1e4f7d2b5c8a0e3f6d9b2c1",
                   "video": {
                     "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "duracao_ms": 598400
                   },
                   "programa": {
-                    "resumo": "Edição de terça com bastidores e notícias de famosos.",
                     "blocos": [
                       {
                         "inicio_ms": 0,
@@ -1386,14 +1385,13 @@
               "application/json": {
                 "schema": {},
                 "example": {
-                  "versao_esquema": "1.5",
+                  "versao_esquema": "1.6",
                   "versao_decupagem": "9c1f4e0a7b3d2c68a5f0e9d1b4c7a8e2f3d6b0c9a1e4f7d2b5c8a0e3f6d9b2c1",
                   "video": {
                     "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "duracao_ms": 598400
                   },
                   "programa": {
-                    "resumo": "Edição de terça com bastidores e notícias de famosos.",
                     "blocos": [
                       {
                         "inicio_ms": 0,
@@ -2101,13 +2099,12 @@
                     }
                   ],
                   "decupagem": {
-                    "versao_esquema": "1.5",
+                    "versao_esquema": "1.6",
                     "video": {
                       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                       "duracao_ms": 598400
                     },
                     "programa": {
-                      "resumo": "Edição de terça com bastidores e notícias de famosos.",
                       "blocos": [
                         {
                           "inicio_ms": 0,
@@ -4226,7 +4223,8 @@
               "1.2",
               "1.3",
               "1.4",
-              "1.5"
+              "1.5",
+              "1.6"
             ],
             "title": "Versao Esquema"
           },
@@ -4931,6 +4929,7 @@
                   "codec_nao_suportado",
                   "duracao_excedida",
                   "upload_expirado",
+                  "processamento_demorou_demais",
                   "analise_falhou",
                   "transcricao_falhou",
                   "ocr_falhou",
@@ -5178,6 +5177,7 @@
                   "codec_nao_suportado",
                   "duracao_excedida",
                   "upload_expirado",
+                  "processamento_demorou_demais",
                   "analise_falhou",
                   "transcricao_falhou",
                   "ocr_falhou",
@@ -5414,6 +5414,7 @@
                   "codec_nao_suportado",
                   "duracao_excedida",
                   "upload_expirado",
+                  "processamento_demorou_demais",
                   "analise_falhou",
                   "transcricao_falhou",
                   "ocr_falhou",
@@ -6799,6 +6800,11 @@
             "title": "Inventario",
             "default": []
           },
+          "inventariado": {
+            "type": "boolean",
+            "title": "Inventariado",
+            "default": true
+          },
           "plano_recorrente": {
             "anyOf": [
               {
@@ -6843,11 +6849,6 @@
       },
       "Programa": {
         "properties": {
-          "resumo": {
-            "type": "string",
-            "maxLength": 2000,
-            "title": "Resumo"
-          },
           "blocos": {
             "items": {
               "$ref": "#/components/schemas/Bloco"
@@ -6859,7 +6860,6 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "resumo",
           "blocos"
         ],
         "title": "Programa"

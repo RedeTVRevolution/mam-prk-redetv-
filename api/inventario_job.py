@@ -104,7 +104,10 @@ def executar(
             dormir=dormir,
         )
     nova = aplicar_inventario(
-        decupagem, inventarios, motor=config.motor, modelo=config.modelo
+        decupagem,
+        inventarios,
+        motor=config.motor,
+        modelo=config.modelo,
     )
     # Os planos recorrentes (#546) saem dos mesmos quadros-chave, sem modelo.
     nova = com_os_planos_recorrentes(

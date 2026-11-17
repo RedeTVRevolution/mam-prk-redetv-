@@ -468,3 +468,210 @@ def test_uma_falha_cancela_os_lotes_que_ainda_nao_comecaram() -> None:
         )
 
     assert len(chamadas) == 1
+
+
+def test_com_vagas_sobrando_uma_falha_cancela_os_lotes_que_nao_comecaram(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quadros = bruto(
+        *[
+            quadro(
+                i,
+                f"q/{i}.jpg",
+                objetos=[ObjetoDetectado(rotulo="vase", caixa=caixa())],
+            )
+            for i in range(10)
+        ]
+    )
+    iniciados: list[int] = []
+    falha_registrada = threading.Event()
+
+    class EventoQueAvisa(threading.Event):
+        def set(self) -> None:
+            super().set()
+            falha_registrada.set()
+
+    # O auxiliar marca a falha no seu Event; a chamada 0 só termina depois disso.
+    monkeypatch.setattr("api.paralelo.Event", EventoQueAvisa)
+
+    class TransporteComUmaLentaEUmaQueFalha:
+        def gerar(self, chamada: Chamada) -> str:
+            plano = int(chamada.texto.split()[1])
+            iniciados.append(plano)
+            if plano == 0:  # lenta: só termina depois de a 1 falhar
+                falha_registrada.wait(timeout=5)  # o prazo só protege contra travar
+                return resposta({"plano": 0, "objetos": []})
+            raise AnaliseFalhou("sem capacidade")
+
+    with pytest.raises(AnaliseFalhou, match="sem capacidade"):
+        converter_do_florence(
+            decupagem(*[[f"q/{i}.jpg"] for i in range(10)]),
+            quadros,
+            transporte=TransporteComUmaLentaEUmaQueFalha(),
+            modelo="m",
+            job_id="j1",
+            planos_por_lote=1,
+            paralelismo=2,
+        )
+
+    assert sorted(iniciados) == [0, 1]
+
+
+# Plano que o modelo omite (#692): pedido de novo, só ele; ainda ausente, fica marcado.
+DOIS_PLANOS_FLORENCE = bruto(
+    *[
+        quadro(
+            i,
+            f"q/{i}.jpg",
+            objetos=[ObjetoDetectado(rotulo="vase", caixa=caixa())],
+        )
+        for i in range(2)
+    ]
+)
+
+
+def _vaso(i: int) -> dict[str, Any]:
+    return {"plano": i, "objetos": [convertido("vaso", [f"p{i}q0o0"])]}
+
+
+def test_florence_plano_omitido_e_pedido_de_novo_so_ele() -> None:
+    transporte = TransporteFalso(resposta(_vaso(0)), resposta(_vaso(1)))
+
+    inventarios = converter_do_florence(
+        decupagem(["q/0.jpg"], ["q/1.jpg"]),
+        DOIS_PLANOS_FLORENCE,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+    )
+
+    assert len(transporte.chamadas) == 2
+    segunda = transporte.chamadas[1]
+    assert "PLANO 1" in segunda.texto and "PLANO 0" not in segunda.texto
+    assert segunda.instrucao == transporte.chamadas[0].instrucao
+    assert segunda.esquema == transporte.chamadas[0].esquema
+    assert [len(inventarios[i]) for i in (0, 1)] == [1, 1]
+    nova = aplicar_inventario(
+        decupagem(["q/0.jpg"], ["q/1.jpg"]), inventarios, motor="florence", modelo="m"
+    )
+    assert [p.inventariado for p in nova.planos] == [True, True]
+
+
+def test_florence_plano_ainda_omitido_fica_marcado_com_uma_rodada_extra() -> None:
+    transporte = TransporteFalso(resposta(_vaso(0)), resposta(), resposta(_vaso(1)))
+    d = decupagem(["q/0.jpg"], ["q/1.jpg"])
+
+    inventarios = converter_do_florence(
+        d,
+        DOIS_PLANOS_FLORENCE,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+    )
+
+    assert len(transporte.chamadas) == 2  # a terceira resposta nunca é pedida
+    assert 1 not in inventarios
+    nova = aplicar_inventario(d, inventarios, motor="florence", modelo="m")
+    assert [p.inventariado for p in nova.planos] == [True, False]
+
+
+def test_gemini_plano_omitido_e_pedido_de_novo_so_ele() -> None:
+    d = decupagem(["q/a.jpg"], ["q/b.jpg"])
+    transporte = TransporteFalso(
+        resposta({"plano": 0, "objetos": [visto("vaso", 0)]}),
+        resposta({"plano": 1, "objetos": [visto("quadro", 0)]}),
+    )
+
+    inventarios = olhar_com_gemini(
+        d,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+        quadro_de=lambda c: c.encode(),
+    )
+
+    assert len(transporte.chamadas) == 2
+    segunda = transporte.chamadas[1]
+    assert segunda.imagens == (b"q/b.jpg",)
+    assert "PLANO 1" in segunda.texto and "PLANO 0" not in segunda.texto
+    assert inventarios[1][0].nome == "quadro"
+
+
+def test_gemini_plano_ainda_omitido_fica_marcado() -> None:
+    d = decupagem(["q/a.jpg"], ["q/b.jpg"])
+    transporte = TransporteFalso(
+        resposta({"plano": 0, "objetos": [visto("vaso", 0)]}), resposta()
+    )
+
+    inventarios = olhar_com_gemini(
+        d,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+        quadro_de=lambda c: b"x",
+    )
+
+    assert len(transporte.chamadas) == 2
+    nova = aplicar_inventario(d, inventarios, motor="gemini", modelo="m")
+    assert [p.inventariado for p in nova.planos] == [True, False]
+
+
+def test_plano_sem_objetos_na_resposta_nao_e_omitido() -> None:
+    transporte = TransporteFalso(
+        resposta(_vaso(0), {"plano": 1, "objetos": []}),
+    )
+    d = decupagem(["q/0.jpg"], ["q/1.jpg"])
+
+    inventarios = converter_do_florence(
+        d,
+        DOIS_PLANOS_FLORENCE,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+    )
+
+    assert len(transporte.chamadas) == 1
+    nova = aplicar_inventario(d, inventarios, motor="florence", modelo="m")
+    assert all(p.inventariado for p in nova.planos)
+
+
+def test_o_campo_do_servidor_fica_fora_do_esquema_do_modelo() -> None:
+    from api.decupagem import CAMPOS_DO_SERVIDOR
+
+    assert "inventariado" in CAMPOS_DO_SERVIDOR
+    assert Plano.model_validate(
+        plano(0, []).model_dump(exclude={"inventariado"})
+    ).inventariado
+
+
+def test_florence_rodada_extra_nao_apaga_o_plano_ja_respondido() -> None:
+    transporte = TransporteFalso(
+        resposta(_vaso(0)), resposta({"plano": 0, "objetos": []}, _vaso(1))
+    )
+
+    inventarios = converter_do_florence(
+        decupagem(["q/0.jpg"], ["q/1.jpg"]),
+        DOIS_PLANOS_FLORENCE,
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+    )
+
+    assert [len(inventarios[i]) for i in (0, 1)] == [1, 1]
+
+
+def test_gemini_rodada_extra_nao_apaga_o_plano_ja_respondido() -> None:
+    transporte = TransporteFalso(
+        resposta({"plano": 0, "objetos": [visto("vaso", 0)]}),
+        resposta({"plano": 0, "objetos": []}, {"plano": 1, "objetos": [visto("x", 0)]}),
+    )
+
+    inventarios = olhar_com_gemini(
+        decupagem(["q/a.jpg"], ["q/b.jpg"]),
+        transporte=transporte,
+        modelo="m",
+        job_id="j1",
+        quadro_de=lambda c: b"x",
+    )
+
+    assert [len(inventarios[i]) for i in (0, 1)] == [1, 1]

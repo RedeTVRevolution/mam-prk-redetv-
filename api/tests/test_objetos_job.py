@@ -44,7 +44,7 @@ def _decupagem(quadros_dos_planos: list[list[str]]) -> Decupagem:
         {
             "versao_esquema": "1.3",
             "video": {"sha256": "a" * 64, "duracao_ms": 6_000},
-            "programa": {"resumo": "r", "blocos": []},
+            "programa": {"blocos": []},
             "pautas": [],
             "pessoas": [],
             "planos": planos,
