@@ -103,7 +103,7 @@ class RegistroDaCorrecao:
             catalogo=self._catalogo,
             marcas=self._marcas,
         )
-        self._gravar(job, correcao, autoria, lido=(modelo, versao), antes=todas)
+        self._gravar(job, correcao, autoria, todas, lido=(modelo, versao))
         return correcao, versao
 
     def desfazer(
@@ -153,9 +153,7 @@ class RegistroDaCorrecao:
             job.id,
             autoria,
         )
-        alvo_tipo = next(c.tipo for c in correcoes if c.id == alvo_id)
-        recalcula = pode_mudar_os_ids(alvo_tipo)
-        return self._gravar(job, registro, autoria, NaoPendente, recalcula=recalcula)
+        return self._gravar(job, registro, autoria, correcoes, NaoPendente)
 
     def _sobre_o_modelo(
         self,
@@ -169,7 +167,7 @@ class RegistroDaCorrecao:
         todas = self._correcoes.listar(job.id)
         registro = regra(modelo, versao, todas)
         return self._gravar(
-            job, registro, autoria, se_ja_existe, lido=(modelo, versao), antes=todas
+            job, registro, autoria, todas, se_ja_existe, lido=(modelo, versao)
         )
 
     # ponytail: sem chave de idempotência. O web não repete o POST; repetir continua dando 409
@@ -182,17 +180,17 @@ class RegistroDaCorrecao:
         job: Job,
         registro: Correcao,
         autoria: Autoria,
+        antes: list[Correcao],
         se_ja_existe: type[Exception] | None = None,
         *,
         lido: tuple[dict[str, Any], str] | None = None,
-        antes: list[Correcao] | None = None,
-        recalcula: bool = True,
     ) -> Correcao:
-        """Grava, registra o evento e atualiza o Catálogo do Job. `se_ja_existe` é a exceção
-        da operação para o registro que outro pedido gravou no meio. Com o `lido` (modelo e
-        versão) e as Correções de `antes`, o catálogo só é recalculado se o conjunto de
-        `catalogo_id` muda com o registro, e o recálculo não reabre o modelo; sem eles,
-        `recalcula` decide (o `decidir`, que não leu o modelo, pelo tipo do alvo)."""
+        """Grava, registra o evento e atualiza o Catálogo do Job. `antes` são as Correções que
+        a operação leu; `se_ja_existe` é a exceção dela para o registro que outro pedido gravou
+        no meio. O catálogo só é recalculado se o tipo da Correção criada ou do alvo pode mudar
+        o conjunto de `catalogo_id` (`pode_mudar_os_ids`) ou, com o modelo `lido`, se a
+        comparação em memória o muda; o recálculo reusa o `lido`. O `decidir` não leu o modelo:
+        vale só o tipo."""
         try:
             self._correcoes.acrescentar(registro)
         except CorrecaoJaExiste as erro:
@@ -208,13 +206,26 @@ class RegistroDaCorrecao:
             programa=job.programa,
             tipo_de_correcao=registro.tipo,
         )
-        if lido is not None and antes is not None:
-            # ponytail: dois pedidos simultâneos neutros um a um e que juntos mudam o
-            # conjunto não recalculam; a carga `make preencher-catalogo-dos-jobs` conserta.
-            try:
-                recalcula = _ids(*lido, antes) != _ids(*lido, [*antes, registro])
-            except Exception:
-                log.exception("conjunto de ids de %s não comparado", job.id)
-        if recalcula:
+        if self._recalcula(registro, antes, lido):
             atualizar_catalogo_do_job(job, self._jobs, self._leitura, lido)
         return registro
+
+    @staticmethod
+    def _recalcula(
+        registro: Correcao,
+        antes: list[Correcao],
+        lido: tuple[dict[str, Any], str] | None,
+    ) -> bool:
+        alvo = (
+            registro.desfaz or registro.aprova or registro.recusa or registro.descarta
+        )
+        tipo = next((c.tipo for c in antes if c.id == alvo), registro.tipo)
+        if pode_mudar_os_ids(tipo):
+            return True
+        if lido is None:
+            return False
+        try:
+            return _ids(*lido, antes) != _ids(*lido, [*antes, registro])
+        except Exception:
+            log.exception("conjunto de ids de %s não comparado", registro.job_id)
+            return True

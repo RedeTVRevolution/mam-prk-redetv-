@@ -181,14 +181,13 @@ def test_reaplicar_grava_registra_o_evento_e_atualiza_o_catalogo_do_job() -> Non
     assert _evento(mundo).tipo_de_correcao == "pessoa.renomear"
 
 
-def test_descartar_grava_e_registra_o_evento_sem_recalcular_o_catalogo_do_job() -> None:
+def test_descartar_grava_registra_o_evento_e_atualiza_o_catalogo_do_job() -> None:
     mundo = Mundo()
     alvo = mundo.com_fila()
 
     descarte = mundo.registro.descartar(mundo.job, alvo.id, "não vale", AUTORIA)
 
-    # O alvo estava fora da fila de aplicação: o conjunto de `catalogo_id` não muda (#720).
-    assert mundo.passos == ["gravou", "evento"]
+    assert mundo.passos == SEQUENCIA
     assert (descarte.tipo, descarte.descarta) == ("descartar", alvo.id)
     assert _evento(mundo).tipo_de_correcao == "descartar"
 

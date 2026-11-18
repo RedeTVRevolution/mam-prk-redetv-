@@ -197,3 +197,103 @@ def test_pode_mudar_os_ids_declara_todo_tipo_que_mexe_em_pessoa_ou_comercial() -
         assert pode_mudar_os_ids(tipo), tipo
     assert not pode_mudar_os_ids("pauta.titulo")
     assert pode_mudar_os_ids("tipo.que.nao.existe")
+
+
+def test_pedido_concorrente_de_tipo_que_pode_mudar_recalcula_mesmo_sem_mudar_na_comparacao() -> (
+    None
+):
+    mundo = MundoContado()
+    mundo.renomear_ana()
+    acrescentar = mundo.correcoes.acrescentar
+    entrou: list[Any] = []
+
+    def com_o_nao_e_no_meio(correcao: Any) -> None:
+        if not entrou:
+            entrou.append(True)  # o `nao_e` do outro pedido entra antes dos tempos
+            ocorrencia = {"lista": "na_imagem", "inicio_ms": 1000, "fim_ms": 5000}
+            mundo.registrar(
+                mundo.novo(
+                    "pessoa.nao_e", "p1", "Não identificado", ocorrencia=ocorrencia
+                )
+            )
+        acrescentar(correcao)
+
+    mundo.correcoes.acrescentar = com_o_nao_e_no_meio  # type: ignore[method-assign]
+
+    # Com a lista que o pedido leu (sem o `nao_e`) os tempos não mudam o conjunto; com as
+    # duas gravadas (tempos antes), o `nao_e` já não casa e a Ana fica.
+    mundo.registrar(
+        mundo.novo(
+            "item.tempos",
+            "p1",
+            "10000-14000",
+            tipo_do_item="pessoa",
+            ocorrencia={"lista": "na_imagem", "inicio_ms": 1000, "fim_ms": 5000},
+        )
+    )
+
+    assert mundo.job.pessoas_do_catalogo == [mundo.ana.id]
+
+
+def _job_com(mundo: MundoContado, ids: list[str]) -> None:
+    mundo.jobs.trocar("j1", lambda j: {"pessoas_do_catalogo": ids})
+
+
+def _reprocessar_sem_a_ana(mundo: MundoContado) -> None:
+    """Outro modelo, em que a Correção do `renomear` já não casa: ela vai para a fila."""
+    modelo = {**MODELO, "pessoas": [_pessoa("p1", "Carla Dias", 1000, 5000)]}
+    mundo.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
+
+
+# As seis operações com um tipo que muda o conjunto (`pessoa.renomear`): o Catálogo do Job
+# fica certo mesmo partindo de um valor velho.
+
+
+def test_seis_operacoes_corrigir() -> None:
+    mundo = MundoContado()
+    mundo.renomear_ana()
+    assert mundo.job.pessoas_do_catalogo == [mundo.ana.id]
+
+
+def test_seis_operacoes_desfazer() -> None:
+    mundo = MundoContado()
+    alvo = mundo.renomear_ana()
+    mundo.registro.desfazer(mundo.job, alvo.id, "x", mundo.autoria)
+    assert mundo.job.pessoas_do_catalogo == []
+
+
+def test_seis_operacoes_reaplicar() -> None:
+    mundo = MundoContado()
+    alvo = mundo.renomear_ana()
+    _reprocessar_sem_a_ana(mundo)
+    _job_com(mundo, [])
+
+    mundo.registro.reaplicar(mundo.job, alvo.id, "p1", "x", mundo.autoria)
+
+    assert mundo.job.pessoas_do_catalogo == [mundo.ana.id]
+
+
+def test_seis_operacoes_descartar() -> None:
+    mundo = MundoContado()
+    alvo = mundo.renomear_ana()
+    _reprocessar_sem_a_ana(mundo)
+    _job_com(mundo, [mundo.ana.id])
+
+    mundo.registro.descartar(mundo.job, alvo.id, "x", mundo.autoria)
+
+    assert mundo.job.pessoas_do_catalogo == []
+
+
+def test_seis_operacoes_aprovar() -> None:
+    mundo = MundoContado()
+    alvo = mundo.registrar(mundo.novo("pessoa.renomear", "p1", "Ana Souza Lima"), True)
+    mundo.registro.decidir(mundo.job, alvo.id, True, "", mundo.autoria)
+    assert mundo.job.pessoas_do_catalogo == [mundo.ana.id]
+
+
+def test_seis_operacoes_recusar() -> None:
+    mundo = MundoContado()
+    alvo = mundo.registrar(mundo.novo("pessoa.renomear", "p1", "Ana Souza Lima"), True)
+    _job_com(mundo, [mundo.ana.id])
+    mundo.registro.decidir(mundo.job, alvo.id, False, "não", mundo.autoria)
+    assert mundo.job.pessoas_do_catalogo == []
