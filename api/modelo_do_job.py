@@ -440,6 +440,10 @@ class RepositorioDeJobs(Protocol):
         """Quantos Jobs `criado_por` criou de `desde` em diante (lixeira inclusive)."""
         ...
 
+    def contar_do_programa(self, nome: str) -> int:
+        """Quantos Jobs do programa estão fora da lixeira; lê só o campo da lixeira."""
+        ...
+
 
 def agora_utc() -> datetime:
     return datetime.now(UTC)

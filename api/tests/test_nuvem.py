@@ -282,6 +282,19 @@ class TestRepositorioFirestore:
             "a-velho",
         ]
 
+    def test_contar_do_programa_ignora_a_lixeira_e_os_outros_programas(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        lixeira = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="x"
+        )
+        repositorio.salvar(_job("a", BASE, programa="TV Fama"))
+        repositorio.salvar(_job("b", BASE, programa="TV Fama", lixeira=lixeira))
+        repositorio.salvar(_job("c", BASE, programa="Outro"))
+
+        assert repositorio.contar_do_programa("TV Fama") == 1
+        assert repositorio.contar_do_programa("Nenhum") == 0
+
     def test_lixeira_traz_so_os_da_lixeira_do_envio_mais_recente_ao_mais_antigo(
         self, repositorio: RepositorioFirestore
     ) -> None:

@@ -491,6 +491,11 @@ class RepositorioEmMemoria:
             if j.criado_por == criado_por and j.criado_em >= desde
         )
 
+    def contar_do_programa(self, nome: str) -> int:
+        return sum(
+            1 for j in self._jobs.values() if j.programa == nome and j.lixeira is None
+        )
+
 
 class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
@@ -533,6 +538,9 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        raise ServicoIndisponivel
+
+    def contar_do_programa(self, nome: str) -> int:
         raise ServicoIndisponivel
 
 

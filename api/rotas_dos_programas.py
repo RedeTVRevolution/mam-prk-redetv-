@@ -528,10 +528,7 @@ def criar_rotas_dos_programas(
         programa = programas.obter(id)
         if programa is None:
             raise HTTPException(404, "Programa inexistente")
-        achados = jobs.consultar(
-            FiltroDeJobs(programas=frozenset({programa.nome}), so_os_da_lista=True)
-        )
-        return ImpactoDoPrograma(videos=len(achados.jobs))
+        return ImpactoDoPrograma(videos=jobs.contar_do_programa(programa.nome))
 
     @rotas.delete("/{id}", status_code=204)
     def apagar(

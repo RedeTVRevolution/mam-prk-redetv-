@@ -471,6 +471,15 @@ class RepositorioFirestore:
         ).where(filter=FieldFilter("criado_em", ">=", desde))
         return int(consulta.count().get()[0][0].value)
 
+    def contar_do_programa(self, nome: str) -> int:
+        # Igualdade num campo só (índice automático); lê só `lixeira`, sem montar o Job.
+        docs = (
+            self._colecao.where(filter=FieldFilter("programa", "==", nome))
+            .select(["lixeira"])
+            .stream()
+        )
+        return sum(1 for doc in docs if (doc.to_dict() or {}).get("lixeira") is None)
+
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode

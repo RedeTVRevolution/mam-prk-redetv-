@@ -122,7 +122,7 @@ class JobsQueVeOFiltro(RepositorioEmMemoria):
         return super().consultar(filtro)
 
 
-def test_o_impacto_ignora_a_lixeira_e_le_so_os_campos_da_lista() -> None:
+def test_o_impacto_ignora_a_lixeira_e_conta_sem_consultar() -> None:
     jobs = JobsQueVeOFiltro()
     lixeira = EnvioParaLixeira(em=BASE, por_uid="u1", por_email="a@b.c", motivo="x")
     for job in (
@@ -134,7 +134,7 @@ def test_o_impacto_ignora_a_lixeira_e_le_so_os_campos_da_lista() -> None:
     cliente, _, _ = _cliente(["editor"], jobs=jobs)
     resposta = cliente.get("/v1/admin/programas/tv-fama/impacto", headers=AUTORIZACAO)
     assert resposta.json() == {"videos": 1}
-    assert [f.so_os_da_lista for f in jobs.filtros] == [True]
+    assert jobs.filtros == []  # a contagem lê só o campo da lixeira, não a lista
 
 
 class ProgramasQueContam(ProgramasEmMemoria):
