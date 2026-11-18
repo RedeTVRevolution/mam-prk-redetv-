@@ -60,7 +60,7 @@ def test_a_interface_so_acrescenta_e_consulta() -> None:
         n for n in dir(RepositorioDeAuditoriaEmMemoria) if not n.startswith("_")
     }
 
-    assert publicos == {"acrescentar", "consultar"}
+    assert publicos == {"acrescentar", "consultar", "existe"}
 
 
 def test_filtra_por_uid_e_por_email_da_pessoa() -> None:

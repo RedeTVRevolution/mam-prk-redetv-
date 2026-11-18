@@ -93,8 +93,9 @@ def registro_de_auditoria(
     alvo_nome: str,
     motivo: str | None = None,
     detalhes: dict[str, Any] | None = None,
+    id: str | None = None,
 ) -> RegistroDeAuditoria:
-    """O registro de uma ação: quem fez (pessoa ou sistema), o alvo e o `id` novo."""
+    """O registro de uma ação: quem fez (pessoa ou sistema), o alvo e o `id` (novo, se não vier)."""
     # Texto é o nome de um sistema sem chave (purga automática, comandos do `make`).
     de_quem = (
         {"uid": quem.uid, "email": quem.email}
@@ -102,7 +103,7 @@ def registro_de_auditoria(
         else {"sistema": quem if isinstance(quem, str) else quem.sistema}
     )
     return RegistroDeAuditoria(
-        id=uuid.uuid4().hex,
+        id=id or uuid.uuid4().hex,
         quando=quando,
         **de_quem,
         acao=acao,
@@ -160,6 +161,10 @@ class RepositorioDeAuditoria(Protocol):
 
     def acrescentar(self, registro: RegistroDeAuditoria) -> None: ...
 
+    def existe(self, id: str) -> bool:
+        """Para quem retoma uma ação interrompida reconhecer o registro já gravado."""
+        ...
+
     def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria: ...
 
 
@@ -171,6 +176,9 @@ class RepositorioDeAuditoriaEmMemoria:
         if registro.id in self._registros:
             raise ValueError(f"registro já existe: {registro.id}")
         self._registros[registro.id] = registro
+
+    def existe(self, id: str) -> bool:
+        return id in self._registros
 
     def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
         """Mais recente primeiro (desempate pelo id, na mesma direção).

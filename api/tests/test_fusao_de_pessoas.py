@@ -9,10 +9,11 @@ from fastapi.testclient import TestClient
 
 from api.auditoria import FiltroDeAuditoria, RepositorioDeAuditoriaEmMemoria
 from api.auth import Usuario
-from api.catalogo import CatalogoEmMemoria, Rosto
+from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, Rosto
 from api.correcoes import LIMITE_DO_MOTIVO, versao_do_modelo
 from api.fotos_de_referencia import FotosEmMemoria
 from api.jobs import RepositorioEmMemoria
+from api.lixeira_na_leitura import VersaoDaLixeiraEmMemoria
 from api.main import criar_app
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tests.test_auth import VerificadorFalso
@@ -69,6 +70,7 @@ class Mundo:
         self.jobs = RepositorioEmMemoria()
         self.armazenamento = ArmazenamentoFalso()
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
+        self.versao = VersaoDaLixeiraEmMemoria()
         for id in ("j1", "j2"):
             self.jobs.salvar(_job(id, pessoas_do_catalogo=[self.duplicada.id]))
             self.armazenamento.decupagens[id] = [
@@ -94,6 +96,7 @@ class Mundo:
                 catalogo=self.catalogo,
                 fotos_de_referencia=self.fotos,
                 relogio=lambda: BASE,
+                versao_da_lixeira=self.versao,
             )
         )
 
@@ -403,3 +406,178 @@ def test_a_fusao_passa_a_origem_para_o_destino_nos_jobs() -> None:
     for id in ("j1", "j2"):
         job = mundo.jobs.obter(id)
         assert job and job.pessoas_do_catalogo == [mundo.sabrina.id]
+
+
+# --- Fusão retomável (#721) ---
+
+
+def _cai_uma_vez(objeto: Any, metodo: str, quando: Any = lambda *a: True) -> None:
+    """Troca `objeto.metodo` por uma versão que levanta na primeira chamada que
+    `quando(*args)` aceita e depois volta ao normal."""
+    original = getattr(objeto, metodo)
+    caiu: list[bool] = []
+
+    def com_falha(*args: Any, **kwargs: Any) -> Any:
+        if not caiu and quando(*args):
+            caiu.append(True)
+            raise RuntimeError("falha de teste")
+        return original(*args, **kwargs)
+
+    setattr(objeto, metodo, com_falha)
+
+
+def _fundida(mundo: Mundo) -> FusaoDaPessoa:
+    fusao = mundo.catalogo.obter(mundo.duplicada.id).fundida  # type: ignore[union-attr]
+    assert fusao is not None
+    return fusao
+
+
+def _registros(mundo: Mundo) -> list[Any]:
+    return mundo.auditoria.consultar(FiltroDeAuditoria()).registros
+
+
+def test_falha_na_segunda_foto_deixa_a_fusao_pendente_e_o_mesmo_pedido_conclui() -> (
+    None
+):
+    mundo = Mundo()
+    extra = f"referencias/{mundo.duplicada.id}/c.jpg"
+    mundo.fotos.objetos.add(extra)
+    origem = mundo.catalogo.obter(mundo.duplicada.id)
+    assert origem
+    mundo.catalogo.definir_rostos(
+        origem.id, [*origem.rostos, Rosto(origem="acervo", referencia=extra)]
+    )
+    _cai_uma_vez(mundo.fotos, "apagar", lambda objeto: objeto == extra)
+
+    with pytest.raises(RuntimeError):
+        mundo.fundir()
+
+    assert _fundida(mundo).fase is not None
+    assert len(mundo.catalogo.obter(mundo.duplicada.id).rostos) == 2  # type: ignore[union-attr]
+    assert len(_registros(mundo)) == 1
+
+    resposta = mundo.fundir()
+
+    assert resposta.status_code == 200, resposta.text
+    assert resposta.json()["videos"] == 2
+    assert mundo.fotos.objetos == {f"referencias/{mundo.sabrina.id}/a.jpg"}
+    assert mundo.catalogo.obter(mundo.duplicada.id).rostos == []  # type: ignore[union-attr]
+    assert _fundida(mundo).fase is None
+    assert len(_registros(mundo)) == 1
+    destino = mundo.catalogo.obter(mundo.sabrina.id)
+    assert destino and destino.apelidos == ["Sá", "Sabrina S."]
+
+
+def test_rostos_vazio_nao_e_sinal_de_pronto_o_prefixo_ainda_se_apaga() -> None:
+    mundo = Mundo()
+    mundo.fundir()  # conclui; depois reabre a fusão como se tivesse caído no prefixo
+    mundo.catalogo.definir_fusao(
+        mundo.duplicada.id, _fundida(mundo).model_copy(update={"fase": "limpando"})
+    )
+    velha = f"referencias/{mundo.duplicada.id}/velha.jpg"
+    mundo.fotos.objetos.add(velha)
+    _cai_uma_vez(mundo.fotos, "apagar_prefixo")
+
+    with pytest.raises(RuntimeError):
+        mundo.fundir()
+
+    assert _fundida(mundo).fase == "limpando"
+    assert velha in mundo.fotos.objetos
+
+    assert mundo.fundir().status_code == 200
+    assert velha not in mundo.fotos.objetos
+    assert _fundida(mundo).fase is None
+
+
+def test_cai_entre_gravar_a_fusao_e_a_auditoria_a_retomada_grava_antes_das_fotos() -> (
+    None
+):
+    mundo = Mundo()
+    _cai_uma_vez(mundo.auditoria, "acrescentar")
+
+    with pytest.raises(RuntimeError):
+        mundo.fundir()
+
+    assert _fundida(mundo).fase == "aguardando_auditoria"
+    assert _registros(mundo) == []
+    assert len(mundo.fotos.objetos) == 3  # nenhuma foto saiu
+    # a contagem de antes de gravar: depois da fusão a leitura já daria zero
+    apagou_com_registro: list[bool] = []
+    original = mundo.fotos.apagar
+
+    def apagar(objeto: str) -> None:
+        apagou_com_registro.append(len(_registros(mundo)) == 1)
+        original(objeto)
+
+    mundo.fotos.apagar = apagar  # type: ignore[method-assign]
+
+    resposta = mundo.fundir()
+
+    assert resposta.status_code == 200, resposta.text
+    assert apagou_com_registro and all(apagou_com_registro)
+    [registro] = _registros(mundo)
+    assert registro.detalhes["videos"] == 2 and registro.detalhes["aparicoes"] == 4
+    assert registro.detalhes["origem_nome"] == "Sabrina S."
+    assert registro.detalhes["destino_nome"] == "Sabrina Sato"
+    assert registro.detalhes["fotos_apagadas"] == 1
+    assert (resposta.json()["videos"], resposta.json()["aparicoes"]) == (2, 4)
+    assert _fundida(mundo).fase is None
+
+
+def test_cai_depois_da_auditoria_a_retomada_reconhece_o_registro_e_limpa() -> None:
+    mundo = Mundo()
+    _cai_uma_vez(
+        mundo.catalogo,
+        "definir_fusao",
+        lambda id, fusao: fusao is not None and fusao.fase == "limpando",
+    )
+
+    with pytest.raises(RuntimeError):
+        mundo.fundir()
+
+    [antes] = _registros(mundo)
+    assert _fundida(mundo).fase == "aguardando_auditoria"
+
+    assert mundo.fundir().status_code == 200
+
+    [depois] = _registros(mundo)
+    assert depois == antes
+    assert (depois.uid, depois.email) == ("cur", "cur@redetv.com")
+    assert mundo.catalogo.obter(mundo.duplicada.id).rostos == []  # type: ignore[union-attr]
+    assert _fundida(mundo).fase is None
+
+
+def test_job_que_nao_troca_deixa_o_marcador_e_a_retomada_troca_e_roda_ao_fundir() -> (
+    None
+):
+    mundo = Mundo()
+    _cai_uma_vez(mundo.jobs, "trocar", lambda job_id, mudar: job_id == "j2")
+
+    assert mundo.fundir().status_code == 500
+
+    assert _fundida(mundo).fase == "limpando"
+    job = mundo.jobs.obter("j2")
+    assert job and job.pessoas_do_catalogo == [mundo.duplicada.id]
+    versao = mundo.versao.atual()
+
+    assert mundo.fundir().status_code == 200
+
+    for id in ("j1", "j2"):
+        job = mundo.jobs.obter(id)
+        assert job and job.pessoas_do_catalogo == [mundo.sabrina.id]
+    assert _fundida(mundo).fase is None
+    assert mundo.versao.atual() > versao
+    assert len(_registros(mundo)) == 1
+
+
+def test_o_mesmo_pedido_com_outro_destino_na_fusao_pendente_continua_422() -> None:
+    mundo = Mundo()
+    terceira = mundo.catalogo.acrescentar("Outra", "", [])
+    _cai_uma_vez(mundo.fotos, "apagar_prefixo")
+    with pytest.raises(RuntimeError):
+        mundo.fundir()
+
+    assert mundo.fundir(destino=terceira.id).status_code == 422
+
+    assert _fundida(mundo).destino_id == mundo.sabrina.id
+    assert _fundida(mundo).fase == "limpando"

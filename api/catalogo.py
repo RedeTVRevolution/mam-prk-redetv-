@@ -48,6 +48,12 @@ class FusaoDaPessoa(BaseModel):
     por_uid: str
     por_email: str
     motivo: str
+    # Fusão retomável (#721): sem `fase`, a fusão está concluída. Nasce `aguardando_auditoria`
+    # (com o id e o conteúdo do registro, que a leitura já trocada não refaria) e só passa a
+    # `limpando` depois de o registro estar gravado; só aí as fotos de rosto saem.
+    fase: Literal["aguardando_auditoria", "limpando"] | None = None
+    registro_id: str | None = None
+    registro_detalhes: dict[str, Any] | None = None
 
 
 class RenomeacaoDaPessoa(BaseModel):

@@ -1368,6 +1368,9 @@ class RepositorioDeAuditoriaFirestore:
     def acrescentar(self, registro: RegistroDeAuditoria) -> None:
         _documento(self._colecao, registro.id).create(registro.model_dump())
 
+    def existe(self, id: str) -> bool:
+        return bool(_documento(self._colecao, id).get().exists)
+
     def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
         # Igualdades (pessoa, alvo, ação) mais intervalo e ordem em `quando`: os
         # índices compostos estão no infra/modulos/mam/main.tf.
