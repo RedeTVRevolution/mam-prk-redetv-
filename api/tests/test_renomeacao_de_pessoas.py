@@ -109,12 +109,6 @@ class Mundo:
             headers=headers,
         )
 
-    def andamento(self) -> Any:
-        return self.cliente.get(
-            f"/v1/catalogo/pessoas/{self.sabrina.id}/renomear/andamento",
-            headers=CURADOR,
-        )
-
     def nome_na_decupagem(self, job_id: str) -> str:
         corpo = self.cliente.get(f"/v1/jobs/{job_id}/decupagem", headers=CURADOR).json()
         nome: str = next(p["nome"] for p in corpo["pessoas"] if p["id"] == "pes01")
@@ -218,13 +212,6 @@ def test_renomear_troca_no_catalogo_e_nas_decupagens_sem_reindexar() -> None:
     for job in ("j1", "j2"):
         assert mundo.nome_na_decupagem(job) == "Sabrina Sato Silva"
     assert mundo.indice.gravacoes == 0
-    assert mundo.andamento().json() == {
-        "estado": "concluida",
-        "feitos": 2,
-        "total": 2,
-        "nome_antigo": "Sabrina Sato",
-        "nome_novo": "Sabrina Sato Silva",
-    }
 
 
 def test_a_correcao_de_outro_nome_no_video_nao_e_trocada() -> None:
@@ -240,7 +227,7 @@ def test_a_correcao_de_outro_nome_no_video_nao_e_trocada() -> None:
     assert mundo.nome_na_decupagem("j1") == "Sabrina Sato Silva"
     # A prévia só conta o vídeo em que o nome muda.
     assert previa["videos"] == 1
-    assert mundo.andamento().json()["total"] == 1
+    assert previa["videos"] == 1
 
 
 def test_o_nome_antigo_fica_como_apelido_para_a_busca() -> None:
@@ -311,30 +298,38 @@ def test_pessoa_inexistente_e_404_e_fundida_e_422() -> None:
     assert fundida.status_code == 422
 
 
-def test_renomeacao_presa_sem_pendentes_termina_ao_retomar() -> None:
+def test_documento_antigo_em_andamento_nao_barra_e_perde_os_campos_ao_gravar() -> None:
     mundo = Mundo()
     mundo.catalogo.definir_renomeacao(
         mundo.sabrina.id,
-        RenomeacaoDaPessoa(
-            nome_antigo="Sabrina",
-            nome_novo="Sabrina Sato",
-            nomes_anteriores=["Sabrina"],
-            em=BASE,
-            por_uid="cur",
-            por_email="cur@redetv.com",
-            total=2,
-            pendentes=[],
-            estado="em_andamento",
+        RenomeacaoDaPessoa.model_validate(
+            {
+                "nome_antigo": "Sabrina",
+                "nome_novo": "Sabrina Sato",
+                "nomes_anteriores": ["Sabrina"],
+                "em": BASE,
+                "por_uid": "cur",
+                "por_email": "cur@redetv.com",
+                "total": 2,
+                "pendentes": ["j1"],
+                "estado": "em_andamento",
+            }
         ),
     )
-    assert mundo.renomear().status_code == 409
 
-    mundo.cliente.post(
-        f"/v1/catalogo/pessoas/{mundo.sabrina.id}/renomear/retomar", headers=CURADOR
-    )
+    resposta = mundo.renomear()
 
-    assert mundo.andamento().json()["estado"] == "concluida"
-    assert mundo.renomear().status_code == 200
+    assert resposta.status_code == 200, resposta.text
+    gravada = mundo.catalogo.obter(mundo.sabrina.id).renomeacao  # type: ignore[union-attr]
+    assert gravada is not None
+    assert set(gravada.model_dump()) == {
+        "nome_antigo",
+        "nome_novo",
+        "nomes_anteriores",
+        "em",
+        "por_uid",
+        "por_email",
+    }
 
 
 def test_sem_correcao_aprovar_e_403_e_nada_muda() -> None:
@@ -369,13 +364,3 @@ def test_nome_de_outra_pessoa_ou_igual_ao_atual_e_422() -> None:
     assert mundo.renomear("Sabrina Sato").status_code == 422
     assert mundo.renomear("  ").status_code == 422
     assert mundo.auditoria.consultar(FiltroDeAuditoria()).registros == []
-
-
-def test_andamento_de_pessoa_que_nunca_foi_renomeada_e_404() -> None:
-    mundo = Mundo()
-
-    resposta = mundo.cliente.get(
-        f"/v1/catalogo/pessoas/{mundo.outra.id}/renomear/andamento", headers=CURADOR
-    )
-
-    assert resposta.status_code == 404

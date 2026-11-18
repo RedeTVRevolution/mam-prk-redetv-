@@ -18,11 +18,9 @@ from pydantic import BaseModel, field_validator
 from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.catalogo import (
-    AndamentoDaRenomeacao,
     Catalogo,
     PessoaDoCatalogo,
     RenomeacaoDaPessoa,
-    andamento_da_renomeacao,
 )
 from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, sem_controle
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_dos_jobs
@@ -111,10 +109,6 @@ def criar_rotas_da_renomeacao(
         ],
     ) -> ImpactoDaRenomeacao:
         pessoa = viva(id_da_pessoa)
-        if pessoa.renomeacao is not None and pessoa.renomeacao.estado != "concluida":
-            raise HTTPException(
-                409, "A renomeação anterior ainda não terminou: aguarde ou retome"
-            )
         novo = pedido.nome
         if novo == pessoa.nome:
             raise HTTPException(422, "O nome novo é igual ao atual")
@@ -153,9 +147,6 @@ def criar_rotas_da_renomeacao(
                 em=quando,
                 por_uid=autor.uid,
                 por_email=autor.email.lower(),
-                total=len(ids),
-                pendentes=[],
-                estado="concluida",
             ),
         )
         try:
@@ -183,37 +174,5 @@ def criar_rotas_da_renomeacao(
             raise
         ao_renomear()
         return impacto
-
-    @rotas.get("/pessoas/{id_da_pessoa}/renomear/andamento")
-    def andamento(
-        id_da_pessoa: str,
-        _autor: Annotated[
-            Usuario,
-            Depends(exige("correcao.aprovar", "Chave de sistema não mexe no catálogo")),
-        ],
-    ) -> AndamentoDaRenomeacao:
-        pessoa = pessoas.obter(id_da_pessoa)
-        if pessoa is None or pessoa.renomeacao is None:
-            raise HTTPException(404, "Nenhuma renomeação desta pessoa")
-        return andamento_da_renomeacao(pessoa.renomeacao)
-
-    @rotas.post("/pessoas/{id_da_pessoa}/renomear/retomar")
-    def retomar(
-        id_da_pessoa: str,
-        _autor: Annotated[
-            Usuario,
-            Depends(exige("correcao.aprovar", "Chave de sistema não mexe no catálogo")),
-        ],
-    ) -> AndamentoDaRenomeacao:
-        """Fecha uma renomeação que ficou em andamento antes de o índice largar o nome:
-        não há mais o que reindexar."""
-        pessoa = pessoas.obter(id_da_pessoa)
-        if pessoa is None or pessoa.renomeacao is None:
-            raise HTTPException(404, "Nenhuma renomeação desta pessoa")
-        r = pessoa.renomeacao
-        if r.estado != "concluida":
-            r = r.model_copy(update={"estado": "concluida", "pendentes": []})
-            pessoas.definir_renomeacao(pessoa.id, r)
-        return andamento_da_renomeacao(r)
 
     return rotas

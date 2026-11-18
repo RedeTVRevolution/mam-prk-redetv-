@@ -237,20 +237,6 @@
   "sem_papel": "403 Sem a permiss\u00e3o catalogo.fundir",
   "sem_token": "401"
  },
- "GET /v1/catalogo/pessoas/{id_da_pessoa}/renomear/andamento": {
-  "administrador": "404",
-  "chave_so_cancelar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
-  "chave_so_criar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
-  "chave_so_ler": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
-  "chave_todos": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
-  "consulta": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "curador": "404",
-  "diretoria": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "editor": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "sem_documento": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "sem_papel": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "sem_token": "401"
- },
  "GET /v1/correcoes/catalogo": {
   "administrador": "200",
   "chave_so_cancelar": "200",
@@ -1071,20 +1057,6 @@
   "chave_todos": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
   "consulta": "403 Sem a permiss\u00e3o correcao.aprovar",
   "curador": "422",
-  "diretoria": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "editor": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "sem_documento": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "sem_papel": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "sem_token": "401"
- },
- "POST /v1/catalogo/pessoas/{id_da_pessoa}/renomear/retomar": {
-  "administrador": "404",
-  "chave_so_cancelar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
-  "chave_so_criar": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
-  "chave_so_ler": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
-  "chave_todos": "403 Chave de sistema n\u00e3o mexe no cat\u00e1logo",
-  "consulta": "403 Sem a permiss\u00e3o correcao.aprovar",
-  "curador": "404",
   "diretoria": "403 Sem a permiss\u00e3o correcao.aprovar",
   "editor": "403 Sem a permiss\u00e3o correcao.aprovar",
   "sem_documento": "403 Sem a permiss\u00e3o correcao.aprovar",

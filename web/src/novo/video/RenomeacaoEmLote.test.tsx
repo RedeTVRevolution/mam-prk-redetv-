@@ -15,9 +15,7 @@ const DECUPAGEM = (nome: string) => ({ ...BASE, pessoas: [{ ...BASE.pessoas[0], 
 
 let decupagemAtual = DECUPAGEM('Leo Lobo')
 let pedidos: { id: string; corpo: { nome: string; previa: boolean } }[] = []
-let consultas = 0
-let retomadas = 0
-let estadoFinal: 'concluida' | 'falhou' = 'concluida'
+let andamentoConsultado = 0
 
 const servidor = setupServer(
   ...rotasDoVideo(
@@ -34,21 +32,8 @@ const servidor = setupServer(
     return HttpResponse.json({ nome_antigo: 'Leo Lobo', nome_novo: corpo.nome, videos: 3, momentos_afetados: 7, previa: corpo.previa })
   }),
   http.get('/v1/catalogo/pessoas/:id/renomear/andamento', () => {
-    consultas += 1
-    const feito = consultas > 1
-    return HttpResponse.json({
-      estado: feito ? estadoFinal : 'em_andamento',
-      feitos: feito && estadoFinal === 'concluida' ? 3 : 1,
-      total: 3,
-      nome_antigo: 'Leo Lobo',
-      nome_novo: 'Leão Lobo',
-    })
-  }),
-  http.post('/v1/catalogo/pessoas/:id/renomear/retomar', () => {
-    retomadas += 1
-    estadoFinal = 'concluida'
-    consultas = 0
-    return HttpResponse.json({ estado: 'em_andamento', feitos: 1, total: 3, nome_antigo: 'Leo Lobo', nome_novo: 'Leão Lobo' })
+    andamentoConsultado += 1
+    return new HttpResponse(null, { status: 404 })
   }),
 )
 beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
@@ -56,9 +41,7 @@ simularPlayer()
 beforeEach(() => {
   decupagemAtual = DECUPAGEM('Leo Lobo')
   pedidos = []
-  consultas = 0
-  retomadas = 0
-  estadoFinal = 'concluida'
+  andamentoConsultado = 0
 })
 afterEach(() => {
   servidor.resetHandlers()
@@ -94,7 +77,7 @@ async function digitarOutroNome(usuario: ReturnType<typeof userEvent.setup>) {
   await usuario.type(campo, 'Leão Lobo')
 }
 
-test('mostra a prévia sem mudar nada e, com Enter, renomeia e acompanha a busca até terminar', async () => {
+test('mostra a prévia sem mudar nada e, com Enter, renomeia e fecha sem consultar andamento', async () => {
   const usuario = await abrir(APROVADOR)
   await digitarOutroNome(usuario)
 
@@ -106,11 +89,10 @@ test('mostra a prévia sem mudar nada e, com Enter, renomeia e acompanha a busca
   await usuario.keyboard('{Enter}')
 
   await waitFor(() => expect(pedidos[1]).toEqual({ id: 'cat-leo', corpo: { nome: 'Leão Lobo', previa: false } }))
-  expect(await screen.findByText('Atualizando a busca: 1 de 3 vídeos.')).toBeTruthy()
-  // O campo e o botão sumiram: o foco fica no formulário (o Esc ainda o fecha), não no body.
-  expect(screen.getByRole('form', { name: /^Renomear .* em todos os vídeos$/ }).contains(document.activeElement)).toBe(true)
   expect(await inspetor().findByRole('region', { name: /^Detalhe: Leão Lobo/ })).toBeTruthy()
-  expect(await screen.findByText(/Pronto: Leão Lobo em 3 vídeos/, undefined, { timeout: 4000 })).toBeTruthy()
+  await waitFor(() => expect(screen.queryByRole('form', { name: /Renomear/ })).toBeNull())
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(andamentoConsultado).toBe(0)
 }, 20_000)
 
 test('renomear invalida a decupagem de todos os vídeos, não só a do vídeo aberto', async () => {
@@ -138,22 +120,6 @@ test('Esc cancela depois da prévia sem renomear', async () => {
   await waitFor(() => expect(screen.queryByRole('form', { name: /Renomear/ })).toBeNull())
   expect(pedidos.map((p) => p.corpo.previa)).toEqual([true])
 })
-
-test('se a busca não termina, "Tentar de novo" retoma', async () => {
-  estadoFinal = 'falhou'
-  const usuario = await abrir(APROVADOR)
-  await digitarOutroNome(usuario)
-  await usuario.keyboard('{Enter}')
-  await screen.findByText(/passa a ser/)
-  await usuario.keyboard('{Enter}')
-
-  const retomar = await screen.findByRole('button', { name: 'Tentar de novo' }, { timeout: 4000 })
-  expect(screen.getByText(/O nome novo já vale nas decupagens/)).toBeTruthy()
-  await usuario.click(retomar)
-
-  await waitFor(() => expect(retomadas).toBe(1))
-  expect(await screen.findByText(/Pronto: Leão Lobo/, undefined, { timeout: 4000 })).toBeTruthy()
-}, 20_000)
 
 test('sem correcao.aprovar, o botão não aparece', async () => {
   await abrir(['decupagem.editar'])
