@@ -80,9 +80,15 @@ class LeituraDaDecupagem:
         self._pessoas = pessoas
         self._marcas = marcas
 
-    def corrigida(self, job_id: str, quem: QuemConta | None = None) -> dict[str, Any]:
-        """Com `quem`, um Quem conta de fora (compartilhado por quem lê vários vídeos)."""
-        return self._corrigida(job_id, quem)[0]
+    def corrigida(
+        self,
+        job_id: str,
+        quem: QuemConta | None = None,
+        lido: tuple[dict[str, Any], str] | None = None,
+    ) -> dict[str, Any]:
+        """Com `quem`, um Quem conta de fora (compartilhado por quem lê vários vídeos).
+        Com `lido`, o modelo e a versão que o chamador já leu (não abre o Storage)."""
+        return self._corrigida(job_id, quem, lido)[0]
 
     def entregue(self, job_id: str) -> dict[str, Any]:
         corrigida, quem, sem_vinculo = self._corrigida(job_id)
@@ -95,12 +101,16 @@ class LeituraDaDecupagem:
         )
 
     def _corrigida(
-        self, job_id: str, quem: QuemConta | None = None
+        self,
+        job_id: str,
+        quem: QuemConta | None = None,
+        lido: tuple[dict[str, Any], str] | None = None,
     ) -> tuple[dict[str, Any], QuemConta, set[int]]:
         """A leitura corrigida, o Quem conta que a leu e as pessoas (por `id()` do dicionário)
         que não contam: a `entregue` os reaproveita."""
         lida = decupagem_com_correcoes(
-            *ler_modelo(self._decupagens, job_id), self._correcoes.listar(job_id)
+            *(lido or ler_modelo(self._decupagens, job_id)),
+            self._correcoes.listar(job_id),
         )
         quem = quem or QuemConta(self._pessoas, self._marcas)
         sem_vinculo: set[int] = set()

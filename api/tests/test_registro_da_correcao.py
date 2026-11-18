@@ -273,23 +273,19 @@ def test_a_falha_do_catalogo_do_job_nao_desfaz_a_gravacao() -> None:
 
 def test_a_falha_ao_ler_a_decupagem_para_o_catalogo_nao_desfaz_a_gravacao() -> None:
     mundo = Mundo()
-    abrir = mundo.armazenamento.abrir_decupagem
+    alvo = mundo.corrigir(exige_aprovacao=True)
     leituras: list[str] = []
 
-    def so_a_primeira_abre(job_id: str) -> Any:
+    def fora_do_ar(job_id: str) -> Any:
         leituras.append(job_id)
-        if len(leituras) > 1:
-            raise OSError("Storage fora do ar")
-        return abrir(job_id)
+        raise OSError("Storage fora do ar")
 
-    mundo.armazenamento.abrir_decupagem = so_a_primeira_abre  # type: ignore[method-assign]
+    mundo.armazenamento.abrir_decupagem = fora_do_ar  # type: ignore[method-assign]
 
-    correcao, _ = mundo.registro.corrigir(
-        mundo.job, NovaCorrecao(**_novo()), AUTORIA, exige_aprovacao=False
-    )
+    mundo.registro.decidir(mundo.job, alvo.id, True, "", AUTORIA)
 
-    assert len(leituras) == 2
-    assert mundo.correcoes.listar("j1") == [correcao]
+    assert len(leituras) == 1
+    assert mundo.correcoes.listar("j1")[-1].tipo == "aprovar"
     assert len(mundo.eventos.publicados) == 1
 
 
