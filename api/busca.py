@@ -408,8 +408,9 @@ class Busca:
         purgas: PurgasDeMarca | None = None,
     ) -> None:
         self._marcas = marcas or CatalogoDeMarcasEmMemoria()
-        # Só para não pôr acento numa marca citada (#731): relida a cada 30 s, não por busca.
-        self._copia_das_marcas = CopiaCurta(self._marcas.todas, relogio)
+        # Só para não pôr acento numa marca citada (#731): relida a cada 30 s, não por busca,
+        # nem quando a leitura falha.
+        self._copia_das_marcas = CopiaCurta(self._ler_marcas, relogio)
         self._purgas = purgas or PurgasDeMarcaEmMemoria()
         self._versao = versao_da_lixeira or VersaoDaLixeiraEmMemoria()
         self._listas = listas or ListasDaBuscaEmMemoria()
@@ -623,7 +624,7 @@ class Busca:
 
         decidir(entendida.pessoas)
         carregar_nomes(entendida.pessoas)
-        intocadas = _intocadas(entendida, nome, self._marcas_vivas())
+        intocadas = _intocadas(entendida, nome, self._copia_das_marcas.itens())
         clausulas = self._clausulas(entendida, nome, contam, intocadas)
         t_entender = _agora() - inicio
         facetado = ajustes or Ajustes()
@@ -973,11 +974,11 @@ class Busca:
             return None
         return achado
 
-    def _marcas_vivas(self) -> list[MarcaDoCatalogo]:
+    def _ler_marcas(self) -> list[MarcaDoCatalogo]:
         """As marcas do catálogo; sem elas (falha na leitura), nenhuma fica protegida do
         acento e a busca segue."""
         try:
-            return self._copia_das_marcas.itens()
+            return self._marcas.todas()
         except Exception:
             log.warning(
                 "marcas não lidas; o acento vale para todas as palavras", exc_info=True

@@ -2836,3 +2836,26 @@ def test_marca_e_nome_com_hifen_ficam_como_foram_digitados(
         ),
     )
     assert _o_que_vai_ao_modelo(m, digitado) == ({ao_modelo}, [ao_modelo])
+
+
+def test_sem_as_marcas_a_busca_segue_e_nao_relê_o_catalogo_a_cada_busca(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    m = Mundo()
+    leituras: list[int] = []
+
+    def falha() -> list[Any]:
+        leituras.append(1)
+        raise RuntimeError("Firestore fora")
+
+    monkeypatch.setattr(m.marcas, "todas", falha)
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1", tipo="fala", job_id="j1", inicio_ms=0, fim_ms=1_000, texto="praça"
+        ),
+    )
+    busca = m.busca()
+    for _ in range(3):
+        assert busca.buscar("praca").videos
+    assert len(leituras) == 1
