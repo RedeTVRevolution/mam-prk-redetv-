@@ -1681,6 +1681,14 @@ class TestRepositorioDeAuditoriaFirestore:
         campos.update(extra)
         return RegistroDeAuditoria(**campos)  # type: ignore[arg-type]
 
+    def test_existe_reconhece_so_o_registro_gravado(
+        self, auditoria: RepositorioDeAuditoriaFirestore
+    ) -> None:
+        assert not auditoria.existe("a")
+        auditoria.acrescentar(self._registro("a", 0))
+        assert auditoria.existe("a")
+        assert not auditoria.existe("b")
+
     def test_acrescenta_e_consulta_filtrando_e_paginando(
         self, auditoria: RepositorioDeAuditoriaFirestore
     ) -> None:

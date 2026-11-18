@@ -62,10 +62,10 @@ def atualizar_catalogo_do_job(
 
 def passar_pessoa_nos_jobs(
     repositorio: "RepositorioDeJobs", origem_id: str, destino_id: str
-) -> None:
+) -> bool:
     """Na fusão, os vídeos da origem (até os da lixeira) passam a listar o destino. Nunca
-    levanta: o Job que falha fica com a origem, e a carga (`make preencher-catalogo-dos-jobs`)
-    o conserta."""
+    levanta: diz se todos os Jobs foram trocados; o que falha fica com a origem, e a fusão
+    pendente (ou a carga `make preencher-catalogo-dos-jobs`) o conserta."""
 
     def trocar(job: "Job") -> dict[str, Any] | None:
         if origem_id not in job.pessoas_do_catalogo:
@@ -79,3 +79,5 @@ def passar_pessoa_nos_jobs(
             repositorio.trocar(job.id, trocar)
     except Exception:
         log.exception("fusão %s -> %s não passou aos Jobs", origem_id, destino_id)
+        return False
+    return True
