@@ -337,8 +337,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         achada = pessoa(id_da_pessoa)
         if achada.lixeira is None:
             raise HTTPException(409, "A pessoa não está na lixeira")
-        # As fotos já saíram no envio e não voltam: o registro conta 0 delas.
-        impacto = impacto_da_pessoa(achada.id, 0)
+        # Sem impacto no registro (#717): contá-lo lia todos os vídeos da pessoa.
         lixeira_da_pessoa(achada.id, None)
         try:
             registrar(
@@ -346,7 +345,7 @@ def criar_rotas_da_lixeira_do_catalogo(
                 "item.restaurado",
                 achada,
                 achada.lixeira.motivo,
-                impacto.model_dump(),
+                {},
                 autor,
             )
         except Exception:
@@ -392,11 +391,8 @@ def criar_rotas_da_lixeira_do_catalogo(
             raise HTTPException(409, "Só se purga o que está na lixeira")
         if pedido.nome != achada.nome:
             raise HTTPException(422, "O nome digitado não é o do item")
-        impacto = (
-            impacto_da_pessoa(achada.id, 0)
-            if tipo == "pessoa"
-            else impacto_da_marca(achada)
-        )
+        # O da pessoa não é calculado (#717): lia todos os vídeos dela.
+        impacto = impacto_da_marca(achada).model_dump() if tipo == "marca" else {}
         ao_mudar()  # antes do registro e da purga: se falha, nada muda
         # O registro vem antes: se falha, nada é apagado.
         registrar(
@@ -404,7 +400,7 @@ def criar_rotas_da_lixeira_do_catalogo(
             "item.purgado",
             achada,
             achada.lixeira.motivo,
-            impacto.model_dump(),
+            impacto,
             autor,
         )
         if tipo == "marca":
