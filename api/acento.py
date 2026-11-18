@@ -10,6 +10,7 @@ as outras com as mesmas letras. "praca" vira "praça"; "pais" (país ou pais), "
 import logging
 import re
 import threading
+import unicodedata
 from collections import defaultdict
 from collections.abc import Collection
 from functools import cache
@@ -46,7 +47,9 @@ def _montar() -> dict[str, str]:
         return {}
     grafias: defaultdict[str, list[tuple[float, str]]] = defaultdict(list)
     for palavra, frequencia in frequencias.items():
-        grafias[normalizar(palavra)].append((frequencia, palavra))
+        # Só o acento volta: "2ª" e "1º" (NFKC muda) não substituem o "2a" digitado.
+        if unicodedata.normalize("NFKC", palavra) == palavra:
+            grafias[normalizar(palavra)].append((frequencia, palavra))
     acentos = {}
     for chave, opcoes in grafias.items():
         (primeira, palavra), *resto = sorted(opcoes, reverse=True)

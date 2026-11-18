@@ -46,6 +46,8 @@ def test_a_grafia_com_acento_muito_mais_comum_vence(
         "maio",
         "sabia",
         "secretaria",
+        "2a",
+        "1o",
     ],
 )
 def test_a_palavra_ambigua_nao_muda(palavra: str) -> None:
