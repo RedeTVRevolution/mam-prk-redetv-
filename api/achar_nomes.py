@@ -126,12 +126,12 @@ class ListaIndexada[T: ComNome](list[Indexado[T]]):
         então ou a palavra começa com as duas primeiras letras do termo, ou tem as duas
         últimas a 1 posição de onde ficariam (n-2). Vale cada termo que aceita erro; fica o
         de menos candidatos."""
-        opcoes = (
+        opcoes: list[set[int]] = [
             self._casam_o_termo(t)
             for t in termos
             if len(t) >= TAMANHO_PARA_ACEITAR_ERRO
-        )
-        return sorted(min(opcoes, key=lambda o: len(o), default=set()))
+        ]
+        return sorted(min(opcoes, key=len, default=set()))
 
     def posicoes_exatas(self, termos: list[str]) -> set[int]:
         """Posições dos itens com uma variante em que todos os termos começam uma palavra."""
