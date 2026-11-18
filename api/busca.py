@@ -51,7 +51,7 @@ from api.lixeira_na_leitura import (
 )
 from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
 from api.modelo_do_job import CursorInvalido, Job, RepositorioDeJobs
-from api.numero import com_as_formas, mesma_palavra, singular
+from api.numero import com_as_formas, mesma_palavra, raizes, singular
 from api.quem_conta import QuemConta
 from api.texto import chave_da_marca, normalizar
 
@@ -1287,18 +1287,33 @@ def _evidencias(e: ConsultaEntendida) -> tuple[str, ...]:
 def _texto_da_busca(e: ConsultaEntendida) -> str:
     """O que vai à busca por texto e por significado: a frase das aspas e o resto, sem
     repetir a frase se ela já está no texto livre."""
-    if e.frase_exata and e.texto_livre and _contem(e.texto_livre, e.frase_exata):
+    # Só com a mesma grafia: o significado e o Ranking leem o acento ("pães" acha mais que "paes").
+    if (
+        e.frase_exata
+        and e.texto_livre
+        and f" {_no_singular(e.frase_exata)} " in f" {_no_singular(e.texto_livre)} "
+    ):
         return e.texto_livre
     return " ".join(p for p in (e.frase_exata, e.texto_livre) if p)
 
 
 def _contem(texto: str, frase: str) -> bool:
     """A frase inteira no texto, com as palavras juntas e na ordem, sem acento nem maiúscula."""
-    return f" {_no_singular(frase)} " in f" {_no_singular(texto)} "
+    procuradas = [raizes(p) for p in re.findall(r"\w+", frase)]
+    if not procuradas:  # frase só de pontuação ("%") não casa com tudo
+        return False
+    palavras = [raizes(p) for p in re.findall(r"\w+", texto)]
+    return any(
+        all(
+            not a.isdisjoint(b)
+            for a, b in zip(palavras[i : i + len(procuradas)], procuradas, strict=True)
+        )
+        for i in range(len(palavras) - len(procuradas) + 1)
+    )
 
 
 def _no_singular(texto: str) -> str:
-    return " ".join(normalizar(singular(p)) for p in re.findall(r"\w+", texto))
+    return " ".join(singular(p) for p in re.findall(r"\w+", texto))
 
 
 def _tem_a_frase(r: Registro, frase: str | None) -> bool:

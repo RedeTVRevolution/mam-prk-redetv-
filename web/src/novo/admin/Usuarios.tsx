@@ -4,6 +4,7 @@ import { cn } from 'cn'
 import { useId, useRef, useState } from 'react'
 import { SessaoExpirada, codigoDoErro, type ContaDaLista } from '../../api.ts'
 import { falhaDaAcao, type Falha } from '../../falhaDaAcao.ts'
+import { nomeNormalizado } from '../../painel.ts'
 import { NOME_DO_PAPEL, PAPEIS } from '../../papeis.ts'
 import type { Usuario } from '../../sessao.ts'
 import { useApi } from '../consultas.ts'
@@ -182,10 +183,10 @@ export default function Usuarios({ eu }: { eu: Usuario }) {
     }
   }
 
-  const termo = busca.trim().toLowerCase()
+  const termo = nomeNormalizado(busca)
   const visiveis = contas.filter(
     (c) =>
-      (!termo || c.nome.toLowerCase().includes(termo) || c.email.toLowerCase().includes(termo)) &&
+      (!termo || nomeNormalizado(c.nome).includes(termo) || nomeNormalizado(c.email).includes(termo)) &&
       (papel === TODOS || c.papeis.includes(papel)) &&
       (situacao === TODOS || c.situacao === situacao),
   )

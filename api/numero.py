@@ -2,6 +2,7 @@
 "microfone" e "microfones" como a mesma palavra, sem depender do índice."""
 
 import re
+from functools import lru_cache
 
 from api.texto import normalizar
 
@@ -66,21 +67,58 @@ def _plurais(s: str) -> set[str]:
     return {s + "s"}
 
 
+# A busca compara sem acento: as tabelas e as regras abaixo valem para a palavra já normalizada,
+# e assim "pães" e "paes" dão as mesmas formas.
+_IRREGULARES_SEM_ACENTO = {
+    normalizar(p): normalizar(s) for p, s in _IRREGULARES.items()
+}
+_INVARIAVEIS_SEM_ACENTO = {normalizar(p) for p in _INVARIAVEIS}
+
+
+def raizes(palavra: str) -> frozenset[str]:
+    """Os singulares possíveis da palavra sem acento: "pais" é de pai e de país."""
+    return _raizes(normalizar(palavra))
+
+
+@lru_cache(maxsize=8192)
+def _raizes(n: str) -> frozenset[str]:
+    if n in _IRREGULARES_SEM_ACENTO:
+        achadas = {_IRREGULARES_SEM_ACENTO[n]}
+    elif len(n) >= 4 and n.endswith("aes"):
+        achadas = {n[:-3] + "ao"}  # pães, cães, alemães; "mães" é irregular
+    else:
+        achadas = {singular(n)}
+    if n in _INVARIAVEIS_SEM_ACENTO:
+        achadas.add(n)
+    return frozenset(achadas)
+
+
+def _plurais_sem_acento(raiz: str) -> set[str]:
+    irregulares = {p for p, s in _IRREGULARES_SEM_ACENTO.items() if s == raiz}
+    if irregulares or raiz in _INVARIAVEIS_SEM_ACENTO:
+        return irregulares
+    if raiz.endswith("ao"):
+        # Sem "-aes" que é de outra palavra: "mao" não acha "maes" (de mãe).
+        return {
+            raiz[:-2] + fim for fim in ("oes", "aes", "aos")
+        } - _IRREGULARES_SEM_ACENTO.keys()
+    return {normalizar(p) for p in _plurais(raiz)}
+
+
 def formas(palavra: str) -> set[str]:
-    """A palavra, o singular dela e os plurais desse singular: o que se manda ao índice
-    para achar o registro gravado em qualquer número."""
-    p = palavra.casefold()
-    s = singular(p)
-    return {p, s} | _plurais(s)
+    """Sem acento: a palavra, os singulares dela e os plurais deles, o que se manda ao
+    índice para achar o registro gravado em qualquer número."""
+    achadas = raizes(palavra)
+    return {normalizar(palavra), *achadas}.union(*map(_plurais_sem_acento, achadas))
 
 
 def mesma_palavra(a: str, b: str) -> bool:
     """Iguais no número, sem acento nem maiúscula."""
-    return normalizar(singular(a)) == normalizar(singular(b))
+    return not raizes(a).isdisjoint(raizes(b))
 
 
 def com_as_formas(texto: str) -> str:
-    """Formas normalizadas em grupos OR; palavras repetidas e pontuação ficam de fora."""
+    """Formas sem acento em grupos OR; palavras repetidas e pontuação ficam de fora."""
     saida: list[str] = []
     vistas: set[str] = set()
     for palavra in re.findall(r"\w+", texto):
@@ -88,7 +126,7 @@ def com_as_formas(texto: str) -> str:
         if digitada in vistas:
             continue
         vistas.add(digitada)
-        outras = {normalizar(forma) for forma in formas(palavra)} - {digitada}
+        outras = formas(digitada) - {digitada}
         grupo = [digitada, *sorted(outras)]
         saida.append(f"({' OR '.join(grupo)})" if outras else digitada)
     return " ".join(saida)
