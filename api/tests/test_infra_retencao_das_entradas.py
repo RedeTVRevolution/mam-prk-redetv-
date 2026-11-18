@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+from api.ciclo_de_vida import PRAZO_DA_RODADA
+
 
 def test_so_copia_limpa_e_audio_expiram_no_bucket_aceitos() -> None:
     texto = (
@@ -25,8 +27,6 @@ def test_so_copia_limpa_e_audio_expiram_no_bucket_aceitos() -> None:
 
 def test_rodada_da_indexacao_passa_do_timeout_do_job() -> None:
     """`PRAZO_DA_RODADA` só vale se o Job `mam-indexacao` morrer antes dele."""
-    from api.ciclo_de_vida import PRAZO_DA_RODADA
-
     texto = (
         Path(__file__).resolve().parents[2] / "infra/modulos/mam/main.tf"
     ).read_text()

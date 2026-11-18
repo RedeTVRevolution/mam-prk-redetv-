@@ -6,7 +6,6 @@ nome e os apelidos dela. A leitura das Decupagens mostra o destino onde havia a 
 """
 
 import logging
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any
@@ -22,6 +21,7 @@ from api.catalogo import (
     FusaoMudou,
     PessoaDoCatalogo,
     nomes_de_busca,
+    novo_id,
 )
 from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
 from api.correcoes import Motivo, RepositorioDeCorrecoes, sem_controle
@@ -29,6 +29,7 @@ from api.fotos_de_referencia import FotosDeReferencia, apagar_fotos_da_pessoa
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
+from api.quem_conta import QuemConta
 from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, LinhaDaConsulta
 
@@ -67,16 +68,8 @@ def destino_vigente(pessoas: Catalogo, destino_id: str) -> str | None:
     """A pessoa que vale hoje: segue a cadeia de fusões (o destino pode ter sido fundido
     depois) até quem não está fundido. `None` se a cadeia chega a um id que não existe ou
     dá a volta: como na leitura (`api.quem_conta`), a origem fica sem pessoa."""
-    vistos: set[str] = set()
-    while destino_id not in vistos:
-        vistos.add(destino_id)
-        pessoa = pessoas.obter(destino_id)
-        if pessoa is None:
-            return None
-        if pessoa.fundida is None:
-            return destino_id
-        destino_id = pessoa.fundida.destino_id
-    return None
+    fim = QuemConta(pessoas).pessoas([destino_id])[destino_id].pessoa
+    return fim.id if fim else None
 
 
 def _passar_os_nomes(
@@ -325,7 +318,7 @@ def criar_rotas_da_fusao(
             por_email=autor.email.lower(),
             motivo=pedido.motivo,
             fase="aguardando_auditoria",
-            registro_id=uuid.uuid4().hex,
+            registro_id=novo_id(),
             registro_detalhes={
                 "origem_id": origem.id,
                 "origem_nome": origem.nome,

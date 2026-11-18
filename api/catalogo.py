@@ -70,46 +70,6 @@ class RenomeacaoDaPessoa(BaseModel):
     por_email: str
 
 
-class AndamentoDaRenomeacao(BaseModel):
-    estado: Literal["em_andamento", "concluida", "falhou"]
-    feitos: int
-    total: int
-    nome_antigo: str
-    nome_novo: str
-
-
-class _Renomeacao(Protocol):
-    """O que a renomeação de uma pessoa e a de um programa têm em comum."""
-
-    @property
-    def estado(self) -> str: ...
-    @property
-    def total(self) -> int: ...
-    @property
-    def pendentes(self) -> list[str]: ...
-    @property
-    def nome_antigo(self) -> str: ...
-    @property
-    def nome_novo(self) -> str: ...
-
-
-def andamento_da_renomeacao(
-    r: _Renomeacao, confirmando_conta_como_em_andamento: bool = False
-) -> AndamentoDaRenomeacao:
-    """Para quem lê, a troca de programa que espera a auditoria (`confirmando`) já está em andamento."""
-    estado = r.estado
-    if confirmando_conta_como_em_andamento and estado == "confirmando":
-        estado = "em_andamento"
-    dados: dict[str, Any] = {
-        "estado": estado,
-        "feitos": r.total - len(r.pendentes),
-        "total": r.total,
-        "nome_antigo": r.nome_antigo,
-        "nome_novo": r.nome_novo,
-    }
-    return AndamentoDaRenomeacao.model_validate(dados)
-
-
 class PessoaDoCatalogo(BaseModel):
     id: str
     nome: str

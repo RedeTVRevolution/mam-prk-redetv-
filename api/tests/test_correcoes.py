@@ -4,7 +4,9 @@ from typing import Any, get_args
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
+from api import correcoes, decupagem
 from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria
 from api.chaves import (
@@ -1160,12 +1162,6 @@ def test_desfazer_renomeacao_depois_de_juncao_ou_nao_e_registra_os_nomes_da_pess
 
 
 def test_limites_das_correcoes_sao_os_da_decupagem() -> None:
-    from typing import Any
-
-    from pydantic import TypeAdapter
-
-    from api import correcoes, decupagem
-
     def teto(tipo: Any) -> int:
         return int(TypeAdapter(tipo).json_schema()["maxLength"])
 

@@ -20,7 +20,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import (
     APIRouter,
@@ -34,9 +34,7 @@ from pydantic import BaseModel, field_validator
 from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.catalogo import (
-    AndamentoDaRenomeacao,
     Catalogo,
-    andamento_da_renomeacao,
     existente_para_acrescentar,
     visivel,
 )
@@ -90,6 +88,25 @@ class PessoaNoProgramaPublica(BaseModel):
     nome: str
     apelidos: list[str]
     papel: str
+
+
+class AndamentoDaRenomeacao(BaseModel):
+    estado: Literal["em_andamento", "concluida", "falhou"]
+    feitos: int
+    total: int
+    nome_antigo: str
+    nome_novo: str
+
+
+def andamento_da_renomeacao(r: RenomeacaoDoPrograma) -> AndamentoDaRenomeacao:
+    """Para quem lê, a troca que espera a auditoria (`confirmando`) já está em andamento."""
+    return AndamentoDaRenomeacao(
+        estado="em_andamento" if r.estado == "confirmando" else r.estado,
+        feitos=r.total - len(r.pendentes),
+        total=r.total,
+        nome_antigo=r.nome_antigo,
+        nome_novo=r.nome_novo,
+    )
 
 
 class ProgramaPublico(BaseModel):
@@ -168,9 +185,7 @@ def criar_rotas_dos_programas(
             nome=programa.nome,
             perfil=programa.perfil,
             pessoas=pessoas,
-            renomeacao=None
-            if r is None
-            else andamento_da_renomeacao(r, confirmando_conta_como_em_andamento=True),
+            renomeacao=None if r is None else andamento_da_renomeacao(r),
         )
 
     def conferir_pessoas(dados: DadosDoPrograma) -> None:

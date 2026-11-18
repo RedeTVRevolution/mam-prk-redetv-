@@ -211,10 +211,11 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
     busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
     repositorio = RepositorioFirestore(cliente)
     catalogo = CatalogoFirestore(cliente)
+    storage = ClienteStorage(project=projeto)
     purga = Purga(
         repositorio,
         RepositorioDeCorrecoesFirestore(cliente),
-        ArquivosNoStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        ArquivosNoStorage(storage, aceitos, decupagens),
         (
             AgentRetrieval(
                 busca,
@@ -232,9 +233,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
     rodar_a_varredura_diaria(
         repositorio,
         purga,
-        ArmazenamentoStorage(
-            ClienteStorage(project=projeto), quarentena, aceitos, decupagens
-        ),
+        ArmazenamentoStorage(storage, quarentena, aceitos, decupagens),
         lambda: purgar_catalogo_vencido(
             catalogo,
             CatalogoDeMarcasFirestore(cliente),
@@ -247,7 +246,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         lambda: retomar_fusoes_pendentes(
             catalogo,
             repositorio,
-            ReferenciasStorage(ClienteStorage(project=projeto), referencias),
+            ReferenciasStorage(storage, referencias),
             auditoria,
             VersaoDaLixeiraFirestore(cliente).avancar,
         ),
