@@ -92,6 +92,7 @@ from api.modelo_do_job import (
 from api.papeis import DocumentoDePapeis, Papel
 from api.papeis import em_ordem as papeis_em_ordem
 from api.programas import (
+    TROCA_ABERTA,
     NomeEmUso,
     Programa,
     ProgramaInexistente,
@@ -1073,6 +1074,13 @@ class ProgramasFirestore:
     def obter(self, id: str) -> Programa | None:
         doc = _documento(self._colecao, id).get()
         return Programa(id=id, **(doc.to_dict() or {})) if doc.exists else None
+
+    def com_troca_aberta(self) -> list[Programa]:
+        # Campo simples dentro do mapa: o índice de campo único automático basta.
+        consulta = self._colecao.where(
+            filter=FieldFilter("renomeacao.estado", "in", list(TROCA_ABERTA))
+        )
+        return [Programa(id=d.id, **(d.to_dict() or {})) for d in consulta.stream()]
 
     def _conferir_nome(self, programa: Programa) -> None:
         if any(

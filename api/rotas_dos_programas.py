@@ -59,6 +59,7 @@ from api.programas import (
     pessoas_do_programa,
     troca_vale,
 )
+from api.quem_conta import QuemConta
 from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
@@ -150,8 +151,8 @@ def criar_rotas_dos_programas(
     lista de pessoas."""
     rotas = APIRouter(prefix="/admin/programas")
 
-    def publico(programa: Programa) -> ProgramaPublico:
-        visiveis, _ = pessoas_do_programa(programa, catalogo)
+    def publico(programa: Programa, quem: QuemConta | None = None) -> ProgramaPublico:
+        visiveis, _ = pessoas_do_programa(programa, catalogo, quem)
         pessoas = [
             PessoaNoProgramaPublica(
                 pessoa_id=pessoa.id,
@@ -173,8 +174,9 @@ def criar_rotas_dos_programas(
         )
 
     def conferir_pessoas(dados: DadosDoPrograma) -> None:
+        achadas = catalogo.obter_varios(v.pessoa_id for v in dados.pessoas)
         for v in dados.pessoas:
-            pessoa = catalogo.obter(v.pessoa_id)
+            pessoa = achadas.get(v.pessoa_id)
             if pessoa is None or not visivel(pessoa):
                 raise HTTPException(422, f"Pessoa fora do catálogo: {v.pessoa_id}")
 
@@ -314,7 +316,10 @@ def criar_rotas_dos_programas(
             Depends(exige("programas.editar", "Chave de sistema não edita programas")),
         ],
     ) -> list[ProgramaPublico]:
-        return [publico(p) for p in programas.listar()]
+        todos = programas.listar()
+        quem = QuemConta(catalogo)
+        quem.pessoas(v.pessoa_id for p in todos for v in p.pessoas)  # um lote só
+        return [publico(p, quem) for p in todos]
 
     @rotas.post("", status_code=201)
     def criar(
@@ -508,7 +513,9 @@ def criar_rotas_dos_programas(
         programa = programas.obter(id)
         if programa is None:
             raise HTTPException(404, "Programa inexistente")
-        achados = jobs.consultar(FiltroDeJobs(programas=frozenset({programa.nome})))
+        achados = jobs.consultar(
+            FiltroDeJobs(programas=frozenset({programa.nome}), so_os_da_lista=True)
+        )
         return ImpactoDoPrograma(videos=len(achados.jobs))
 
     @rotas.delete("/{id}", status_code=204)
