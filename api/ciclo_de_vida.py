@@ -401,7 +401,8 @@ def corrigir_estado(
 
     Ao falhar, as etapas que ficaram em andamento fecham como `falhou`, e o
     `codigo_falha` vem da primeira delas, para o "reprocessar o que falhou" recomeçar
-    dali (sem etapa aberta, ou com a validação aberta, a falha conta como do arquivo). Ao concluir, a indexação fica como
+    dali (sem etapa aberta, ou com a validação aberta, a falha conta como do arquivo). Nas
+    duas direções a `etapa_atual` fica nula. Ao concluir, a indexação fica como
     estava: nada a dispara, e quem quer o vídeo na busca reprocessa a partir da
     indexação.
     """
@@ -411,7 +412,12 @@ def corrigir_estado(
         lido[:] = [job]
         if job.estado not in DESTINOS_DA_CORRECAO[destino]:
             raise EstadoNaoCorrigivel(f"Job em {job.estado} não pode ir para {destino}")
-        mudancas: dict[str, Any] = {"estado": destino, "atualizado_em": agora}
+        # Sem etapa rodando: a tela lê `etapa_atual` como "anda".
+        mudancas: dict[str, Any] = {
+            "estado": destino,
+            "etapa_atual": None,
+            "atualizado_em": agora,
+        }
         if destino == "falhou":
             abertas = [
                 n for n in _ordem_das_etapas() if (e := job.etapas.get(n)) and not e.fim
@@ -450,7 +456,13 @@ def desfazer_correcao(
     def mudar(job: Job) -> dict[str, Any] | None:
         if (job.estado, job.atualizado_em) != (depois.estado, depois.atualizado_em):
             return None
-        voltam = ("estado", "codigo_falha", "etapas", "versao_pipeline")
+        voltam = (
+            "estado",
+            "codigo_falha",
+            "etapa_atual",
+            "etapas",
+            "versao_pipeline",
+        )
         return {
             **{campo: getattr(antes, campo) for campo in voltam},
             "atualizado_em": agora,
@@ -596,3 +608,14 @@ def fechar_a_rodada(
         }
 
     return repositorio.trocar(job_id, mudar)
+
+
+def etapa_de_reprocesso(job: Job) -> NomeDaEtapa | None:
+    """De onde "reprocessar o que falhou" recomeçaria o Job, para a tela só ler; `None` se
+    não vale (`NaoReprocessavel`) ou se o Job concluído ainda anda (`etapa_atual`)."""
+    if job.estado == "concluido" and job.etapa_atual:
+        return None
+    try:
+        return etapa_de_partida(job)
+    except NaoReprocessavel:
+        return None
