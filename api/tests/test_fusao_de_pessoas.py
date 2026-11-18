@@ -685,6 +685,38 @@ def test_destino_fundido_durante_a_retomada_leva_os_jobs_ao_novo_vigente() -> No
         assert job and job.pessoas_do_catalogo == [c.id]
 
 
+def test_jobs_que_pararam_no_destino_intermediario_seguem_ao_vigente_na_retomada() -> (
+    None
+):
+    mundo = Mundo()
+    c = mundo.catalogo.acrescentar("Sabrina Sato Oficial", "", [])
+    chamadas: list[int] = []
+
+    def terceira(*_: Any) -> bool:
+        chamadas.append(1)
+        return len(chamadas) == 3  # A -> B passa j1 e j2; a de B -> C em j1 cai
+
+    _cai_uma_vez(mundo.jobs, "trocar", terceira)
+    original = mundo.fotos.apagar_prefixo
+    outra: list[Any] = []
+
+    def b_vai_para_c_no_meio(prefixo: str) -> None:
+        if not outra:
+            outra.append(None)
+            outra[0] = mundo.fundir(origem=mundo.sabrina.id, destino=c.id)
+        original(prefixo)
+
+    mundo.fotos.apagar_prefixo = b_vai_para_c_no_meio  # type: ignore[method-assign]
+    assert mundo.fundir().status_code == 500  # Jobs de A em B; B -> C falhou
+    assert outra[0].status_code == 200
+
+    assert _retomar(mundo) == 1
+
+    for id in ("j1", "j2"):
+        job = mundo.jobs.obter(id)
+        assert job and job.pessoas_do_catalogo == [c.id]
+
+
 @pytest.mark.parametrize("sabotar", ["purgado", "ciclo"])
 def test_cadeia_sem_pessoa_valida_tira_a_origem_dos_jobs(sabotar: str) -> None:
     mundo = Mundo()

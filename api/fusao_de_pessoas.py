@@ -72,6 +72,22 @@ def destino_vigente(pessoas: Catalogo, destino_id: str) -> str | None:
     return fim.id if fim else None
 
 
+def _elos_do_meio(
+    pessoas: Catalogo, gravado_id: str, vigente_id: str | None
+) -> list[str]:
+    """Os ids da cadeia de fusão entre o destino gravado e o vigente (este fora). Vazio se
+    não há vigente (cadeia quebrada ou com volta)."""
+    elos: list[str] = []
+    atual = gravado_id
+    while vigente_id is not None and atual != vigente_id and atual not in elos:
+        elos.append(atual)
+        pessoa = pessoas.obter(atual)
+        if pessoa is None or pessoa.fundida is None:
+            return []
+        atual = pessoa.fundida.destino_id
+    return elos
+
+
 def _passar_os_nomes(
     pessoas: Catalogo, origem: PessoaDoCatalogo, destino_id: str | None
 ) -> None:
@@ -128,16 +144,18 @@ def concluir_fusao(
     apagar_fotos_da_pessoa(fotos, pessoas, origem)
     # Os Jobs vão ao destino vigente, não ao gravado (#722): ele pode ter sido fundido depois.
     # Se o destino foi fundido enquanto os Jobs passavam, eles seguem para o novo vigente.
-    de = origem.id
+    # Jobs que uma tentativa anterior deixou num destino do meio da cadeia saem dele também.
+    de = [origem.id, *_elos_do_meio(pessoas, fusao.destino_id, destino_id)]
     while True:
-        if not passar_pessoa_nos_jobs(repositorio, de, destino_id):
-            raise FusaoNaoConcluida(origem.id)
+        for id in de:
+            if not passar_pessoa_nos_jobs(repositorio, id, destino_id):
+                raise FusaoNaoConcluida(origem.id)
         if (
             destino_id is None
             or (agora := destino_vigente(pessoas, destino_id)) == destino_id
         ):
             break
-        de, destino_id = destino_id, agora
+        de, destino_id = [destino_id], agora
     ao_fundir()
     _avancar(
         pessoas,
