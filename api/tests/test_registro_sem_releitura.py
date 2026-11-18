@@ -2,12 +2,13 @@
 Correção pode mudar o conjunto de `catalogo_id`. As leituras são contadas num dublê."""
 
 import json
+from datetime import timedelta
 from typing import Any
 
-from api.correcoes import TIPOS, NovaCorrecao, versao_do_modelo
+from api.correcoes import TIPOS, Autoria, NovaCorrecao, versao_do_modelo
 from api.registro_da_correcao import pode_mudar_os_ids
 from api.tests.test_correcoes import MODELO, _pessoa
-from api.tests.test_registro_da_correcao import AUTORIA, Mundo
+from api.tests.test_registro_da_correcao import AUTORIA, BASE, Mundo
 
 PESSOAS = [
     {**_pessoa("p1", "Ana Souza", 1000, 5000), "citada_na_fala": []},
@@ -23,6 +24,7 @@ class MundoContado(Mundo):
         self.armazenamento.decupagens["j1"] = [BYTES]
         self.beto = self.catalogo.acrescentar("Beto Lima Neto", "repórter", [])
         self.leituras = 0
+        self._minutos = 0
         abrir = self.armazenamento.abrir_decupagem
 
         def contando(job_id: str) -> Any:
@@ -31,6 +33,14 @@ class MundoContado(Mundo):
 
         self.armazenamento.abrir_decupagem = contando  # type: ignore[method-assign]
 
+    @property
+    def autoria(self) -> Autoria:
+        """Cada registro um minuto depois do outro: a ordem das Correções vem da data."""
+        self._minutos += 1
+        return Autoria(
+            AUTORIA.uid, AUTORIA.email, BASE + timedelta(minutes=self._minutos)
+        )
+
     def novo(self, tipo: Any, item_id: str, valor: str, **campos: Any) -> NovaCorrecao:
         return NovaCorrecao(
             tipo=tipo, item_id=item_id, valor=valor, motivo="m", versao=VERSAO, **campos
@@ -38,7 +48,7 @@ class MundoContado(Mundo):
 
     def registrar(self, novo: NovaCorrecao, aprovacao: bool = False) -> Any:
         correcao, _ = self.registro.corrigir(
-            self.job, novo, AUTORIA, exige_aprovacao=aprovacao
+            self.job, novo, self.autoria, exige_aprovacao=aprovacao
         )
         return correcao
 
@@ -74,7 +84,7 @@ def test_desfazer_um_tipo_neutro_devolve_o_id_que_o_nao_e_tirou() -> None:
     tempos, _ = mundo.tempos_e_nao_e()
     assert mundo.job.pessoas_do_catalogo == []
 
-    mundo.registro.desfazer(mundo.job, tempos.id, "enganei-me", AUTORIA)
+    mundo.registro.desfazer(mundo.job, tempos.id, "enganei-me", mundo.autoria)
 
     assert mundo.job.pessoas_do_catalogo == [mundo.ana.id]
 
@@ -115,7 +125,7 @@ def test_decidir_de_tipo_neutro_nao_le_a_decupagem() -> None:
     alvo = mundo.registrar(mundo.novo("pauta.titulo", "pau01", "Outro"), True)
     mundo.leituras = 0
 
-    mundo.registro.decidir(mundo.job, alvo.id, True, "", AUTORIA)
+    mundo.registro.decidir(mundo.job, alvo.id, True, "", mundo.autoria)
 
     assert mundo.leituras == 0
 
@@ -125,7 +135,7 @@ def test_decidir_de_tipo_que_pode_mudar_le_uma_vez_depois_de_gravar() -> None:
     alvo = mundo.registrar(mundo.novo("pessoa.renomear", "p1", "Ana Souza Lima"), True)
     mundo.leituras = 0
 
-    mundo.registro.decidir(mundo.job, alvo.id, True, "", AUTORIA)
+    mundo.registro.decidir(mundo.job, alvo.id, True, "", mundo.autoria)
 
     assert mundo.leituras == 1
     assert mundo.job.pessoas_do_catalogo == [mundo.ana.id]
@@ -137,9 +147,9 @@ def test_desfazer_de_tipo_neutro_le_uma_vez_e_o_que_muda_o_conjunto_atualiza() -
     renomeada = mundo.renomear_ana()
     mundo.leituras = 0
 
-    mundo.registro.desfazer(mundo.job, titulo.id, "x", AUTORIA)
+    mundo.registro.desfazer(mundo.job, titulo.id, "x", mundo.autoria)
     assert mundo.leituras == 1
-    mundo.registro.desfazer(mundo.job, renomeada.id, "x", AUTORIA)
+    mundo.registro.desfazer(mundo.job, renomeada.id, "x", mundo.autoria)
 
     assert mundo.job.pessoas_do_catalogo == []
 
