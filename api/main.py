@@ -19,6 +19,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
+from api.acento import dicionario as dicionario_de_acentos
 from api.acessos import AcessosNaAuditoria
 from api.agent_retrieval import (
     AgentRetrieval,
@@ -936,11 +937,14 @@ if _projeto:
     )
     # Conexão TLS e token do índice, do embedding e da Ranking prontos antes da 1ª busca (#568).
     # Em segundo plano: não atrasa a partida nem o readiness.
-    _aquecimentos: list[Callable[[], None]] = []
+    _aquecimentos: list[Callable[[], object]] = []
     if _busca and _transporte_do_indice:
         _aquecimentos.append(partial(aquecer_o_indice, _transporte_do_indice, _busca))
     if _adaptadores.aquecer:
         _aquecimentos.append(_adaptadores.aquecer)
+    # Por último, depois das conexões: o índice dos acentos (#731, ~1 s de CPU), para a
+    # 1ª busca não esperar por ele.
+    _aquecimentos.append(dicionario_de_acentos)
     aquecer_na_partida(_aquecimentos)
 else:
     app = criar_app()

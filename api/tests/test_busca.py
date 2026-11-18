@@ -2803,6 +2803,7 @@ def test_o_significado_da_pessoa_e_o_ranking_recebem_a_mesma_grafia() -> None:
 def test_nome_do_catalogo_marca_e_palavra_ambigua_vao_como_foram_digitados() -> None:
     m = Mundo()
     m.catalogo.acrescentar("Rita Leao", "cantora", [])
+    m.marcas.acrescentar("Itaú", [])
     texto = "Rita Leao pais país coco cocô Itau"
     m.com(
         job("j1"),

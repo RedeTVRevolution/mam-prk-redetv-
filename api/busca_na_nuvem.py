@@ -124,7 +124,7 @@ def tocar_o_host(sessao: Any, host: str) -> None:
     sessao.get(f"https://{host}/", timeout=5)
 
 
-def aquecer_na_partida(tarefas: list[Callable[[], None]]) -> threading.Thread:
+def aquecer_na_partida(tarefas: list[Callable[[], object]]) -> threading.Thread:
     """Roda as tarefas numa thread em segundo plano, sem atrasar a partida; falha só vai
     ao log."""
 
@@ -133,7 +133,7 @@ def aquecer_na_partida(tarefas: list[Callable[[], None]]) -> threading.Thread:
             try:
                 tarefa()
             except Exception:
-                log.warning("aquecimento da conexão falhou", exc_info=True)
+                log.warning("aquecimento na partida falhou", exc_info=True)
 
     thread = threading.Thread(target=rodar, name="aquecer-conexoes", daemon=True)
     thread.start()

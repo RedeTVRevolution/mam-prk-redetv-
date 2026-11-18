@@ -1,7 +1,6 @@
 """`api/acento.py`: o acento de volta antes do significado e do Ranking (#731)."""
 
 import time
-from pathlib import Path
 
 import pytest
 
@@ -10,11 +9,11 @@ from api.acento import com_acento
 
 
 @pytest.mark.parametrize("digitado", ["praça", "praca", "PRACA", "Praça"])
-def test_a_palavra_do_dicionario_vem_com_o_acento_e_a_caixa_dele(digitado: str) -> None:
+def test_a_palavra_comum_vem_com_o_acento_e_em_minuscula(digitado: str) -> None:
     assert com_acento(f"{digitado} da Sé") == "praça da Sé"
 
 
-def test_a_palavra_fora_do_dicionario_fica_como_foi_digitada() -> None:
+def test_a_palavra_sem_grafia_com_acento_fica_como_foi_digitada() -> None:
     assert (
         com_acento("Praia, OCULOS escuros e Cozinha!")
         == "Praia, óculos escuros e Cozinha!"
@@ -22,9 +21,34 @@ def test_a_palavra_fora_do_dicionario_fica_como_foi_digitada() -> None:
 
 
 @pytest.mark.parametrize(
-    "palavra", ["pais", "país", "coco", "cocô", "e", "esta", "está", "maca", "Itau"]
+    "digitado, esperado",
+    [("manha", "manhã"), ("publico", "público"), ("eleicao", "eleição")],
 )
-def test_a_palavra_ambigua_e_a_marca_nao_mudam(palavra: str) -> None:
+def test_a_grafia_com_acento_muito_mais_comum_vence(
+    digitado: str, esperado: str
+) -> None:
+    assert com_acento(digitado) == esperado
+
+
+@pytest.mark.parametrize(
+    "palavra",
+    [
+        "pais",
+        "país",
+        "coco",
+        "cocô",
+        "e",
+        "esta",
+        "está",
+        "maca",
+        "metro",
+        "marco",
+        "maio",
+        "sabia",
+        "secretaria",
+    ],
+)
+def test_a_palavra_ambigua_nao_muda(palavra: str) -> None:
     assert com_acento(palavra) == palavra
 
 
@@ -33,24 +57,18 @@ def test_a_palavra_intocada_nao_muda() -> None:
     assert com_acento("o leao") == "o leão"
 
 
-def test_o_dicionario_e_pequeno_sem_repeticao_e_so_com_acento() -> None:
-    linhas = acento.ARQUIVO.read_text("utf-8").splitlines()
-    palavras = [p.strip() for p in linhas if p.strip() and not p.startswith("#")]
-    assert len(palavras) <= 5_000
-    # Nenhuma grafia sem acento com duas leituras (avó/avô) nem palavra já sem acento.
-    assert len(acento.dicionario()) == len(palavras)
-    assert all(chave != valor for chave, valor in acento.dicionario().items())
-
-
-def test_sem_o_dicionario_a_busca_segue_com_o_texto_digitado(
+def test_sem_as_frequencias_a_busca_segue_com_o_texto_digitado(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(acento, "ARQUIVO", Path("/nao/existe/acentos.txt"))
-    acento.dicionario.cache_clear()
+    def falha(*_: object) -> dict[str, float]:
+        raise OSError("sem os dados da wordfreq")
+
+    monkeypatch.setattr(acento, "get_frequency_dict", falha)
+    acento._montar.cache_clear()
     try:
         assert com_acento("praca") == "praca"
     finally:
-        acento.dicionario.cache_clear()
+        acento._montar.cache_clear()
 
 
 def test_a_restauracao_leva_menos_de_1_ms_por_consulta() -> None:
