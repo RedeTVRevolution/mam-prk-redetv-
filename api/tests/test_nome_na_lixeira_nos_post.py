@@ -55,6 +55,31 @@ def test_nome_fora_da_lixeira_devolve_o_existente_com_200() -> None:
     assert len(mundo.catalogo._pessoas) == 1 and len(mundo.marcas._marcas) == 1
 
 
+@pytest.mark.parametrize("primeiro_na_lixeira", [True, False])
+def test_homonimo_ativo_vale_sobre_o_da_lixeira(primeiro_na_lixeira: bool) -> None:
+    mundo = Mundo(["editor"])
+    p1 = mundo.catalogo.acrescentar("Ana Lima", "repórter", [])
+    p2 = mundo.catalogo.acrescentar("Ana Lima", "repórter", [])
+    m1 = mundo.marcas.acrescentar("Marca X", [])
+    m2 = mundo.marcas.acrescentar("Marca X", [])
+    lixo_p, ativa_p = (p1, p2) if primeiro_na_lixeira else (p2, p1)
+    lixo_m, ativa_m = (m1, m2) if primeiro_na_lixeira else (m2, m1)
+    mundo.catalogo.definir_lixeira(lixo_p.id, ENVIO)
+    mundo.marcas.definir_lixeira(lixo_m.id, ENVIO)
+
+    p = mundo.cliente.post(
+        "/v1/catalogo/pessoas",
+        json={"nome": "Ana Lima", "papel": "x"},
+        headers=AUTORIZACAO,
+    )
+    m = mundo.cliente.post(
+        "/v1/catalogo/marcas", json={"nome": "Marca X"}, headers=AUTORIZACAO
+    )
+
+    assert (p.status_code, m.status_code) == (200, 200)
+    assert (p.json()["id"], m.json()["id"]) == (ativa_p.id, ativa_m.id)
+
+
 def test_pessoa_do_programa_na_lixeira_409_existente_200_nova_201() -> None:
     cliente, _, c = _cliente(["editor"])
     catalogo = cast(CatalogoEmMemoria, c)

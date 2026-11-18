@@ -153,11 +153,10 @@ def sem_lixeira(entrada: EntradaDoCatalogo) -> bool:
 def existente_para_acrescentar[T: EntradaDoCatalogo](achadas: list[T]) -> T | None:
     """Para o POST que evita duplicata: o registro que já existe (fora da lixeira), ou
     `None` se o nome é novo. Nome na lixeira é 409: restaurar é o caminho, não criar."""
-    if not achadas:
-        return None
-    if achadas[0].lixeira is not None:
+    ativa = next((a for a in achadas if a.lixeira is None), None)
+    if ativa is None and achadas:
         raise HTTPException(409, "Esse nome está na lixeira e pode ser restaurado")
-    return achadas[0]
+    return ativa
 
 
 def qualquer(_: object) -> bool:
