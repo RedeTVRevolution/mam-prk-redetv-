@@ -48,6 +48,7 @@ from api.nuvem import (
     TranscricoesStorage,
     objeto_do_proxy,
 )
+from api.paralelo import em_paralelo
 from api.permissoes import JobDoPedido, enxerga, exige_escopo
 from api.precos_dos_modelos import Preco, precos_do_ambiente, tokens_do_transporte
 from api.programas import Perfis, perfis_dos_programas
@@ -55,6 +56,7 @@ from api.transcricao import Transcricao
 
 ETAPA_DE_CUSTO = "passada_de_comparacao"  # o rótulo de custo de cada chamada
 # O id da passada leva o nome do modelo e vira nome de objeto e trecho da rota: sem barra.
+DOWNLOADS_EM_PARALELO = 8  # passadas baixadas ao mesmo tempo na listagem
 FORMA_DO_ID = r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
 
 
@@ -94,7 +96,9 @@ class Passada(ResumoDaPassada):
 class LeituraDePassadas(Protocol):
     def ler_passada(self, job_id: str, passada_id: str) -> Passada | None: ...
 
-    def listar_passadas(self, job_id: str) -> list[ResumoDaPassada]: ...
+    def listar_passadas(
+        self, job_id: str, teto: int = DOWNLOADS_EM_PARALELO
+    ) -> list[ResumoDaPassada]: ...
 
 
 class ArmazemDaPassada(LeituraDePassadas, Protocol):
@@ -132,7 +136,9 @@ class PassadasEmMemoria:
     def ler_passada(self, job_id: str, passada_id: str) -> Passada | None:
         return self.passadas.get((job_id, passada_id))
 
-    def listar_passadas(self, job_id: str) -> list[ResumoDaPassada]:
+    def listar_passadas(
+        self, job_id: str, teto: int = DOWNLOADS_EM_PARALELO
+    ) -> list[ResumoDaPassada]:
         return sorted(
             (p.resumo() for (j, _), p in self.passadas.items() if j == job_id),
             key=lambda r: r.criada_em,
@@ -269,13 +275,20 @@ class PassadasStorage:
         except NotFound:
             return None
 
-    def listar_passadas(self, job_id: str) -> list[ResumoDaPassada]:
-        blobs = self._cliente.list_blobs(
-            self._decupagens, prefix=prefixo_das_passadas(job_id)
+    def listar_passadas(
+        self, job_id: str, teto: int = DOWNLOADS_EM_PARALELO
+    ) -> list[ResumoDaPassada]:
+        """Sem tratar falha: o erro de download ou de validação sobe, sem lista parcial."""
+        blobs = list(
+            self._cliente.list_blobs(
+                self._decupagens, prefix=prefixo_das_passadas(job_id)
+            )
         )
-        resumos = [
-            Passada.model_validate_json(b.download_as_bytes()).resumo() for b in blobs
-        ]
+        resumos = em_paralelo(
+            blobs,
+            lambda b: Passada.model_validate_json(b.download_as_bytes()).resumo(),
+            teto,
+        )
         return sorted(resumos, key=lambda r: r.criada_em)
 
 

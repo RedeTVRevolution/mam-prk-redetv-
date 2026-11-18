@@ -1,11 +1,13 @@
 """Passada de comparação (#247): comando e rotas, sem nuvem."""
 
+import threading
 from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 from google.api_core.exceptions import NotFound
+from pydantic import ValidationError
 
 from api.ambiente import FaltaNoAmbiente
 from api.auth import Usuario
@@ -326,3 +328,62 @@ def test_sem_decupagem_ver_e_403() -> None:
     assert cliente.get("/v1/jobs/j1/passadas", headers=AUTORIZACAO).status_code == 403
     rota = f"/v1/jobs/j1/passadas/{passada.id}"
     assert cliente.get(rota, headers=AUTORIZACAO).status_code == 403
+
+
+def _com_passadas(n: int, falha: str | None = None) -> PassadasStorage:
+    modelo, _, _ = _rodar()
+    objetos: dict[tuple[str, str], bytes] = {}
+    for i in range(n):
+        passada = modelo.model_copy(
+            # a ordem dos nomes não é a das datas
+            update={"id": f"p{i}", "criada_em": BASE.replace(minute=n - i)}
+        )
+        objetos[("decupagens", f"j1/passadas/p{i}.json")] = (
+            passada.model_dump_json().encode()
+        )
+    if falha:
+        objetos[("decupagens", f"j1/passadas/{falha}.json")] = b"{}"
+    return PassadasStorage(cast(Any, _StorageFalso(objetos)), "aceitos", "decupagens")
+
+
+def test_listar_passadas_baixa_em_paralelo_com_teto_e_mantem_a_ordem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    armazem = _com_passadas(4)
+    teto = 2
+    barreira = threading.Barrier(
+        teto, timeout=5
+    )  # só passa se dois downloads se sobrepõem
+    trava = threading.Lock()
+    agora = maximo = 0
+
+    original = _Blob.download_as_bytes
+
+    def baixar(self: _Blob) -> bytes:
+        nonlocal agora, maximo
+        with trava:
+            agora += 1
+            maximo = max(maximo, agora)
+        try:
+            try:
+                barreira.wait()
+            except threading.BrokenBarrierError:
+                pass  # a última passada ímpar não tem par
+            return original(self)
+        finally:
+            with trava:
+                agora -= 1
+
+    monkeypatch.setattr(_Blob, "download_as_bytes", baixar)
+
+    resumos = armazem.listar_passadas("j1", teto)
+
+    assert [r.id for r in resumos] == ["p3", "p2", "p1", "p0"]  # por criada_em
+    assert maximo == teto
+
+
+def test_passada_que_falha_ao_validar_faz_a_listagem_levantar() -> None:
+    armazem = _com_passadas(3, falha="ruim")
+
+    with pytest.raises(ValidationError):
+        armazem.listar_passadas("j1", 2)
