@@ -278,13 +278,50 @@ def test_falha_fecha_as_etapas_abertas_e_o_job_pode_ser_reprocessado() -> None:
     assert trocado is not None and trocado[1].etapa_atual == "transcricao"
 
 
+def test_corrigir_para_falhou_ou_concluido_apaga_a_etapa_atual() -> None:
+    for destino, estado in (("falhou", "analisando"), ("concluido", "analisando")):
+        mundo = Mundo(
+            _job(
+                estado,
+                etapa_atual="analise",
+                etapas={"analise": Etapa(inicio=BASE)},
+            ),
+            decupagem=True,
+        )
+
+        assert mundo.corrigir(destino).status_code == 200
+        assert mundo.job().etapa_atual is None
+
+
+def test_concluido_corrigido_a_partir_de_falhou_deixa_a_etapa_atual_nula() -> None:
+    mundo = Mundo(
+        _job(
+            "falhou",
+            codigo_falha="analise_falhou",
+            etapa_atual="analise",
+            etapas={"analise": Etapa(inicio=BASE)},
+        ),
+        decupagem=True,
+    )
+
+    assert mundo.corrigir("concluido").status_code == 200
+    job = mundo.job()
+    assert job.etapa_atual is None and job.etapas["analise"].fim is None
+
+
 class AuditoriaQueFalha(RepositorioDeAuditoriaEmMemoria):
     def acrescentar(self, registro: RegistroDeAuditoria) -> None:
         raise RuntimeError("Firestore fora")
 
 
 def test_sem_auditoria_o_job_volta_ao_que_era() -> None:
-    mundo = Mundo(_job("analisando", etapas={"analise": Etapa(inicio=BASE)}))
+    mundo = Mundo(
+        _job(
+            "analisando",
+            etapa_atual="analise",
+            etapas={"analise": Etapa(inicio=BASE)},
+        )
+    )
     mundo.auditoria = AuditoriaQueFalha()
 
     with pytest.raises(RuntimeError):
@@ -300,6 +337,7 @@ def test_sem_auditoria_o_job_volta_ao_que_era() -> None:
 
     job = mundo.job()
     assert job.estado == "analisando"
+    assert job.etapa_atual == "analise"
     assert job.etapas["analise"].resultado is None
 
 

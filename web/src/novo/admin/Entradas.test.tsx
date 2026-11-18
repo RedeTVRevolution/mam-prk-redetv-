@@ -62,6 +62,7 @@ const servidor = setupServer(
       estado: antigo.estado === 'falhou' ? 'analisando' : antigo.estado,
       codigo_falha: null,
       etapa_atual: etapa,
+      etapa_de_reprocesso: null,
     }
     jobs = jobs.map((j) => (j.id === novo.id ? novo : j))
     return HttpResponse.json(novo)
@@ -120,6 +121,7 @@ const falhaDeEtapa = () =>
     nome: 'falhou-na-tela.mp4',
     estado: 'falhou',
     codigo_falha: 'ocr_falhou',
+    etapa_de_reprocesso: 'leitura_da_tela',
     etapas: [{ nome: 'leitura_da_tela', inicio: '2026-10-29T15:01:00Z', fim: '2026-10-29T15:02:00Z', resultado: 'falhou' }],
   })
 
@@ -198,7 +200,7 @@ test('Reprocessar só aparece na falha de etapa e no concluído com etapa que fa
     job({ id: 'q', nome: 'falha-do-arquivo.mp4', estado: 'falhou', codigo_falha: 'arquivo_corrompido' }),
     // Sem código, a API recusa o reprocessamento mesmo com uma etapa falha no registro.
     job({ id: 's', nome: 'falha-sem-codigo.mp4', estado: 'falhou', etapas: [{ nome: 'analise', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] }),
-    job({ id: 'c1', nome: 'concluido-com-falha.mp4', etapas: [{ nome: 'indexacao', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] }),
+    job({ id: 'c1', nome: 'concluido-com-falha.mp4', etapa_de_reprocesso: 'indexacao', etapas: [{ nome: 'indexacao', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] }),
     job({ id: 'c2', nome: 'concluido-limpo.mp4', etapas: [{ nome: 'indexacao', ...ETAPA_OK }] }),
   ]
   await abrir()
@@ -211,6 +213,19 @@ test('Reprocessar só aparece na falha de etapa e no concluído com etapa que fa
   expect(botao('concluido-limpo.mp4')).toBeNull()
   const arquivo = screen.getByRole('row', { name: /falha-do-arquivo.mp4/ })
   expect(within(arquivo).getByText('Envie o arquivo de novo')).toBeTruthy()
+})
+
+test('falhou corrigido com etapa_atual ainda gravada: sem botão Reprocessar no vão entre duas etapas', async () => {
+  const agora = new Date().toISOString()
+  jobs = [
+    { ...falhaDeEtapa(), criado_em: agora, atualizado_em: agora, etapa_atual: 'leitura_da_tela' },
+    { ...falhaDeEtapa(), id: 'f2', nome: 'falhou-parado.mp4', criado_em: agora, atualizado_em: agora, etapa_atual: null },
+  ]
+  await abrir()
+  await linhaDe('falhou-na-tela.mp4')
+  const botao = (nome: string) => within(screen.getByRole('row', { name: new RegExp(nome) })).queryByRole('button', { name: /^Reprocessar / })
+  expect(botao('falhou-na-tela.mp4')).toBeNull()
+  expect(botao('falhou-parado.mp4')).toBeTruthy()
 })
 
 test('tempo esgotado na validação: frase própria, sem botão de reprocessar', async () => {
@@ -229,6 +244,7 @@ test('processamento interrompido entre etapas: retoma da primeira que não concl
       nome: 'interrompido-na-analise.mp4',
       estado: 'falhou',
       codigo_falha: 'processamento_interrompido',
+      etapa_de_reprocesso: 'analise',
       etapas: [concluida('validacao'), concluida('transcricao'), concluida('leitura_da_tela')],
     }),
     job({
@@ -322,7 +338,7 @@ test('a página que ainda vinha do servidor não desfaz o reprocessamento feito 
 })
 
 test('no vídeo concluído, o Reprocessar continua concluído e mostra a etapa em andamento', async () => {
-  jobs = [job({ nome: 'c.mp4', etapas: [{ nome: 'quadros_chave', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] })]
+  jobs = [job({ nome: 'c.mp4', etapa_de_reprocesso: 'quadros_chave', etapas: [{ nome: 'quadros_chave', inicio: ETAPA_OK.inicio, fim: ETAPA_OK.fim, resultado: 'falhou' }] })]
   await abrir()
   await linhaDe('c.mp4')
   await userEvent.click(screen.getByRole('button', { name: 'Reprocessar c.mp4' }))
@@ -447,7 +463,7 @@ test('a linha mostra a capa, o estado com ícone e a régua das etapas; o filtro
 
 test('o prazo vencido desabilita reprocessar falhas e escolher etapas com explicação', async () => {
   jobs = [
-    job({ id: 'f', nome: 'falhou.mp4', estado: 'falhou', codigo_falha: 'analise_falhou', reprocessavel_ate: '2000-01-01T00:00:00Z' }),
+    job({ id: 'f', nome: 'falhou.mp4', estado: 'falhou', codigo_falha: 'analise_falhou', etapa_de_reprocesso: 'analise', reprocessavel_ate: '2000-01-01T00:00:00Z' }),
     job({ id: 'c', nome: 'concluido.mp4', reprocessavel_ate: '2000-01-01T00:00:00Z' }),
   ]
   await abrir({ podeEscolherEtapa: true })
@@ -464,7 +480,7 @@ test('o prazo vencido desabilita reprocessar falhas e escolher etapas com explic
 
 test.each(['falhou', 'concluido'] as const)('não abre o reprocessamento se o prazo venceu com a tela aberta (%s)', async (estado) => {
   const agora = Date.now()
-  jobs = [1000, 2000].map((prazo, i) => job({ id: `j${i}`, nome: `clipe${i}.mp4`, estado, codigo_falha: estado === 'falhou' ? 'analise_falhou' : null, reprocessavel_ate: new Date(agora + prazo).toISOString() }))
+  jobs = [1000, 2000].map((prazo, i) => job({ id: `j${i}`, nome: `clipe${i}.mp4`, estado, codigo_falha: estado === 'falhou' ? 'analise_falhou' : null, etapa_de_reprocesso: estado === 'falhou' ? 'analise' : null, reprocessavel_ate: new Date(agora + prazo).toISOString() }))
   await abrir({ podeEscolherEtapa: true })
   const botao = await screen.findByRole('button', { name: /^Reprocessar clipe0.mp4/ }) as HTMLButtonElement
   expect(botao.disabled).toBe(false)

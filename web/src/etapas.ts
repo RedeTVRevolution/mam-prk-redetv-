@@ -26,19 +26,6 @@ export const ORDEM = [
   'indexacao',
 ]
 
-/** Depois do `concluido` só estas rodam; a falha de uma não muda o estado do Job. */
-const DEPOIS_DO_CONCLUIDO = ORDEM.slice(4)
-
-/** A etapa que cada falha de etapa aponta (`ETAPA_DA_FALHA` em api/ciclo_de_vida.py). */
-const ETAPA_DA_FALHA: Record<string, string> = {
-  transcricao_falhou: 'transcricao',
-  ocr_falhou: 'leitura_da_tela',
-  analise_falhou: 'analise',
-}
-
-/** As falhas que pedem novo envio (`FALHAS_DO_ARQUIVO` em api/ciclo_de_vida.py). */
-const FALHAS_DO_ARQUIVO = ['formato_invalido', 'arquivo_corrompido', 'codec_nao_suportado', 'duracao_excedida', 'upload_expirado']
-
 /** "de" + a etapa, para "Reprocessar a partir da leitura da tela?". */
 const PARTIDA: Record<string, string> = {
   transcricao: 'da transcrição',
@@ -52,34 +39,6 @@ const PARTIDA: Record<string, string> = {
 
 export function partidaDaEtapa(etapa: string): string {
   return PARTIDA[etapa] ?? `da etapa ${nomeDaEtapa(etapa)}`
-}
-
-interface JobComEtapas {
-  estado: string
-  codigo_falha: string | null
-  etapa_atual?: string | null
-  etapas?: { nome: string; resultado: string | null }[]
-}
-
-/**
- * De onde "reprocessar o que falhou" recomeçaria este Job (`etapa_de_partida` em
- * api/ciclo_de_vida.py; mude as duas juntas), ou `null` quando não vale: a falha é do
- * arquivo, o processamento parou na validação, o vídeo concluído não tem etapa que tenha
- * falhado ou o Job já está andando.
- */
-export function etapaDeReprocesso(job: JobComEtapas): string | null {
-  if (job.estado !== 'falhou' && (job.estado !== 'concluido' || job.etapa_atual)) return null
-  const falhas = ORDEM.filter((nome) => job.etapas?.some((e) => e.nome === nome && e.resultado === 'falhou'))
-  if (job.estado === 'falhou') {
-    if (job.codigo_falha === null || FALHAS_DO_ARQUIVO.includes(job.codigo_falha)) return null
-    let partida: string | undefined = falhas[0] ?? ETAPA_DA_FALHA[job.codigo_falha]
-    if (!partida && job.codigo_falha === 'processamento_interrompido') {
-      // O Workflows caiu entre duas etapas: recomeça da primeira que não concluiu.
-      partida = ORDEM.find((nome) => !job.etapas?.some((e) => e.nome === nome && e.resultado === 'concluida'))
-    }
-    return partida && partida !== 'validacao' ? partida : null
-  }
-  return falhas[0] && DEPOIS_DO_CONCLUIDO.includes(falhas[0]) ? falhas[0] : null
 }
 
 /** As etapas que o Curador pode escolher num vídeo concluído, na ordem em que rodam. */

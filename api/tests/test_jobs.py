@@ -229,6 +229,7 @@ def test_get_jobs_lista_do_mais_recente_para_o_mais_antigo() -> None:
         "copia_bigquery",
         "etapa_atual",
         "etapas",
+        "etapa_de_reprocesso",
         "reprocessamentos",
         "inicio_da_passada",
         "reprocessavel_ate",

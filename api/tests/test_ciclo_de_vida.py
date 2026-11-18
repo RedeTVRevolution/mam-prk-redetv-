@@ -15,7 +15,7 @@ from api.ciclo_de_vida import (
     transitar,
 )
 from api.jobs import JobPublico, RepositorioEmMemoria
-from api.modelo_do_job import CodigoDeFalha, Estado, Job
+from api.modelo_do_job import CodigoDeFalha, Estado, Etapa, Job
 
 BASE = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 DEPOIS = BASE + timedelta(minutes=5)
@@ -261,3 +261,79 @@ def test_job_publico_lista_as_etapas_na_ordem_do_inicio() -> None:
     publico = JobPublico.de(job)
 
     assert [e.nome for e in publico.etapas] == ["validacao", "transcricao"]
+
+
+def _com(estado: Estado, **campos: object) -> Job:
+    return _job(estado).model_copy(update=campos)
+
+
+def _etapa(resultado: str | None) -> Etapa:
+    return Etapa(inicio=BASE, fim=BASE if resultado else None, resultado=resultado)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("job", "esperado"),
+    [
+        pytest.param(
+            _com(
+                "falhou",
+                codigo_falha="ocr_falhou",
+                etapas={
+                    "transcricao": _etapa("concluida"),
+                    "leitura_da_tela": _etapa("falhou"),
+                },
+            ),
+            "leitura_da_tela",
+            id="falhou de etapa",
+        ),
+        pytest.param(
+            _com(
+                "falhou",
+                codigo_falha="analise_falhou",
+                etapa_atual="analise",
+                etapas={"analise": _etapa("falhou")},
+            ),
+            "analise",
+            id="falhou de etapa com etapa_atual gravada",
+        ),
+        pytest.param(
+            _com("falhou", codigo_falha="formato_invalido"), None, id="falha do arquivo"
+        ),
+        pytest.param(
+            _com(
+                "falhou",
+                codigo_falha="processamento_interrompido",
+                etapas={
+                    "validacao": _etapa("concluida"),
+                    "transcricao": _etapa("concluida"),
+                },
+            ),
+            "leitura_da_tela",
+            id="processamento interrompido",
+        ),
+        pytest.param(
+            _com("concluido", etapas={"identificacao": _etapa("falhou")}),
+            "identificacao",
+            id="concluido com etapa falhada de depois",
+        ),
+        pytest.param(_com("concluido"), None, id="concluido sem falha"),
+        pytest.param(
+            _com(
+                "concluido",
+                etapa_atual="indexacao",
+                etapas={"identificacao": _etapa("falhou"), "indexacao": _etapa(None)},
+            ),
+            None,
+            id="concluido ainda andando",
+        ),
+        pytest.param(
+            _com("analisando", etapa_atual="analise", etapas={"analise": _etapa(None)}),
+            None,
+            id="andando",
+        ),
+    ],
+)
+def test_job_resumido_diz_de_onde_reprocessar_o_que_falhou(
+    job: Job, esperado: str | None
+) -> None:
+    assert JobPublico.de(job).etapa_de_reprocesso == esperado

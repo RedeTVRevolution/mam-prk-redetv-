@@ -5059,6 +5059,27 @@
             "title": "Etapas",
             "default": []
           },
+          "etapa_de_reprocesso": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "validacao",
+                  "transcricao",
+                  "leitura_da_tela",
+                  "analise",
+                  "identificacao",
+                  "quadros_chave",
+                  "inventario_de_objetos",
+                  "indexacao"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etapa De Reprocesso"
+          },
           "reprocessamentos": {
             "type": "integer",
             "title": "Reprocessamentos",
@@ -5307,6 +5328,27 @@
             "title": "Etapas",
             "default": []
           },
+          "etapa_de_reprocesso": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "validacao",
+                  "transcricao",
+                  "leitura_da_tela",
+                  "analise",
+                  "identificacao",
+                  "quadros_chave",
+                  "inventario_de_objetos",
+                  "indexacao"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etapa De Reprocesso"
+          },
           "reprocessamentos": {
             "type": "integer",
             "title": "Reprocessamentos",
@@ -5543,6 +5585,27 @@
             "type": "array",
             "title": "Etapas",
             "default": []
+          },
+          "etapa_de_reprocesso": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "validacao",
+                  "transcricao",
+                  "leitura_da_tela",
+                  "analise",
+                  "identificacao",
+                  "quadros_chave",
+                  "inventario_de_objetos",
+                  "indexacao"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etapa De Reprocesso"
           },
           "reprocessamentos": {
             "type": "integer",

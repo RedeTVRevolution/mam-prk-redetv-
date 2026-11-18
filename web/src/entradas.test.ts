@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { casaComOsFiltrosDoCliente, consultaDasEntradas, filtrosDasEntradas, filtrosParaEnderecoDasEntradas, SEM_FILTROS_DAS_ENTRADAS, tempoDaEntradaMs } from './entradas.ts'
+import { casaComOsFiltrosDoCliente, consultaDasEntradas, emAndamento, filtrosDasEntradas, filtrosParaEnderecoDasEntradas, SEM_FILTROS_DAS_ENTRADAS, tempoDaEntradaMs } from './entradas.ts'
 import type { Job } from './jobs.ts'
 
 const JOB: Job = {
@@ -18,6 +18,14 @@ const JOB: Job = {
 }
 
 const AGORA = Date.parse('2026-11-04T15:00:00Z')
+
+test('emAndamento: só o que anda; falhou e concluído sem etapa_atual (corrigidos) não', () => {
+  expect(emAndamento({ ...JOB, estado: 'falhou', codigo_falha: 'analise_falhou', etapa_atual: null })).toBe(false)
+  expect(emAndamento({ ...JOB, estado: 'falhou', codigo_falha: 'analise_falhou', etapa_atual: 'analise' })).toBe(true)
+  expect(emAndamento({ ...JOB, estado: 'concluido', etapa_atual: null })).toBe(false)
+  expect(emAndamento({ ...JOB, estado: 'concluido', etapa_atual: 'indexacao' })).toBe(true)
+  expect(emAndamento({ ...JOB, estado: 'analisando' })).toBe(true)
+})
 
 test('o tempo da entrada mede só a passada atual até o último fim de etapa', () => {
   expect(tempoDaEntradaMs({ ...JOB, inicio_da_passada: '2026-11-03T14:00:00Z', reprocessamentos: 1 }, AGORA)).toBe(409_000)
