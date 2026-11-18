@@ -75,8 +75,6 @@ class CatalogoDeMarcas(Protocol):
 
 class CatalogoDeMarcasEmMemoria(CatalogoGenericoEmMemoria[MarcaDoCatalogo]):
     _inexistente = MarcaInexistente
-    # Os testes mexem direto nesse dicionário.
-    _marcas = property(lambda self: self._itens)
 
     def achar(self, nome: str, *, com_lixeira: bool = False) -> list[MarcaDoCatalogo]:
         return self._achar(nome, com_lixeira)

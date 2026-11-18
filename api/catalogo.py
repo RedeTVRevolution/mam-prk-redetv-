@@ -374,8 +374,6 @@ class CatalogoEmMemoria(CatalogoGenericoEmMemoria[PessoaDoCatalogo]):
     _inexistente = PessoaInexistente
     _visivel = staticmethod(visivel)
     _achavel_na_lixeira = staticmethod(sem_fusao)
-    # Os testes mexem direto nesse dicionário.
-    _pessoas = property(lambda self: self._itens)
 
     @classmethod
     def copia_de(cls, catalogo: Catalogo) -> "CatalogoEmMemoria":

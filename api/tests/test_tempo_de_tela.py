@@ -395,7 +395,7 @@ def _catalogo_da_copia(consulta: Any) -> CatalogoEmMemoria:
     for linhas in consulta._copia.por_job.values():
         for linha in linhas:
             for p in linha.pessoas:
-                catalogo._pessoas.setdefault(
+                catalogo._itens.setdefault(
                     p.id, PessoaDoCatalogo(id=p.id, nome=p.nome or p.id, papel="")
                 )
     return catalogo
@@ -791,7 +791,7 @@ def _empate_com_nome_atual() -> tuple[CatalogoQueConta, CopiaEmMemoria]:
         ("p3", "Zzz Velho"),
         ("p4", "Carla"),
     ):
-        catalogo._pessoas[id_] = PessoaDoCatalogo(id=id_, nome=nome, papel="")
+        catalogo._itens[id_] = PessoaDoCatalogo(id=id_, nome=nome, papel="")
     catalogo.definir_fusao(
         "p3",
         FusaoDaPessoa(

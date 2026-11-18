@@ -212,7 +212,7 @@ def _renomeada(catalogo: CatalogoEmMemoria, de: str, para: str) -> PessoaDoCatal
 def test_renomeacao_troca_o_nome_antigo_pelo_atual() -> None:
     catalogo = CatalogoEmMemoria()
     p = _renomeada(catalogo, "Ana Souza", "Ana Souza Lima")
-    catalogo._pessoas[p.id] = p
+    catalogo._itens[p.id] = p
     leitura = _leitura(_modelo(_pessoa("pes01", "Ana Souza", p.id)), catalogo)
     assert _nome(leitura.corrigida("j1")) == "Ana Souza Lima"
 
@@ -252,7 +252,7 @@ def test_destino_purgado_na_corrigida_a_renomeacao_da_origem_vale() -> None:
     catalogo = CatalogoEmMemoria()
     a = _renomeada(catalogo, "Ana Souza", "Ana Souza Lima")
     b = catalogo.acrescentar("Ana B", "p", [])
-    catalogo._pessoas[a.id] = _fundida_em(a, b.id)
+    catalogo._itens[a.id] = _fundida_em(a, b.id)
     catalogo.apagar(b.id)
     leitura = _leitura(_modelo(_pessoa("pes01", "Ana Souza", a.id)), catalogo)
     lida = leitura.corrigida("j1")
@@ -262,7 +262,7 @@ def test_destino_purgado_na_corrigida_a_renomeacao_da_origem_vale() -> None:
 def test_renomeacao_respeita_o_nome_corrigido_no_video() -> None:
     catalogo = CatalogoEmMemoria()
     p = _renomeada(catalogo, "Ana Souza", "Ana Souza Lima")
-    catalogo._pessoas[p.id] = p
+    catalogo._itens[p.id] = p
     leitura = _leitura(_modelo(_pessoa("pes01", "Ana Outra", p.id)), catalogo)
     assert _nome(leitura.corrigida("j1")) == "Ana Outra"
 

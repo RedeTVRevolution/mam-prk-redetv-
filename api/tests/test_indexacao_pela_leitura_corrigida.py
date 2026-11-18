@@ -55,11 +55,11 @@ class PessoasContadas(CatalogoEmMemoria):
 
 def _catalogos() -> tuple[PessoasContadas, CatalogoDeMarcasEmMemoria]:
     pessoas = PessoasContadas()
-    pessoas._pessoas[SABRINA] = PessoaDoCatalogo(
+    pessoas._itens[SABRINA] = PessoaDoCatalogo(
         id=SABRINA, nome="Sabrina Sato", papel="apresentadora", lixeira=LIXEIRA
     )
     marcas = CatalogoDeMarcasEmMemoria()
-    marcas._marcas["marca-x"] = MarcaDoCatalogo(
+    marcas._itens["marca-x"] = MarcaDoCatalogo(
         id="marca-x", nome="Marca X", lixeira=LIXEIRA
     )
     return pessoas, marcas

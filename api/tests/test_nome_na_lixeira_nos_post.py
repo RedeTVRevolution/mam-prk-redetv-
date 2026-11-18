@@ -33,7 +33,7 @@ def test_pessoa_e_marca_na_lixeira_respondem_409_sem_criar() -> None:
 
     assert (p.status_code, m.status_code) == (409, 409)
     assert LIXEIRA in p.json()["detail"] and LIXEIRA in m.json()["detail"]
-    assert len(mundo.catalogo._pessoas) == 1 and len(mundo.marcas._marcas) == 1
+    assert len(mundo.catalogo._itens) == 1 and len(mundo.marcas._itens) == 1
 
 
 def test_nome_fora_da_lixeira_devolve_o_existente_com_200() -> None:
@@ -52,7 +52,7 @@ def test_nome_fora_da_lixeira_devolve_o_existente_com_200() -> None:
 
     assert (p.status_code, m.status_code) == (200, 200)
     assert (p.json()["id"], m.json()["id"]) == (pessoa.id, marca.id)
-    assert len(mundo.catalogo._pessoas) == 1 and len(mundo.marcas._marcas) == 1
+    assert len(mundo.catalogo._itens) == 1 and len(mundo.marcas._itens) == 1
 
 
 @pytest.mark.parametrize("primeiro_na_lixeira", [True, False])
@@ -83,7 +83,7 @@ def test_homonimo_ativo_vale_sobre_o_da_lixeira(primeiro_na_lixeira: bool) -> No
 def test_pessoa_do_programa_na_lixeira_409_existente_200_nova_201() -> None:
     cliente, _, c = _cliente(["editor"])
     catalogo = cast(CatalogoEmMemoria, c)
-    antes = len(catalogo._pessoas)
+    antes = len(catalogo._itens)
     existente = catalogo.acrescentar("Ana Lima", "", [])
     na_lixeira = catalogo.acrescentar("Bia Souza", "", [])
     catalogo.definir_lixeira(na_lixeira.id, ENVIO)
@@ -98,7 +98,7 @@ def test_pessoa_do_programa_na_lixeira_409_existente_200_nova_201() -> None:
     assert lixo.status_code == 409 and LIXEIRA in lixo.json()["detail"]
     assert (de_novo.status_code, de_novo.json()["pessoa_id"]) == (200, existente.id)
     assert nova.status_code == 201
-    assert len(catalogo._pessoas) == antes + 3
+    assert len(catalogo._itens) == antes + 3
 
 
 @pytest.mark.parametrize("com_lixeira", [False, True])

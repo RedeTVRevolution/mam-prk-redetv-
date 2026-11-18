@@ -215,10 +215,10 @@ def test_decupagem_com_30_pessoas_de_10_ids_faz_uma_leitura_em_lote() -> None:
     catalogo = CatalogoContado()
     marcas = MarcasContadas()
     for i in range(10):
-        catalogo._pessoas[f"p{i}"] = PessoaDoCatalogo(
+        catalogo._itens[f"p{i}"] = PessoaDoCatalogo(
             id=f"p{i}", nome=f"Pessoa {i}", papel="x"
         )
-    marcas._marcas["m0"] = MarcaDoCatalogo(id="m0", nome="Marca")
+    marcas._itens["m0"] = MarcaDoCatalogo(id="m0", nome="Marca")
     modelo = {
         "pessoas": [
             {
