@@ -48,10 +48,12 @@ def atualizar_catalogo_do_job(
     job: "Job",
     repositorio: "RepositorioDeJobs",
     leitura: LeituraDaDecupagem,
+    lido: tuple[dict[str, Any], str] | None = None,
 ) -> None:
-    """Relê a Decupagem corrigida e regrava os campos do Job; nunca levanta."""
+    """Lê a Decupagem corrigida (com `lido`, sem reabrir o modelo) e regrava os campos do
+    Job; nunca levanta."""
     try:
-        corrigida = leitura.corrigida(job.id)
+        corrigida = leitura.corrigida(job.id, lido=lido)
     except Exception:
         log.exception("decupagem de %s não lida para o catálogo do Job", job.id)
         return
