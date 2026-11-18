@@ -203,9 +203,6 @@ def _renomeada(catalogo: CatalogoEmMemoria, de: str, para: str) -> PessoaDoCatal
         em=BASE,
         por_uid="u1",
         por_email="a@r.com",
-        total=0,
-        pendentes=[],
-        estado="concluida",
     )
     return catalogo.definir_renomeacao(p.id, renomeacao).model_copy(
         update={"nome": para}
