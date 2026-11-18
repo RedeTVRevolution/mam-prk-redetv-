@@ -129,6 +129,13 @@ class PessoaDoCatalogo(BaseModel):
     renomeacao: RenomeacaoDaPessoa | None = None
 
 
+class FusaoMudou(Exception):
+    """A fusão gravada não é a que o pedido esperava: outro pedido chegou antes (#721)."""
+
+
+SeAFusao = Callable[["FusaoDaPessoa | None"], bool]
+
+
 class PessoaInexistente(Exception):
     """Nenhuma pessoa do catálogo tem o id pedido."""
 
@@ -253,8 +260,11 @@ class Catalogo(Protocol):
         """Manda para a lixeira (ou, com `None`, tira); `PessoaInexistente` se o id não existe."""
         ...
 
-    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
-        """Marca a pessoa como fundida no destino (ou, com `None`, desfaz); `PessoaInexistente` se o id não existe."""
+    def definir_fusao(
+        self, id: str, fusao: FusaoDaPessoa | None, se: SeAFusao | None = None
+    ) -> PessoaDoCatalogo:
+        """Marca a pessoa como fundida no destino (ou, com `None`, desfaz); `PessoaInexistente` se o id não existe.
+        Com `se`, grava só se a fusão atual passa nele (na mesma transação); senão `FusaoMudou`."""
         ...
 
     def definir_renomeacao(
@@ -379,7 +389,11 @@ class CatalogoEmMemoria(CatalogoGenericoEmMemoria[PessoaDoCatalogo]):
     def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
         return self._achar(nome, com_lixeira)
 
-    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
+    def definir_fusao(
+        self, id: str, fusao: FusaoDaPessoa | None, se: SeAFusao | None = None
+    ) -> PessoaDoCatalogo:
+        if se is not None and not se(self._existente(id).fundida):
+            raise FusaoMudou(id)
         return self._alterar(id, {"fundida": fusao})
 
     def fusoes_pendentes(self) -> list[PessoaDoCatalogo]:

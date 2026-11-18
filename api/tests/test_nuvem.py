@@ -39,6 +39,7 @@ from api.busca import (
 from api.catalogo import (
     EnvioParaLixeira,
     FusaoDaPessoa,
+    FusaoMudou,
     PessoaDoCatalogo,
     PessoaInexistente,
     Rosto,
@@ -1308,6 +1309,25 @@ class TestCatalogoFirestore:
         assert lida is not None and lida.fundida == fusao
         with pytest.raises(PessoaInexistente):
             catalogo.definir_fusao("inexistente", fusao)
+
+    def test_definir_fusao_com_condicao_so_grava_se_a_atual_passa(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        origem = catalogo.acrescentar("Ana", "", [])
+        primeira = FusaoDaPessoa(
+            destino_id="b", em=BASE, por_uid="u", por_email="a@b.c", motivo="m"
+        )
+        catalogo.definir_fusao(origem.id, primeira, se=lambda atual: atual is None)
+
+        with pytest.raises(FusaoMudou):
+            catalogo.definir_fusao(
+                origem.id,
+                primeira.model_copy(update={"destino_id": "c"}),
+                se=lambda atual: atual is None,
+            )
+
+        lida = catalogo.obter(origem.id)
+        assert lida is not None and lida.fundida == primeira
 
     def test_nome_novo_fica_a_revisar_com_o_autor(
         self, catalogo: CatalogoFirestore

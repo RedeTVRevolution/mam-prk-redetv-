@@ -42,10 +42,12 @@ from api.catalogo import (
     EntradaDoCatalogo,
     EnvioParaLixeira,
     FusaoDaPessoa,
+    FusaoMudou,
     PessoaDoCatalogo,
     PessoaInexistente,
     RenomeacaoDaPessoa,
     Rosto,
+    SeAFusao,
     corrigida,
     nomes_de_busca,
     novo_id,
@@ -1012,8 +1014,15 @@ class CatalogoFirestore(CatalogoGenericoFirestore[PessoaDoCatalogo]):
     def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
         return self._achar(nome, com_lixeira)
 
-    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
-        return self._alterar(id, {"fundida": fusao})
+    def definir_fusao(
+        self, id: str, fusao: FusaoDaPessoa | None, se: SeAFusao | None = None
+    ) -> PessoaDoCatalogo:
+        def mudar(pessoa: PessoaDoCatalogo) -> PessoaDoCatalogo:
+            if se is not None and not se(pessoa.fundida):
+                raise FusaoMudou(id)
+            return pessoa.model_copy(update={"fundida": fusao})
+
+        return self._transformar(id, mudar)
 
     def fusoes_pendentes(self) -> list[PessoaDoCatalogo]:
         # No servidor: o marcador só existe enquanto a fusão está pendente.

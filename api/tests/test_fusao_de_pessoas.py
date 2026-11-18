@@ -584,6 +584,56 @@ def test_o_mesmo_pedido_com_outro_destino_na_fusao_pendente_continua_422() -> No
     assert _fundida(mundo).fase == "limpando"
 
 
+def test_duas_fusoes_da_mesma_origem_ao_mesmo_tempo_so_a_primeira_grava() -> None:
+    mundo = Mundo()
+    terceira = mundo.catalogo.acrescentar("Outra", "", [])
+    original = mundo.catalogo.definir_fusao
+    outra: list[Any] = []
+
+    def com_a_outra_antes(*args: Any, **kwargs: Any) -> Any:
+        if not outra:  # a fusão em C passou pela validação junto e grava antes
+            outra.append(None)
+            outra[0] = mundo.fundir(destino=terceira.id)
+        return original(*args, **kwargs)
+
+    mundo.catalogo.definir_fusao = com_a_outra_antes  # type: ignore[method-assign]
+
+    resposta = mundo.fundir()
+
+    assert outra[0].status_code == 200
+    assert resposta.status_code == 409
+    assert (_fundida(mundo).destino_id, _fundida(mundo).fase) == (terceira.id, None)
+    for id in ("j1", "j2"):
+        job = mundo.jobs.obter(id)
+        assert job and job.pessoas_do_catalogo == [terceira.id]
+    assert mundo.catalogo.obter(mundo.sabrina.id).apelidos == ["Sá"]  # type: ignore[union-attr]
+    assert len(_registros(mundo)) == 1
+
+
+def test_duas_retomadas_ao_mesmo_tempo_gravam_um_registro_e_concluem() -> None:
+    mundo = Mundo()
+    _cai_uma_vez(mundo.auditoria, "acrescentar")
+    with pytest.raises(RuntimeError):
+        mundo.fundir()
+    original = mundo.auditoria.existe
+    outra: list[Any] = []
+
+    def a_outra_grava_depois_da_consulta(id: str) -> bool:
+        existe = original(id)
+        if not outra:
+            outra.append(None)  # antes da chamada aninhada, senão ela reentra
+            outra[0] = mundo.fundir()
+        return existe
+
+    mundo.auditoria.existe = a_outra_grava_depois_da_consulta  # type: ignore[method-assign]
+
+    resposta = mundo.fundir()
+
+    assert (outra[0].status_code, resposta.status_code) == (200, 200)
+    assert len(_registros(mundo)) == 1
+    assert _fundida(mundo).fase is None
+
+
 # --- Retomada pela varredura diária (#722) ---
 
 
