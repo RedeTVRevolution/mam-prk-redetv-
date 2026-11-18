@@ -259,6 +259,7 @@ def test_os_campos_da_lista_cobrem_o_job_resumido_e_os_obrigatorios_do_job() -> 
         "enviado_por",
         "capa_url",
         "reprocessavel_ate",
+        "etapa_de_reprocesso",  # derivado de estado, codigo_falha, etapas e etapa_atual
     }
     obrigatorios = {n for n, c in Job.model_fields.items() if c.is_required()}
 
