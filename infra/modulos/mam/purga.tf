@@ -71,6 +71,10 @@ resource "google_cloud_run_v2_job" "purga" {
           value = local.buckets["decupagens"]
         }
         env {
+          name  = "BUCKET_REFERENCIAS"
+          value = local.buckets["referencias"]
+        }
+        env {
           name  = "BUSCA_REGIAO"
           value = var.regiao_da_busca
         }

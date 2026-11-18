@@ -1015,6 +1015,15 @@ class CatalogoFirestore(CatalogoGenericoFirestore[PessoaDoCatalogo]):
     def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
         return self._alterar(id, {"fundida": fusao})
 
+    def fusoes_pendentes(self) -> list[PessoaDoCatalogo]:
+        # No servidor: o marcador só existe enquanto a fusão está pendente.
+        consulta = self._colecao.where(
+            filter=FieldFilter(
+                "fundida.fase", "in", ["aguardando_auditoria", "limpando"]
+            )
+        )
+        return [self._ler(d.id, d.to_dict() or {}) for d in consulta.stream()]
+
     def definir_renomeacao(
         self, id: str, renomeacao: RenomeacaoDaPessoa | None
     ) -> PessoaDoCatalogo:

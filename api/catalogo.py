@@ -242,6 +242,11 @@ class Catalogo(Protocol):
 
     def na_lixeira(self) -> list[PessoaDoCatalogo]: ...
 
+    def fusoes_pendentes(self) -> list[PessoaDoCatalogo]:
+        """As origens de fusão com o marcador de fase (#722): a varredura diária as retoma.
+        `todas` e `achar` escondem a fundida, então só esta consulta a acha."""
+        ...
+
     def definir_lixeira(
         self, id: str, envio: EnvioParaLixeira | None
     ) -> PessoaDoCatalogo:
@@ -376,6 +381,9 @@ class CatalogoEmMemoria(CatalogoGenericoEmMemoria[PessoaDoCatalogo]):
 
     def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
         return self._alterar(id, {"fundida": fusao})
+
+    def fusoes_pendentes(self) -> list[PessoaDoCatalogo]:
+        return [p for p in self._itens.values() if p.fundida and p.fundida.fase]
 
     def definir_renomeacao(
         self, id: str, renomeacao: RenomeacaoDaPessoa | None
