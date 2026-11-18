@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from api.catalogo import CatalogoGenericoEmMemoria, EnvioParaLixeira, novo_id
-from api.texto import chave_da_marca
+from api.texto import chave_da_marca, normalizar
 
 
 class MarcaDoCatalogo(BaseModel):
@@ -159,10 +159,15 @@ def carregar_marcas(
     """Acrescenta ao catálogo as marcas dos comerciais que ainda não estão nele (pelo
     nome ou apelido, sem acento nem maiúscula), inclusive entre as da lixeira: marca
     na lixeira não é recriada, só depois da purga (#596). Idempotente; devolve quantas
-    entraram."""
+    entraram. Cada nome (normalizado) é consultado uma vez na carga."""
     entraram = 0
+    resolvidos: set[str] = set()
     for decupagem in decupagens:
         for marca in marcas_dos_comerciais(decupagem):
+            chave = normalizar(marca)
+            if chave in resolvidos:
+                continue
+            resolvidos.add(chave)
             if catalogo.achar(marca, com_lixeira=True):
                 continue
             catalogo.acrescentar(marca, [])
