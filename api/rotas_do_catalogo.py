@@ -24,7 +24,8 @@ from api.catalogo import (
     PessoaDoCatalogo,
     existente_para_acrescentar,
 )
-from api.correcoes import LIMITE_DO_NOME, sem_controle
+from api.correcoes import sem_controle
+from api.decupagem import LIMITE_DO_NOME
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
 from api.permissoes import exige, exige_escopo
 from api.texto_como_dado import Linha, LinhaDaConsulta

@@ -1157,3 +1157,16 @@ def test_desfazer_renomeacao_depois_de_juncao_ou_nao_e_registra_os_nomes_da_pess
         nome,
     )
     assert nome in {p["nome"] for p in mundo.decupagem()["pessoas"]}
+
+
+def test_limites_das_correcoes_sao_os_da_decupagem() -> None:
+    from pydantic import TypeAdapter
+
+    from api import correcoes, decupagem
+
+    def teto(tipo: object) -> int:
+        return TypeAdapter(tipo).json_schema()["maxLength"]
+
+    assert correcoes.LIMITE_DO_NOME == teto(decupagem.Rotulo)
+    assert correcoes.LIMITE_DO_TEXTO == teto(decupagem.Texto)
+    assert correcoes.LIMITE_DO_ID == teto(decupagem.Id)

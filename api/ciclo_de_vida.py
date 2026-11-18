@@ -341,7 +341,8 @@ def reprocessar(
         lido[:] = [job]
         if prazo_vencido(job, agora):
             raise NaoReprocessavel(
-                "O prazo de reprocessamento deste vídeo (7 dias após o envio) terminou: "
+                "O prazo de reprocessamento deste vídeo "
+                f"({PRAZO_DO_REPROCESSAMENTO.days} dias após o envio) terminou: "
                 "a cópia em alta resolução e o áudio não ficam guardados no MAM. "
                 "Para reprocessar, envie o vídeo de novo a partir do arquivo da RedeTV."
             )
