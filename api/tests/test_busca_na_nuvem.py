@@ -279,7 +279,7 @@ def test_aquecer_na_partida_roda_em_segundo_plano_e_so_loga_a_falha(
 
     aquecer_na_partida([falha, lambda: feitas.append("b")]).join(timeout=2)
     assert feitas == ["b"]
-    assert "aquecimento da conexão falhou" in caplog.text
+    assert "aquecimento na partida falhou" in caplog.text
 
 
 def test_o_aquecimento_da_ranking_so_existe_com_a_configuracao() -> None:

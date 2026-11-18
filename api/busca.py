@@ -25,6 +25,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from api.acento import com_acento
 from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.entendimento_da_consulta import (
@@ -49,7 +50,12 @@ from api.lixeira_na_leitura import (
     VersaoDaLixeira,
     VersaoDaLixeiraEmMemoria,
 )
-from api.marcas import CatalogoDeMarcas, CatalogoDeMarcasEmMemoria
+from api.marcas import (
+    CatalogoDeMarcas,
+    CatalogoDeMarcasEmMemoria,
+    MarcaDoCatalogo,
+    nomes_de_busca_da_marca,
+)
 from api.modelo_do_job import CursorInvalido, Job, RepositorioDeJobs
 from api.numero import com_as_formas, mesma_palavra, raizes, singular
 from api.quem_conta import QuemConta
@@ -402,6 +408,9 @@ class Busca:
         purgas: PurgasDeMarca | None = None,
     ) -> None:
         self._marcas = marcas or CatalogoDeMarcasEmMemoria()
+        # Só para não pôr acento numa marca citada (#731): relida a cada 30 s, não por busca,
+        # nem quando a leitura falha.
+        self._copia_das_marcas = CopiaCurta(self._ler_marcas, relogio)
         self._purgas = purgas or PurgasDeMarcaEmMemoria()
         self._versao = versao_da_lixeira or VersaoDaLixeiraEmMemoria()
         self._listas = listas or ListasDaBuscaEmMemoria()
@@ -615,7 +624,8 @@ class Busca:
 
         decidir(entendida.pessoas)
         carregar_nomes(entendida.pessoas)
-        clausulas = self._clausulas(entendida, nome, contam)
+        intocadas = _intocadas(entendida, nome, self._copia_das_marcas.itens())
+        clausulas = self._clausulas(entendida, nome, contam, intocadas)
         t_entender = _agora() - inicio
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
@@ -688,7 +698,9 @@ class Busca:
             try:
                 achados = [
                     *self._reordenar(
-                        impressao, _texto_da_busca(entendida), achados[:TETO_DO_RANKING]
+                        impressao,
+                        com_acento(_texto_da_busca(entendida), intocadas),
+                        achados[:TETO_DO_RANKING],
                     ),
                     *achados[TETO_DO_RANKING:],
                 ]
@@ -962,6 +974,17 @@ class Busca:
             return None
         return achado
 
+    def _ler_marcas(self) -> list[MarcaDoCatalogo]:
+        """As marcas do catálogo; sem elas (falha na leitura), nenhuma fica protegida do
+        acento e a busca segue."""
+        try:
+            return self._marcas.todas()
+        except Exception:
+            log.warning(
+                "marcas não lidas; o acento vale para todas as palavras", exc_info=True
+            )
+            return []
+
     def _termo_da_foto(self, jpeg: bytes) -> str:
         try:
             termo = termo_da_foto(jpeg, transporte=self._transporte)
@@ -977,14 +1000,16 @@ class Busca:
         e: ConsultaEntendida,
         nome: Callable[[str | None], str | None],
         contam: Collection[str],
+        intocadas: Collection[str],
     ) -> list[_Clausula]:
         base = _base(e)
         clausulas: list[_Clausula] = []
         for pessoa in e.pessoas:
             clausulas.extend(
-                _clausulas_da_pessoa(pessoa, e, base, nome, pessoa in contam)
+                _clausulas_da_pessoa(pessoa, e, base, nome, pessoa in contam, intocadas)
             )
         if livre := _texto_da_busca(e):
+            significado = com_acento(livre, intocadas)
             tipos: list[TipoDeRegistro | None] = []
             por_evidencia: tuple[tuple[EvidenciaDaBusca, TipoDeRegistro], ...] = (
                 ("imagem", "plano"),
@@ -1005,7 +1030,7 @@ class Busca:
                         Consulta(
                             filtros=replace(base, tipo=tipo_do_texto),
                             texto=com_as_formas(livre),
-                            significado=livre,
+                            significado=significado,
                             cortar_significado=True,
                         ),
                         lambda r: _motivo(r, nome),
@@ -1297,6 +1322,31 @@ def _texto_da_busca(e: ConsultaEntendida) -> str:
     return " ".join(p for p in (e.frase_exata, e.texto_livre) if p)
 
 
+def _palavras(texto: str) -> str:
+    return " ".join(re.findall(r"\w+", normalizar(texto)))
+
+
+def _intocadas(
+    e: ConsultaEntendida,
+    nome: Callable[[str | None], str | None],
+    marcas: list[MarcaDoCatalogo],
+) -> frozenset[str]:
+    """As palavras que vão ao significado e ao Ranking sem o acento do dicionário (#731):
+    as do nome das pessoas citadas e as das marcas citadas por inteiro ("pao de acucar",
+    não "pao de queijo")."""
+    citado = f" {_palavras(e.saneada)} "
+    nomes = [nome(i) or "" for i in e.pessoas]
+    # ponytail: varre todas as marcas a cada busca (centenas, menos de 1 ms); se o
+    # catálogo crescer, um índice como o `IndiceDeNomesCitados`.
+    nomes += [
+        n
+        for m in marcas
+        for n in nomes_de_busca_da_marca(m)
+        if f" {_palavras(n)} " in citado
+    ]
+    return frozenset(_palavras(" ".join(nomes)).split())
+
+
 def _contem(texto: str, frase: str) -> bool:
     """A frase inteira no texto, com as palavras juntas e na ordem, sem acento nem maiúscula."""
     procuradas = [raizes(p) for p in re.findall(r"\w+", frase)]
@@ -1329,6 +1379,7 @@ def _clausulas_da_pessoa(
     base: Filtros,
     nome: Callable[[str | None], str | None],
     conta: bool,
+    intocadas: Collection[str],
 ) -> list[_Clausula]:
     """A pessoa que não conta (lixeira do catálogo, #583) não gera a cláusula de aparição;
     o nome dela segue achado pelo texto."""
@@ -1341,7 +1392,7 @@ def _clausulas_da_pessoa(
             _Clausula(
                 Consulta(
                     filtros=replace(base, tipo="plano", pessoa=pessoa),
-                    significado=e.texto_livre or quem,
+                    significado=com_acento(e.texto_livre, intocadas) or quem,
                 ),
                 lambda r: f"Na imagem: {quem}",
                 pessoa_na_imagem=pessoa,
