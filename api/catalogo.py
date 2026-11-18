@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any, Literal, Protocol, Self
 
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from api.texto import normalizar
@@ -149,6 +150,25 @@ def sem_lixeira(entrada: EntradaDoCatalogo) -> bool:
     return entrada.lixeira is None
 
 
+def existente_para_acrescentar[T: EntradaDoCatalogo](achadas: list[T]) -> T | None:
+    """Para o POST que evita duplicata: o registro que já existe (fora da lixeira), ou
+    `None` se o nome é novo. Nome na lixeira é 409: restaurar é o caminho, não criar."""
+    if not achadas:
+        return None
+    if achadas[0].lixeira is not None:
+        raise HTTPException(409, "Esse nome está na lixeira e pode ser restaurado")
+    return achadas[0]
+
+
+def qualquer(_: object) -> bool:
+    return True
+
+
+def sem_fusao(pessoa: PessoaDoCatalogo) -> bool:
+    """O que `achar(com_lixeira=True)` ainda esconde: a fundida, que o destino já cobre."""
+    return pessoa.fundida is None
+
+
 def nomes_de_busca(entrada: EntradaDoCatalogo) -> list[str]:
     """Nome e apelidos normalizados (de pessoa ou marca): o que `achar` compara."""
     return sorted({normalizar(n) for n in [entrada.nome, *entrada.apelidos]})
@@ -205,8 +225,10 @@ class Catalogo(Protocol):
         """As pessoas que existem entre os `ids`, numa leitura em lote."""
         ...
 
-    def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        """As pessoas (fora da lixeira e não fundidas) cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
+        """As pessoas (fora da lixeira e não fundidas) cujo nome ou apelido é `nome`, sem
+        maiúsculas nem acentos; com `com_lixeira`, as da lixeira também (as fundidas
+        continuam de fora)."""
         ...
 
     def todas(self) -> list[PessoaDoCatalogo]:
@@ -291,6 +313,7 @@ class CatalogoGenericoEmMemoria[T: EntradaDoCatalogo]:
 
     _inexistente: type[Exception]
     _visivel: Callable[[T], bool] = staticmethod(sem_lixeira)
+    _achavel_na_lixeira: Callable[[T], bool] = staticmethod(qualquer)
 
     def __init__(self) -> None:
         self._itens: dict[str, T] = {}
@@ -306,8 +329,8 @@ class CatalogoGenericoEmMemoria[T: EntradaDoCatalogo]:
 
     def _achar(self, nome: str, com_lixeira: bool = False) -> list[T]:
         chave = normalizar(nome)
-        itens = self._itens.values() if com_lixeira else self.todas()
-        return [i for i in itens if chave in nomes_de_busca(i)]
+        ok = self._achavel_na_lixeira if com_lixeira else self._visivel
+        return [i for i in self._itens.values() if ok(i) and chave in nomes_de_busca(i)]
 
     def obter(self, id: str) -> T | None:
         return self._itens.get(id)
@@ -332,6 +355,7 @@ class CatalogoGenericoEmMemoria[T: EntradaDoCatalogo]:
 class CatalogoEmMemoria(CatalogoGenericoEmMemoria[PessoaDoCatalogo]):
     _inexistente = PessoaInexistente
     _visivel = staticmethod(visivel)
+    _achavel_na_lixeira = staticmethod(sem_fusao)
     # Os testes mexem direto nesse dicionário.
     _pessoas = property(lambda self: self._itens)
 
@@ -342,8 +366,8 @@ class CatalogoEmMemoria(CatalogoGenericoEmMemoria[PessoaDoCatalogo]):
         copia._itens = {p.id: p for p in catalogo.todas()}
         return copia
 
-    def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        return self._achar(nome)
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
+        return self._achar(nome, com_lixeira)
 
     def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
         return self._alterar(id, {"fundida": fusao})

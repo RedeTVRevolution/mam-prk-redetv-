@@ -11,7 +11,6 @@ from api.catalogo import (
     CatalogoEmMemoria,
     CopiaCurta,
     PessoaDoCatalogo,
-    nomes_de_busca,
 )
 from api.jobs import RepositorioEmMemoria
 from api.modelo_do_job import Job
@@ -22,7 +21,6 @@ from api.tests.test_busca import (
     objeto,
     pedido,
 )
-from api.texto import normalizar
 
 AGORA = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 
@@ -60,10 +58,10 @@ class CatalogoContado(CatalogoEmMemoria):
         self.lotes += 1
         return super().obter_varios(ids)
 
-    def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        # No Firestore é uma consulta por nome, não a leitura da coleção.
-        chave = normalizar(nome)
-        return [p for p in super().todas() if chave in nomes_de_busca(p)]
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
+        # No Firestore é uma consulta por nome, não a leitura da coleção (e aqui `_achar`
+        # não passa por `todas`, que conta).
+        return super().achar(nome, com_lixeira=com_lixeira)
 
     def todas(self) -> list[PessoaDoCatalogo]:
         self.leituras_de_todas += 1
