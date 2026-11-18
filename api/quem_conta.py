@@ -14,14 +14,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from api.catalogo import PessoaDoCatalogo
+from api.catalogo import PessoaDoCatalogo, nomes_de_busca
 from api.erros import lido
 from api.lixeira_na_leitura import PurgaDeMarca, PurgasDeMarca
 from api.marcas import (
     CatalogoDeMarcas,
     MarcaDoCatalogo,
     MarcasCanonicas,
-    nomes_de_busca_da_marca,
 )
 from api.texto import chave_da_marca
 
@@ -172,7 +171,7 @@ class QuemConta:
             self._na_lixeira = frozenset(
                 chave_da_marca(n)
                 for m in lido(marcas.na_lixeira)
-                for n in nomes_de_busca_da_marca(m)
+                for n in nomes_de_busca(m)
             )
         return self._na_lixeira
 

@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from api.acento import com_acento
 from api.cache_curto import CacheCurto
-from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
+from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo, nomes_de_busca
 from api.entendimento_da_consulta import (
     ConsultaEntendida,
     IndiceDeNomesCitados,
@@ -54,7 +54,6 @@ from api.marcas import (
     CatalogoDeMarcas,
     CatalogoDeMarcasEmMemoria,
     MarcaDoCatalogo,
-    nomes_de_busca_da_marca,
 )
 from api.modelo_do_job import CursorInvalido, Job, RepositorioDeJobs
 from api.numero import com_as_formas, mesma_palavra, raizes, singular
@@ -1339,10 +1338,7 @@ def _intocadas(
     # ponytail: varre todas as marcas a cada busca (centenas, menos de 1 ms); se o
     # catálogo crescer, um índice como o `IndiceDeNomesCitados`.
     nomes += [
-        n
-        for m in marcas
-        for n in nomes_de_busca_da_marca(m)
-        if f" {_palavras(n)} " in citado
+        n for m in marcas for n in nomes_de_busca(m) if f" {_palavras(n)} " in citado
     ]
     return frozenset(_palavras(" ".join(nomes)).split())
 

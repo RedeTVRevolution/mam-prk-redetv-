@@ -63,7 +63,7 @@ from api.decupagem import (
     id_posicional,
 )
 from api.identidade import identidade_do_nome, nao_identificado
-from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
+from api.marcas import CatalogoDeMarcas
 from api.pessoas import LISTAS
 from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
@@ -280,7 +280,7 @@ def _id_no_catalogo(
             achado is None
             or achado.lixeira is not None
             or (isinstance(achado, PessoaDoCatalogo) and achado.fundida is not None)
-            or normalizar(novo.valor) not in _nomes_de_busca(achado)
+            or normalizar(novo.valor) not in nomes_de_busca(achado)
         ):
             raise CatalogoIdInvalido(novo.catalogo_id)
         return achado.id
@@ -288,12 +288,6 @@ def _id_no_catalogo(
         return None
     achadas = catalogo.achar(novo.valor)
     return achadas[0].id if len(achadas) == 1 else None
-
-
-def _nomes_de_busca(entrada: PessoaDoCatalogo | MarcaDoCatalogo) -> list[str]:
-    if isinstance(entrada, PessoaDoCatalogo):
-        return nomes_de_busca(entrada)
-    return nomes_de_busca_da_marca(entrada)
 
 
 def estado_das(correcoes: list[Correcao]) -> EstadoDasCorrecoes:

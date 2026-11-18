@@ -1387,13 +1387,13 @@ class TestCatalogoDeMarcasFirestore:
         m = marcas.acrescentar("Na lixeira", [])
         marcas.definir_lixeira(m.id, _envio_para_lixeira())
         lidos: list[str] = []
-        original = marcas._marca
+        original = marcas._ler
 
         def espia(id: str, dados: dict[str, Any]) -> MarcaDoCatalogo:
             lidos.append(id)
             return original(id, dados)
 
-        marcas._marca = espia  # type: ignore[method-assign]
+        marcas._ler = espia  # type: ignore[method-assign]
 
         assert [x.id for x in marcas.na_lixeira()] == [m.id]
         assert lidos == [m.id]  # as outras três nem chegam ao Python

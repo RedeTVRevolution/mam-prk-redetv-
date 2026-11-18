@@ -18,7 +18,8 @@ from typing import Any, Protocol
 from google.cloud import firestore
 from pydantic import BaseModel
 
-from api.marcas import MarcaDoCatalogo, nomes_de_busca_da_marca
+from api.catalogo import nomes_de_busca
+from api.marcas import MarcaDoCatalogo
 
 COLECAO_DO_ESTADO_DA_LIXEIRA = "estado_da_lixeira"
 COLECAO_DAS_PURGAS_DE_MARCA = "purgas_de_marca"
@@ -87,7 +88,7 @@ def _registro_da_purga(marca: MarcaDoCatalogo, em: datetime) -> PurgaDeMarca:
     return PurgaDeMarca(
         nome=marca.nome,
         apelidos=marca.apelidos,
-        nomes=nomes_de_busca_da_marca(marca),
+        nomes=nomes_de_busca(marca),
         em=em,
         marca_id=marca.id,
     )
