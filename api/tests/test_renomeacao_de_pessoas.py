@@ -227,7 +227,6 @@ def test_a_correcao_de_outro_nome_no_video_nao_e_trocada() -> None:
     assert mundo.nome_na_decupagem("j1") == "Sabrina Sato Silva"
     # A prévia só conta o vídeo em que o nome muda.
     assert previa["videos"] == 1
-    assert previa["videos"] == 1
 
 
 def test_o_nome_antigo_fica_como_apelido_para_a_busca() -> None:
