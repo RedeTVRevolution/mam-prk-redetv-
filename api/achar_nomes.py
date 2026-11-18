@@ -131,7 +131,7 @@ class ListaIndexada[T: ComNome](list[Indexado[T]]):
             for t in termos
             if len(t) >= TAMANHO_PARA_ACEITAR_ERRO
         ]
-        return sorted(min(opcoes, key=len, default=set()))
+        return sorted(min(opcoes, key=len)) if opcoes else []
 
     def posicoes_exatas(self, termos: list[str]) -> set[int]:
         """Posições dos itens com uma variante em que todos os termos começam uma palavra."""
