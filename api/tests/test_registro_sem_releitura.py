@@ -164,14 +164,14 @@ def test_dois_registros_que_mudam_o_conjunto_e_o_segundo_entra_antes_do_recalcul
     def segundo_no_meio(evento: Any) -> None:
         publicar(evento)
         if not entrou:  # outro pedido grava entre a gravação e o recálculo do primeiro
-            entrou.append(
-                mundo.registrar(mundo.novo("pessoa.renomear", "p2", "Beto Lima Neto"))
-            )
+            entrou.append(True)  # antes da chamada aninhada, senão ela reentra
+            mundo.registrar(mundo.novo("pessoa.renomear", "p2", "Beto Lima Neto"))
 
     mundo.eventos.publicar = segundo_no_meio  # type: ignore[method-assign]
 
     mundo.renomear_ana()
 
+    assert len(mundo.correcoes.listar("j1")) == 2
     assert sorted(mundo.job.pessoas_do_catalogo) == sorted(
         [mundo.ana.id, mundo.beto.id]
     )
