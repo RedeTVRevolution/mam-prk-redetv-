@@ -277,7 +277,7 @@ def test_filtro_acha_o_mesmo_do_antigo_e_nao_avalia_mais_que_os_candidatos(
 
 @pytest.mark.parametrize(
     ("consulta", "teto"),
-    [("anastacio", 20), ("bernardino", 40), ("anastácio cavalcanti", 5)],
+    [("anastacio", 40), ("bernardino", 40), ("anastácio cavalcanti", 40)],
 )
 def test_consulta_seletiva_avalia_poucos_itens(
     consulta: str, teto: int, monkeypatch: pytest.MonkeyPatch

@@ -9,7 +9,7 @@ Os casamentos exatos vêm de um índice por palavra (#485): lista ordenada de (p
 posição do item, variante), consultada com `bisect` pelo prefixo de cada termo, sem
 varrer o catálogo. Só quando os exatos não enchem o limite e algum termo aceita erro de
 digitação o custo é calculado, para completar com os aproximados, apenas nos candidatos
-de um filtro por tamanho de palavra, que nunca perde um nome que o custo aceitaria.
+de um filtro por pares de letras, que nunca perde um nome que o custo aceitaria.
 """
 
 from bisect import bisect_left
@@ -102,23 +102,36 @@ class ListaIndexada[T: ComNome](list[Indexado[T]]):
             for variante, nome in enumerate(indexado.nomes)
             for palavra in set(nome.split())
         )
-        # Maior palavra de cada item, em ordem: um termo de `n` letras só casa, com um
-        # erro, uma palavra de pelo menos `n - 1` letras (filtro dos aproximados).
-        self.tamanhos = sorted(
-            (
-                max((len(p) for nome in i.nomes for p in nome.split()), default=0),
-                posicao,
-            )
-            for posicao, i in enumerate(self)
-        )
+        # Itens por (par de letras seguidas, posição do par na palavra), para o filtro dos
+        # aproximados.
+        self.pares: dict[tuple[str, int], set[int]] = {}
+        for posicao, indexado in enumerate(self):
+            for nome in indexado.nomes:
+                for palavra in nome.split():
+                    for i in range(len(palavra) - 1):
+                        self.pares.setdefault((palavra[i : i + 2], i), set()).add(
+                            posicao
+                        )
+
+    def _casam_o_termo(self, termo: str) -> set[int]:
+        n = len(termo)
+        casam = set(self.pares.get((termo[:2], 0), ()))
+        for i in range(n - 3, n):
+            casam |= self.pares.get((termo[-2:], i), set())
+        return casam
 
     def candidatos(self, termos: list[str]) -> list[int]:
-        """Posições que podem casar `termos` com um erro: pelo termo mais longo, que tem de
-        casar sozinho, só entram os itens com uma palavra de pelo menos `n - 1` letras."""
-        minimo = max(map(len, termos)) - 1
-        return sorted(
-            p for _, p in self.tamanhos[bisect_left(self.tamanhos, (minimo,)) :]
+        """Posições que podem casar `termos` com um erro. Um erro (letra a mais, a menos,
+        trocada ou duas vizinhas trocadas) mexe em no máximo duas letras vizinhas do termo,
+        então ou a palavra começa com as duas primeiras letras do termo, ou tem as duas
+        últimas a 1 posição de onde ficariam (n-2). Vale cada termo que aceita erro; fica o
+        de menos candidatos."""
+        opcoes = (
+            self._casam_o_termo(t)
+            for t in termos
+            if len(t) >= TAMANHO_PARA_ACEITAR_ERRO
         )
+        return sorted(min(opcoes, key=lambda o: len(o), default=set()))
 
     def posicoes_exatas(self, termos: list[str]) -> set[int]:
         """Posições dos itens com uma variante em que todos os termos começam uma palavra."""
@@ -161,7 +174,7 @@ def achar_por_prefixo[T: ComNome](
     """Até `limite` itens que a consulta casa no nome ou nos apelidos: primeiro os sem
     erro de digitação, depois os com; dentro de cada grupo, por nome. Os nomes vêm
     normalizados e os exatos do índice por palavra; os aproximados só calculam o custo
-    para os candidatos do filtro de tamanho."""
+    para os candidatos do filtro por pares de letras."""
     termos = normalizar(consulta).split()
     if not termos:
         return []
