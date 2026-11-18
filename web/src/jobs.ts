@@ -37,6 +37,8 @@ export interface Job {
   enviado_por?: { tipo: 'pessoa' | 'sistema'; nome: string | null }
   /** As etapas iniciadas, da primeira à última. */
   etapas?: EtapaDoJob[]
+  /** De onde "reprocessar o que falhou" recomeçaria; `null` quando não vale (a API decide). */
+  etapa_de_reprocesso?: string | null
   reprocessamentos?: number
   /** Início da passada atual; ausente em Job anterior ao campo. */
   inicio_da_passada?: string | null
