@@ -9,6 +9,7 @@ import pytest
 from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 
+from api import dados_da_purga
 from api.auditoria import FiltroDeAuditoria
 from api.bancos import auditoria_do_firestore
 from api.catalogo import FusaoDaPessoa
@@ -38,7 +39,11 @@ def _fusao(destino_id: str, fase: str) -> FusaoDaPessoa:
     )
 
 
-def test_a_varredura_conclui_as_duas_fases_e_a_segunda_nao_faz_nada() -> None:
+def test_a_varredura_conclui_as_duas_fases_e_a_segunda_nao_faz_nada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Nenhum vídeo é purgado: o BigQuery não é chamado, e o transporte não pede credencial.
+    monkeypatch.setattr(dados_da_purga, "transporte_http", lambda _projeto: None)
     projeto = f"teste-{uuid.uuid4().hex[:12]}"
     ambiente = {
         "GCP_PROJECT_ID": projeto,
