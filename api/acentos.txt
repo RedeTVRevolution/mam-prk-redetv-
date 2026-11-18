@@ -3,6 +3,8 @@
 # Não entram: palavras cuja grafia sem acento é outra palavra (pais/país, coco/cocô, e/é, esta/está,
 # maca/maçã, maio/maiô, metro/metrô, manha/manhã, marco/março, publico/público, vitima/vítima),
 # duas grafias com acento na mesma chave (avó/avô), nomes de pessoas e marcas (Itaú).
+# Entram os substantivos que também são verbo raro sem acento (medico, noticia, musica, premio):
+# na busca, quem digita quer o substantivo.
 abóbora
 abraço
 açaí

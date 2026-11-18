@@ -2811,3 +2811,28 @@ def test_nome_do_catalogo_marca_e_palavra_ambigua_vao_como_foram_digitados() -> 
         ),
     )
     assert _o_que_vai_ao_modelo(m, texto) == ({texto}, [texto])
+
+
+@pytest.mark.parametrize(
+    "digitado, ao_modelo",
+    [
+        ("cha Leao na praca", "chá Leao na praça"),  # a marca citada inteira fica
+        ("cha Pao de Acucar", "chá Pao de Acucar"),
+        ("pao de queijo", "pão de queijo"),  # só parte da marca: é palavra comum
+        ("Rita Leao-Silva na praca", "Rita Leao-Silva na praça"),
+    ],
+)
+def test_marca_e_nome_com_hifen_ficam_como_foram_digitados(
+    digitado: str, ao_modelo: str
+) -> None:
+    m = Mundo()
+    m.marcas.acrescentar("Leão", [])
+    m.marcas.acrescentar("Pão de Açúcar", ["GPA"])
+    m.catalogo.acrescentar("Rita Leao-Silva", "cantora", [])
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1", tipo="fala", job_id="j1", inicio_ms=0, fim_ms=1_000, texto=digitado
+        ),
+    )
+    assert _o_que_vai_ao_modelo(m, digitado) == ({ao_modelo}, [ao_modelo])
