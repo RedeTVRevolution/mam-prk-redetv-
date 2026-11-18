@@ -83,7 +83,6 @@ def test_mesmo_resultado_da_implementacao_anterior(consulta: str) -> None:
     itens = _catalogo()
     indice = IndiceDeNomes[_Item]()
     esperado = _antigo(itens, consulta)
-    assert achar_por_prefixo(itens, consulta) == esperado
     assert achar_por_prefixo(indice.de(itens), consulta) == esperado
 
 
@@ -194,3 +193,98 @@ def test_limites_de_borda_iguais_ao_antigo(limite: int) -> None:
         assert achar_por_prefixo(indice, consulta, limite) == _antigo(
             itens, consulta, limite
         )
+
+
+def _catalogo_grande() -> list[_Item]:
+    """2 mil itens: palavras de 3 a 7 letras, mais poucos nomes longos e os casos de erro."""
+    sorteio = random.Random(634)
+    letras = "abcdefghilmnoprstuvz"
+    itens = [
+        _Item(
+            " ".join(
+                "".join(sorteio.choices(letras, k=sorteio.randint(3, 7)))
+                for _ in range(sorteio.randint(1, 3))
+            ),
+            ["".join(sorteio.choices(letras, k=sorteio.randint(3, 7)))]
+            if sorteio.random() < 0.3
+            else [],
+        )
+        for _ in range(1990)
+    ]
+    itens += [
+        _Item("Abcde Souza", []),  # exato de "acbde" não; vizinhas trocadas
+        _Item("Acbde Lima", ["Çabcde"]),
+        _Item("Abcdef", []),  # letra a mais
+        _Item("Abcd", []),  # letra a menos
+        _Item("Abxde", []),  # letra trocada
+        _Item("Ângela Maria", ["Anjela"]),
+        _Item("Anastacio Bernardino Cavalcanti", []),  # só ele tem palavra de 11+
+        _Item("Anastacia Bernardina", []),
+        _Item("Anastasio", []),
+        _Item("Bernardino", ["Bernardo Cavalcante"]),
+    ]
+    sorteio.shuffle(itens)
+    return itens
+
+
+def _contar_custos(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    chamadas = [0]
+    original = achar_nomes._custo_minimo
+
+    def contando(termos: list[str], indexado: object) -> int | None:
+        chamadas[0] += 1
+        return original(termos, indexado)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(achar_nomes, "_custo_minimo", contando)
+    return chamadas
+
+
+CONSULTAS_COM_ERRO = [
+    "abcde",
+    "acbde",
+    "abcdef",
+    "abcd1",
+    "abxde",
+    "abde",
+    "angela",
+    "ângela",
+    "anjela",
+    "cabcde",
+    "bernardino",
+    "bernardin",
+    "bernadino",
+    "anastacio",
+    "anastácio cavalcanti",
+    "lima acbde",
+    "xyzxyz",
+]
+
+
+@pytest.mark.parametrize("consulta", CONSULTAS_COM_ERRO)
+def test_filtro_acha_o_mesmo_do_antigo_e_nao_avalia_mais_que_os_candidatos(
+    consulta: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    itens = _catalogo_grande()
+    indice = IndiceDeNomes[_Item]().de(itens)
+    termos = normalizar(consulta).split()
+    esperados = {limite: _antigo(itens, consulta, limite) for limite in (10, -1)}
+    chamadas = _contar_custos(monkeypatch)
+    for limite in (10, -1):
+        chamadas[0] = 0
+        assert achar_por_prefixo(indice, consulta, limite) == esperados[limite]
+        assert chamadas[0] <= len(indice.candidatos(termos))
+
+
+@pytest.mark.parametrize(
+    ("consulta", "teto"),
+    [("anastacio", 20), ("bernardino", 40), ("anastácio cavalcanti", 5)],
+)
+def test_consulta_seletiva_avalia_poucos_itens(
+    consulta: str, teto: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    itens = _catalogo_grande()
+    indice = IndiceDeNomes[_Item]().de(itens)
+    esperado = _antigo(itens, consulta, -1)
+    chamadas = _contar_custos(monkeypatch)
+    assert achar_por_prefixo(indice, consulta, -1) == esperado
+    assert 0 < chamadas[0] <= teto < len(itens) // 10
