@@ -99,3 +99,13 @@ test('com tudo marcado: Selecionar tudo e marcar a última caixa que faltava vol
   await usuario.click(screen.getByRole('option', { name: 'Selecionar tudo' }))
   expect(valor()).toBe('')
 })
+
+test('a caixa de procurar da faceta ignora acento e maiúscula', async () => {
+  const usuario = userEvent.setup()
+  const opcoes = ['Itaú', 'Bradesco', 'Caixa', 'Nubank', 'Inter', 'Safra', 'Pan', 'Original', 'Neon'].map((r) => ({ valor: r, rotulo: r }))
+  render(<Faceta rotulo="Marca" Icone={IconTag} opcoes={opcoes} valor={[]} aoMudar={() => {}} />)
+
+  await usuario.click(screen.getByRole('button', { name: 'Marca' }))
+  await usuario.type(screen.getByRole('combobox'), 'ITAU')
+  expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Itaú'])
+})

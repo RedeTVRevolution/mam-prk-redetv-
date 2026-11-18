@@ -1,14 +1,20 @@
 import type * as React from 'react'
 import { IconSearch } from '@tabler/icons-react'
-import { Command as CommandPrimitive } from 'cmdk'
+import { Command as CommandPrimitive, defaultFilter } from 'cmdk'
 import { cn } from 'cn'
+import { nomeNormalizado } from '../../painel.ts'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './dialog.tsx'
+
+// O filtro do cmdk só ignora maiúscula; este ignora também o acento ("itau" acha "Itaú").
+const semAcento = (valor: string, busca: string, palavras?: string[]) =>
+  defaultFilter(nomeNormalizado(valor), nomeNormalizado(busca), palavras?.map(nomeNormalizado))
 
 // shadcn/ui (cmdk), com os cantos e as cores do design system.
 export function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
   return (
     <CommandPrimitive
       data-slot="command"
+      filter={semAcento}
       className={cn('flex size-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground', className)}
       {...props}
     />
@@ -27,7 +33,7 @@ export function CommandDialog({
       <DialogContent mostrarFechar={false} className={cn('top-[15dvh] translate-y-0 gap-0 p-0', className)}>
         <DialogTitle className="sr-only">{titulo}</DialogTitle>
         <DialogDescription className="sr-only">{descricao}</DialogDescription>
-        <CommandPrimitive data-slot="command" label={titulo} className="flex min-h-0 min-w-0 flex-col bg-popover text-popover-foreground">
+        <CommandPrimitive data-slot="command" label={titulo} filter={semAcento} className="flex min-h-0 min-w-0 flex-col bg-popover text-popover-foreground">
           {children}
         </CommandPrimitive>
       </DialogContent>

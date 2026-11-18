@@ -31,12 +31,14 @@ from api.busca import (
     Ranking,
     RankingEmOrdem,
     VideoGuardado,
+    _texto_da_busca,
     filtros_do_servidor,
 )
 from api.cache_curto import CacheCurto
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import (
     TEMPO_DA_CONSULTA_S,
+    ConsultaEntendida,
 )
 from api.eventos_de_uso import Eventos, EventosEmMemoria
 from api.gemini import ErroHttp
@@ -2256,6 +2258,23 @@ def test_frase_exata_com_o_numero_trocado_ainda_vale() -> None:
     assert [v.job_id for v in buscar(m, '"promoção imperdível"').videos] == ["j1"]
 
 
+@pytest.mark.parametrize("frase", ["paes de queijo", "pão de queijo", "PAO DE QUEIJO"])
+def test_frase_exata_vale_com_e_sem_acento(frase: str) -> None:
+    m = Mundo(pedido(frase_exata=frase))
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="Olha os pães de queijo quentinhos",
+        ),
+    )
+    assert [v.job_id for v in buscar(m, f'"{frase}"').videos] == ["j1"]
+
+
 def test_video_na_lixeira_do_indice_nao_ocupa_o_teto_de_registros() -> None:
     m = Mundo(pedido(texto_livre="vestido"))
     envio = EnvioParaLixeira(
@@ -2664,3 +2683,26 @@ def test_o_filtro_de_marca_vale_so_sobre_os_candidatos_do_teto() -> None:
     assert all(c.filtros.marca is None for c in m.indice.consultas)
     assert len(m.indice.consultas) == 1
     assert r.videos == []  # o teto: a marca pedida ficou fora dos 500 candidatos
+
+
+@pytest.mark.parametrize(
+    "frase, livre, esperado",
+    [
+        ("pães de queijo", "paes de queijo", "pães de queijo paes de queijo"),
+        ("pão", "paes", "pão paes"),
+        ("promoção", "as promoções de hoje", "as promoções de hoje"),
+    ],
+)
+def test_texto_da_busca_so_junta_a_frase_quando_a_grafia_e_a_mesma(
+    frase: str, livre: str, esperado: str
+) -> None:
+    # O significado e o Ranking leem a grafia: a frase com acento não some atrás da sem acento.
+    e = ConsultaEntendida(saneada="", frase_exata=frase, texto_livre=livre)
+    assert _texto_da_busca(e) == esperado
+
+
+def test_frase_so_de_pontuacao_nao_casa_com_tudo() -> None:
+    m = Mundo(pedido(frase_exata="%", texto_livre="desconto"))
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000, texto="produto com desconto"))
+    assert buscar(m, "desconto").videos  # sem as aspas, o registro é achado
+    assert buscar(m, '"%" desconto').videos == []

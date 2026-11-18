@@ -190,6 +190,11 @@ test('a busca e os filtros reduzem a tabela', async () => {
   expect(within(tabela).getByText('Eva Costa')).toBeTruthy()
 
   await usuario.clear(screen.getByRole('textbox', { name: 'Buscar por nome ou e-mail' }))
+  await usuario.type(screen.getByRole('textbox', { name: 'Buscar por nome ou e-mail' }), 'ÉVA CÓSTA')
+  expect(within(tabela).queryByText('Rui Prado')).toBeNull()
+  expect(within(tabela).getByText('Eva Costa')).toBeTruthy()
+
+  await usuario.clear(screen.getByRole('textbox', { name: 'Buscar por nome ou e-mail' }))
   await usuario.selectOptions(screen.getByRole('combobox', { name: 'Situação' }), 'Desativada')
   expect(within(tabela).queryByText('Rui Prado')).toBeNull()
   expect(within(tabela).getByText('Eva Costa')).toBeTruthy()
