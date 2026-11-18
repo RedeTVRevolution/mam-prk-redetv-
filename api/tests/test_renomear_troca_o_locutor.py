@@ -1,7 +1,10 @@
 import json
 from typing import Any
 
+import pytest
+
 from api.correcoes import versao_do_modelo
+from api.identidade import identidade_do_nome
 from api.tests.test_correcoes import MODELO, Mundo
 
 FALAS = [
@@ -98,3 +101,65 @@ def test_correcao_de_fala_antes_da_troca_com_outro_locutor_nao_e_tocada() -> Non
     _renomear(mundo, "pes01", "Alberto")
 
     assert _locutores(mundo)[:2] == ["Carla Dias", "Alberto"]
+
+
+def test_correcao_de_fala_entre_duas_trocas_deixa_cada_fala_no_locutor_certo() -> None:
+    mundo = _mundo()
+    _renomear(mundo, "pes01", "Alberto")
+    valor = {"texto": "Tchau", "locutor": "Alberto"}
+    resposta = mundo.corrigir(
+        tipo="fala.texto", item_id="fal003", valor=json.dumps(valor), versao=VERSAO
+    )
+    assert resposta.status_code == 201
+    mundo.avancar()
+    _dar_a_primeira_fala_a_carla(mundo)
+    mundo.avancar()
+
+    _renomear(mundo, "pes01", "Roberto")
+
+    assert _locutores(mundo) == [
+        "Carla Dias",
+        "Roberto",
+        "Roberto",
+        "Roberto",
+        "não identificado",
+    ]
+
+
+def test_o_locutor_e_normalizado_uma_vez_por_leitura(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    falas = [
+        {"inicio_ms": i, "fim_ms": i + 1, "texto": "x", "locutor": "Ana Souza"}
+        for i in range(60)
+    ]
+    mundo = Mundo(["editor"])
+    modelo = {**MODELO, "transcricao": falas}
+    mundo.reprocessar(modelo)
+    versao = versao_do_modelo(json.dumps(modelo).encode())
+    chamadas = 0
+    original = identidade_do_nome
+
+    def contando(nome: str) -> str | None:
+        nonlocal chamadas
+        chamadas += 1
+        return original(nome)
+
+    monkeypatch.setattr("api.correcoes.identidade_do_nome", contando)
+
+    def chamadas_numa_leitura() -> int:
+        nonlocal chamadas
+        chamadas = 0
+        mundo.decupagem()
+        return chamadas
+
+    resposta = mundo.corrigir(item_id="pes01", valor="Nome 1", versao=versao)
+    assert resposta.status_code == 201
+    mundo.avancar()
+    com_uma = chamadas_numa_leitura()
+    for n in range(2, 6):
+        resposta = mundo.corrigir(item_id="pes01", valor=f"Nome {n}", versao=versao)
+        assert resposta.status_code == 201
+        mundo.avancar()
+
+    assert chamadas_numa_leitura() - com_uma < len(falas)
