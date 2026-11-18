@@ -49,6 +49,8 @@ from api.catalogo import (
     corrigida,
     nomes_de_busca,
     novo_id,
+    qualquer,
+    sem_fusao,
     sem_lixeira,
     visivel,
 )
@@ -913,32 +915,48 @@ class CatalogoGenericoFirestore[T: EntradaDoCatalogo]:
     _modelo: type[T]
     _inexistente: type[Exception]
     _visivel: Callable[[T], bool] = staticmethod(sem_lixeira)
+    _achavel_na_lixeira: Callable[[T], bool] = staticmethod(qualquer)
 
     def __init__(self, cliente: firestore.Client, colecao: str) -> None:
         self._cliente = cliente
         self._colecao = cliente.collection(colecao)
 
+    def _dados(self, entrada: T) -> dict[str, Any]:
+        return {
+            **entrada.model_dump(exclude={"id"}),
+            "nomes_de_busca": nomes_de_busca(entrada),
+        }
+
     def _gravar(self, entrada: T) -> T:
-        _documento(self._colecao, entrada.id).set(
-            {
-                **entrada.model_dump(exclude={"id"}),
-                "nomes_de_busca": nomes_de_busca(entrada),
-            }
-        )
+        _documento(self._colecao, entrada.id).set(self._dados(entrada))
         return entrada
 
     def _ler(self, id: str, dados: dict[str, Any]) -> T:
         dados = {k: v for k, v in dados.items() if k != "nomes_de_busca"}
         return self._modelo(id=id, **dados)  # type: ignore[call-arg]
 
-    def _existente(self, id: str) -> T:
-        atual = self.obter(id)
-        if atual is None:
-            raise self._inexistente(id)
-        return atual
+    def _transformar(self, id: str, mudar: Callable[[T], T]) -> T:
+        """Lê, muda e grava o documento na mesma transação: duas ações ao mesmo tempo
+        não se perdem (quem perde a disputa lê de novo e repete). `mudar` pode rodar
+        mais de uma vez."""
+        referencia = _documento(self._colecao, id)
+
+        @firestore.transactional
+        def na_transacao(transacao: Any) -> T:
+            doc = referencia.get(transaction=transacao)
+            if not doc.exists:
+                raise self._inexistente(id)
+            nova = mudar(self._ler(id, doc.to_dict() or {}))
+            transacao.set(referencia, self._dados(nova))
+            return nova
+
+        resultado: T = _repetir_sob_disputa(
+            lambda: na_transacao(self._cliente.transaction())
+        )
+        return resultado
 
     def _alterar(self, id: str, update: Mapping[str, Any]) -> T:
-        return self._gravar(self._existente(id).model_copy(update=update))
+        return self._transformar(id, lambda e: e.model_copy(update=update))
 
     def obter(self, id: str) -> T | None:
         doc = _documento(self._colecao, id).get()
@@ -955,7 +973,8 @@ class CatalogoGenericoFirestore[T: EntradaDoCatalogo]:
             filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
         )
         achadas = [self._ler(d.id, d.to_dict() or {}) for d in consulta.stream()]
-        return [e for e in achadas if com_lixeira or self._visivel(e)]
+        ok = self._achavel_na_lixeira if com_lixeira else self._visivel
+        return [e for e in achadas if ok(e)]
 
     def _lidas(self) -> list[T]:
         return [self._ler(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
@@ -982,19 +1001,15 @@ class CatalogoFirestore(CatalogoGenericoFirestore[PessoaDoCatalogo]):
     _modelo = PessoaDoCatalogo
     _inexistente = PessoaInexistente
     _visivel = staticmethod(visivel)
+    _achavel_na_lixeira = staticmethod(sem_fusao)
 
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO
     ) -> None:
         super().__init__(cliente, colecao)
 
-    def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        return self._achar(nome)
-
-    def na_lixeira(self) -> list[PessoaDoCatalogo]:
-        # ponytail: adaptador temporário, hoje lê a coleção inteira; o ticket seguinte
-        # da #634 apaga e a pessoa passa a usar o do genérico (consulta no servidor).
-        return [p for p in self._lidas() if p.lixeira is not None]
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
+        return self._achar(nome, com_lixeira)
 
     def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
         return self._alterar(id, {"fundida": fusao})
@@ -1032,7 +1047,7 @@ class CatalogoFirestore(CatalogoGenericoFirestore[PessoaDoCatalogo]):
         papel: str | None = None,
         apelidos: list[str] | None = None,
     ) -> PessoaDoCatalogo:
-        return self._gravar(corrigida(self._existente(id), nome, papel, apelidos))
+        return self._transformar(id, lambda p: corrigida(p, nome, papel, apelidos))
 
     def definir_rostos(self, id: str, rostos: list[Rosto]) -> PessoaDoCatalogo:
         return self._alterar(id, {"rostos": list(rostos)})

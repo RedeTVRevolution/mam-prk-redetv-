@@ -7,7 +7,6 @@ correções aplicadas por cima, em memória.
 
 import hashlib
 import json
-import re
 import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -107,7 +106,6 @@ TOLERANCIA_DO_PLANO_MS = 1000
 TIPOS_DE_TEXTO_NA_TELA = get_args(TextoNaTela.model_fields["tipo"].annotation)
 FONTES_DO_NOME = get_args(FonteDoNome)
 TONS_DA_PAUTA = get_args(TomDaPauta)
-_TEMPOS = re.compile(r"^(\d{1,12})-(\d{1,12})$")
 
 
 # Controles (C0, C1), formatação invisível (largura zero, direção do texto) e
@@ -224,10 +222,10 @@ class ItemDoHistorico(Correcao):
 
 def tempos_de(valor: str) -> tuple[int, int]:
     """Lê "<inicio_ms>-<fim_ms>"; `ValueError` se não for isso ou se o início passar do fim."""
-    achado = _TEMPOS.match(valor)
+    achado = textos.ler_tempos(valor)
     if achado is None:
         raise ValueError("tempos fora do formato inicio_ms-fim_ms")
-    inicio, fim = int(achado[1]), int(achado[2])
+    inicio, fim = achado
     _inicio_antes_do_fim(inicio, fim)
     return inicio, fim
 
@@ -779,7 +777,7 @@ def identidade_da_pessoa(pessoa: dict[str, Any]) -> str:
     identidade = identidade_do_nome(nome)
     if identidade is None:
         inicio, fim = intervalo_da_pessoa(pessoa, ("na_imagem",))
-        return f"{normalizar(nome)}@{inicio}-{fim}"
+        return textos.escrever_separacao(normalizar(nome), inicio, fim)
     return identidade
 
 
@@ -1464,8 +1462,7 @@ def _campo(nome: str) -> Callable[[dict[str, Any]], str]:
 
 
 def _tempos_do_item(item: dict[str, Any]) -> str:
-    inicio, fim = intervalo_da_pauta(item)
-    return f"{inicio}-{fim}"
+    return textos.escrever_tempos(*intervalo_da_pauta(item))
 
 
 def _valor_da_descricao(item: dict[str, Any]) -> str:
@@ -1550,7 +1547,7 @@ def _na_lista(
     if achada is None:
         return ""
     lista, o = achada
-    return f"{lista} {o['inicio_ms']}-{o['fim_ms']}"
+    return textos.escrever_ocorrencia(lista, o["inicio_ms"], o["fim_ms"])
 
 
 def _tempos_na_lista(
@@ -1560,7 +1557,7 @@ def _tempos_na_lista(
     achada = _ocorrencia_do_pedido(pessoa, ocorrencia, (ocorrencia.lista,))
     if achada is None:
         return ""
-    return f"{achada[1]['inicio_ms']}-{achada[1]['fim_ms']}"
+    return textos.escrever_tempos(achada[1]["inicio_ms"], achada[1]["fim_ms"])
 
 
 def _papel_visual_na_lista(
@@ -1578,7 +1575,7 @@ def _aparicao_acrescentada_na_lista(
     if achada is None:
         return ""
     lista, o = achada
-    return f"{lista} {o['inicio_ms']}-{o['fim_ms']}"
+    return textos.escrever_ocorrencia(lista, o["inicio_ms"], o["fim_ms"])
 
 
 def _nome_entregue_do_alvo(
@@ -1840,8 +1837,7 @@ def _do_mesmo_tipo_de_objeto(
 
 
 def _tempos_do_objeto(item: dict[str, Any]) -> str:
-    inicio, fim = intervalo_do_objeto(item)
-    return f"{inicio}-{fim}"
+    return textos.escrever_tempos(*intervalo_do_objeto(item))
 
 
 def _ancora_do_comercial_novo(valor: str, item_id: str, versao: str) -> Ancora:
