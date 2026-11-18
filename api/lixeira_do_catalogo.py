@@ -25,6 +25,7 @@ from api.catalogo import (
     Catalogo,
     EnvioParaLixeira,
     PessoaInexistente,
+    nomes_de_busca,
 )
 from api.catalogo_apagado import so_o_rosto
 from api.correcoes import RepositorioDeCorrecoes
@@ -45,7 +46,6 @@ from api.marcas import (
     CatalogoDeMarcas,
     MarcaDoCatalogo,
     MarcaInexistente,
-    nomes_de_busca_da_marca,
 )
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
@@ -180,7 +180,7 @@ def criar_rotas_da_lixeira_do_catalogo(
         so = SoMarcasQueContam(
             relatorio_de_marcas, marcas, purgas_de_marca, repositorio
         )
-        nomes = set(nomes_de_busca_da_marca(achada))
+        nomes = set(nomes_de_busca(achada))
         return ou_503(lambda: so.insercoes_dos_nomes(nomes))
 
     def impacto_da_pessoa(id: str, fotos_dela: int) -> ImpactoDaPessoa:

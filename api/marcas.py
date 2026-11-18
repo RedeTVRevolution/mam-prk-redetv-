@@ -10,8 +10,8 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from api.catalogo import EnvioParaLixeira, novo_id
-from api.texto import chave_da_marca, normalizar
+from api.catalogo import CatalogoGenericoEmMemoria, EnvioParaLixeira, novo_id
+from api.texto import chave_da_marca
 
 
 class MarcaDoCatalogo(BaseModel):
@@ -26,11 +26,6 @@ class MarcaDoCatalogo(BaseModel):
 
 class MarcaInexistente(Exception):
     """Nenhuma marca do catálogo tem o id pedido."""
-
-
-def nomes_de_busca_da_marca(marca: MarcaDoCatalogo) -> list[str]:
-    """Nome e apelidos normalizados: o que `achar` compara."""
-    return sorted({normalizar(n) for n in [marca.nome, *marca.apelidos]})
 
 
 class CatalogoDeMarcas(Protocol):
@@ -78,46 +73,16 @@ class CatalogoDeMarcas(Protocol):
     ) -> MarcaDoCatalogo: ...
 
 
-class CatalogoDeMarcasEmMemoria:
-    def __init__(self) -> None:
-        self._marcas: dict[str, MarcaDoCatalogo] = {}
-
-    def obter(self, id: str) -> MarcaDoCatalogo | None:
-        return self._marcas.get(id)
-
-    def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
-        return {i: self._marcas[i] for i in dict.fromkeys(ids) if i in self._marcas}
+class CatalogoDeMarcasEmMemoria(CatalogoGenericoEmMemoria[MarcaDoCatalogo]):
+    _inexistente = MarcaInexistente
+    # Os testes mexem direto nesse dicionário.
+    _marcas = property(lambda self: self._itens)
 
     def achar(self, nome: str, *, com_lixeira: bool = False) -> list[MarcaDoCatalogo]:
-        chave = normalizar(nome)
-        marcas = self._marcas.values() if com_lixeira else self.todas()
-        return [m for m in marcas if chave in nomes_de_busca_da_marca(m)]
-
-    def todas(self) -> list[MarcaDoCatalogo]:
-        return [m for m in self._marcas.values() if m.lixeira is None]
-
-    def na_lixeira(self) -> list[MarcaDoCatalogo]:
-        return [m for m in self._marcas.values() if m.lixeira is not None]
-
-    def definir_lixeira(
-        self, id: str, envio: EnvioParaLixeira | None
-    ) -> MarcaDoCatalogo:
-        atual = self._marcas.get(id)
-        if atual is None:
-            raise MarcaInexistente(id)
-        self._marcas[id] = atual.model_copy(update={"lixeira": envio})
-        return self._marcas[id]
-
-    def apagar(self, id: str) -> None:
-        if self._marcas.pop(id, None) is None:
-            raise MarcaInexistente(id)
+        return self._achar(nome, com_lixeira)
 
     def definir_apelidos(self, id: str, apelidos: list[str]) -> MarcaDoCatalogo:
-        atual = self._marcas.get(id)
-        if atual is None:
-            raise MarcaInexistente(id)
-        self._marcas[id] = atual.model_copy(update={"apelidos": list(apelidos)})
-        return self._marcas[id]
+        return self._alterar(id, {"apelidos": list(apelidos)})
 
     def acrescentar(
         self,
@@ -134,7 +99,7 @@ class CatalogoDeMarcasEmMemoria:
             a_revisar=a_revisar,
             acrescentada_por=autor,
         )
-        self._marcas[marca.id] = marca
+        self._itens[marca.id] = marca
         return marca
 
 
