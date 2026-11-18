@@ -37,6 +37,7 @@ from api.catalogo import (
     AndamentoDaRenomeacao,
     Catalogo,
     andamento_da_renomeacao,
+    existente_para_acrescentar,
     visivel,
 )
 from api.ciclo_de_vida import pedir_indexacao
@@ -539,6 +540,7 @@ def criar_rotas_dos_programas(
 
     @rotas.post("/pessoas", status_code=201)
     def criar_pessoa(
+        resposta: Response,
         dados: NovaPessoaDoPrograma,
         autor: Annotated[
             Usuario,
@@ -547,9 +549,11 @@ def criar_rotas_dos_programas(
     ) -> PessoaNoProgramaPublica:
         """A pessoa que ainda não está no catálogo, criada ali mesmo (sem papel: o
         papel é do vínculo com o programa)."""
-        existentes = catalogo.achar(dados.nome)
-        if existentes:
-            pessoa = existentes[0]
+        pessoa = existente_para_acrescentar(
+            catalogo.achar(dados.nome, com_lixeira=True)
+        )
+        if pessoa:
+            resposta.status_code = 200
         else:
             pessoa = catalogo.acrescentar(
                 dados.nome,

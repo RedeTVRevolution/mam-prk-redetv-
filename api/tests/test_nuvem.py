@@ -25,6 +25,7 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
+from api import nuvem
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
 from api.busca import (
     Entendida,
@@ -35,7 +36,13 @@ from api.busca import (
     MomentoGuardado,
     VideoGuardado,
 )
-from api.catalogo import EnvioParaLixeira, FusaoDaPessoa, PessoaInexistente
+from api.catalogo import (
+    EnvioParaLixeira,
+    FusaoDaPessoa,
+    PessoaDoCatalogo,
+    PessoaInexistente,
+    Rosto,
+)
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.erros import ServicoIndisponivel
@@ -2153,3 +2160,61 @@ def test_ano_da_copia_usa_array_union_sem_substituir_o_marcador() -> None:
     repositorio.acrescentar_ano_da_copia("j1", 2026)
 
     assert gravacoes == [{"copia_bigquery.anos": firestore.ArrayUnion([2026])}]
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestCatalogoFirestoreSobDisputa:
+    @pytest.fixture
+    def catalogo(self) -> CatalogoFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return CatalogoFirestore(cliente, colecao=f"catalogo-{uuid.uuid4().hex}")
+
+    def test_escrita_concorrente_na_mesma_pessoa_nao_perde_nenhuma_das_duas(
+        self, catalogo: CatalogoFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pessoa = catalogo.acrescentar("Ana", "repórter", [])
+        rosto = Rosto(origem="acervo", referencia="referencias/x/1.jpg")
+        outro = CatalogoFirestore(catalogo._cliente, colecao=catalogo._colecao.id)
+        monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+        pendente = [True]
+        original = nuvem._documento
+
+        def documento(colecao: Any, id: str) -> Any:
+            referencia = original(colecao, id)
+            ler = referencia.get
+
+            def get(**kw: Any) -> Any:
+                lido = ler(**kw)
+                if pendente and kw.get("transaction") is not None:
+                    pendente.clear()  # a outra ação grava entre a leitura e a gravação
+                    outro.definir_rostos(pessoa.id, [rosto])
+                return lido
+
+            referencia.get = get
+            return referencia
+
+        monkeypatch.setattr("api.nuvem._documento", documento)
+
+        catalogo.definir_lixeira(pessoa.id, _envio_para_lixeira())
+
+        final = catalogo.obter(pessoa.id)
+        assert final is not None
+        assert final.lixeira == _envio_para_lixeira() and final.rostos == [rosto]
+
+    def test_na_lixeira_consulta_no_servidor_sem_ler_a_colecao_inteira(
+        self, catalogo: CatalogoFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        a = catalogo.acrescentar("Ana", "", [])
+        catalogo.acrescentar("Bia", "", [])
+        catalogo.definir_lixeira(a.id, _envio_para_lixeira())
+        lidos: list[str] = []
+        ler = catalogo._ler
+
+        def contando(id: str, dados: dict[str, Any]) -> PessoaDoCatalogo:
+            lidos.append(id)
+            return ler(id, dados)
+
+        monkeypatch.setattr(catalogo, "_ler", contando)
+
+        assert [p.id for p in catalogo.na_lixeira()] == [a.id]
+        assert lidos == [a.id]
