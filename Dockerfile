@@ -126,6 +126,7 @@ COPY api/__init__.py \
      api/numero.py \
      api/nuvem.py \
      api/paddle.py \
+     api/paralelo.py \
      api/papeis.py \
      api/permissoes.py \
      api/pessoas.py \
@@ -220,6 +221,7 @@ COPY api/__init__.py \
      api/nuvem.py \
      api/ocr_job.py \
      api/paddle.py \
+     api/paralelo.py \
      api/papeis.py \
      api/permissoes.py \
      api/pessoas.py \
@@ -341,6 +343,7 @@ COPY api/__init__.py \
      api/nuvem.py \
      api/objetos_job.py \
      api/paddle.py \
+     api/paralelo.py \
      api/papeis.py \
      api/permissoes.py \
      api/pessoas.py \
