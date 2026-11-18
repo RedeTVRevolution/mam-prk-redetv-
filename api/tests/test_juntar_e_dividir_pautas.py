@@ -129,6 +129,28 @@ def test_dividir_uma_pauta_em_duas() -> None:
     assert item["depois_legivel"] == "Primeira | Segunda (corte em 00:30)"
 
 
+def test_dividir_a_1_s_ou_menos_das_bordas_e_422_e_a_mais_de_1_s_divide() -> None:
+    for em_ms in (21000, 49000):  # pauta 20000-50000: exatamente na tolerância
+        mundo = _mundo()
+
+        assert _dividir(mundo, em_ms).status_code == 422
+        assert _pautas(mundo)[1] == ("pau02", "Esporte", 20000, 50000)
+        assert mundo.historico().json() == []
+
+    mundo = _mundo()
+    assert _dividir(mundo, 21001).status_code == 201
+    assert [p[1:] for p in _pautas(mundo)[1:3]] == [
+        ("Primeira", 20000, 21001),
+        ("Segunda", 21001, 50000),
+    ]
+    mundo = _mundo()
+    assert _dividir(mundo, 48999).status_code == 201
+    assert [p[1:] for p in _pautas(mundo)[1:3]] == [
+        ("Primeira", 20000, 48999),
+        ("Segunda", 48999, 50000),
+    ]
+
+
 def test_dividir_e_desfazer() -> None:
     mundo = _mundo()
     cid = _dividir(mundo).json()["id"]
@@ -194,7 +216,7 @@ def test_juntar_com_aprovacao_so_vale_depois_de_aprovar() -> None:
 def test_dividir_reindexa_o_video() -> None:
     mundo = MundoDaBusca()
     modelo = json.loads(mundo.armazenamento.decupagens["j1"][0])
-    pauta = {**_pauta("pau01", "Abertura", 0, 2000), "pessoas": []}
+    pauta = {**_pauta("pau01", "Abertura", 0, 4000), "pessoas": []}
     modelo["pautas"] = [pauta]
     mundo.armazenamento.decupagens["j1"] = [json.dumps(modelo).encode()]
     mundo.reindexar()
@@ -204,7 +226,7 @@ def test_dividir_reindexa_o_video() -> None:
         json={
             "tipo": "pauta.dividir",
             "item_id": pauta["id"],
-            "valor": json.dumps({"em_ms": 1000, "titulos": ["Um", "Dois"]}),
+            "valor": json.dumps({"em_ms": 2000, "titulos": ["Um", "Dois"]}),
             "motivo": "são dois assuntos",
             "versao": _versao(modelo),
         },
@@ -301,6 +323,26 @@ def test_reprocessar_sem_pauta_a_dividir_deixa_a_divisao_na_fila() -> None:
     mundo.reprocessar(_modelo(pautas=[_pauta("nov1", "Curta", 20000, 25000)]))
 
     assert _pautas(mundo) == [("nov1", "Curta", 20000, 25000)]
+    fila = mundo.cliente.get("/v1/jobs/j1/fila", headers=AUTORIZACAO).json()
+    assert [i["id"] for i in fila] == [cid]
+
+
+def test_a_divisao_reapontada_colada_no_fim_fica_na_fila_como_nao_reaplicada() -> None:
+    mundo = _mundo()
+    cid = _dividir(mundo).json()["id"]  # corte em 30000
+    mundo.reprocessar(_modelo(pautas=[_pauta("nov1", "Quase", 20000, 30500)]))
+
+    assert _pautas(mundo) == [("nov1", "Quase", 20000, 30500)]
+    fila = mundo.cliente.get("/v1/jobs/j1/fila", headers=AUTORIZACAO).json()
+    assert [i["id"] for i in fila] == [cid]
+
+
+def test_a_divisao_reapontada_colada_no_inicio_fica_na_fila() -> None:
+    mundo = _mundo()
+    cid = _dividir(mundo).json()["id"]
+    mundo.reprocessar(_modelo(pautas=[_pauta("nov1", "Quase", 29500, 50000)]))
+
+    assert _pautas(mundo) == [("nov1", "Quase", 29500, 50000)]
     fila = mundo.cliente.get("/v1/jobs/j1/fila", headers=AUTORIZACAO).json()
     assert [i["id"] for i in fila] == [cid]
 

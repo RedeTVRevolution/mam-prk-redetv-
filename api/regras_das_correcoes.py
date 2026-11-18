@@ -828,6 +828,7 @@ def aplicar(
     esvaziadas: list[dict[str, Any]] = []
     # Quem recebeu troca de nome, e em que ordem: a junção fica com a mais nova.
     renomeadas: dict[int, int] = {}
+    ordem_das_renomeacoes = 0
     atendidas = {c.id for c in reconciliadas.atendidas}
     reapontadas = {c.id for c in reconciliadas.casadas}
     da_versao = [
@@ -892,7 +893,8 @@ def aplicar(
             if id(pessoa) not in aplicadas or c.id in atendidas:
                 continue
             if c.tipo == "pessoa.renomear":
-                renomeadas[id(pessoa)] = len(renomeadas) + 1
+                ordem_das_renomeacoes += 1
+                renomeadas[id(pessoa)] = ordem_das_renomeacoes
             if entrada.pode_esvaziar:
                 esvaziadas.append(pessoa)
     _juntar_as_do_mesmo_nome(resultado, renomeadas)
