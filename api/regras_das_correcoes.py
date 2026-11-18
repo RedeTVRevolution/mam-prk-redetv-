@@ -57,6 +57,7 @@ from api.correcoes import (
     sobrepoe,
     sobrepoe_de_verdade,
     sobrepoe_metade,
+    trocar_o_locutor_no_grupo,
     valor_do_item,
 )
 from api.decupagem import (
@@ -633,10 +634,11 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
         except ItemInexistente:
             return  # o que a correção aponta já não existe nesta versão
     for item in itens_com_o_id(resultado, c):
+        anterior = str(item.get("locutor", ""))
         aplica(item, c)
         item["origem"] = "revisao"
-    if c.tipo == "fala.texto":
-        resultado.pop(GRUPOS_DE_FALAS, None)  # o locutor pode ter mudado
+        if c.tipo == "fala.texto":
+            trocar_o_locutor_no_grupo(resultado, item, anterior)
 
 
 def pares_proibidos(correcoes: Sequence[Correcao]) -> set[frozenset[str]]:

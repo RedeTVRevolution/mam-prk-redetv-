@@ -1484,6 +1484,23 @@ class TestProgramasFirestore:
         programas.salvar(Programa(id="p", nome="Antigo"), com_renomeacao=True)
         assert programas.obter("p") == Programa(id="p", nome="Antigo")
 
+    def test_com_troca_aberta_traz_so_em_andamento_e_falhou(
+        self, programas: ProgramasFirestore
+    ) -> None:
+        for id, estado in [
+            ("a", "em_andamento"),
+            ("f", "falhou"),
+            ("c", "concluida"),
+            ("k", "confirmando"),
+        ]:
+            programas.salvar(
+                Programa(id=id, nome=f"P {id}", renomeacao=_andamento(estado, [])),
+                com_renomeacao=True,
+            )
+        programas.salvar(Programa(id="s", nome="Sem troca"))
+
+        assert sorted(p.id for p in programas.com_troca_aberta()) == ["a", "f"]
+
     def test_trocar_grava_o_que_mudar_devolve_e_so_isso(
         self, programas: ProgramasFirestore
     ) -> None:

@@ -163,3 +163,50 @@ def test_o_locutor_e_normalizado_uma_vez_por_leitura(
         mundo.avancar()
 
     assert chamadas_numa_leitura() - com_uma < len(falas)
+
+
+def test_correcao_de_fala_entre_renomeacoes_nao_reagrupa_todas_as_falas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    falas = [
+        {"inicio_ms": i, "fim_ms": i + 1, "texto": "x", "locutor": "Ana Souza"}
+        for i in range(60)
+    ]
+    mundo = Mundo(["editor"])
+    modelo = {**MODELO, "transcricao": falas}
+    mundo.reprocessar(modelo)
+    versao = versao_do_modelo(json.dumps(modelo).encode())
+    chamadas = 0
+    original = identidade_do_nome
+
+    def contando(nome: str) -> str | None:
+        nonlocal chamadas
+        chamadas += 1
+        return original(nome)
+
+    monkeypatch.setattr("api.correcoes.identidade_do_nome", contando)
+
+    def renomear_e_corrigir_uma_fala(n: int) -> None:
+        resposta = mundo.corrigir(item_id="pes01", valor=f"Nome {n}", versao=versao)
+        assert resposta.status_code == 201
+        mundo.avancar()
+        valor = {"texto": f"y{n}", "locutor": f"Nome {n}"}
+        resposta = mundo.corrigir(
+            tipo="fala.texto", item_id="fal000", valor=json.dumps(valor), versao=versao
+        )
+        assert resposta.status_code == 201
+        mundo.avancar()
+
+    def chamadas_numa_leitura() -> int:
+        nonlocal chamadas
+        chamadas = 0
+        mundo.decupagem()
+        return chamadas
+
+    renomear_e_corrigir_uma_fala(1)
+    com_uma = chamadas_numa_leitura()
+    for n in range(2, 6):
+        renomear_e_corrigir_uma_fala(n)
+
+    assert chamadas_numa_leitura() - com_uma < len(falas)
+    assert set(_locutores(mundo)) == {"Nome 5"}

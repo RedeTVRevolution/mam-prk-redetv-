@@ -1678,6 +1678,21 @@ def _tempos_no_item(item: dict[str, Any], c: Correcao) -> None:
 GRUPOS_DE_FALAS = "_falas_por_locutor"
 
 
+def trocar_o_locutor_no_grupo(
+    resultado: dict[str, Any], fala: dict[str, Any], anterior: str
+) -> None:
+    """A fala corrigida muda de grupo se o locutor mudou; os outros grupos ficam."""
+    grupos = resultado.get(GRUPOS_DE_FALAS)
+    if grupos is None or fala.get("locutor") == anterior:
+        return
+    velho = identidade_do_nome(anterior)
+    if velho is not None and velho in grupos:
+        grupos[velho] = [f for f in grupos[velho] if f is not fala]
+    novo = identidade_do_nome(str(fala.get("locutor", "")))
+    if novo is not None:
+        grupos.setdefault(novo, []).append(fala)
+
+
 def _renomear_pessoa(
     resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao
 ) -> None:
