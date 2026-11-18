@@ -15,6 +15,7 @@ from api.canonicos import com_os_canonicos
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.correcoes import (
     CORRIGIVEIS,
+    GRUPOS_DE_FALAS,
     PREFIXO_ACRESCENTADO,
     TIPOS,
     TOLERANCIA_DO_PLANO_MS,
@@ -640,6 +641,8 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
     for item in itens_com_o_id(resultado, c):
         aplica(item, c)
         item["origem"] = "revisao"
+    if c.tipo == "fala.texto":
+        resultado.pop(GRUPOS_DE_FALAS, None)  # o locutor pode ter mudado
 
 
 def pares_proibidos(correcoes: Sequence[Correcao]) -> set[frozenset[str]]:
@@ -900,6 +903,7 @@ def aplicar(
                 esvaziadas.append(pessoa)
     _juntar_as_do_mesmo_nome(resultado, renomeadas)
     resultado.pop("_separadas", None)
+    resultado.pop(GRUPOS_DE_FALAS, None)
     # A pessoa que ficou sem nenhuma ocorrência some da decupagem, e das pautas.
     sumidas = [e for e in esvaziadas if not any(e[lista] for lista in LISTAS)]
     if sumidas:

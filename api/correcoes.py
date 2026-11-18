@@ -1677,6 +1677,10 @@ def _tempos_no_item(item: dict[str, Any], c: Correcao) -> None:
     item["inicio_ms"], item["fim_ms"] = tempos_de(c.depois)
 
 
+# As falas por locutor normalizado, na aplicação: nasce na 1ª renomeação e sai no fim.
+GRUPOS_DE_FALAS = "_falas_por_locutor"
+
+
 def _renomear_pessoa(
     resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao
 ) -> None:
@@ -1686,12 +1690,20 @@ def _renomear_pessoa(
     # agora (não o `c.antes`), para a segunda troca achar o que a primeira deixou.
     # "Não identificado" é de várias pessoas, então não leva nada.
     if anterior is not None:
-        for fala in resultado.get("transcricao", []):
-            if (
-                isinstance(fala, dict)
-                and identidade_do_nome(str(fala.get("locutor", ""))) == anterior
-            ):
-                fala["locutor"] = c.depois
+        grupos = resultado.get(GRUPOS_DE_FALAS)
+        if grupos is None:
+            grupos = resultado[GRUPOS_DE_FALAS] = {}
+            for fala in resultado.get("transcricao", []):
+                if isinstance(fala, dict):
+                    identidade = identidade_do_nome(str(fala.get("locutor", "")))
+                    if identidade is not None:
+                        grupos.setdefault(identidade, []).append(fala)
+        movidas = grupos.pop(anterior, [])
+        for fala in movidas:
+            fala["locutor"] = c.depois
+        novo = identidade_do_nome(c.depois)
+        if novo is not None:
+            grupos.setdefault(novo, []).extend(movidas)
     # O nome da revisora vale sobre a conferência do código, feita no nome anterior.
     pessoa["estado_do_nome"] = "confirmado"
     _catalogo_id_na_pessoa(pessoa, c)
