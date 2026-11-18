@@ -2047,6 +2047,13 @@ def _reapontar_juncao(
     return nova, atendida
 
 
+def _corte_no_miolo(pauta: dict[str, Any], em: int) -> bool:
+    """O corte só vale a mais de `TOLERANCIA_DO_PLANO_MS` das duas bordas: perto
+    do fim `_aplicar_divisao` o tomaria por corte já feito (sem efeito)."""
+    inicio, fim = pauta["inicio_ms"], pauta["fim_ms"]
+    return bool(inicio + TOLERANCIA_DO_PLANO_MS < em < fim - TOLERANCIA_DO_PLANO_MS)
+
+
 def _preparar_divisao(
     entregue: dict[str, Any], novo: NovaCorrecao, versao: str
 ) -> tuple[str, Ancora]:
@@ -2054,8 +2061,10 @@ def _preparar_divisao(
     item = next((p for p in pautas(entregue) if p.get("id") == novo.item_id), None)
     if item is None:
         raise ItemInexistente(novo.item_id)
-    if not item["inicio_ms"] < divisao.em_ms < item["fim_ms"]:
-        raise EstruturaInvalida("o corte cai fora da pauta")
+    if not _corte_no_miolo(item, divisao.em_ms):
+        raise EstruturaInvalida(
+            "o corte cai fora da pauta ou a 1 s ou menos do início ou do fim"
+        )
     return novo.valor, ancora_do_item(item, "pauta", versao)
 
 
@@ -2109,7 +2118,7 @@ def _reapontar_divisao(
     ]
     antes = [p for p in achadas if abs(p["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
     depois = [p for p in achadas if abs(p["inicio_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
-    com_o_corte = [p for p in achadas if p["inicio_ms"] < em < p["fim_ms"]]
+    com_o_corte = [p for p in achadas if _corte_no_miolo(p, em)]
     if antes and depois:
         # O modelo já cortou aqui; atendida só se os títulos também são os escolhidos.
         trazidos = [normalizar(p["titulo"]) for p in (antes[0], depois[0])]
