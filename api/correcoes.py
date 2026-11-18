@@ -27,6 +27,9 @@ from api import catalogo_de_correcoes as textos
 from api.decupagem import (
     CATEGORIAS_DE_OBJETO,
     CORES_BASE,
+    LIMITE_DO_ID,
+    LIMITE_DO_NOME,
+    LIMITE_DO_TEXTO,
     RELACOES_DO_OBJETO,
     CategoriaDeObjeto,
     Comercial,
@@ -95,8 +98,6 @@ NOME_NAO_IDENTIFICADO = "Não identificado"
 TIPOS_DE_COMERCIAL = get_args(Comercial.model_fields["tipo"].annotation)
 CAMPOS_DO_COMERCIAL = ("marca", "tipo", "inicio_ms", "fim_ms", "evidencias")
 LIMITE_DO_MOTIVO = 500
-LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
-LIMITE_DO_TEXTO = 2000  # o mesmo de `Texto` na decupagem
 # A descrição de plano e o texto de fala vão em JSON: cabe a maior descrição
 # válida (200 + 2000 + 50 × 200 caracteres) com folga para aspas e escapes.
 LIMITE_DO_JSON = 16000
@@ -489,7 +490,8 @@ class NovaJuncao(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ids: Annotated[
-        list[Annotated[str, StringConstraints(max_length=40)]], Field(min_length=2)
+        list[Annotated[str, StringConstraints(max_length=LIMITE_DO_ID)]],
+        Field(min_length=2),
     ]
     titulo: _Rotulo
 
@@ -584,7 +586,7 @@ class NovaCorrecao(BaseModel):
     # `comercial.marca`); o servidor confere que existe e que o nome é o dela.
     catalogo_id: Annotated[str, Linha(64, min_length=1), ID_SEGURO] | None = None
     # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
-    item_id: Annotated[str, Linha(40)] = ""
+    item_id: Annotated[str, Linha(LIMITE_DO_ID)] = ""
     # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
     # esquema; `comercial.acrescentar`: o JSON do comercial; `pessoa.nao_e`:
     # "Não identificado"; `pessoa.aparicao_para_mencao`: a lista de destino;
@@ -651,7 +653,7 @@ class NovaRecusa(NovaResolucao):
 class NovaReaplicacao(NovaResolucao):
     """Corpo de `POST /v1/jobs/{id}/fila/{cid}/reaplicar`."""
 
-    item_id: Annotated[str, Linha(40, min_length=1)]
+    item_id: Annotated[str, Linha(LIMITE_DO_ID, min_length=1)]
 
 
 class RepositorioDeAprovacao(Protocol):

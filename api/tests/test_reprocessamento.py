@@ -746,3 +746,14 @@ def test_tempo_esgotado_na_validacao_nao_reprocessa_e_pede_o_mesmo_envio() -> No
     assert "demorou demais" in detalhe and "envie" in detalhe
     assert "do arquivo" not in detalhe
     assert mundo.disparo.disparos == []
+
+
+def test_mensagem_do_prazo_segue_a_constante(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("api.ciclo_de_vida.PRAZO_DO_REPROCESSAMENTO", timedelta(days=3))
+    job = _falhou_na_analise()
+    job.criado_em = AGORA - timedelta(days=4)
+    repositorio = RepositorioEmMemoria()
+    repositorio.criar(job)
+
+    with pytest.raises(NaoReprocessavel, match=r"\(3 dias após o envio\)"):
+        reprocessar(repositorio, job.id, AGORA)

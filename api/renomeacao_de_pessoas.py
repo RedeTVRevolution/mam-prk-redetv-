@@ -22,7 +22,8 @@ from api.catalogo import (
     PessoaDoCatalogo,
     RenomeacaoDaPessoa,
 )
-from api.correcoes import LIMITE_DO_NOME, RepositorioDeCorrecoes, sem_controle
+from api.correcoes import RepositorioDeCorrecoes, sem_controle
+from api.decupagem import LIMITE_DO_NOME
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_dos_jobs
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
