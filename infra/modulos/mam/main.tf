@@ -823,7 +823,8 @@ locals {
     objetos = { decupagens = "roles/storage.objectUser" }
     # Apaga os arquivos do vídeo purgado: cópia limpa, proxy, janelas, decupagem e quadros.
     # A varredura diária também expira o upload abandonado e apaga o objeto dele da quarentena (#369).
-    purga = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser" }
+    # A varredura retoma a fusão de pessoas pendente (#722) e apaga as fotos de rosto da origem (referências).
+    purga = { quarentena = "roles/storage.objectUser", aceitos = "roles/storage.objectUser", decupagens = "roles/storage.objectUser", referencias = "roles/storage.objectUser" }
     # Lê a contagem de itens que a decupagem deixa ao lado dela (#455).
     taxa = { decupagens = "roles/storage.objectViewer" }
   }

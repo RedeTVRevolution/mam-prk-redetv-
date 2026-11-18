@@ -5,6 +5,7 @@ nome e os apelidos dela. A leitura das Decupagens mostra o destino onde havia a 
 `api.quem_conta`); nada gravado é reescrito. As fotos de rosto da origem saem (LGPD).
 """
 
+import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime
@@ -30,6 +31,8 @@ from api.permissoes import exige
 from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, LinhaDaConsulta
 
+log = logging.getLogger(__name__)
+
 
 class PedidoDeFusao(BaseModel):
     destino_id: Annotated[str, Linha(64, min_length=1), ID_SEGURO]
@@ -53,6 +56,104 @@ class Fundida(BaseModel):
     destino_nome: str
     videos: int
     aparicoes: int
+
+
+class FusaoNaoConcluida(Exception):
+    """Nem todos os Jobs trocaram a origem pelo destino; o marcador fica e a retomada repete."""
+
+
+def destino_vigente(pessoas: Catalogo, destino_id: str) -> str:
+    """A pessoa que vale hoje: segue a cadeia de fusões (o destino pode ter sido fundido
+    depois) até quem não está fundido. Pára num id que não existe ou que já se viu."""
+    vistos = {destino_id}
+    while (pessoa := pessoas.obter(destino_id)) and pessoa.fundida:
+        destino_id = pessoa.fundida.destino_id
+        if destino_id in vistos:
+            break
+        vistos.add(destino_id)
+    return destino_id
+
+
+def concluir_fusao(
+    origem: PessoaDoCatalogo,
+    fusao: FusaoDaPessoa,
+    pessoas: Catalogo,
+    repositorio: RepositorioDeJobs,
+    fotos: FotosDeReferencia,
+    auditoria: RepositorioDeAuditoria,
+    ao_fundir: Callable[[], None],
+) -> Fundida:
+    """Os passos depois de gravada a fusão; cada um se repete sem estragar o outro."""
+    detalhes = fusao.registro_detalhes or {}
+    if fusao.fase == "aguardando_auditoria":
+        # `existe`: a queda pode ter vindo depois de gravar o registro (que só se cria).
+        if not auditoria.existe(fusao.registro_id or ""):
+            auditoria.acrescentar(
+                registro_de_auditoria(
+                    quando=fusao.em,
+                    quem=Usuario(uid=fusao.por_uid, email=fusao.por_email),
+                    acao="pessoa.fundida",
+                    alvo_tipo="pessoa",
+                    alvo_id=origem.id,
+                    alvo_nome=origem.nome,
+                    motivo=fusao.motivo,
+                    detalhes=detalhes,
+                    id=fusao.registro_id,
+                )
+            )
+        fusao = fusao.model_copy(update={"fase": "limpando"})
+        pessoas.definir_fusao(origem.id, fusao)
+    # Rosto é dado sensível: as fotos da origem saem, e as do destino ficam.
+    apagar_fotos_da_pessoa(fotos, pessoas, origem)
+    # Os Jobs vão ao destino vigente, não ao gravado (#722): ele pode ter sido fundido depois.
+    if not passar_pessoa_nos_jobs(
+        repositorio, origem.id, destino_vigente(pessoas, fusao.destino_id)
+    ):
+        raise FusaoNaoConcluida(origem.id)
+    ao_fundir()
+    pessoas.definir_fusao(
+        origem.id,
+        fusao.model_copy(
+            update={"fase": None, "registro_id": None, "registro_detalhes": None}
+        ),
+    )
+    return Fundida(
+        origem_id=origem.id,
+        destino_id=fusao.destino_id,
+        destino_nome=detalhes.get("destino_nome", ""),
+        videos=detalhes.get("videos", 0),
+        aparicoes=detalhes.get("aparicoes", 0),
+    )
+
+
+def retomar_fusoes_pendentes(
+    pessoas: Catalogo,
+    repositorio: RepositorioDeJobs,
+    fotos: FotosDeReferencia,
+    auditoria: RepositorioDeAuditoria,
+    ao_fundir: Callable[[], None],
+) -> int:
+    """A varredura diária conclui as fusões pendentes, nas duas fases; devolve quantas.
+    Uma que falha fica como está e não impede as outras: a próxima varredura tenta."""
+    concluidas = 0
+    for origem in pessoas.fusoes_pendentes():
+        if origem.fundida is None or origem.fundida.fase is None:
+            continue
+        try:
+            concluir_fusao(
+                origem,
+                origem.fundida,
+                pessoas,
+                repositorio,
+                fotos,
+                auditoria,
+                ao_fundir,
+            )
+        except Exception:
+            log.exception("a retomada da fusão de %s falhou", origem.id)
+            continue
+        concluidas += 1
+    return concluidas
 
 
 def criar_rotas_da_fusao(
@@ -179,43 +280,13 @@ def criar_rotas_da_fusao(
         return concluir(origem, fusao)
 
     def concluir(origem: PessoaDoCatalogo, fusao: FusaoDaPessoa) -> Fundida:
-        """Os passos depois de gravada a fusão; cada um se repete sem estragar o outro."""
-        detalhes = fusao.registro_detalhes or {}
-        if fusao.fase == "aguardando_auditoria":
-            # `existe`: a queda pode ter vindo depois de gravar o registro (que só se cria).
-            if not auditoria.existe(fusao.registro_id or ""):
-                auditoria.acrescentar(
-                    registro_de_auditoria(
-                        quando=fusao.em,
-                        quem=Usuario(uid=fusao.por_uid, email=fusao.por_email),
-                        acao="pessoa.fundida",
-                        alvo_tipo="pessoa",
-                        alvo_id=origem.id,
-                        alvo_nome=origem.nome,
-                        motivo=fusao.motivo,
-                        detalhes=detalhes,
-                        id=fusao.registro_id,
-                    )
-                )
-            fusao = fusao.model_copy(update={"fase": "limpando"})
-            pessoas.definir_fusao(origem.id, fusao)
-        # Rosto é dado sensível: as fotos da origem saem, e as do destino ficam.
-        apagar_fotos_da_pessoa(fotos, pessoas, origem)
-        if not passar_pessoa_nos_jobs(repositorio, origem.id, fusao.destino_id):
-            raise HTTPException(500, "Nem todos os vídeos passaram: repita o pedido")
-        ao_fundir()
-        pessoas.definir_fusao(
-            origem.id,
-            fusao.model_copy(
-                update={"fase": None, "registro_id": None, "registro_detalhes": None}
-            ),
-        )
-        return Fundida(
-            origem_id=origem.id,
-            destino_id=fusao.destino_id,
-            destino_nome=detalhes.get("destino_nome", ""),
-            videos=detalhes.get("videos", 0),
-            aparicoes=detalhes.get("aparicoes", 0),
-        )
+        try:
+            return concluir_fusao(
+                origem, fusao, pessoas, repositorio, fotos, auditoria, ao_fundir
+            )
+        except FusaoNaoConcluida:
+            raise HTTPException(
+                500, "Nem todos os vídeos passaram: repita o pedido"
+            ) from None
 
     return rotas

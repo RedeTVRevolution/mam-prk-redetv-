@@ -12,6 +12,7 @@ from api.auth import Usuario
 from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, Rosto
 from api.correcoes import LIMITE_DO_MOTIVO, versao_do_modelo
 from api.fotos_de_referencia import FotosEmMemoria
+from api.fusao_de_pessoas import retomar_fusoes_pendentes
 from api.jobs import RepositorioEmMemoria
 from api.lixeira_na_leitura import VersaoDaLixeiraEmMemoria
 from api.main import criar_app
@@ -581,3 +582,69 @@ def test_o_mesmo_pedido_com_outro_destino_na_fusao_pendente_continua_422() -> No
 
     assert _fundida(mundo).destino_id == mundo.sabrina.id
     assert _fundida(mundo).fase == "limpando"
+
+
+# --- Retomada pela varredura diária (#722) ---
+
+
+def _retomar(mundo: Mundo) -> int:
+    return retomar_fusoes_pendentes(
+        mundo.catalogo, mundo.jobs, mundo.fotos, mundo.auditoria, mundo.versao.avancar
+    )
+
+
+def test_fusao_pendente_cujo_destino_foi_fundido_depois_passa_os_jobs_ao_vigente() -> (
+    None
+):
+    mundo = Mundo()
+    c = mundo.catalogo.acrescentar("Sabrina Sato Oficial", "", [])
+    _cai_uma_vez(mundo.jobs, "trocar")
+    assert mundo.fundir().status_code == 500  # A -> B pendente, Jobs ainda em A
+    assert mundo.fundir(origem=mundo.sabrina.id, destino=c.id).status_code == 200
+
+    assert _retomar(mundo) == 1
+
+    for id in ("j1", "j2"):
+        job = mundo.jobs.obter(id)
+        assert job and job.pessoas_do_catalogo == [c.id]
+    assert _fundida(mundo).fase is None
+    assert _fundida(mundo).destino_id == mundo.sabrina.id  # o gravado não muda
+
+
+def test_a_retomada_acha_a_origem_escondida_das_buscas_nas_duas_fases() -> None:
+    mundo = Mundo()
+    outra = mundo.catalogo.acrescentar("Outra", "", [])
+    _cai_uma_vez(mundo.fotos, "apagar_prefixo")
+    with pytest.raises(RuntimeError):
+        mundo.fundir()  # A: limpando
+    _cai_uma_vez(mundo.auditoria, "acrescentar")
+    with pytest.raises(RuntimeError):
+        mundo.fundir(origem=outra.id, destino=mundo.sabrina.id)  # B: aguardando
+
+    assert mundo.duplicada.id not in [p.id for p in mundo.catalogo.todas()]
+    assert {
+        p.id: p.fundida.fase for p in mundo.catalogo.fusoes_pendentes() if p.fundida
+    } == {
+        mundo.duplicada.id: "limpando",
+        outra.id: "aguardando_auditoria",
+    }
+    assert _retomar(mundo) == 2
+    assert len(_registros(mundo)) == 2
+    assert mundo.catalogo.fusoes_pendentes() == []
+    assert _retomar(mundo) == 0
+    assert len(_registros(mundo)) == 2
+
+
+def test_falha_numa_retomada_nao_impede_as_outras() -> None:
+    mundo = Mundo()
+    outra = mundo.catalogo.acrescentar("Outra", "", [])
+    for origem in (mundo.duplicada.id, outra.id):
+        _cai_uma_vez(mundo.fotos, "apagar_prefixo")
+        with pytest.raises(RuntimeError):
+            mundo.fundir(origem=origem, destino=mundo.sabrina.id)
+    _cai_uma_vez(mundo.fotos, "apagar_prefixo")  # a primeira retomada cai
+
+    assert _retomar(mundo) == 1
+    assert len(mundo.catalogo.fusoes_pendentes()) == 1
+    assert _retomar(mundo) == 1
+    assert mundo.catalogo.fusoes_pendentes() == []
