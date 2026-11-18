@@ -7,10 +7,11 @@ web, retirada no #327: só a migração `apagar_referencias_web` ainda os lê.
 
 import threading
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timedelta
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, Self
 
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from api.texto import normalizar
@@ -47,12 +48,19 @@ class FusaoDaPessoa(BaseModel):
     por_uid: str
     por_email: str
     motivo: str
+    # Fusão retomável (#721): sem `fase`, a fusão está concluída. Nasce `aguardando_auditoria`
+    # (com o id e o conteúdo do registro, que a leitura já trocada não refaria) e só passa a
+    # `limpando` depois de o registro estar gravado; só aí as fotos de rosto saem.
+    fase: Literal["aguardando_auditoria", "limpando"] | None = None
+    registro_id: str | None = None
+    registro_detalhes: dict[str, Any] | None = None
 
 
 class RenomeacaoDaPessoa(BaseModel):
-    """A última renomeação em todos os vídeos (#263): de onde veio o nome e o andamento.
-    Desde o #417 nasce `concluida`, sem `pendentes`: o índice não guarda o
-    nome. `nomes_anteriores` guarda todos os nomes que a pessoa já teve."""
+    """A última renomeação em todos os vídeos (#263): de onde veio o nome e quem trocou.
+    `nomes_anteriores` guarda todos os nomes que a pessoa já teve. Documento antigo com
+    `estado`, `pendentes` e `total` carrega (campos desconhecidos são ignorados) e os
+    perde na próxima gravação."""
 
     nome_antigo: str
     nome_novo: str
@@ -60,49 +68,6 @@ class RenomeacaoDaPessoa(BaseModel):
     em: datetime
     por_uid: str
     por_email: str
-    total: int
-    pendentes: list[str]
-    estado: Literal["em_andamento", "concluida", "falhou"]
-
-
-class AndamentoDaRenomeacao(BaseModel):
-    estado: Literal["em_andamento", "concluida", "falhou"]
-    feitos: int
-    total: int
-    nome_antigo: str
-    nome_novo: str
-
-
-class _Renomeacao(Protocol):
-    """O que a renomeação de uma pessoa e a de um programa têm em comum."""
-
-    @property
-    def estado(self) -> str: ...
-    @property
-    def total(self) -> int: ...
-    @property
-    def pendentes(self) -> list[str]: ...
-    @property
-    def nome_antigo(self) -> str: ...
-    @property
-    def nome_novo(self) -> str: ...
-
-
-def andamento_da_renomeacao(
-    r: _Renomeacao, confirmando_conta_como_em_andamento: bool = False
-) -> AndamentoDaRenomeacao:
-    """Para quem lê, a troca de programa que espera a auditoria (`confirmando`) já está em andamento."""
-    estado = r.estado
-    if confirmando_conta_como_em_andamento and estado == "confirmando":
-        estado = "em_andamento"
-    dados: dict[str, Any] = {
-        "estado": estado,
-        "feitos": r.total - len(r.pendentes),
-        "total": r.total,
-        "nome_antigo": r.nome_antigo,
-        "nome_novo": r.nome_novo,
-    }
-    return AndamentoDaRenomeacao.model_validate(dados)
 
 
 class PessoaDoCatalogo(BaseModel):
@@ -122,6 +87,13 @@ class PessoaDoCatalogo(BaseModel):
     renomeacao: RenomeacaoDaPessoa | None = None
 
 
+class FusaoMudou(Exception):
+    """A fusão gravada não é a que o pedido esperava: outro pedido chegou antes (#721)."""
+
+
+SeAFusao = Callable[["FusaoDaPessoa | None"], bool]
+
+
 class PessoaInexistente(Exception):
     """Nenhuma pessoa do catálogo tem o id pedido."""
 
@@ -131,9 +103,45 @@ def visivel(pessoa: PessoaDoCatalogo) -> bool:
     return pessoa.lixeira is None and pessoa.fundida is None
 
 
-def nomes_de_busca(pessoa: PessoaDoCatalogo) -> list[str]:
-    """Nome e apelidos normalizados: o que `achar` compara."""
-    return sorted({normalizar(n) for n in [pessoa.nome, *pessoa.apelidos]})
+class EntradaDoCatalogo(Protocol):
+    """O que pessoa e marca têm em comum: o que a implementação única do catálogo (em
+    memória aqui, no Firestore em `api/nuvem.py`) lê e grava."""
+
+    id: str
+    nome: str
+    apelidos: list[str]
+    lixeira: EnvioParaLixeira | None
+
+    def model_copy(self, *, update: Mapping[str, Any]) -> Self: ...
+
+    def model_dump(self, *, exclude: set[str]) -> dict[str, Any]: ...
+
+
+def sem_lixeira(entrada: EntradaDoCatalogo) -> bool:
+    return entrada.lixeira is None
+
+
+def existente_para_acrescentar[T: EntradaDoCatalogo](achadas: list[T]) -> T | None:
+    """Para o POST que evita duplicata: o registro que já existe (fora da lixeira), ou
+    `None` se o nome é novo. Nome na lixeira é 409: restaurar é o caminho, não criar."""
+    ativa = next((a for a in achadas if a.lixeira is None), None)
+    if ativa is None and achadas:
+        raise HTTPException(409, "Esse nome está na lixeira e pode ser restaurado")
+    return ativa
+
+
+def qualquer(_: object) -> bool:
+    return True
+
+
+def sem_fusao(pessoa: PessoaDoCatalogo) -> bool:
+    """O que `achar(com_lixeira=True)` ainda esconde: a fundida, que o destino já cobre."""
+    return pessoa.fundida is None
+
+
+def nomes_de_busca(entrada: EntradaDoCatalogo) -> list[str]:
+    """Nome e apelidos normalizados (de pessoa ou marca): o que `achar` compara."""
+    return sorted({normalizar(n) for n in [entrada.nome, *entrada.apelidos]})
 
 
 VALIDADE_DA_COPIA = timedelta(seconds=30)
@@ -187,8 +195,10 @@ class Catalogo(Protocol):
         """As pessoas que existem entre os `ids`, numa leitura em lote."""
         ...
 
-    def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        """As pessoas (fora da lixeira e não fundidas) cujo nome ou apelido é `nome`, sem maiúsculas nem acentos."""
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
+        """As pessoas (fora da lixeira e não fundidas) cujo nome ou apelido é `nome`, sem
+        maiúsculas nem acentos; com `com_lixeira`, as da lixeira também (as fundidas
+        continuam de fora)."""
         ...
 
     def todas(self) -> list[PessoaDoCatalogo]:
@@ -197,14 +207,22 @@ class Catalogo(Protocol):
 
     def na_lixeira(self) -> list[PessoaDoCatalogo]: ...
 
+    def fusoes_pendentes(self) -> list[PessoaDoCatalogo]:
+        """As origens de fusão com o marcador de fase (#722): a varredura diária as retoma.
+        `todas` e `achar` escondem a fundida, então só esta consulta a acha."""
+        ...
+
     def definir_lixeira(
         self, id: str, envio: EnvioParaLixeira | None
     ) -> PessoaDoCatalogo:
         """Manda para a lixeira (ou, com `None`, tira); `PessoaInexistente` se o id não existe."""
         ...
 
-    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
-        """Marca a pessoa como fundida no destino (ou, com `None`, desfaz); `PessoaInexistente` se o id não existe."""
+    def definir_fusao(
+        self, id: str, fusao: FusaoDaPessoa | None, se: SeAFusao | None = None
+    ) -> PessoaDoCatalogo:
+        """Marca a pessoa como fundida no destino (ou, com `None`, desfaz); `PessoaInexistente` se o id não existe.
+        Com `se`, grava só se a fusão atual passa nele (na mesma transação); senão `FusaoMudou`."""
         ...
 
     def definir_renomeacao(
@@ -267,57 +285,80 @@ def corrigida(
     )
 
 
-class CatalogoEmMemoria:
+class CatalogoGenericoEmMemoria[T: EntradaDoCatalogo]:
+    """A parte do catálogo em memória que pessoas e marcas dividem; cada uma só diz o
+    modelo (nos `acrescentar`), a exceção de inexistente e o que é "visível"."""
+
+    _inexistente: type[Exception]
+    _visivel: Callable[[T], bool] = staticmethod(sem_lixeira)
+    _achavel_na_lixeira: Callable[[T], bool] = staticmethod(qualquer)
+
     def __init__(self) -> None:
-        self._pessoas: dict[str, PessoaDoCatalogo] = {}
+        self._itens: dict[str, T] = {}
+
+    def _existente(self, id: str) -> T:
+        if id not in self._itens:
+            raise self._inexistente(id)
+        return self._itens[id]
+
+    def _alterar(self, id: str, update: Mapping[str, Any]) -> T:
+        self._itens[id] = self._existente(id).model_copy(update=update)
+        return self._itens[id]
+
+    def _achar(self, nome: str, com_lixeira: bool = False) -> list[T]:
+        chave = normalizar(nome)
+        ok = self._achavel_na_lixeira if com_lixeira else self._visivel
+        return [i for i in self._itens.values() if ok(i) and chave in nomes_de_busca(i)]
+
+    def obter(self, id: str) -> T | None:
+        return self._itens.get(id)
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, T]:
+        return {i: self._itens[i] for i in dict.fromkeys(ids) if i in self._itens}
+
+    def todas(self) -> list[T]:
+        return [i for i in self._itens.values() if self._visivel(i)]
+
+    def na_lixeira(self) -> list[T]:
+        return [i for i in self._itens.values() if i.lixeira is not None]
+
+    def definir_lixeira(self, id: str, envio: EnvioParaLixeira | None) -> T:
+        return self._alterar(id, {"lixeira": envio})
+
+    def apagar(self, id: str) -> None:
+        if self._itens.pop(id, None) is None:
+            raise self._inexistente(id)
+
+
+class CatalogoEmMemoria(CatalogoGenericoEmMemoria[PessoaDoCatalogo]):
+    _inexistente = PessoaInexistente
+    _visivel = staticmethod(visivel)
+    _achavel_na_lixeira = staticmethod(sem_fusao)
 
     @classmethod
     def copia_de(cls, catalogo: Catalogo) -> "CatalogoEmMemoria":
         """Uma cópia solta: o que se acrescenta nela não chega ao catálogo de origem."""
         copia = cls()
-        copia._pessoas = {p.id: p for p in catalogo.todas()}
+        copia._itens = {p.id: p for p in catalogo.todas()}
         return copia
 
-    def obter(self, id: str) -> PessoaDoCatalogo | None:
-        return self._pessoas.get(id)
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
+        return self._achar(nome, com_lixeira)
 
-    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
-        return {i: self._pessoas[i] for i in dict.fromkeys(ids) if i in self._pessoas}
-
-    def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        chave = normalizar(nome)
-        return [p for p in self.todas() if chave in nomes_de_busca(p)]
-
-    def todas(self) -> list[PessoaDoCatalogo]:
-        return [p for p in self._pessoas.values() if visivel(p)]
-
-    def na_lixeira(self) -> list[PessoaDoCatalogo]:
-        return [p for p in self._pessoas.values() if p.lixeira is not None]
-
-    def definir_lixeira(
-        self, id: str, envio: EnvioParaLixeira | None
+    def definir_fusao(
+        self, id: str, fusao: FusaoDaPessoa | None, se: SeAFusao | None = None
     ) -> PessoaDoCatalogo:
-        atual = self._pessoas.get(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        self._pessoas[id] = atual.model_copy(update={"lixeira": envio})
-        return self._pessoas[id]
+        if se is not None and not se(self._existente(id).fundida):
+            raise FusaoMudou(id)
+        return self._alterar(id, {"fundida": fusao})
 
-    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
-        atual = self._pessoas.get(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        self._pessoas[id] = atual.model_copy(update={"fundida": fusao})
-        return self._pessoas[id]
+    def fusoes_pendentes(self) -> list[PessoaDoCatalogo]:
+        return [p for p in self._itens.values() if p.fundida and p.fundida.fase]
 
     def definir_renomeacao(
         self, id: str, renomeacao: RenomeacaoDaPessoa | None
     ) -> PessoaDoCatalogo:
-        atual = self._pessoas.get(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        self._pessoas[id] = atual.model_copy(update={"renomeacao": renomeacao})
-        return self._pessoas[id]
+        return self._alterar(id, {"renomeacao": renomeacao})
 
     def acrescentar(
         self,
@@ -336,7 +377,7 @@ class CatalogoEmMemoria:
             a_revisar=a_revisar,
             acrescentada_por=autor,
         )
-        self._pessoas[pessoa.id] = pessoa
+        self._itens[pessoa.id] = pessoa
         return pessoa
 
     def corrigir(
@@ -347,19 +388,8 @@ class CatalogoEmMemoria:
         papel: str | None = None,
         apelidos: list[str] | None = None,
     ) -> PessoaDoCatalogo:
-        atual = self._pessoas.get(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        self._pessoas[id] = corrigida(atual, nome, papel, apelidos)
-        return self._pessoas[id]
+        self._itens[id] = corrigida(self._existente(id), nome, papel, apelidos)
+        return self._itens[id]
 
     def definir_rostos(self, id: str, rostos: list[Rosto]) -> PessoaDoCatalogo:
-        atual = self._pessoas.get(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        self._pessoas[id] = atual.model_copy(update={"rostos": list(rostos)})
-        return self._pessoas[id]
-
-    def apagar(self, id: str) -> None:
-        if self._pessoas.pop(id, None) is None:
-            raise PessoaInexistente(id)
+        return self._alterar(id, {"rostos": list(rostos)})

@@ -46,8 +46,40 @@ ROTULOS_DAS_LISTAS = {
     "citada_no_texto": "citada no texto",
 }
 
-_OCORRENCIA = re.compile(rf"^({'|'.join(ROTULOS_DAS_LISTAS)}) (\d+)-(\d+)$")
-_TEMPOS = re.compile(r"^(\d+)-(\d+)$")
+# O protocolo de texto do `antes` e do `depois` das Correções: escrever e ler ficam
+# aqui, com o mesmo limite de dígitos. Quem não casa fica cru (`None` ao ler).
+_OCORRENCIA = re.compile(
+    rf"^({'|'.join(ROTULOS_DAS_LISTAS)}) (\d{{1,12}})-(\d{{1,12}})$"
+)
+_TEMPOS = re.compile(r"^(\d{1,12})-(\d{1,12})$")
+
+
+def escrever_tempos(inicio_ms: int, fim_ms: int) -> str:
+    return f"{inicio_ms}-{fim_ms}"
+
+
+def ler_tempos(valor: str) -> tuple[int, int] | None:
+    achado = _TEMPOS.match(valor)
+    return (int(achado[1]), int(achado[2])) if achado else None
+
+
+def escrever_ocorrencia(lista: str, inicio_ms: int, fim_ms: int) -> str:
+    return f"{lista} {escrever_tempos(inicio_ms, fim_ms)}"
+
+
+def ler_ocorrencia(valor: str) -> tuple[str, int, int] | None:
+    achada = _OCORRENCIA.match(valor)
+    return (achada[1], int(achada[2]), int(achada[3])) if achada else None
+
+
+def escrever_separacao(descricao: str, inicio_ms: int, fim_ms: int) -> str:
+    return f"{descricao}@{escrever_tempos(inicio_ms, fim_ms)}"
+
+
+def ler_separacao(valor: str) -> tuple[str, int, int] | None:
+    descricao, _, faixa = valor.rpartition("@")
+    tempos_ = ler_tempos(faixa)
+    return (descricao, *tempos_) if tempos_ else None
 
 
 def _faixa(inicio_ms: int, fim_ms: int) -> str:
@@ -171,11 +203,11 @@ def plano_limpo(valor: str) -> str:
 
 
 def ocorrencia(valor: str) -> str:
-    achada = _OCORRENCIA.match(valor)
+    achada = ler_ocorrencia(valor)
     if not achada:
         return valor
-    lista, inicio, fim = achada.groups()
-    return f"{ROTULOS_DAS_LISTAS[lista]} {_faixa(int(inicio), int(fim))}"
+    lista, inicio, fim = achada
+    return f"{ROTULOS_DAS_LISTAS[lista]} {_faixa(inicio, fim)}"
 
 
 def separacao(valor: str) -> str:
@@ -183,16 +215,16 @@ def separacao(valor: str) -> str:
     descrição e o trecho em que aparece."""
     if valor.startswith("["):
         return "; ".join(separacao(c) for c in json.loads(valor))
-    descricao, _, faixa = valor.rpartition("@")
-    achado = _TEMPOS.match(faixa)
-    if not achado:
+    achada = ler_separacao(valor)
+    if not achada:
         return valor
-    return f"{descricao} {_faixa(int(achado[1]), int(achado[2]))}"
+    descricao, inicio, fim = achada
+    return f"{descricao} {_faixa(inicio, fim)}"
 
 
 def tempos(valor: str) -> str:
-    achado = _TEMPOS.match(valor)
-    return _faixa(int(achado[1]), int(achado[2])) if achado else valor
+    achado = ler_tempos(valor)
+    return _faixa(*achado) if achado else valor
 
 
 class Opcao(BaseModel):

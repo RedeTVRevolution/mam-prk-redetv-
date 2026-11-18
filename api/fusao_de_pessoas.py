@@ -5,9 +5,10 @@ nome e os apelidos dela. A leitura das Decupagens mostra o destino onde havia a 
 `api.quem_conta`); nada gravado é reescrito. As fotos de rosto da origem saem (LGPD).
 """
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
@@ -17,8 +18,10 @@ from api.auth import Usuario
 from api.catalogo import (
     Catalogo,
     FusaoDaPessoa,
+    FusaoMudou,
     PessoaDoCatalogo,
     nomes_de_busca,
+    novo_id,
 )
 from api.catalogo_dos_jobs import passar_pessoa_nos_jobs
 from api.correcoes import Motivo, RepositorioDeCorrecoes, sem_controle
@@ -26,8 +29,11 @@ from api.fotos_de_referencia import FotosDeReferencia, apagar_fotos_da_pessoa
 from api.leitura_da_decupagem import AbreDecupagem, decupagens_corrigidas
 from api.modelo_do_job import FiltroDeJobs, RepositorioDeJobs
 from api.permissoes import exige
+from api.quem_conta import QuemConta
 from api.texto import normalizar
 from api.texto_como_dado import ID_SEGURO, Linha, LinhaDaConsulta
+
+log = logging.getLogger(__name__)
 
 
 class PedidoDeFusao(BaseModel):
@@ -52,6 +58,180 @@ class Fundida(BaseModel):
     destino_nome: str
     videos: int
     aparicoes: int
+
+
+class FusaoNaoConcluida(Exception):
+    """Nem todos os Jobs trocaram a origem pelo destino; o marcador fica e a retomada repete."""
+
+
+def destino_vigente(pessoas: Catalogo, destino_id: str) -> str | None:
+    """A pessoa que vale hoje: segue a cadeia de fusões (o destino pode ter sido fundido
+    depois) até quem não está fundido. `None` se a cadeia chega a um id que não existe ou
+    dá a volta: como na leitura (`api.quem_conta`), a origem fica sem pessoa."""
+    fim = QuemConta(pessoas).pessoas([destino_id])[destino_id].pessoa
+    return fim.id if fim else None
+
+
+def _elos_do_meio(
+    pessoas: Catalogo, gravado_id: str, vigente_id: str | None
+) -> list[str]:
+    """Os ids da cadeia de fusão entre o destino gravado e o vigente (este fora). Vazio se
+    não há vigente (cadeia quebrada ou com volta)."""
+    elos: list[str] = []
+    atual = gravado_id
+    while vigente_id is not None and atual != vigente_id and atual not in elos:
+        elos.append(atual)
+        pessoa = pessoas.obter(atual)
+        if pessoa is None or pessoa.fundida is None:
+            return []
+        atual = pessoa.fundida.destino_id
+    return elos
+
+
+def _passar_os_nomes(
+    pessoas: Catalogo, origem: PessoaDoCatalogo, destino_id: str | None
+) -> None:
+    """O nome e os apelidos da origem viram apelidos do destino; repetir não duplica."""
+    destino = pessoas.obter(destino_id) if destino_id else None
+    if destino is None:
+        return
+    ja_tem = set(nomes_de_busca(destino))
+    novos: list[str] = []
+    for nome in [origem.nome, *origem.apelidos]:
+        if normalizar(nome) not in ja_tem:
+            ja_tem.add(normalizar(nome))
+            novos.append(nome)
+    if novos:
+        pessoas.corrigir(destino.id, apelidos=[*destino.apelidos, *novos])
+
+
+def _avancar(
+    pessoas: Catalogo, origem_id: str, fusao: FusaoDaPessoa, nova: FusaoDaPessoa
+) -> None:
+    """Grava a fase seguinte só se a fusão ainda é esta. Se outro pedido da mesma fusão
+    já avançou, o passo dele vale e este segue (os passos se repetem sem estragar)."""
+    try:
+        pessoas.definir_fusao(
+            origem_id,
+            nova,
+            se=lambda atual: (
+                atual is not None and atual.registro_id == fusao.registro_id
+            ),
+        )
+    except FusaoMudou:
+        pass
+
+
+def concluir_fusao(
+    origem: PessoaDoCatalogo,
+    fusao: FusaoDaPessoa,
+    pessoas: Catalogo,
+    repositorio: RepositorioDeJobs,
+    fotos: FotosDeReferencia,
+    auditoria: RepositorioDeAuditoria,
+    ao_fundir: Callable[[], None],
+) -> Fundida:
+    """Os passos depois de gravada a fusão; cada um se repete sem estragar o outro."""
+    detalhes = fusao.registro_detalhes or {}
+    destino_id = destino_vigente(pessoas, fusao.destino_id)
+    if fusao.fase == "aguardando_auditoria":
+        _passar_os_nomes(pessoas, origem, destino_id)
+        _gravar_o_registro(auditoria, origem, fusao, detalhes)
+        limpando = fusao.model_copy(update={"fase": "limpando"})
+        _avancar(pessoas, origem.id, fusao, limpando)
+        fusao = limpando
+    # Rosto é dado sensível: as fotos da origem saem, e as do destino ficam.
+    apagar_fotos_da_pessoa(fotos, pessoas, origem)
+    # Os Jobs vão ao destino vigente, não ao gravado (#722): ele pode ter sido fundido depois.
+    # Se o destino foi fundido enquanto os Jobs passavam, eles seguem para o novo vigente.
+    # Jobs que uma tentativa anterior deixou num destino do meio da cadeia saem dele também.
+    de = [origem.id, *_elos_do_meio(pessoas, fusao.destino_id, destino_id)]
+    while True:
+        for id in de:
+            if not passar_pessoa_nos_jobs(repositorio, id, destino_id):
+                raise FusaoNaoConcluida(origem.id)
+        if (
+            destino_id is None
+            or (agora := destino_vigente(pessoas, destino_id)) == destino_id
+        ):
+            break
+        de, destino_id = [destino_id], agora
+    ao_fundir()
+    _avancar(
+        pessoas,
+        origem.id,
+        fusao,
+        fusao.model_copy(
+            update={"fase": None, "registro_id": None, "registro_detalhes": None}
+        ),
+    )
+    return Fundida(
+        origem_id=origem.id,
+        destino_id=fusao.destino_id,
+        destino_nome=detalhes.get("destino_nome", ""),
+        videos=detalhes.get("videos", 0),
+        aparicoes=detalhes.get("aparicoes", 0),
+    )
+
+
+def _gravar_o_registro(
+    auditoria: RepositorioDeAuditoria,
+    origem: PessoaDoCatalogo,
+    fusao: FusaoDaPessoa,
+    detalhes: dict[str, Any],
+) -> None:
+    """O registro só se cria: `existe` reconhece o de uma queda depois de gravar, e o
+    erro de criar o mesmo id vale como gravado (outro pedido da mesma fusão chegou antes)."""
+    registro_id = fusao.registro_id or ""
+    if auditoria.existe(registro_id):
+        return
+    try:
+        auditoria.acrescentar(
+            registro_de_auditoria(
+                quando=fusao.em,
+                quem=Usuario(uid=fusao.por_uid, email=fusao.por_email),
+                acao="pessoa.fundida",
+                alvo_tipo="pessoa",
+                alvo_id=origem.id,
+                alvo_nome=origem.nome,
+                motivo=fusao.motivo,
+                detalhes=detalhes,
+                id=fusao.registro_id,
+            )
+        )
+    except Exception:
+        if not auditoria.existe(registro_id):
+            raise
+
+
+def retomar_fusoes_pendentes(
+    pessoas: Catalogo,
+    repositorio: RepositorioDeJobs,
+    fotos: FotosDeReferencia,
+    auditoria: RepositorioDeAuditoria,
+    ao_fundir: Callable[[], None],
+) -> int:
+    """A varredura diária conclui as fusões pendentes, nas duas fases; devolve quantas.
+    Uma que falha fica como está e não impede as outras: a próxima varredura tenta."""
+    concluidas = 0
+    for origem in pessoas.fusoes_pendentes():
+        if origem.fundida is None or origem.fundida.fase is None:
+            continue
+        try:
+            concluir_fusao(
+                origem,
+                origem.fundida,
+                pessoas,
+                repositorio,
+                fotos,
+                auditoria,
+                ao_fundir,
+            )
+        except Exception:
+            log.exception("a retomada da fusão de %s falhou", origem.id)
+            continue
+        concluidas += 1
+    return concluidas
 
 
 def criar_rotas_da_fusao(
@@ -136,64 +316,54 @@ def criar_rotas_da_fusao(
             Depends(exige("catalogo.fundir", "Chave de sistema não mexe no catálogo")),
         ],
     ) -> Fundida:
+        origem = pessoas.obter(id_da_pessoa)
+        fusao = origem.fundida if origem else None
+        if origem and fusao and fusao.fase and fusao.destino_id == pedido.destino_id:
+            return concluir(
+                origem, fusao
+            )  # o mesmo pedido de uma fusão que ficou pela metade
         origem, destino = origem_e_destino(id_da_pessoa, pedido.destino_id)
         videos, aparicoes = contar(origem.id)
         quando = relogio()
         ao_fundir()  # antes da mudança: se falha, nada muda (e de novo depois, no fim)
-        ja_tem = set(nomes_de_busca(destino))
-        novos: list[str] = []
-        for nome in [origem.nome, *origem.apelidos]:
-            if normalizar(nome) not in ja_tem:
-                ja_tem.add(normalizar(nome))
-                novos.append(nome)
-        pessoas.corrigir(destino.id, apelidos=[*destino.apelidos, *novos])
-        pessoas.definir_fusao(
-            origem.id,
-            FusaoDaPessoa(
-                destino_id=destino.id,
-                em=quando,
-                por_uid=autor.uid,
-                por_email=autor.email.lower(),
-                motivo=pedido.motivo,
-            ),
+        # A fusão grava com o conteúdo do registro e o marcador: se algo cai daqui até o fim,
+        # o mesmo pedido conclui (a leitura já troca a origem pelo destino, e a contagem
+        # refeita daria zero). Apagar as fotos antes de gravar apagaria dado biométrico sem registro.
+        fusao = FusaoDaPessoa(
+            destino_id=destino.id,
+            em=quando,
+            por_uid=autor.uid,
+            por_email=autor.email.lower(),
+            motivo=pedido.motivo,
+            fase="aguardando_auditoria",
+            registro_id=novo_id(),
+            registro_detalhes={
+                "origem_id": origem.id,
+                "origem_nome": origem.nome,
+                "destino_id": destino.id,
+                "destino_nome": destino.nome,
+                "videos": videos,
+                "aparicoes": aparicoes,
+                "fotos_apagadas": len(origem.rostos),
+            },
         )
         try:
-            auditoria.acrescentar(
-                registro_de_auditoria(
-                    quando=quando,
-                    quem=autor,
-                    acao="pessoa.fundida",
-                    alvo_tipo="pessoa",
-                    alvo_id=origem.id,
-                    alvo_nome=origem.nome,
-                    motivo=pedido.motivo,
-                    detalhes={
-                        "origem_id": origem.id,
-                        "origem_nome": origem.nome,
-                        "destino_id": destino.id,
-                        "destino_nome": destino.nome,
-                        "videos": videos,
-                        "aparicoes": aparicoes,
-                        "fotos_apagadas": len(origem.rostos),
-                    },
-                )
+            # Só se ninguém fundiu a origem desde a validação (outro pedido ao mesmo tempo).
+            pessoas.definir_fusao(origem.id, fusao, se=lambda atual: atual is None)
+        except FusaoMudou:
+            raise HTTPException(
+                409, "Esta pessoa acabou de ser fundida em outra: recarregue"
+            ) from None
+        return concluir(origem, fusao)
+
+    def concluir(origem: PessoaDoCatalogo, fusao: FusaoDaPessoa) -> Fundida:
+        try:
+            return concluir_fusao(
+                origem, fusao, pessoas, repositorio, fotos, auditoria, ao_fundir
             )
-        except Exception:
-            # Sem registro a fusão não vale: nada foi apagado ainda.
-            pessoas.definir_fusao(origem.id, None)
-            pessoas.corrigir(destino.id, apelidos=destino.apelidos)
-            ao_fundir()
-            raise
-        # Rosto é dado sensível: as fotos da origem saem, e as do destino ficam.
-        apagar_fotos_da_pessoa(fotos, pessoas, origem)
-        passar_pessoa_nos_jobs(repositorio, origem.id, destino.id)
-        ao_fundir()
-        return Fundida(
-            origem_id=origem.id,
-            destino_id=destino.id,
-            destino_nome=destino.nome,
-            videos=videos,
-            aparicoes=aparicoes,
-        )
+        except FusaoNaoConcluida:
+            raise HTTPException(
+                500, "Nem todos os vídeos passaram: repita o pedido"
+            ) from None
 
     return rotas

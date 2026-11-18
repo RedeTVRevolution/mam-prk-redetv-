@@ -24,6 +24,7 @@ from api.auth import Usuario
 from api.bancos import auditoria_do_firestore, cliente_do_firestore
 from api.correcoes import RepositorioDeCorrecoes
 from api.dados_da_purga import dados_do_ambiente
+from api.fusao_de_pessoas import retomar_fusoes_pendentes
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import Armazenamento, expirar_uploads
 from api.lixeira import (
@@ -44,6 +45,7 @@ from api.nuvem import (
     ArquivosNoStorage,
     CatalogoDeMarcasFirestore,
     CatalogoFirestore,
+    ReferenciasStorage,
     RepositorioDeCorrecoesFirestore,
     RepositorioFirestore,
 )
@@ -174,14 +176,20 @@ def rodar_a_varredura_diaria(
     armazenamento: Armazenamento,
     purgar_catalogo: Callable[[], int],
     agora: datetime,
+    retomar_fusoes: Callable[[], int] = lambda: 0,
 ) -> None:
-    """O que o agendador diário faz: expira uploads abandonados (#369), purga vídeos e catálogo."""
+    """O que o agendador diário faz: expira uploads abandonados (#369), retoma fusões de
+    pessoas pendentes (#722), purga vídeos e catálogo."""
     try:
         expirados = expirar_uploads(repositorio, armazenamento, agora)
         log.info("varredura diária: %d upload(s) expirado(s)", len(expirados))
     except Exception:
         # Não segura a purga: a varredura de amanhã tenta de novo.
         log.exception("a expiração dos uploads falhou")
+    try:
+        log.info("varredura diária: %d fusão(ões) retomada(s)", retomar_fusoes())
+    except Exception:
+        log.exception("a retomada das fusões falhou")
     purgados = purgar_vencidas(repositorio, purga, agora)
     log.info("purga automática: %d vídeo(s) purgado(s)", len(purgados))
     log.info("purga automática: %d item(ns) do catálogo purgado(s)", purgar_catalogo())
@@ -193,6 +201,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         quarentena = exigir_do_ambiente(ambiente, "BUCKET_QUARENTENA")
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
         decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
+        referencias = exigir_do_ambiente(ambiente, "BUCKET_REFERENCIAS")
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -201,10 +210,12 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
     auditoria = auditoria_do_firestore(projeto, ambiente)
     busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
     repositorio = RepositorioFirestore(cliente)
+    catalogo = CatalogoFirestore(cliente)
+    storage = ClienteStorage(project=projeto)
     purga = Purga(
         repositorio,
         RepositorioDeCorrecoesFirestore(cliente),
-        ArquivosNoStorage(ClienteStorage(project=projeto), aceitos, decupagens),
+        ArquivosNoStorage(storage, aceitos, decupagens),
         (
             AgentRetrieval(
                 busca,
@@ -222,11 +233,9 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
     rodar_a_varredura_diaria(
         repositorio,
         purga,
-        ArmazenamentoStorage(
-            ClienteStorage(project=projeto), quarentena, aceitos, decupagens
-        ),
+        ArmazenamentoStorage(storage, quarentena, aceitos, decupagens),
         lambda: purgar_catalogo_vencido(
-            CatalogoFirestore(cliente),
+            catalogo,
             CatalogoDeMarcasFirestore(cliente),
             auditoria,
             agora_utc(),
@@ -234,6 +243,13 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
             VersaoDaLixeiraFirestore(cliente).avancar,
         ),
         agora_utc(),
+        lambda: retomar_fusoes_pendentes(
+            catalogo,
+            repositorio,
+            ReferenciasStorage(storage, referencias),
+            auditoria,
+            VersaoDaLixeiraFirestore(cliente).avancar,
+        ),
     )
     return 0
 

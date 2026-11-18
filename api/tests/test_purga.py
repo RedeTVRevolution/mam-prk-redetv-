@@ -340,3 +340,32 @@ def test_a_falha_ao_apagar_um_upload_nao_segura_a_expiracao_dos_outros() -> None
     for job_id in ("j3", "j4"):
         job = mundo.jobs.obter(job_id)
         assert job is not None and job.codigo_falha == "upload_expirado"
+
+
+def test_a_varredura_diaria_retoma_as_fusoes_e_a_falha_nao_segura_a_purga() -> None:
+    mundo = Mundo(_na_lixeira("j1", em=AGORA - timedelta(days=31)))
+    retomadas: list[str] = []
+
+    def retomar() -> int:
+        retomadas.append("x")
+        return 1
+
+    rodar_a_varredura_diaria(
+        mundo.jobs,
+        mundo.purga(),
+        ArmazenamentoFalso(),
+        lambda: 0,
+        AGORA,
+        retomar,
+    )
+
+    def quebrada() -> int:
+        raise RuntimeError("firestore fora")
+
+    mundo2 = Mundo(_na_lixeira("j1", em=AGORA - timedelta(days=31)))
+    rodar_a_varredura_diaria(
+        mundo2.jobs, mundo2.purga(), ArmazenamentoFalso(), lambda: 0, AGORA, quebrada
+    )
+
+    assert retomadas == ["x"]
+    assert mundo.jobs.obter("j1") is None and mundo2.jobs.obter("j1") is None

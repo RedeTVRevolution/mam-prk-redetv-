@@ -37,6 +37,7 @@ from api.catalogo import Catalogo
 from api.ciclo_de_vida import (
     PRAZO_DO_REPROCESSAMENTO,
     JaTerminou,
+    etapa_de_reprocesso,
     pedir_indexacao,
     transitar,
 )
@@ -183,6 +184,8 @@ class JobResumido(BaseModel):
     etapa_atual: NomeDaEtapa | None = None
     # As etapas iniciadas, da primeira à última.
     etapas: list[EtapaPublica] = []
+    # De onde "reprocessar o que falhou" recomeçaria; nulo quando não vale.
+    etapa_de_reprocesso: NomeDaEtapa | None = None
     reprocessamentos: int = 0
     inicio_da_passada: datetime | None = None
     enviado_por: EnviadoPor
@@ -192,7 +195,11 @@ class JobResumido(BaseModel):
 
     @classmethod
     def de(cls, job: Job) -> Self:
-        campos = set(cls.model_fields) - {"enviado_por", "etapas"}
+        campos = set(cls.model_fields) - {
+            "enviado_por",
+            "etapas",
+            "etapa_de_reprocesso",
+        }
         enviado_por = (
             EnviadoPor(tipo="sistema", nome=job.sistema)
             if job.sistema is not None
@@ -202,6 +209,7 @@ class JobResumido(BaseModel):
         return cls(
             **job.model_dump(include=campos),
             etapas=[EtapaPublica(nome=n, **e.model_dump()) for n, e in etapas],
+            etapa_de_reprocesso=etapa_de_reprocesso(job),
             enviado_por=enviado_por,
             reprocessavel_ate=job.criado_em + PRAZO_DO_REPROCESSAMENTO,
         )
@@ -483,6 +491,11 @@ class RepositorioEmMemoria:
             if j.criado_por == criado_por and j.criado_em >= desde
         )
 
+    def contar_do_programa(self, nome: str) -> int:
+        return sum(
+            1 for j in self._jobs.values() if j.programa == nome and j.lixeira is None
+        )
+
 
 class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
@@ -525,6 +538,9 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def contar_criados(self, criado_por: str, desde: datetime) -> int:
+        raise ServicoIndisponivel
+
+    def contar_do_programa(self, nome: str) -> int:
         raise ServicoIndisponivel
 
 

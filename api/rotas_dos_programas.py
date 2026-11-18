@@ -20,7 +20,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import (
     APIRouter,
@@ -34,9 +34,8 @@ from pydantic import BaseModel, field_validator
 from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
 from api.catalogo import (
-    AndamentoDaRenomeacao,
     Catalogo,
-    andamento_da_renomeacao,
+    existente_para_acrescentar,
     visivel,
 )
 from api.ciclo_de_vida import pedir_indexacao
@@ -58,6 +57,7 @@ from api.programas import (
     pessoas_do_programa,
     troca_vale,
 )
+from api.quem_conta import QuemConta
 from api.texto_como_dado import Linha
 
 log = logging.getLogger(__name__)
@@ -88,6 +88,25 @@ class PessoaNoProgramaPublica(BaseModel):
     nome: str
     apelidos: list[str]
     papel: str
+
+
+class AndamentoDaRenomeacao(BaseModel):
+    estado: Literal["em_andamento", "concluida", "falhou"]
+    feitos: int
+    total: int
+    nome_antigo: str
+    nome_novo: str
+
+
+def andamento_da_renomeacao(r: RenomeacaoDoPrograma) -> AndamentoDaRenomeacao:
+    """Para quem lê, a troca que espera a auditoria (`confirmando`) já está em andamento."""
+    return AndamentoDaRenomeacao(
+        estado="em_andamento" if r.estado == "confirmando" else r.estado,
+        feitos=r.total - len(r.pendentes),
+        total=r.total,
+        nome_antigo=r.nome_antigo,
+        nome_novo=r.nome_novo,
+    )
 
 
 class ProgramaPublico(BaseModel):
@@ -149,8 +168,8 @@ def criar_rotas_dos_programas(
     lista de pessoas."""
     rotas = APIRouter(prefix="/admin/programas")
 
-    def publico(programa: Programa) -> ProgramaPublico:
-        visiveis, _ = pessoas_do_programa(programa, catalogo)
+    def publico(programa: Programa, quem: QuemConta | None = None) -> ProgramaPublico:
+        visiveis, _ = pessoas_do_programa(programa, catalogo, quem)
         pessoas = [
             PessoaNoProgramaPublica(
                 pessoa_id=pessoa.id,
@@ -166,14 +185,13 @@ def criar_rotas_dos_programas(
             nome=programa.nome,
             perfil=programa.perfil,
             pessoas=pessoas,
-            renomeacao=None
-            if r is None
-            else andamento_da_renomeacao(r, confirmando_conta_como_em_andamento=True),
+            renomeacao=None if r is None else andamento_da_renomeacao(r),
         )
 
     def conferir_pessoas(dados: DadosDoPrograma) -> None:
+        achadas = catalogo.obter_varios(v.pessoa_id for v in dados.pessoas)
         for v in dados.pessoas:
-            pessoa = catalogo.obter(v.pessoa_id)
+            pessoa = achadas.get(v.pessoa_id)
             if pessoa is None or not visivel(pessoa):
                 raise HTTPException(422, f"Pessoa fora do catálogo: {v.pessoa_id}")
 
@@ -313,7 +331,10 @@ def criar_rotas_dos_programas(
             Depends(exige("programas.editar", "Chave de sistema não edita programas")),
         ],
     ) -> list[ProgramaPublico]:
-        return [publico(p) for p in programas.listar()]
+        todos = programas.listar()
+        quem = QuemConta(catalogo)
+        quem.pessoas(v.pessoa_id for p in todos for v in p.pessoas)  # um lote só
+        return [publico(p, quem) for p in todos]
 
     @rotas.post("", status_code=201)
     def criar(
@@ -507,8 +528,7 @@ def criar_rotas_dos_programas(
         programa = programas.obter(id)
         if programa is None:
             raise HTTPException(404, "Programa inexistente")
-        achados = jobs.consultar(FiltroDeJobs(programas=frozenset({programa.nome})))
-        return ImpactoDoPrograma(videos=len(achados.jobs))
+        return ImpactoDoPrograma(videos=jobs.contar_do_programa(programa.nome))
 
     @rotas.delete("/{id}", status_code=204)
     def apagar(
@@ -539,6 +559,7 @@ def criar_rotas_dos_programas(
 
     @rotas.post("/pessoas", status_code=201)
     def criar_pessoa(
+        resposta: Response,
         dados: NovaPessoaDoPrograma,
         autor: Annotated[
             Usuario,
@@ -547,9 +568,11 @@ def criar_rotas_dos_programas(
     ) -> PessoaNoProgramaPublica:
         """A pessoa que ainda não está no catálogo, criada ali mesmo (sem papel: o
         papel é do vínculo com o programa)."""
-        existentes = catalogo.achar(dados.nome)
-        if existentes:
-            pessoa = existentes[0]
+        pessoa = existente_para_acrescentar(
+            catalogo.achar(dados.nome, com_lixeira=True)
+        )
+        if pessoa:
+            resposta.status_code = 200
         else:
             pessoa = catalogo.acrescentar(
                 dados.nome,

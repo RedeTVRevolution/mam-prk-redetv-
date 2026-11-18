@@ -25,6 +25,7 @@ from google.cloud import firestore
 from google.cloud.storage import Client as ClienteStorage
 from google.oauth2 import service_account
 
+from api import nuvem
 from api.auditoria import FiltroDeAuditoria, RegistroDeAuditoria
 from api.busca import (
     Entendida,
@@ -35,7 +36,14 @@ from api.busca import (
     MomentoGuardado,
     VideoGuardado,
 )
-from api.catalogo import EnvioParaLixeira, FusaoDaPessoa, PessoaInexistente
+from api.catalogo import (
+    EnvioParaLixeira,
+    FusaoDaPessoa,
+    FusaoMudou,
+    PessoaDoCatalogo,
+    PessoaInexistente,
+    Rosto,
+)
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
 from api.correcoes import Ancora, Correcao, CorrecaoJaExiste, Ocorrencia
 from api.erros import ServicoIndisponivel
@@ -273,6 +281,19 @@ class TestRepositorioFirestore:
             "a-novo",
             "a-velho",
         ]
+
+    def test_contar_do_programa_ignora_a_lixeira_e_os_outros_programas(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        lixeira = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="x"
+        )
+        repositorio.salvar(_job("a", BASE, programa="TV Fama"))
+        repositorio.salvar(_job("b", BASE, programa="TV Fama", lixeira=lixeira))
+        repositorio.salvar(_job("c", BASE, programa="Outro"))
+
+        assert repositorio.contar_do_programa("TV Fama") == 1
+        assert repositorio.contar_do_programa("Nenhum") == 0
 
     def test_lixeira_traz_so_os_da_lixeira_do_envio_mais_recente_ao_mais_antigo(
         self, repositorio: RepositorioFirestore
@@ -1302,6 +1323,25 @@ class TestCatalogoFirestore:
         with pytest.raises(PessoaInexistente):
             catalogo.definir_fusao("inexistente", fusao)
 
+    def test_definir_fusao_com_condicao_so_grava_se_a_atual_passa(
+        self, catalogo: CatalogoFirestore
+    ) -> None:
+        origem = catalogo.acrescentar("Ana", "", [])
+        primeira = FusaoDaPessoa(
+            destino_id="b", em=BASE, por_uid="u", por_email="a@b.c", motivo="m"
+        )
+        catalogo.definir_fusao(origem.id, primeira, se=lambda atual: atual is None)
+
+        with pytest.raises(FusaoMudou):
+            catalogo.definir_fusao(
+                origem.id,
+                primeira.model_copy(update={"destino_id": "c"}),
+                se=lambda atual: atual is None,
+            )
+
+        lida = catalogo.obter(origem.id)
+        assert lida is not None and lida.fundida == primeira
+
     def test_nome_novo_fica_a_revisar_com_o_autor(
         self, catalogo: CatalogoFirestore
     ) -> None:
@@ -1387,13 +1427,13 @@ class TestCatalogoDeMarcasFirestore:
         m = marcas.acrescentar("Na lixeira", [])
         marcas.definir_lixeira(m.id, _envio_para_lixeira())
         lidos: list[str] = []
-        original = marcas._marca
+        original = marcas._ler
 
         def espia(id: str, dados: dict[str, Any]) -> MarcaDoCatalogo:
             lidos.append(id)
             return original(id, dados)
 
-        marcas._marca = espia  # type: ignore[method-assign]
+        marcas._ler = espia  # type: ignore[method-assign]
 
         assert [x.id for x in marcas.na_lixeira()] == [m.id]
         assert lidos == [m.id]  # as outras três nem chegam ao Python
@@ -1476,6 +1516,23 @@ class TestProgramasFirestore:
         # O desfazer de uma troca grava o andamento de antes, inclusive nenhum.
         programas.salvar(Programa(id="p", nome="Antigo"), com_renomeacao=True)
         assert programas.obter("p") == Programa(id="p", nome="Antigo")
+
+    def test_com_troca_aberta_traz_so_em_andamento_e_falhou(
+        self, programas: ProgramasFirestore
+    ) -> None:
+        for id, estado in [
+            ("a", "em_andamento"),
+            ("f", "falhou"),
+            ("c", "concluida"),
+            ("k", "confirmando"),
+        ]:
+            programas.salvar(
+                Programa(id=id, nome=f"P {id}", renomeacao=_andamento(estado, [])),
+                com_renomeacao=True,
+            )
+        programas.salvar(Programa(id="s", nome="Sem troca"))
+
+        assert sorted(p.id for p in programas.com_troca_aberta()) == ["a", "f"]
 
     def test_trocar_grava_o_que_mudar_devolve_e_so_isso(
         self, programas: ProgramasFirestore
@@ -1656,6 +1713,14 @@ class TestRepositorioDeAuditoriaFirestore:
         }
         campos.update(extra)
         return RegistroDeAuditoria(**campos)  # type: ignore[arg-type]
+
+    def test_existe_reconhece_so_o_registro_gravado(
+        self, auditoria: RepositorioDeAuditoriaFirestore
+    ) -> None:
+        assert not auditoria.existe("a")
+        auditoria.acrescentar(self._registro("a", 0))
+        assert auditoria.existe("a")
+        assert not auditoria.existe("b")
 
     def test_acrescenta_e_consulta_filtrando_e_paginando(
         self, auditoria: RepositorioDeAuditoriaFirestore
@@ -2153,3 +2218,61 @@ def test_ano_da_copia_usa_array_union_sem_substituir_o_marcador() -> None:
     repositorio.acrescentar_ano_da_copia("j1", 2026)
 
     assert gravacoes == [{"copia_bigquery.anos": firestore.ArrayUnion([2026])}]
+
+
+@pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
+class TestCatalogoFirestoreSobDisputa:
+    @pytest.fixture
+    def catalogo(self) -> CatalogoFirestore:
+        cliente = firestore.Client(project="teste", credentials=_anonima())
+        return CatalogoFirestore(cliente, colecao=f"catalogo-{uuid.uuid4().hex}")
+
+    def test_escrita_concorrente_na_mesma_pessoa_nao_perde_nenhuma_das_duas(
+        self, catalogo: CatalogoFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pessoa = catalogo.acrescentar("Ana", "repórter", [])
+        rosto = Rosto(origem="acervo", referencia="referencias/x/1.jpg")
+        outro = CatalogoFirestore(catalogo._cliente, colecao=catalogo._colecao.id)
+        monkeypatch.setattr("api.nuvem.time.sleep", lambda _: None)
+        pendente = [True]
+        original = nuvem._documento
+
+        def documento(colecao: Any, id: str) -> Any:
+            referencia = original(colecao, id)
+            ler = referencia.get
+
+            def get(**kw: Any) -> Any:
+                lido = ler(**kw)
+                if pendente and kw.get("transaction") is not None:
+                    pendente.clear()  # a outra ação grava entre a leitura e a gravação
+                    outro.definir_rostos(pessoa.id, [rosto])
+                return lido
+
+            referencia.get = get
+            return referencia
+
+        monkeypatch.setattr("api.nuvem._documento", documento)
+
+        catalogo.definir_lixeira(pessoa.id, _envio_para_lixeira())
+
+        final = catalogo.obter(pessoa.id)
+        assert final is not None
+        assert final.lixeira == _envio_para_lixeira() and final.rostos == [rosto]
+
+    def test_na_lixeira_consulta_no_servidor_sem_ler_a_colecao_inteira(
+        self, catalogo: CatalogoFirestore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        a = catalogo.acrescentar("Ana", "", [])
+        catalogo.acrescentar("Bia", "", [])
+        catalogo.definir_lixeira(a.id, _envio_para_lixeira())
+        lidos: list[str] = []
+        ler = catalogo._ler
+
+        def contando(id: str, dados: dict[str, Any]) -> PessoaDoCatalogo:
+            lidos.append(id)
+            return ler(id, dados)
+
+        monkeypatch.setattr(catalogo, "_ler", contando)
+
+        assert [p.id for p in catalogo.na_lixeira()] == [a.id]
+        assert lidos == [a.id]

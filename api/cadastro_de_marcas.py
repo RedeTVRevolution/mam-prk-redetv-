@@ -23,7 +23,8 @@ from pydantic import BaseModel, field_validator
 
 from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
-from api.correcoes import LIMITE_DO_NOME, sem_controle
+from api.correcoes import sem_controle
+from api.decupagem import LIMITE_DO_NOME
 from api.erros import lido
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
 from api.permissoes import exige

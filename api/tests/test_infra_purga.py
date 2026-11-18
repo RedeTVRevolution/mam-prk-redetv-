@@ -51,3 +51,15 @@ def test_tabela_antiga_de_momentos_nao_existe_mais_no_codigo() -> None:
         MODULO.parents[1] / "migracao-us-east4" / "enderecos-recriados.txt"
     ).read_text()
     assert "google_bigquery_table.momentos\n" not in lista
+
+
+def test_purga_recebe_o_bucket_das_fotos_de_rosto_e_tem_papel_nele() -> None:
+    """A varredura retoma fusões de pessoas e apaga as fotos da origem (#722)."""
+    purga = (MODULO / "purga.tf").read_text()
+    assert re.search(
+        r'name\s*=\s*"BUCKET_REFERENCIAS"\s*value\s*=\s*local\.buckets\["referencias"\]',
+        purga,
+    )
+    assert re.search(
+        r'purga\s*=\s*\{[^}]*referencias\s*=\s*"roles/storage.objectUser"', MAIN
+    )

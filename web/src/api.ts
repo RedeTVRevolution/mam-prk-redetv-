@@ -178,21 +178,10 @@ export interface ImpactoDaRenomeacao {
   previa: boolean
 }
 
-/** O andamento da reindexação depois de renomear: `falhou` espera `retomar`. */
-export interface AndamentoDaRenomeacao {
-  estado: 'em_andamento' | 'concluida' | 'falhou'
-  feitos: number
-  total: number
-  nome_antigo: string
-  nome_novo: string
-}
-
 /** Renomear uma pessoa do catálogo em todos os vídeos (exige `correcao.aprovar`). */
 export interface ClienteDaRenomeacao {
   previa(pessoaId: string, nome: string): Promise<ImpactoDaRenomeacao>
   renomear(pessoaId: string, nome: string): Promise<ImpactoDaRenomeacao>
-  andamento(pessoaId: string): Promise<AndamentoDaRenomeacao>
-  retomar(pessoaId: string): Promise<AndamentoDaRenomeacao>
 }
 
 /** Uma conta da administração (`/v1/admin/usuarios`). */
@@ -645,9 +634,6 @@ export function criarClienteDaApi(
         chamar(`/v1/catalogo/pessoas/${encodeURIComponent(pessoaId)}/renomear`, { post: true, corpo: { nome, previa: true } }),
       renomear: (pessoaId, nome) =>
         chamar(`/v1/catalogo/pessoas/${encodeURIComponent(pessoaId)}/renomear`, { post: true, corpo: { nome, previa: false } }),
-      andamento: (pessoaId) => chamar(`/v1/catalogo/pessoas/${encodeURIComponent(pessoaId)}/renomear/andamento`),
-      retomar: (pessoaId) =>
-        chamar(`/v1/catalogo/pessoas/${encodeURIComponent(pessoaId)}/renomear/retomar`, { post: true }),
     },
     usuarios: {
       listar: () => chamar('/v1/admin/usuarios'),

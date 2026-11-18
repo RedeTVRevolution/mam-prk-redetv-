@@ -12,16 +12,16 @@ Só a biblioteca padrão, o catálogo e `api.erros`: o módulo de Jobs não entr
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from threading import Lock
 from typing import Protocol
 
-from api.catalogo import PessoaDoCatalogo
+from api.catalogo import PessoaDoCatalogo, nomes_de_busca
 from api.erros import lido
 from api.lixeira_na_leitura import PurgaDeMarca, PurgasDeMarca
 from api.marcas import (
     CatalogoDeMarcas,
     MarcaDoCatalogo,
     MarcasCanonicas,
-    nomes_de_busca_da_marca,
 )
 from api.texto import chave_da_marca
 
@@ -92,6 +92,9 @@ class QuemConta:
         self._todas_as_purgas: list[tuple[PurgaDeMarca, set[str]]] | None = None
         self._resolvidos: set[str] = set()
         self._cortes: dict[str, datetime] = {}
+        # `pessoas` e `marcas_vivas` podem ser chamados por várias threads (os vídeos de uma
+        # pessoa são lidos em paralelo, #717); o resto é de uma thread só.
+        self._trava = Lock()
 
     def pessoas(self, ids: Iterable[str]) -> dict[str, Destino]:
         """Para cada id, o destino: segue a cadeia de fusão, lendo em lote um elo de cada vez.
@@ -99,7 +102,14 @@ class QuemConta:
         corta, e então a pessoa é tratada como purgada."""
         if self._pessoas is None:
             raise ValueError("sem catálogo de pessoas: use `contam`")
-        obter = self._pessoas.obter_varios
+        with self._trava:
+            return self._seguir_fusoes(ids, self._pessoas.obter_varios)
+
+    def _seguir_fusoes(
+        self,
+        ids: Iterable[str],
+        obter: Callable[[list[str]], Mapping[str, PessoaDoCatalogo]],
+    ) -> dict[str, Destino]:
         pedidos = list(dict.fromkeys(ids))
         ponta = {i: i for i in pedidos}  # o id pedido -> onde a cadeia está agora
         vistos = {i: {i} for i in pedidos}
@@ -135,7 +145,8 @@ class QuemConta:
         pedidos = list(dict.fromkeys(ids))
         if self._marcas is None:
             return set(pedidos)
-        _ler_em_lote(self._marcas_lidas, self._marcas.obter_varios, pedidos)
+        with self._trava:
+            _ler_em_lote(self._marcas_lidas, self._marcas.obter_varios, pedidos)
         return {
             i for i in pedidos if (m := self._marcas_lidas[i]) and m.lixeira is None
         }
@@ -172,7 +183,7 @@ class QuemConta:
             self._na_lixeira = frozenset(
                 chave_da_marca(n)
                 for m in lido(marcas.na_lixeira)
-                for n in nomes_de_busca_da_marca(m)
+                for n in nomes_de_busca(m)
             )
         return self._na_lixeira
 

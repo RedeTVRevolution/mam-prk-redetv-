@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from threading import Lock
 from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel
@@ -96,7 +97,7 @@ def terminar_o_pendente(
     Com `ok` falso a troca vai a `falhou`, para a tela oferecer o `retomar`; um pendente que
     depois indexa ainda sai e pode fechá-la. `nome` é o programa com que o vídeo foi indexado:
     só termina a troca que leva a esse nome (uma troca mais nova ainda espera a sua rodada)."""
-    for programa in programas.listar():
+    for programa in programas.com_troca_aberta():
         r = programa.renomeacao
         if (
             r is None
@@ -134,6 +135,10 @@ class RepositorioDeProgramas(Protocol):
 
     def obter(self, id: str) -> Programa | None: ...
 
+    def com_troca_aberta(self) -> list[Programa]:
+        """Os programas com troca de nome em `TROCA_ABERTA`, sem ler os outros."""
+        ...
+
     def salvar(self, programa: Programa, *, com_renomeacao: bool = False) -> None:
         """Grava (cria ou troca) o programa; `NomeEmUso` se outro já tem o nome. Sem
         `com_renomeacao`, o andamento gravado fica como está (a tarefa o muda sozinha)."""
@@ -170,6 +175,13 @@ class ProgramasEmMemoria:
 
     def obter(self, id: str) -> Programa | None:
         return self._programas.get(id)
+
+    def com_troca_aberta(self) -> list[Programa]:
+        return [
+            p
+            for p in self._programas.values()
+            if p.renomeacao is not None and p.renomeacao.estado in TROCA_ABERTA
+        ]
 
     def _conferir_nome(self, programa: Programa) -> None:
         if any(
@@ -256,7 +268,7 @@ Perfis = Mapping[str, PerfilDoPrograma]
 
 
 def pessoas_do_programa(
-    programa: Programa, catalogo: Catalogo
+    programa: Programa, catalogo: Catalogo, quem: QuemConta | None = None
 ) -> tuple[list[tuple[PessoaDoCatalogo, str]], list[VinculoDaPessoa]]:
     """As pessoas do programa como o catálogo está agora (#425): `(visíveis, escondidos)`.
 
@@ -265,8 +277,10 @@ def pessoas_do_programa(
     o primeiro papel. O vínculo cuja pessoa (ou o destino dela) está na lixeira fica
     escondido, mas continua gravado: o `PUT` o preserva e restaurar a pessoa o devolve.
     Pessoa que saiu do catálogo (purga), destino purgado e ciclo de fusão não são nem uma
-    coisa nem outra (Quem conta)."""
-    destinos = QuemConta(catalogo).pessoas(v.pessoa_id for v in programa.pessoas)
+    coisa nem outra (Quem conta). Com `quem`, o que ele já leu não se lê de novo."""
+    destinos = (quem or QuemConta(catalogo)).pessoas(
+        v.pessoa_id for v in programa.pessoas
+    )
     visiveis: dict[str, tuple[PessoaDoCatalogo, str]] = {}
     escondidos: list[VinculoDaPessoa] = []
     for vinculo in programa.pessoas:
@@ -280,23 +294,48 @@ def pessoas_do_programa(
     return list(visiveis.values()), escondidos
 
 
+class _PerfisSobDemanda(Mapping[str, PerfilDoPrograma]):
+    """Os programas cadastrados agora, pelo nome; o perfil de cada um (com as pessoas lidas do
+    catálogo) só se monta na primeira consulta a ele."""
+
+    def __init__(self, programas: list[Programa], catalogo: Catalogo) -> None:
+        self._programas = {p.nome: p for p in programas}
+        self._catalogo = catalogo
+        self._prontos: dict[str, PerfilDoPrograma] = {}
+        # As janelas em paralelo de um vídeo dividem o mapa: o perfil se monta uma vez.
+        self._trava = Lock()
+
+    def __getitem__(self, nome: str) -> PerfilDoPrograma:
+        with self._trava:
+            return self._montado(nome)
+
+    def _montado(self, nome: str) -> PerfilDoPrograma:
+        if nome not in self._prontos:
+            programa = self._programas[nome]
+            visiveis, _ = pessoas_do_programa(programa, self._catalogo)
+            self._prontos[nome] = PerfilDoPrograma(
+                programa.nome,
+                programa.perfil,
+                tuple(
+                    PessoaDoPerfil(pessoa.nome, papel, tuple(pessoa.apelidos))
+                    for pessoa, papel in visiveis
+                ),
+            )
+        return self._prontos[nome]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._programas)
+
+    def __len__(self) -> int:
+        return len(self._programas)
+
+
 def perfis_dos_programas(
     repositorio: RepositorioDeProgramas, catalogo: Catalogo
 ) -> Perfis:
     """Os programas cadastrados agora, pelo nome, com as pessoas lidas do catálogo.
     Quem está na lixeira não entra; quem foi fundida em outra entra como o destino."""
-    perfis: dict[str, PerfilDoPrograma] = {}
-    for programa in repositorio.listar():
-        visiveis, _ = pessoas_do_programa(programa, catalogo)
-        perfis[programa.nome] = PerfilDoPrograma(
-            programa.nome,
-            programa.perfil,
-            tuple(
-                PessoaDoPerfil(pessoa.nome, papel, tuple(pessoa.apelidos))
-                for pessoa, papel in visiveis
-            ),
-        )
-    return perfis
+    return _PerfisSobDemanda(repositorio.listar(), catalogo)
 
 
 class NomesDosProgramas(Collection[str]):

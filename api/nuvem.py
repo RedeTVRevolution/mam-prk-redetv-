@@ -39,15 +39,21 @@ from api.auditoria import (
     pagina_de as pagina_da_auditoria,
 )
 from api.catalogo import (
+    EntradaDoCatalogo,
     EnvioParaLixeira,
     FusaoDaPessoa,
+    FusaoMudou,
     PessoaDoCatalogo,
     PessoaInexistente,
     RenomeacaoDaPessoa,
     Rosto,
+    SeAFusao,
     corrigida,
     nomes_de_busca,
     novo_id,
+    qualquer,
+    sem_fusao,
+    sem_lixeira,
     visivel,
 )
 from api.chaves import LimiteDeChavesAtivas, RegistroDeChave
@@ -71,7 +77,7 @@ from api.jobs import (
 )
 from api.leitura_da_tela import LeituraDaTela
 from api.lixeira import ArquivosContados
-from api.marcas import MarcaDoCatalogo, MarcaInexistente, nomes_de_busca_da_marca
+from api.marcas import MarcaDoCatalogo, MarcaInexistente
 from api.modelo_do_job import (
     CAMPOS_DA_LISTA,
     SAO_PAULO,
@@ -88,6 +94,7 @@ from api.modelo_do_job import (
 from api.papeis import DocumentoDePapeis, Papel
 from api.papeis import em_ordem as papeis_em_ordem
 from api.programas import (
+    TROCA_ABERTA,
     NomeEmUso,
     Programa,
     ProgramaInexistente,
@@ -463,6 +470,15 @@ class RepositorioFirestore:
             filter=FieldFilter("criado_por", "==", criado_por)
         ).where(filter=FieldFilter("criado_em", ">=", desde))
         return int(consulta.count().get()[0][0].value)
+
+    def contar_do_programa(self, nome: str) -> int:
+        # Igualdade num campo só (índice automático); lê só `lixeira`, sem montar o Job.
+        docs = (
+            self._colecao.where(filter=FieldFilter("programa", "==", nome))
+            .select(["lixeira"])
+            .stream()
+        )
+        return sum(1 for doc in docs if (doc.to_dict() or {}).get("lixeira") is None)
 
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
@@ -903,77 +919,133 @@ class ContasIdentityPlatform:
         self._chamar("POST", ":update", json=corpo)
 
 
-class CatalogoFirestore:
-    """Um documento por pessoa, com o id estável como chave. `nomes_de_busca`
-    (nome e apelidos normalizados) é o índice de `achar`."""
+class CatalogoGenericoFirestore[T: EntradaDoCatalogo]:
+    """Um documento por entrada (pessoa ou marca), com o id estável como chave.
+    `nomes_de_busca` (nome e apelidos normalizados) é o índice de `achar`. Cada catálogo
+    diz o modelo, a exceção de inexistente e o que é "visível"."""
+
+    _modelo: type[T]
+    _inexistente: type[Exception]
+    _visivel: Callable[[T], bool] = staticmethod(sem_lixeira)
+    _achavel_na_lixeira: Callable[[T], bool] = staticmethod(qualquer)
+
+    def __init__(self, cliente: firestore.Client, colecao: str) -> None:
+        self._cliente = cliente
+        self._colecao = cliente.collection(colecao)
+
+    def _dados(self, entrada: T) -> dict[str, Any]:
+        return {
+            **entrada.model_dump(exclude={"id"}),
+            "nomes_de_busca": nomes_de_busca(entrada),
+        }
+
+    def _gravar(self, entrada: T) -> T:
+        _documento(self._colecao, entrada.id).set(self._dados(entrada))
+        return entrada
+
+    def _ler(self, id: str, dados: dict[str, Any]) -> T:
+        dados = {k: v for k, v in dados.items() if k != "nomes_de_busca"}
+        return self._modelo(id=id, **dados)  # type: ignore[call-arg]
+
+    def _transformar(self, id: str, mudar: Callable[[T], T]) -> T:
+        """Lê, muda e grava o documento na mesma transação: duas ações ao mesmo tempo
+        não se perdem (quem perde a disputa lê de novo e repete). `mudar` pode rodar
+        mais de uma vez."""
+        referencia = _documento(self._colecao, id)
+
+        @firestore.transactional
+        def na_transacao(transacao: Any) -> T:
+            doc = referencia.get(transaction=transacao)
+            if not doc.exists:
+                raise self._inexistente(id)
+            nova = mudar(self._ler(id, doc.to_dict() or {}))
+            transacao.set(referencia, self._dados(nova))
+            return nova
+
+        resultado: T = _repetir_sob_disputa(
+            lambda: na_transacao(self._cliente.transaction())
+        )
+        return resultado
+
+    def _alterar(self, id: str, update: Mapping[str, Any]) -> T:
+        return self._transformar(id, lambda e: e.model_copy(update=update))
+
+    def obter(self, id: str) -> T | None:
+        doc = _documento(self._colecao, id).get()
+        return self._ler(id, doc.to_dict() or {}) if doc.exists else None
+
+    def obter_varios(self, ids: Iterable[str]) -> dict[str, T]:
+        return {
+            d.id: self._ler(d.id, d.to_dict() or {})
+            for d in _lidos_em_lote(self._cliente, self._colecao, ids)
+        }
+
+    def _achar(self, nome: str, com_lixeira: bool = False) -> list[T]:
+        consulta = self._colecao.where(
+            filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
+        )
+        achadas = [self._ler(d.id, d.to_dict() or {}) for d in consulta.stream()]
+        ok = self._achavel_na_lixeira if com_lixeira else self._visivel
+        return [e for e in achadas if ok(e)]
+
+    def _lidas(self) -> list[T]:
+        return [self._ler(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
+
+    def todas(self) -> list[T]:
+        return [e for e in self._lidas() if self._visivel(e)]
+
+    def na_lixeira(self) -> list[T]:
+        # No servidor: roda a cada relatório e busca, não pode ler o catálogo inteiro.
+        consulta = self._colecao.where(filter=FieldFilter("lixeira", "!=", None))
+        return [self._ler(d.id, d.to_dict() or {}) for d in consulta.stream()]
+
+    def definir_lixeira(self, id: str, envio: EnvioParaLixeira | None) -> T:
+        return self._alterar(id, {"lixeira": envio})
+
+    def apagar(self, id: str) -> None:
+        referencia = _documento(self._colecao, id)
+        if not referencia.get().exists:
+            raise self._inexistente(id)
+        referencia.delete()
+
+
+class CatalogoFirestore(CatalogoGenericoFirestore[PessoaDoCatalogo]):
+    _modelo = PessoaDoCatalogo
+    _inexistente = PessoaInexistente
+    _visivel = staticmethod(visivel)
+    _achavel_na_lixeira = staticmethod(sem_fusao)
 
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO
     ) -> None:
-        self._cliente = cliente
-        self._colecao = cliente.collection(colecao)
+        super().__init__(cliente, colecao)
 
-    def _gravar(self, pessoa: PessoaDoCatalogo) -> PessoaDoCatalogo:
-        _documento(self._colecao, pessoa.id).set(
-            {
-                **pessoa.model_dump(exclude={"id"}),
-                "nomes_de_busca": nomes_de_busca(pessoa),
-            }
-        )
-        return pessoa
+    def achar(self, nome: str, *, com_lixeira: bool = False) -> list[PessoaDoCatalogo]:
+        return self._achar(nome, com_lixeira)
 
-    @staticmethod
-    def _pessoa(id: str, dados: dict[str, Any]) -> PessoaDoCatalogo:
-        dados = {k: v for k, v in dados.items() if k != "nomes_de_busca"}
-        return PessoaDoCatalogo(id=id, **dados)
-
-    def obter(self, id: str) -> PessoaDoCatalogo | None:
-        doc = _documento(self._colecao, id).get()
-        return self._pessoa(id, doc.to_dict() or {}) if doc.exists else None
-
-    def obter_varios(self, ids: Iterable[str]) -> dict[str, PessoaDoCatalogo]:
-        return {
-            d.id: self._pessoa(d.id, d.to_dict() or {})
-            for d in _lidos_em_lote(self._cliente, self._colecao, ids)
-        }
-
-    def achar(self, nome: str) -> list[PessoaDoCatalogo]:
-        consulta = self._colecao.where(
-            filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
-        )
-        achadas = [self._pessoa(d.id, d.to_dict() or {}) for d in consulta.stream()]
-        return [p for p in achadas if visivel(p)]
-
-    def _lidas(self) -> list[PessoaDoCatalogo]:
-        return [self._pessoa(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
-
-    def todas(self) -> list[PessoaDoCatalogo]:
-        return [p for p in self._lidas() if visivel(p)]
-
-    def na_lixeira(self) -> list[PessoaDoCatalogo]:
-        return [p for p in self._lidas() if p.lixeira is not None]
-
-    def definir_lixeira(
-        self, id: str, envio: EnvioParaLixeira | None
+    def definir_fusao(
+        self, id: str, fusao: FusaoDaPessoa | None, se: SeAFusao | None = None
     ) -> PessoaDoCatalogo:
-        atual = self.obter(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        return self._gravar(atual.model_copy(update={"lixeira": envio}))
+        def mudar(pessoa: PessoaDoCatalogo) -> PessoaDoCatalogo:
+            if se is not None and not se(pessoa.fundida):
+                raise FusaoMudou(id)
+            return pessoa.model_copy(update={"fundida": fusao})
 
-    def definir_fusao(self, id: str, fusao: FusaoDaPessoa | None) -> PessoaDoCatalogo:
-        atual = self.obter(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        return self._gravar(atual.model_copy(update={"fundida": fusao}))
+        return self._transformar(id, mudar)
+
+    def fusoes_pendentes(self) -> list[PessoaDoCatalogo]:
+        # No servidor: o marcador só existe enquanto a fusão está pendente.
+        consulta = self._colecao.where(
+            filter=FieldFilter(
+                "fundida.fase", "in", ["aguardando_auditoria", "limpando"]
+            )
+        )
+        return [self._ler(d.id, d.to_dict() or {}) for d in consulta.stream()]
 
     def definir_renomeacao(
         self, id: str, renomeacao: RenomeacaoDaPessoa | None
     ) -> PessoaDoCatalogo:
-        atual = self.obter(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        return self._gravar(atual.model_copy(update={"renomeacao": renomeacao}))
+        return self._alterar(id, {"renomeacao": renomeacao})
 
     def acrescentar(
         self,
@@ -1003,22 +1075,10 @@ class CatalogoFirestore:
         papel: str | None = None,
         apelidos: list[str] | None = None,
     ) -> PessoaDoCatalogo:
-        atual = self.obter(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        return self._gravar(corrigida(atual, nome, papel, apelidos))
+        return self._transformar(id, lambda p: corrigida(p, nome, papel, apelidos))
 
     def definir_rostos(self, id: str, rostos: list[Rosto]) -> PessoaDoCatalogo:
-        atual = self.obter(id)
-        if atual is None:
-            raise PessoaInexistente(id)
-        return self._gravar(atual.model_copy(update={"rostos": list(rostos)}))
-
-    def apagar(self, id: str) -> None:
-        referencia = _documento(self._colecao, id)
-        if not referencia.get().exists:
-            raise PessoaInexistente(id)
-        referencia.delete()
+        return self._alterar(id, {"rostos": list(rostos)})
 
 
 class ProgramasFirestore:
@@ -1041,6 +1101,13 @@ class ProgramasFirestore:
     def obter(self, id: str) -> Programa | None:
         doc = _documento(self._colecao, id).get()
         return Programa(id=id, **(doc.to_dict() or {})) if doc.exists else None
+
+    def com_troca_aberta(self) -> list[Programa]:
+        # Campo simples dentro do mapa: o índice de campo único automático basta.
+        consulta = self._colecao.where(
+            filter=FieldFilter("renomeacao.estado", "in", list(TROCA_ABERTA))
+        )
+        return [Programa(id=d.id, **(d.to_dict() or {})) for d in consulta.stream()]
 
     def _conferir_nome(self, programa: Programa) -> None:
         if any(
@@ -1122,77 +1189,20 @@ class ProgramasFirestore:
         _documento(self._colecao, id).delete()
 
 
-class CatalogoDeMarcasFirestore:
-    """Um documento por marca, com o id estável como chave. `nomes_de_busca` (nome e
-    apelidos normalizados) é o índice de `achar`."""
+class CatalogoDeMarcasFirestore(CatalogoGenericoFirestore[MarcaDoCatalogo]):
+    _modelo = MarcaDoCatalogo
+    _inexistente = MarcaInexistente
 
     def __init__(
         self, cliente: firestore.Client, colecao: str = COLECAO_DO_CATALOGO_DE_MARCAS
     ) -> None:
-        self._cliente = cliente
-        self._colecao = cliente.collection(colecao)
-
-    @staticmethod
-    def _marca(id: str, dados: dict[str, Any]) -> MarcaDoCatalogo:
-        dados = {k: v for k, v in dados.items() if k != "nomes_de_busca"}
-        return MarcaDoCatalogo(id=id, **dados)
-
-    def obter(self, id: str) -> MarcaDoCatalogo | None:
-        doc = _documento(self._colecao, id).get()
-        return self._marca(id, doc.to_dict() or {}) if doc.exists else None
-
-    def obter_varios(self, ids: Iterable[str]) -> dict[str, MarcaDoCatalogo]:
-        return {
-            d.id: self._marca(d.id, d.to_dict() or {})
-            for d in _lidos_em_lote(self._cliente, self._colecao, ids)
-        }
+        super().__init__(cliente, colecao)
 
     def achar(self, nome: str, *, com_lixeira: bool = False) -> list[MarcaDoCatalogo]:
-        consulta = self._colecao.where(
-            filter=FieldFilter("nomes_de_busca", "array_contains", normalizar(nome))
-        )
-        achadas = [self._marca(d.id, d.to_dict() or {}) for d in consulta.stream()]
-        return [m for m in achadas if com_lixeira or m.lixeira is None]
-
-    def _lidas(self) -> list[MarcaDoCatalogo]:
-        return [self._marca(d.id, d.to_dict() or {}) for d in self._colecao.stream()]
-
-    def todas(self) -> list[MarcaDoCatalogo]:
-        return [m for m in self._lidas() if m.lixeira is None]
-
-    def na_lixeira(self) -> list[MarcaDoCatalogo]:
-        # No servidor: roda a cada relatório e busca, não pode ler o catálogo inteiro.
-        consulta = self._colecao.where(filter=FieldFilter("lixeira", "!=", None))
-        return [self._marca(d.id, d.to_dict() or {}) for d in consulta.stream()]
-
-    def _gravar(self, marca: MarcaDoCatalogo) -> MarcaDoCatalogo:
-        _documento(self._colecao, marca.id).set(
-            {
-                **marca.model_dump(exclude={"id"}),
-                "nomes_de_busca": nomes_de_busca_da_marca(marca),
-            }
-        )
-        return marca
-
-    def definir_lixeira(
-        self, id: str, envio: EnvioParaLixeira | None
-    ) -> MarcaDoCatalogo:
-        atual = self.obter(id)
-        if atual is None:
-            raise MarcaInexistente(id)
-        return self._gravar(atual.model_copy(update={"lixeira": envio}))
-
-    def apagar(self, id: str) -> None:
-        referencia = _documento(self._colecao, id)
-        if not referencia.get().exists:
-            raise MarcaInexistente(id)
-        referencia.delete()
+        return self._achar(nome, com_lixeira)
 
     def definir_apelidos(self, id: str, apelidos: list[str]) -> MarcaDoCatalogo:
-        atual = self.obter(id)
-        if atual is None:
-            raise MarcaInexistente(id)
-        return self._gravar(atual.model_copy(update={"apelidos": list(apelidos)}))
+        return self._alterar(id, {"apelidos": list(apelidos)})
 
     def acrescentar(
         self,
@@ -1202,14 +1212,15 @@ class CatalogoDeMarcasFirestore:
         a_revisar: bool = False,
         autor: str | None = None,
     ) -> MarcaDoCatalogo:
-        marca = MarcaDoCatalogo(
-            id=novo_id(),
-            nome=nome,
-            apelidos=list(apelidos),
-            a_revisar=a_revisar,
-            acrescentada_por=autor,
+        return self._gravar(
+            MarcaDoCatalogo(
+                id=novo_id(),
+                nome=nome,
+                apelidos=list(apelidos),
+                a_revisar=a_revisar,
+                acrescentada_por=autor,
+            )
         )
-        return self._gravar(marca)
 
 
 # ponytail: a busca lê até este tanto de tipos do prefixo; acima disso, o corte é pela chave
@@ -1383,6 +1394,9 @@ class RepositorioDeAuditoriaFirestore:
 
     def acrescentar(self, registro: RegistroDeAuditoria) -> None:
         _documento(self._colecao, registro.id).create(registro.model_dump())
+
+    def existe(self, id: str) -> bool:
+        return bool(_documento(self._colecao, id).get().exists)
 
     def consultar(self, filtro: FiltroDeAuditoria) -> PaginaDeAuditoria:
         # Igualdades (pessoa, alvo, ação) mais intervalo e ordem em `quando`: os

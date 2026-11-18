@@ -75,3 +75,25 @@ def test_le_so_jobs_concluidos_e_pula_a_decupagem_que_nao_abre() -> None:
 
     assert entraram == 2
     assert sorted(m.nome for m in catalogo.todas()) == ["Banco Verde", "Loja Sol"]
+
+
+def test_o_mesmo_nome_e_consultado_uma_vez_por_carga() -> None:
+    class Contando(CatalogoDeMarcasEmMemoria):
+        def __init__(self) -> None:
+            super().__init__()
+            self.consultas: list[str] = []
+
+        def achar(self, nome: str, *, com_lixeira: bool = False) -> list[Any]:
+            self.consultas.append(nome)
+            return super().achar(nome, com_lixeira=com_lixeira)
+
+    catalogo = Contando()
+    catalogo.acrescentar("Ypê", [])
+    decupagens = [
+        json.loads(_modelo("Ypê", "Nova", "nova", "YPE")),
+        json.loads(_modelo("NOVA", "Ypê")),
+    ]
+
+    assert carregar_marcas(catalogo, decupagens) == 1
+    assert len(catalogo.consultas) == 2  # "ype" e "nova", não seis
+    assert [m.nome for m in catalogo.todas()] == ["Ypê", "Nova"]

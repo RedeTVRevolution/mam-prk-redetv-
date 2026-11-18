@@ -7,7 +7,6 @@ correções aplicadas por cima, em memória.
 
 import hashlib
 import json
-import re
 import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -28,6 +27,9 @@ from api import catalogo_de_correcoes as textos
 from api.decupagem import (
     CATEGORIAS_DE_OBJETO,
     CORES_BASE,
+    LIMITE_DO_ID,
+    LIMITE_DO_NOME,
+    LIMITE_DO_TEXTO,
     RELACOES_DO_OBJETO,
     CategoriaDeObjeto,
     Comercial,
@@ -96,8 +98,6 @@ NOME_NAO_IDENTIFICADO = "Não identificado"
 TIPOS_DE_COMERCIAL = get_args(Comercial.model_fields["tipo"].annotation)
 CAMPOS_DO_COMERCIAL = ("marca", "tipo", "inicio_ms", "fim_ms", "evidencias")
 LIMITE_DO_MOTIVO = 500
-LIMITE_DO_NOME = 200  # o mesmo de `Rotulo` na decupagem
-LIMITE_DO_TEXTO = 2000  # o mesmo de `Texto` na decupagem
 # A descrição de plano e o texto de fala vão em JSON: cabe a maior descrição
 # válida (200 + 2000 + 50 × 200 caracteres) com folga para aspas e escapes.
 LIMITE_DO_JSON = 16000
@@ -107,7 +107,6 @@ TOLERANCIA_DO_PLANO_MS = 1000
 TIPOS_DE_TEXTO_NA_TELA = get_args(TextoNaTela.model_fields["tipo"].annotation)
 FONTES_DO_NOME = get_args(FonteDoNome)
 TONS_DA_PAUTA = get_args(TomDaPauta)
-_TEMPOS = re.compile(r"^(\d{1,12})-(\d{1,12})$")
 
 
 # Controles (C0, C1), formatação invisível (largura zero, direção do texto) e
@@ -224,10 +223,10 @@ class ItemDoHistorico(Correcao):
 
 def tempos_de(valor: str) -> tuple[int, int]:
     """Lê "<inicio_ms>-<fim_ms>"; `ValueError` se não for isso ou se o início passar do fim."""
-    achado = _TEMPOS.match(valor)
+    achado = textos.ler_tempos(valor)
     if achado is None:
         raise ValueError("tempos fora do formato inicio_ms-fim_ms")
-    inicio, fim = int(achado[1]), int(achado[2])
+    inicio, fim = achado
     _inicio_antes_do_fim(inicio, fim)
     return inicio, fim
 
@@ -491,7 +490,8 @@ class NovaJuncao(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ids: Annotated[
-        list[Annotated[str, StringConstraints(max_length=40)]], Field(min_length=2)
+        list[Annotated[str, StringConstraints(max_length=LIMITE_DO_ID)]],
+        Field(min_length=2),
     ]
     titulo: _Rotulo
 
@@ -586,7 +586,7 @@ class NovaCorrecao(BaseModel):
     # `comercial.marca`); o servidor confere que existe e que o nome é o dela.
     catalogo_id: Annotated[str, Linha(64, min_length=1), ID_SEGURO] | None = None
     # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
-    item_id: Annotated[str, Linha(40)] = ""
+    item_id: Annotated[str, Linha(LIMITE_DO_ID)] = ""
     # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
     # esquema; `comercial.acrescentar`: o JSON do comercial; `pessoa.nao_e`:
     # "Não identificado"; `pessoa.aparicao_para_mencao`: a lista de destino;
@@ -653,7 +653,7 @@ class NovaRecusa(NovaResolucao):
 class NovaReaplicacao(NovaResolucao):
     """Corpo de `POST /v1/jobs/{id}/fila/{cid}/reaplicar`."""
 
-    item_id: Annotated[str, Linha(40, min_length=1)]
+    item_id: Annotated[str, Linha(LIMITE_DO_ID, min_length=1)]
 
 
 class RepositorioDeAprovacao(Protocol):
@@ -779,7 +779,7 @@ def identidade_da_pessoa(pessoa: dict[str, Any]) -> str:
     identidade = identidade_do_nome(nome)
     if identidade is None:
         inicio, fim = intervalo_da_pessoa(pessoa, ("na_imagem",))
-        return f"{normalizar(nome)}@{inicio}-{fim}"
+        return textos.escrever_separacao(normalizar(nome), inicio, fim)
     return identidade
 
 
@@ -1464,8 +1464,7 @@ def _campo(nome: str) -> Callable[[dict[str, Any]], str]:
 
 
 def _tempos_do_item(item: dict[str, Any]) -> str:
-    inicio, fim = intervalo_da_pauta(item)
-    return f"{inicio}-{fim}"
+    return textos.escrever_tempos(*intervalo_da_pauta(item))
 
 
 def _valor_da_descricao(item: dict[str, Any]) -> str:
@@ -1550,7 +1549,7 @@ def _na_lista(
     if achada is None:
         return ""
     lista, o = achada
-    return f"{lista} {o['inicio_ms']}-{o['fim_ms']}"
+    return textos.escrever_ocorrencia(lista, o["inicio_ms"], o["fim_ms"])
 
 
 def _tempos_na_lista(
@@ -1560,7 +1559,7 @@ def _tempos_na_lista(
     achada = _ocorrencia_do_pedido(pessoa, ocorrencia, (ocorrencia.lista,))
     if achada is None:
         return ""
-    return f"{achada[1]['inicio_ms']}-{achada[1]['fim_ms']}"
+    return textos.escrever_tempos(achada[1]["inicio_ms"], achada[1]["fim_ms"])
 
 
 def _papel_visual_na_lista(
@@ -1578,7 +1577,7 @@ def _aparicao_acrescentada_na_lista(
     if achada is None:
         return ""
     lista, o = achada
-    return f"{lista} {o['inicio_ms']}-{o['fim_ms']}"
+    return textos.escrever_ocorrencia(lista, o["inicio_ms"], o["fim_ms"])
 
 
 def _nome_entregue_do_alvo(
@@ -1677,6 +1676,25 @@ def _tempos_no_item(item: dict[str, Any], c: Correcao) -> None:
     item["inicio_ms"], item["fim_ms"] = tempos_de(c.depois)
 
 
+# As falas por locutor normalizado, na aplicação: nasce na 1ª renomeação e sai no fim.
+GRUPOS_DE_FALAS = "_falas_por_locutor"
+
+
+def trocar_o_locutor_no_grupo(
+    resultado: dict[str, Any], fala: dict[str, Any], anterior: str
+) -> None:
+    """A fala corrigida muda de grupo se o locutor mudou; os outros grupos ficam."""
+    grupos = resultado.get(GRUPOS_DE_FALAS)
+    if grupos is None or fala.get("locutor") == anterior:
+        return
+    velho = identidade_do_nome(anterior)
+    if velho is not None and velho in grupos:
+        grupos[velho] = [f for f in grupos[velho] if f is not fala]
+    novo = identidade_do_nome(str(fala.get("locutor", "")))
+    if novo is not None:
+        grupos.setdefault(novo, []).append(fala)
+
+
 def _renomear_pessoa(
     resultado: dict[str, Any], pessoa: dict[str, Any], c: Correcao
 ) -> None:
@@ -1686,12 +1704,20 @@ def _renomear_pessoa(
     # agora (não o `c.antes`), para a segunda troca achar o que a primeira deixou.
     # "Não identificado" é de várias pessoas, então não leva nada.
     if anterior is not None:
-        for fala in resultado.get("transcricao", []):
-            if (
-                isinstance(fala, dict)
-                and identidade_do_nome(str(fala.get("locutor", ""))) == anterior
-            ):
-                fala["locutor"] = c.depois
+        grupos = resultado.get(GRUPOS_DE_FALAS)
+        if grupos is None:
+            grupos = resultado[GRUPOS_DE_FALAS] = {}
+            for fala in resultado.get("transcricao", []):
+                if isinstance(fala, dict):
+                    identidade = identidade_do_nome(str(fala.get("locutor", "")))
+                    if identidade is not None:
+                        grupos.setdefault(identidade, []).append(fala)
+        movidas = grupos.pop(anterior, [])
+        for fala in movidas:
+            fala["locutor"] = c.depois
+        novo = identidade_do_nome(c.depois)
+        if novo is not None:
+            grupos.setdefault(novo, []).extend(movidas)
     # O nome da revisora vale sobre a conferência do código, feita no nome anterior.
     pessoa["estado_do_nome"] = "confirmado"
     _catalogo_id_na_pessoa(pessoa, c)
@@ -1828,8 +1854,7 @@ def _do_mesmo_tipo_de_objeto(
 
 
 def _tempos_do_objeto(item: dict[str, Any]) -> str:
-    inicio, fim = intervalo_do_objeto(item)
-    return f"{inicio}-{fim}"
+    return textos.escrever_tempos(*intervalo_do_objeto(item))
 
 
 def _ancora_do_comercial_novo(valor: str, item_id: str, versao: str) -> Ancora:
@@ -2035,6 +2060,13 @@ def _reapontar_juncao(
     return nova, atendida
 
 
+def _corte_no_miolo(pauta: dict[str, Any], em: int) -> bool:
+    """O corte só vale a mais de `TOLERANCIA_DO_PLANO_MS` das duas bordas: perto
+    do fim `_aplicar_divisao` o tomaria por corte já feito (sem efeito)."""
+    inicio, fim = pauta["inicio_ms"], pauta["fim_ms"]
+    return bool(inicio + TOLERANCIA_DO_PLANO_MS < em < fim - TOLERANCIA_DO_PLANO_MS)
+
+
 def _preparar_divisao(
     entregue: dict[str, Any], novo: NovaCorrecao, versao: str
 ) -> tuple[str, Ancora]:
@@ -2042,8 +2074,10 @@ def _preparar_divisao(
     item = next((p for p in pautas(entregue) if p.get("id") == novo.item_id), None)
     if item is None:
         raise ItemInexistente(novo.item_id)
-    if not item["inicio_ms"] < divisao.em_ms < item["fim_ms"]:
-        raise EstruturaInvalida("o corte cai fora da pauta")
+    if not _corte_no_miolo(item, divisao.em_ms):
+        raise EstruturaInvalida(
+            "o corte cai fora da pauta ou a 1 s ou menos do início ou do fim"
+        )
     return novo.valor, ancora_do_item(item, "pauta", versao)
 
 
@@ -2097,7 +2131,7 @@ def _reapontar_divisao(
     ]
     antes = [p for p in achadas if abs(p["fim_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
     depois = [p for p in achadas if abs(p["inicio_ms"] - em) <= TOLERANCIA_DO_PLANO_MS]
-    com_o_corte = [p for p in achadas if p["inicio_ms"] < em < p["fim_ms"]]
+    com_o_corte = [p for p in achadas if _corte_no_miolo(p, em)]
     if antes and depois:
         # O modelo já cortou aqui; atendida só se os títulos também são os escolhidos.
         trazidos = [normalizar(p["titulo"]) for p in (antes[0], depois[0])]

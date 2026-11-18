@@ -48,10 +48,12 @@ def atualizar_catalogo_do_job(
     job: "Job",
     repositorio: "RepositorioDeJobs",
     leitura: LeituraDaDecupagem,
+    lido: tuple[dict[str, Any], str] | None = None,
 ) -> None:
-    """Relê a Decupagem corrigida e regrava os campos do Job; nunca levanta."""
+    """Lê a Decupagem corrigida (com `lido`, sem reabrir o modelo) e regrava os campos do
+    Job; nunca levanta."""
     try:
-        corrigida = leitura.corrigida(job.id)
+        corrigida = leitura.corrigida(job.id, lido=lido)
     except Exception:
         log.exception("decupagem de %s não lida para o catálogo do Job", job.id)
         return
@@ -59,16 +61,18 @@ def atualizar_catalogo_do_job(
 
 
 def passar_pessoa_nos_jobs(
-    repositorio: "RepositorioDeJobs", origem_id: str, destino_id: str
-) -> None:
+    repositorio: "RepositorioDeJobs", origem_id: str, destino_id: str | None
+) -> bool:
     """Na fusão, os vídeos da origem (até os da lixeira) passam a listar o destino. Nunca
-    levanta: o Job que falha fica com a origem, e a carga (`make preencher-catalogo-dos-jobs`)
-    o conserta."""
+    levanta: diz se todos os Jobs foram trocados (sem destino, a origem só sai); o que falha fica com a origem, e a fusão
+    pendente (ou a carga `make preencher-catalogo-dos-jobs`) o conserta."""
 
     def trocar(job: "Job") -> dict[str, Any] | None:
         if origem_id not in job.pessoas_do_catalogo:
             return None
-        ids = {destino_id, *(i for i in job.pessoas_do_catalogo if i != origem_id)}
+        ids = {i for i in job.pessoas_do_catalogo if i != origem_id}
+        if destino_id is not None:
+            ids.add(destino_id)
         return {"pessoas_do_catalogo": sorted(ids)}
 
     try:
@@ -77,3 +81,5 @@ def passar_pessoa_nos_jobs(
             repositorio.trocar(job.id, trocar)
     except Exception:
         log.exception("fusão %s -> %s não passou aos Jobs", origem_id, destino_id)
+        return False
+    return True

@@ -18,8 +18,14 @@ from api.achar_nomes import IndiceDeNomes, achar_por_prefixo
 from api.auditoria import RepositorioDeAuditoria
 from api.auth import Usuario
 from api.cadastro_de_marcas import criar_rotas_do_cadastro_de_marcas
-from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
-from api.correcoes import LIMITE_DO_NOME, sem_controle
+from api.catalogo import (
+    Catalogo,
+    CopiaCurta,
+    PessoaDoCatalogo,
+    existente_para_acrescentar,
+)
+from api.correcoes import sem_controle
+from api.decupagem import LIMITE_DO_NOME
 from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo
 from api.permissoes import exige, exige_escopo
 from api.texto_como_dado import Linha, LinhaDaConsulta
@@ -112,9 +118,11 @@ def criar_rotas_do_catalogo(
             ),
         ],
     ) -> PessoaAchada:
-        existentes = pessoas.achar(nova.nome)
-        if existentes:
-            return pessoa_achada(existentes[0])
+        existente = existente_para_acrescentar(
+            pessoas.achar(nova.nome, com_lixeira=True)
+        )
+        if existente:
+            return pessoa_achada(existente)
         resposta.status_code = 201
         criada = pessoas.acrescentar(
             nova.nome,
@@ -144,9 +152,11 @@ def criar_rotas_do_catalogo(
             ),
         ],
     ) -> MarcaAchada:
-        existentes = marcas.achar(nova.nome)
-        if existentes:
-            return marca_achada(existentes[0])
+        existente = existente_para_acrescentar(
+            marcas.achar(nova.nome, com_lixeira=True)
+        )
+        if existente:
+            return marca_achada(existente)
         resposta.status_code = 201
         criada = marcas.acrescentar(
             nova.nome, [], a_revisar=True, autor=autor.email or autor.uid

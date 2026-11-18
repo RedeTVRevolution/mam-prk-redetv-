@@ -346,10 +346,10 @@ def test_purga_manual_apaga_a_pessoa_e_deixa_o_registro() -> None:
         "item.purgado",
     ]
     purgado = next(r for r in mundo.registros() if r.acao == "item.purgado")
-    assert purgado.detalhes["aparicoes_que_perdem_o_nome"] == 2
+    assert purgado.detalhes == {}  # o impacto da pessoa não é gravado (#717)
 
 
-def test_restaurar_grava_os_numeros_do_impacto() -> None:
+def test_restaurar_grava_o_impacto_da_marca_e_o_da_pessoa_nao() -> None:
     mundo = Mundo()
     mundo.enviar("pessoas", mundo.ana.id)
     mundo.enviar("marcas", mundo.marca.id)
@@ -362,8 +362,7 @@ def test_restaurar_grava_os_numeros_do_impacto() -> None:
         for r in mundo.registros()
         if r.acao == "item.restaurado"
     }
-    assert detalhes["pessoa"]["aparicoes_que_perdem_o_nome"] == 2
-    assert detalhes["pessoa"]["fotos_apagadas"] == 0
+    assert detalhes["pessoa"] == {}
     assert detalhes["marca"]["ocorrencias_que_perdem_o_vinculo"] == 2
 
 

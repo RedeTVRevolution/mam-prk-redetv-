@@ -30,7 +30,7 @@ import {
   tempoDaEntradaMs,
   type FiltrosDasEntradas,
 } from '../../entradas.ts'
-import { ETAPAS_ESCOLHIVEIS, etapaDeReprocesso, nomeDaEtapa, ORDEM, partidaDaEtapa } from '../../etapas.ts'
+import { ETAPAS_ESCOLHIVEIS, nomeDaEtapa, ORDEM, partidaDaEtapa } from '../../etapas.ts'
 import { falhaDaAcao, type Falha } from '../../falhaDaAcao.ts'
 import { fraseDaFalha } from '../../falhas.ts'
 import { dataEHora, MAXIMO_DO_ANDAMENTO, type EtapaDoJob, type Job, type PaginaDoAcervo } from '../../jobs.ts'
@@ -470,7 +470,10 @@ export default function Entradas({
             const job = visiveis[item.index]!
             const aberta = abertas.includes(job.id)
             const doPedido = pedido?.id === job.id ? pedido.tipo : null
-            const partida = etapaDeReprocesso(job)
+            const partida = job.etapa_de_reprocesso ?? null
+            const andandoAgora = emAndamento(job)
+            const podeRetomar = !!partida && !andandoAgora
+            const podeEscolher = podeEscolherEtapa && job.estado === 'concluido' && !andandoAgora
             const prazoVencido = prazoDeReprocessamentoVencido(job, Math.max(agora, agoraDoPedido))
             const falhaDoArquivo = job.estado === 'falhou' && partida === null
             const interrompido = job.codigo_falha === 'processamento_interrompido'
@@ -505,7 +508,7 @@ export default function Entradas({
                   <td className={CELULA} onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-wrap justify-end gap-1.5">
                       {falhaDoArquivo && <span className="text-right text-xs text-muted-foreground">Envie o arquivo de novo</span>}
-                      {podeReprocessar && partida && (
+                      {podeReprocessar && podeRetomar && (
                         <Button
                           type="button"
                           size="sm"
@@ -519,13 +522,13 @@ export default function Entradas({
                           {interrompido ? 'Retomar' : 'Reprocessar'}
                         </Button>
                       )}
-                      {podeEscolherEtapa && job.estado === 'concluido' && !emAndamento(job) && (
+                      {podeEscolher && (
                         <Button type="button" size="sm" variant="secondary" disabled={prazoVencido} aria-describedby={prazoVencido ? `prazo-${job.id}` : undefined} aria-label={`Reprocessar ${job.nome} a partir de uma etapa`} onClick={() => pedir(job, 'etapa')}>
                           <IconRefresh aria-hidden />
                           Reprocessar…
                         </Button>
                       )}
-                      {prazoVencido && ((podeReprocessar && partida) || (podeEscolherEtapa && job.estado === 'concluido' && !emAndamento(job))) && (
+                      {prazoVencido && ((podeReprocessar && podeRetomar) || podeEscolher) && (
                         <p id={`prazo-${job.id}`} className="text-xs text-muted-foreground">{AVISO_DO_REPROCESSAMENTO}</p>
                       )}
                     </div>
@@ -538,7 +541,7 @@ export default function Entradas({
                     </td>
                   </tr>
                 )}
-                {doPedido === 'falha' && partida && (
+                {doPedido === 'falha' && podeRetomar && (
                   <tr>
                     <td colSpan={colunas} className="border-b px-2">
                       <ConfirmarReprocesso

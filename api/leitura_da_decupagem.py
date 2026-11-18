@@ -42,11 +42,15 @@ from api.catalogo_apagado import CATALOGO_ID, ids_do_catalogo, sem_catalogo_apag
 from api.correcoes import Correcao, RepositorioDeCorrecoes, versao_do_modelo
 from api.marcas import CatalogoDeMarcas
 from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs
+from api.paralelo import em_paralelo
 from api.quem_conta import Destino, PessoasEmLote, QuemConta
 from api.regras_das_correcoes import decupagem_com_correcoes
 from api.texto import normalizar
 
 log = logging.getLogger(__name__)
+
+# Decupagens lidas ao mesmo tempo por quem percorre os vídeos de uma pessoa (#717).
+LEITURAS_AO_MESMO_TEMPO = 8
 
 
 class AbreDecupagem(Protocol):
@@ -76,8 +80,15 @@ class LeituraDaDecupagem:
         self._pessoas = pessoas
         self._marcas = marcas
 
-    def corrigida(self, job_id: str) -> dict[str, Any]:
-        return self._corrigida(job_id)[0]
+    def corrigida(
+        self,
+        job_id: str,
+        quem: QuemConta | None = None,
+        lido: tuple[dict[str, Any], str] | None = None,
+    ) -> dict[str, Any]:
+        """Com `quem`, um Quem conta de fora (compartilhado por quem lê vários vídeos).
+        Com `lido`, o modelo e a versão que o chamador já leu (não abre o Storage)."""
+        return self._corrigida(job_id, quem, lido)[0]
 
     def entregue(self, job_id: str) -> dict[str, Any]:
         corrigida, quem, sem_vinculo = self._corrigida(job_id)
@@ -89,13 +100,19 @@ class LeituraDaDecupagem:
             lambda id: id in marcas,
         )
 
-    def _corrigida(self, job_id: str) -> tuple[dict[str, Any], QuemConta, set[int]]:
+    def _corrigida(
+        self,
+        job_id: str,
+        quem: QuemConta | None = None,
+        lido: tuple[dict[str, Any], str] | None = None,
+    ) -> tuple[dict[str, Any], QuemConta, set[int]]:
         """A leitura corrigida, o Quem conta que a leu e as pessoas (por `id()` do dicionário)
         que não contam: a `entregue` os reaproveita."""
         lida = decupagem_com_correcoes(
-            *ler_modelo(self._decupagens, job_id), self._correcoes.listar(job_id)
+            *(lido or ler_modelo(self._decupagens, job_id)),
+            self._correcoes.listar(job_id),
         )
-        quem = QuemConta(self._pessoas, self._marcas)
+        quem = quem or QuemConta(self._pessoas, self._marcas)
         sem_vinculo: set[int] = set()
         if self._pessoas is not None:
             destinos = quem.pessoas(ids_do_catalogo(lida, "pessoas"))
@@ -141,15 +158,28 @@ def decupagens_dos_jobs(
     """Cada vídeo concluído fora da lixeira (e que casa com `filtro`) com a Decupagem
     corrigida; a que não lê é pulada, com log."""
     leitura = LeituraDaDecupagem(decupagens, correcoes, pessoas)
-    for job in repositorio.consultar(filtro or FiltroDeJobs()).jobs:
-        if job.estado != "concluido":
-            continue
+    quem = QuemConta(
+        pessoas
+    )  # um só para todos os vídeos; ele guarda o que lê sob trava
+    concluidos = [
+        j
+        for j in repositorio.consultar(filtro or FiltroDeJobs()).jobs
+        if j.estado == "concluido"
+    ]
+
+    def ler(job: Job) -> tuple[Job, dict[str, Any]] | None:
         try:
-            corrigida = leitura.corrigida(job.id)
-        except Exception:  # noqa: BLE001 - uma Decupagem ruim não trava quem percorre
+            return job, leitura.corrigida(job.id, quem)
+        except Exception:  # noqa: BLE001 - uma Decupagem ruim não cancela as outras
             log.warning("decupagem de %s não lida; pulada", job.id)
-            continue
-        yield job, corrigida
+            return None
+
+    # Em lotes, para não ter milhares de Decupagens na memória de uma vez.
+    lote = LEITURAS_AO_MESMO_TEMPO * 4
+    for i in range(0, len(concluidos), lote):
+        for lida in em_paralelo(concluidos[i : i + lote], ler, LEITURAS_AO_MESMO_TEMPO):
+            if lida is not None:
+                yield lida
 
 
 def decupagens_corrigidas(

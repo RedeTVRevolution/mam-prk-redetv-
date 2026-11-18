@@ -15,6 +15,7 @@ from api.canonicos import com_os_canonicos
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.correcoes import (
     CORRIGIVEIS,
+    GRUPOS_DE_FALAS,
     PREFIXO_ACRESCENTADO,
     TIPOS,
     TOLERANCIA_DO_PLANO_MS,
@@ -56,6 +57,7 @@ from api.correcoes import (
     sobrepoe,
     sobrepoe_de_verdade,
     sobrepoe_metade,
+    trocar_o_locutor_no_grupo,
     valor_do_item,
 )
 from api.decupagem import (
@@ -63,7 +65,7 @@ from api.decupagem import (
     id_posicional,
 )
 from api.identidade import identidade_do_nome, nao_identificado
-from api.marcas import CatalogoDeMarcas, MarcaDoCatalogo, nomes_de_busca_da_marca
+from api.marcas import CatalogoDeMarcas
 from api.pessoas import LISTAS
 from api.texto import normalizar
 from api.tipo_do_objeto import tipo_canonico_de
@@ -280,7 +282,7 @@ def _id_no_catalogo(
             achado is None
             or achado.lixeira is not None
             or (isinstance(achado, PessoaDoCatalogo) and achado.fundida is not None)
-            or normalizar(novo.valor) not in _nomes_de_busca(achado)
+            or normalizar(novo.valor) not in nomes_de_busca(achado)
         ):
             raise CatalogoIdInvalido(novo.catalogo_id)
         return achado.id
@@ -288,12 +290,6 @@ def _id_no_catalogo(
         return None
     achadas = catalogo.achar(novo.valor)
     return achadas[0].id if len(achadas) == 1 else None
-
-
-def _nomes_de_busca(entrada: PessoaDoCatalogo | MarcaDoCatalogo) -> list[str]:
-    if isinstance(entrada, PessoaDoCatalogo):
-        return nomes_de_busca(entrada)
-    return nomes_de_busca_da_marca(entrada)
 
 
 def estado_das(correcoes: list[Correcao]) -> EstadoDasCorrecoes:
@@ -638,8 +634,11 @@ def _aplicar_no_item(resultado: dict[str, Any], c: Correcao) -> None:
         except ItemInexistente:
             return  # o que a correção aponta já não existe nesta versão
     for item in itens_com_o_id(resultado, c):
+        anterior = str(item.get("locutor", ""))
         aplica(item, c)
         item["origem"] = "revisao"
+        if c.tipo == "fala.texto":
+            trocar_o_locutor_no_grupo(resultado, item, anterior)
 
 
 def pares_proibidos(correcoes: Sequence[Correcao]) -> set[frozenset[str]]:
@@ -831,6 +830,7 @@ def aplicar(
     esvaziadas: list[dict[str, Any]] = []
     # Quem recebeu troca de nome, e em que ordem: a junção fica com a mais nova.
     renomeadas: dict[int, int] = {}
+    ordem_das_renomeacoes = 0
     atendidas = {c.id for c in reconciliadas.atendidas}
     reapontadas = {c.id for c in reconciliadas.casadas}
     da_versao = [
@@ -895,11 +895,13 @@ def aplicar(
             if id(pessoa) not in aplicadas or c.id in atendidas:
                 continue
             if c.tipo == "pessoa.renomear":
-                renomeadas[id(pessoa)] = len(renomeadas) + 1
+                ordem_das_renomeacoes += 1
+                renomeadas[id(pessoa)] = ordem_das_renomeacoes
             if entrada.pode_esvaziar:
                 esvaziadas.append(pessoa)
     _juntar_as_do_mesmo_nome(resultado, renomeadas)
     resultado.pop("_separadas", None)
+    resultado.pop(GRUPOS_DE_FALAS, None)
     # A pessoa que ficou sem nenhuma ocorrência some da decupagem, e das pautas.
     sumidas = [e for e in esvaziadas if not any(e[lista] for lista in LISTAS)]
     if sumidas:

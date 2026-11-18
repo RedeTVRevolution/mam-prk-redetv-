@@ -208,6 +208,9 @@ class _RepositorioQueRepassa:
     def contar_criados(self, criado_por: str, desde: datetime) -> int:
         return self._repositorio.contar_criados(criado_por, desde)
 
+    def contar_do_programa(self, nome: str) -> int:
+        return self._repositorio.contar_do_programa(nome)
+
 
 class RepositorioQuePublicaOFim(_RepositorioQueRepassa):
     """Repositório de Jobs que publica o evento a cada transição para `concluido` ou
