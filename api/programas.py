@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from threading import Lock
 from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel
@@ -301,8 +302,14 @@ class _PerfisSobDemanda(Mapping[str, PerfilDoPrograma]):
         self._programas = {p.nome: p for p in programas}
         self._catalogo = catalogo
         self._prontos: dict[str, PerfilDoPrograma] = {}
+        # As janelas em paralelo de um vídeo dividem o mapa: o perfil se monta uma vez.
+        self._trava = Lock()
 
     def __getitem__(self, nome: str) -> PerfilDoPrograma:
+        with self._trava:
+            return self._montado(nome)
+
+    def _montado(self, nome: str) -> PerfilDoPrograma:
         if nome not in self._prontos:
             programa = self._programas[nome]
             visiveis, _ = pessoas_do_programa(programa, self._catalogo)

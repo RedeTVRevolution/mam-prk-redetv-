@@ -1,5 +1,7 @@
 """As operações de programa leem em lote e só o que precisam (#718, spec #634)."""
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
@@ -47,6 +49,23 @@ def _cadastro(n: int) -> tuple[ProgramasEmMemoria, CatalogoQueConta]:
             )
         )
     return ProgramasEmMemoria(programas), catalogo
+
+
+def test_janelas_em_paralelo_montam_o_perfil_uma_vez_so() -> None:
+    programas, catalogo = _cadastro(1)
+    original = catalogo.obter_varios
+
+    def lento(ids: Any) -> Any:
+        time.sleep(0.05)  # as outras threads chegam enquanto a primeira lê
+        return original(ids)
+
+    catalogo.obter_varios = lento  # type: ignore[method-assign]
+    perfis = perfis_dos_programas(programas, catalogo)
+    with ThreadPoolExecutor(8) as executor:
+        nomes = list(executor.map(lambda _: perfis["Programa 0"].nome, range(8)))
+
+    assert nomes == ["Programa 0"] * 8
+    assert len(catalogo.lotes) == 1
 
 
 def test_perfis_le_o_catalogo_so_para_o_programa_pedido() -> None:
