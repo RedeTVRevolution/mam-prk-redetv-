@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from api.agent_retrieval import AgentRetrieval, ConfigDaBusca
 from api.auth import Usuario
 from api.busca import (
     TETO_DA_LISTA_BYTES,
@@ -42,7 +43,13 @@ from api.entendimento_da_consulta import (
 )
 from api.eventos_de_uso import Eventos, EventosEmMemoria
 from api.gemini import ErroHttp
-from api.indice_da_busca import Consulta, Filtros, IndiceEmMemoria, Registro
+from api.indice_da_busca import (
+    Consulta,
+    Filtros,
+    IndiceDaBusca,
+    IndiceEmMemoria,
+    Registro,
+)
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
 from api.marcas import CatalogoDeMarcasEmMemoria
@@ -50,6 +57,12 @@ from api.modelo_do_job import CursorInvalido, Job
 from api.papeis import Papel, RepositorioDePapeisEmMemoria
 from api.programas import Programa, ProgramasEmMemoria
 from api.rota_da_busca import LIMITES_DA_IMAGEM, TEMPO_MAXIMO_S, LimitesDaImagem
+from api.tests.test_agent_retrieval import (
+    CONFIG,
+    SEM_INDICES,
+    _esperar_o_cache,
+    _transporte_de_busca,
+)
 from api.tests.test_auth import VerificadorFalso
 from api.tests.test_gemini import TransporteFalso
 from api.tests.test_jobs import ArmazenamentoFalso
@@ -144,11 +157,12 @@ class Mundo:
         ranking: Ranking | None = None,
         relogio: Callable[[], datetime] = lambda: BASE,
         cache: CacheCurto | None = None,
+        indice: IndiceDaBusca | None = None,
     ) -> Busca:
         return Busca(
             transporte=self.transporte,
             catalogo=self.catalogo,
-            indice=self.indice,
+            indice=indice or self.indice,
             ranking=ranking or RankingEmOrdem(),
             repositorio=self.jobs,
             armazenamento=self.armazenamento,
@@ -2706,3 +2720,94 @@ def test_frase_so_de_pontuacao_nao_casa_com_tudo() -> None:
     m.com(job("j1"), objeto("a", "j1", 0, 1_000, texto="produto com desconto"))
     assert buscar(m, "desconto").videos  # sem as aspas, o registro é achado
     assert buscar(m, '"%" desconto').videos == []
+
+
+class _RankingEspiao:
+    def __init__(self) -> None:
+        self.consultas: list[str] = []
+
+    def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+        self.consultas.append(consulta)
+        return registros
+
+
+def _o_que_vai_ao_modelo(m: Mundo, texto: str) -> tuple[set[str], list[str]]:
+    """O significado de cada cláusula e o texto do Ranking, numa busca por `texto`."""
+    ranking = _RankingEspiao()
+    m.indice.consultas.clear()
+    m.busca(ranking=ranking).buscar(texto)
+    return {
+        c.significado for c in m.indice.consultas if c.significado
+    }, ranking.consultas
+
+
+def _embutidos(chamadas: list[tuple[str, Any]]) -> list[str]:
+    """O texto que vira embedding: o do `:predict` (KNN e cache) e o do `semanticSearch`."""
+    textos: list[str] = []
+    for caminho, corpo in chamadas:
+        if caminho.endswith(":predict"):
+            textos += [i["content"] for i in corpo["instances"]]
+        elif caminho.endswith(":batchSearch"):
+            textos += [
+                b["semanticSearch"]["searchText"]
+                for b in corpo["searches"]
+                if "semanticSearch" in b
+            ]
+    return textos
+
+
+@pytest.mark.parametrize("config", [CONFIG, SEM_INDICES], ids=["ann", "knn"])
+def test_o_embedding_recebe_a_mesma_grafia_com_e_sem_acento(
+    config: ConfigDaBusca,
+) -> None:
+    # Cache frio: um índice novo para cada grafia.
+    for digitado in ["praça", "praca", "PRACA"]:
+        chamadas: list[tuple[str, Any]] = []
+        indice = AgentRetrieval(config, _transporte_de_busca(chamadas))
+        Mundo().busca(indice=indice).buscar(f"{digitado} central")
+        _esperar_o_cache()
+        assert set(_embutidos(chamadas)) == {"praça central"}
+    # Cache quente: depois da primeira grafia, as outras não pedem embedding.
+    chamadas = []
+    indice = AgentRetrieval(config, _transporte_de_busca(chamadas))
+    Mundo().busca(indice=indice).buscar("praça central")
+    _esperar_o_cache()
+    chamadas.clear()
+    for digitado in ["praca", "PRACA"]:
+        Mundo().busca(indice=indice).buscar(f"{digitado} central")
+        _esperar_o_cache()
+    assert not [c for c, _ in chamadas if c.endswith(":predict")]
+    assert set(_embutidos(chamadas)) <= {"praça central"}
+
+
+def test_o_significado_da_pessoa_e_o_ranking_recebem_a_mesma_grafia() -> None:
+    m = Mundo()
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1",
+            tipo="fala",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="Sabrina Sato na praça",
+        ),
+    )
+    vistos = [
+        _o_que_vai_ao_modelo(m, f"Sabrina Sato na {d}")
+        for d in ["praça", "praca", "PRACA"]
+    ]
+    assert vistos == [({"Sabrina Sato na praça"}, ["Sabrina Sato na praça"])] * 3
+
+
+def test_nome_do_catalogo_marca_e_palavra_ambigua_vao_como_foram_digitados() -> None:
+    m = Mundo()
+    m.catalogo.acrescentar("Rita Leao", "cantora", [])
+    texto = "Rita Leao pais país coco cocô Itau"
+    m.com(
+        job("j1"),
+        Registro(
+            id="f1", tipo="fala", job_id="j1", inicio_ms=0, fim_ms=1_000, texto=texto
+        ),
+    )
+    assert _o_que_vai_ao_modelo(m, texto) == ({texto}, [texto])

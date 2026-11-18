@@ -25,6 +25,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from api.acento import com_acento
 from api.cache_curto import CacheCurto
 from api.catalogo import Catalogo, CopiaCurta, PessoaDoCatalogo
 from api.entendimento_da_consulta import (
@@ -688,7 +689,9 @@ class Busca:
             try:
                 achados = [
                     *self._reordenar(
-                        impressao, _texto_da_busca(entendida), achados[:TETO_DO_RANKING]
+                        impressao,
+                        _ao_modelo(_texto_da_busca(entendida), entendida, nome),
+                        achados[:TETO_DO_RANKING],
                     ),
                     *achados[TETO_DO_RANKING:],
                 ]
@@ -985,6 +988,7 @@ class Busca:
                 _clausulas_da_pessoa(pessoa, e, base, nome, pessoa in contam)
             )
         if livre := _texto_da_busca(e):
+            significado = _ao_modelo(livre, e, nome)
             tipos: list[TipoDeRegistro | None] = []
             por_evidencia: tuple[tuple[EvidenciaDaBusca, TipoDeRegistro], ...] = (
                 ("imagem", "plano"),
@@ -1005,7 +1009,7 @@ class Busca:
                         Consulta(
                             filtros=replace(base, tipo=tipo_do_texto),
                             texto=com_as_formas(livre),
-                            significado=livre,
+                            significado=significado,
                             cortar_significado=True,
                         ),
                         lambda r: _motivo(r, nome),
@@ -1297,6 +1301,16 @@ def _texto_da_busca(e: ConsultaEntendida) -> str:
     return " ".join(p for p in (e.frase_exata, e.texto_livre) if p)
 
 
+def _ao_modelo(
+    texto: str, e: ConsultaEntendida, nome: Callable[[str | None], str | None]
+) -> str:
+    """O texto do significado e do Ranking, com o acento das palavras comuns (#731); as
+    palavras do nome das pessoas citadas ficam como foram digitadas."""
+    return com_acento(
+        texto, {p for i in e.pessoas for p in normalizar(nome(i) or "").split()}
+    )
+
+
 def _contem(texto: str, frase: str) -> bool:
     """A frase inteira no texto, com as palavras juntas e na ordem, sem acento nem maiúscula."""
     procuradas = [raizes(p) for p in re.findall(r"\w+", frase)]
@@ -1341,7 +1355,7 @@ def _clausulas_da_pessoa(
             _Clausula(
                 Consulta(
                     filtros=replace(base, tipo="plano", pessoa=pessoa),
-                    significado=e.texto_livre or quem,
+                    significado=_ao_modelo(e.texto_livre, e, nome) or quem,
                 ),
                 lambda r: f"Na imagem: {quem}",
                 pessoa_na_imagem=pessoa,
