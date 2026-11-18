@@ -207,6 +207,9 @@ class RegistroDaCorrecao:
             tipo_de_correcao=registro.tipo,
         )
         if self._recalcula(registro, antes, lido):
+            # ponytail: reusa o modelo já lido (#720). Se a identificação gravar outra
+            # Decupagem nesse meio-tempo, o Catálogo do Job sai da versão velha até a
+            # próxima Correção ou o `make preencher-catalogo-dos-jobs` (aceito em 18/11).
             atualizar_catalogo_do_job(job, self._jobs, self._leitura, lido)
         return registro
 
