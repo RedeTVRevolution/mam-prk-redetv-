@@ -184,3 +184,58 @@ def test_trocar_para_nao_identificado_nao_junta() -> None:
         "pes05",
         "pes06",
     ]
+
+
+def _dois_alberto_souza(mundo: Mundo) -> tuple[str, str]:
+    velho = mundo.catalogo.acrescentar("Alberto Souza", "repórter", []).id
+    novo = mundo.catalogo.acrescentar("Alberto Souza", "ator", []).id
+    return velho, novo
+
+
+def _catalogo_id_da_juncao(mundo: Mundo) -> Any:
+    [alberto, _] = mundo.decupagem()["pessoas"]
+    return alberto.get("catalogo_id")
+
+
+def test_renomear_a_mesma_pessoa_varias_vezes_nao_empata_com_a_proxima() -> None:
+    mundo = _mundo()
+    velho, novo = _dois_alberto_souza(mundo)
+    _corrigir(mundo, "pessoa.renomear", "pes01", "Beto")
+    _corrigir(mundo, "pessoa.renomear", "pes01", "Beto Souza")
+    _corrigir(mundo, "pessoa.renomear", "pes01", "Alberto Souza", catalogo_id=velho)
+
+    _corrigir(mundo, "pessoa.renomear", "pes05", "Alberto Souza", catalogo_id=novo)
+
+    assert _catalogo_id_da_juncao(mundo) == novo
+
+
+def test_a_ordem_das_renomeacoes_e_a_da_aprovacao_nao_a_da_criacao() -> None:
+    mundo = _mundo()
+    mundo.aprovacao.definir(frozenset({"pessoa.renomear"}))
+    velho, novo = _dois_alberto_souza(mundo)
+    # A de pes05 é criada primeiro, mas só entra em vigor na aprovação.
+    pendente = _corrigir(
+        mundo, "pessoa.renomear", "pes05", "Alberto Souza", catalogo_id=novo
+    )
+    for nome in ("Beto", "Alberto Souza"):
+        resposta = mundo.cliente.post(
+            "/v1/jobs/j1/correcoes",
+            json={
+                "tipo": "pessoa.renomear",
+                "item_id": "pes01",
+                "valor": nome,
+                "motivo": "m",
+                "versao": VERSAO,
+                **({"catalogo_id": velho} if nome != "Beto" else {}),
+            },
+            headers={"Authorization": "Bearer token-curador"},
+        )
+        assert resposta.status_code == 201, resposta.text
+        mundo.avancar()
+
+    mundo.cliente.post(
+        f"/v1/jobs/j1/correcoes/{pendente}/aprovar",
+        headers={"Authorization": "Bearer token-curador"},
+    )
+
+    assert _catalogo_id_da_juncao(mundo) == novo
