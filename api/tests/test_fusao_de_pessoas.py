@@ -661,6 +661,54 @@ def test_fusao_pendente_cujo_destino_foi_fundido_depois_passa_os_jobs_ao_vigente
     assert _fundida(mundo).destino_id == mundo.sabrina.id  # o gravado não muda
 
 
+def test_destino_fundido_durante_a_retomada_leva_os_jobs_ao_novo_vigente() -> None:
+    mundo = Mundo()
+    c = mundo.catalogo.acrescentar("Sabrina Sato Oficial", "", [])
+    _cai_uma_vez(mundo.jobs, "trocar")
+    assert mundo.fundir().status_code == 500  # A -> B pendente, Jobs ainda em A
+    original = mundo.fotos.apagar_prefixo
+    outra: list[Any] = []
+
+    def b_vai_para_c_no_meio(prefixo: str) -> None:
+        if not outra:  # depois de a retomada resolver B, antes de passar os Jobs
+            outra.append(None)
+            outra[0] = mundo.fundir(origem=mundo.sabrina.id, destino=c.id)
+        original(prefixo)
+
+    mundo.fotos.apagar_prefixo = b_vai_para_c_no_meio  # type: ignore[method-assign]
+
+    assert _retomar(mundo) == 1
+
+    assert outra[0].status_code == 200
+    for id in ("j1", "j2"):
+        job = mundo.jobs.obter(id)
+        assert job and job.pessoas_do_catalogo == [c.id]
+
+
+@pytest.mark.parametrize("sabotar", ["purgado", "ciclo"])
+def test_cadeia_sem_pessoa_valida_tira_a_origem_dos_jobs(sabotar: str) -> None:
+    mundo = Mundo()
+    c = mundo.catalogo.acrescentar("Sabrina Sato Oficial", "", [])
+    _cai_uma_vez(mundo.jobs, "trocar")
+    assert mundo.fundir().status_code == 500  # A -> B pendente, Jobs ainda em A
+    assert mundo.fundir(origem=mundo.sabrina.id, destino=c.id).status_code == 200
+    if sabotar == "purgado":
+        mundo.catalogo.apagar(c.id)
+    else:
+        fusao = mundo.catalogo.obter(mundo.sabrina.id).fundida  # type: ignore[union-attr]
+        assert fusao is not None
+        mundo.catalogo.definir_fusao(
+            c.id, fusao.model_copy(update={"destino_id": mundo.sabrina.id})
+        )
+
+    assert _retomar(mundo) == 1
+
+    for id in ("j1", "j2"):
+        job = mundo.jobs.obter(id)
+        assert job and job.pessoas_do_catalogo == []
+    assert _fundida(mundo).fase is None
+
+
 def test_a_retomada_acha_a_origem_escondida_das_buscas_nas_duas_fases() -> None:
     mundo = Mundo()
     outra = mundo.catalogo.acrescentar("Outra", "", [])

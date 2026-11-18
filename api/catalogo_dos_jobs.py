@@ -61,16 +61,18 @@ def atualizar_catalogo_do_job(
 
 
 def passar_pessoa_nos_jobs(
-    repositorio: "RepositorioDeJobs", origem_id: str, destino_id: str
+    repositorio: "RepositorioDeJobs", origem_id: str, destino_id: str | None
 ) -> bool:
     """Na fusão, os vídeos da origem (até os da lixeira) passam a listar o destino. Nunca
-    levanta: diz se todos os Jobs foram trocados; o que falha fica com a origem, e a fusão
+    levanta: diz se todos os Jobs foram trocados (sem destino, a origem só sai); o que falha fica com a origem, e a fusão
     pendente (ou a carga `make preencher-catalogo-dos-jobs`) o conserta."""
 
     def trocar(job: "Job") -> dict[str, Any] | None:
         if origem_id not in job.pessoas_do_catalogo:
             return None
-        ids = {destino_id, *(i for i in job.pessoas_do_catalogo if i != origem_id)}
+        ids = {i for i in job.pessoas_do_catalogo if i != origem_id}
+        if destino_id is not None:
+            ids.add(destino_id)
         return {"pessoas_do_catalogo": sorted(ids)}
 
     try:

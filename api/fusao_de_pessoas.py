@@ -63,23 +63,27 @@ class FusaoNaoConcluida(Exception):
     """Nem todos os Jobs trocaram a origem pelo destino; o marcador fica e a retomada repete."""
 
 
-def destino_vigente(pessoas: Catalogo, destino_id: str) -> str:
+def destino_vigente(pessoas: Catalogo, destino_id: str) -> str | None:
     """A pessoa que vale hoje: segue a cadeia de fusões (o destino pode ter sido fundido
-    depois) até quem não está fundido. Pára num id que não existe ou que já se viu."""
-    vistos = {destino_id}
-    while (pessoa := pessoas.obter(destino_id)) and pessoa.fundida:
-        destino_id = pessoa.fundida.destino_id
-        if destino_id in vistos:
-            break
+    depois) até quem não está fundido. `None` se a cadeia chega a um id que não existe ou
+    dá a volta: como na leitura (`api.quem_conta`), a origem fica sem pessoa."""
+    vistos: set[str] = set()
+    while destino_id not in vistos:
         vistos.add(destino_id)
-    return destino_id
+        pessoa = pessoas.obter(destino_id)
+        if pessoa is None:
+            return None
+        if pessoa.fundida is None:
+            return destino_id
+        destino_id = pessoa.fundida.destino_id
+    return None
 
 
 def _passar_os_nomes(
-    pessoas: Catalogo, origem: PessoaDoCatalogo, destino_id: str
+    pessoas: Catalogo, origem: PessoaDoCatalogo, destino_id: str | None
 ) -> None:
     """O nome e os apelidos da origem viram apelidos do destino; repetir não duplica."""
-    destino = pessoas.obter(destino_id)
+    destino = pessoas.obter(destino_id) if destino_id else None
     if destino is None:
         return
     ja_tem = set(nomes_de_busca(destino))
@@ -130,8 +134,17 @@ def concluir_fusao(
     # Rosto é dado sensível: as fotos da origem saem, e as do destino ficam.
     apagar_fotos_da_pessoa(fotos, pessoas, origem)
     # Os Jobs vão ao destino vigente, não ao gravado (#722): ele pode ter sido fundido depois.
-    if not passar_pessoa_nos_jobs(repositorio, origem.id, destino_id):
-        raise FusaoNaoConcluida(origem.id)
+    # Se o destino foi fundido enquanto os Jobs passavam, eles seguem para o novo vigente.
+    de = origem.id
+    while True:
+        if not passar_pessoa_nos_jobs(repositorio, de, destino_id):
+            raise FusaoNaoConcluida(origem.id)
+        if (
+            destino_id is None
+            or (agora := destino_vigente(pessoas, destino_id)) == destino_id
+        ):
+            break
+        de, destino_id = destino_id, agora
     ao_fundir()
     _avancar(
         pessoas,
