@@ -246,7 +246,7 @@ test('erro da API ao juntar fica no formulário', async () => {
   expect(screen.getByRole('form', { name: 'Juntar 2 pautas' })).toBeTruthy()
 })
 
-test('sair do modo de revisão (E) esquece as pautas marcadas e o formulário aberto', async () => {
+test('com a junção aberta, Aprovar Revisão (E) espera: avisa e não sai do modo (#743)', async () => {
   const { usuario } = await abrir()
   await usuario.click(screen.getByRole('button', { name: 'Marcar Abertura para juntar' }))
   await usuario.click(screen.getByRole('button', { name: 'Marcar Debate para juntar' }))
@@ -255,11 +255,23 @@ test('sair do modo de revisão (E) esquece as pautas marcadas e o formulário ab
   await usuario.click(document.body)
 
   await usuario.keyboard('e')
+
+  expect(await screen.findByText('Salve ou cancele a correção aberta antes de aprovar a revisão.')).toBeTruthy()
+  expect(screen.getByText('Catalogando')).toBeTruthy()
+  expect(screen.getByRole('form', { name: 'Juntar 2 pautas' })).toBeTruthy()
+})
+
+test('sair do modo de revisão (E) esquece as pautas marcadas', async () => {
+  const { usuario } = await abrir()
+  await usuario.click(screen.getByRole('button', { name: 'Marcar Abertura para juntar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Marcar Debate para juntar' }))
+  await usuario.click(document.body)
+
+  await usuario.keyboard('e')
   await waitFor(() => expect(screen.queryByText('Catalogando')).toBeNull())
   await usuario.keyboard('e')
   await screen.findByText('Catalogando')
 
-  expect(screen.queryByRole('form', { name: 'Juntar 2 pautas' })).toBeNull()
   expect(screen.queryByText('2 pautas marcadas para juntar')).toBeNull()
 })
 

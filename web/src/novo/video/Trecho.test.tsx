@@ -307,12 +307,18 @@ test('as alças do trecho movem as bordas; Enter grava o que o campo mostra e Es
   expect(JSON.parse(String(correcoes[0].valor))).toMatchObject({ titulo: 'Clima', inicio_ms: 10_000, fim_ms: 21_000 })
 })
 
-test('sair do modo de catalogação descarta o trecho', async () => {
+test('com o campo do trecho aberto, Aprovar Revisão (E) espera: avisa e não sai do modo (#743)', async () => {
   const { usuario } = await trechoPorTeclas(10, 20)
   await usuario.keyboard('a')
   await usuario.keyboard('e')
-  expect(screen.queryByText('00:10–00:20')).toBeNull()
-  expect(screen.queryByRole('tablist', { name: 'Tipo do trecho' })).toBeNull()
+  expect(await screen.findByText('Salve ou cancele a correção aberta antes de aprovar a revisão.')).toBeTruthy()
+  expect(screen.getByRole('tablist', { name: 'Tipo do trecho' })).toBeTruthy()
+})
+
+test('sair do modo de catalogação descarta o trecho só marcado', async () => {
+  const { usuario } = await trechoPorTeclas(10, 20)
+  await usuario.keyboard('e')
+  await waitFor(() => expect(screen.queryByText('00:10–00:20')).toBeNull())
 })
 
 test('sem o modo de catalogação, I, O e A não fazem nada e não há botões do trecho', async () => {

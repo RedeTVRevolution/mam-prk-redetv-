@@ -771,14 +771,18 @@ test('fluxo completo: corrigir fora do modo, gravar e aprovar a revisão com um 
   await usuario.keyboard('{Enter}')
   await waitFor(() => expect(correcoes).toHaveLength(1))
 
-  // Com a gravação em curso, o E não aprova.
+  // Com a gravação em curso, mesmo com o formulário fechado, nem o E nem o botão aprovam.
+  await usuario.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
   ;(document.activeElement as HTMLElement).blur()
   await usuario.keyboard('e')
+  await usuario.click(botaoDoTopo())
+  expect(await screen.findByText('Espere a correção ser gravada para aprovar a revisão.')).toBeTruthy()
   expect(aprovacoesDaRevisao).toBe(0)
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
 
   liberar()
-  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
-  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
+  await waitFor(() => expect(cargas).toBeGreaterThan(1))
 
   await usuario.click(botaoDoTopo())
   await waitFor(() => expect(aprovacoesDaRevisao).toBe(1))

@@ -26,6 +26,7 @@ const DECUPAGEM = {
 }
 
 const correcoes: Record<string, unknown>[] = []
+let aprovacoesDaRevisao = 0
 
 const servidor = setupServer(
   ...rotasDoVideo(
@@ -39,6 +40,10 @@ const servidor = setupServer(
     const { quadros } = (await request.json()) as { quadros: { arquivo: string }[] }
     return HttpResponse.json(quadros.map((q) => ({ ...q, url: `https://exemplo.test/${q.arquivo}`, expira_em: '2999-01-01T00:00:00Z' })))
   }),
+  http.post('/v1/jobs/j1/revisao/aprovar', () => {
+    aprovacoesDaRevisao += 1
+    return HttpResponse.json({ indexacao: 'pendente' }, { status: 202 })
+  }),
   http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
     correcoes.push((await request.json()) as Record<string, unknown>)
     return HttpResponse.json({}, { status: 201 })
@@ -48,6 +53,7 @@ beforeAll(() => servidor.listen({ onUnhandledFrame: 'error' }))
 simularPlayer()
 beforeEach(() => {
   correcoes.length = 0
+  aprovacoesDaRevisao = 0
 })
 afterEach(() => {
   servidor.resetHandlers()
@@ -111,4 +117,17 @@ test('fora do Revisar, os objetos do plano não têm botões de correção', asy
   expect(await inspetor().findByTestId('caixa-do-objeto')).toBeTruthy()
   expect(inspetor().queryByRole('button', { name: 'Não é isto' })).toBeNull()
   expect(inspetor().queryByRole('group', { name: /^Corrigir todos/ })).toBeNull()
+})
+
+test('recolher a seção Objetos descarta a correção aberta do grupo, que não trava o Aprovar Revisão', async () => {
+  const usuario = await abrir()
+  await usuario.click(within(inspetor().getByRole('group', { name: 'Corrigir todos: relógio de parede' })).getByRole('button', { name: 'Corrigir nome' }))
+  await screen.findByRole('form', { name: 'Corrigir nome de 3 objetos, em 2 planos' })
+
+  await usuario.click(inspetor().getByRole('button', { name: /^Objetos \d+$/ }))
+  await usuario.click(inspetor().getByRole('button', { name: /^Objetos \d+$/ }))
+  expect(screen.queryByRole('form')).toBeNull()
+
+  await usuario.click(screen.getByRole('button', { name: 'Aprovar Revisão' }))
+  await waitFor(() => expect(aprovacoesDaRevisao).toBe(1))
 })

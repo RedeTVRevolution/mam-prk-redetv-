@@ -34,7 +34,7 @@ export function useRevisao({
   mostrarAviso: (texto: string) => void
   /** Chamado a cada entrada e saída: o que a revisão abriu (trecho, marcas) se descarta aqui. */
   aoAlternar: () => void
-  /** Um formulário ou uma confirmação de correção aberta: aprovar a revisão espera por ela. */
+  /** Um formulário ou uma confirmação de correção aberta (inclusive juntar, dividir e trecho): aprovar a revisão espera por ela. */
   comCorrecaoAberta: boolean
 }) {
   const api = useApi()

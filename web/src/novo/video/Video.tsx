@@ -295,7 +295,8 @@ export function Video({
       setTrecho(null)
       setDescrevendo(false)
     },
-    comCorrecaoAberta: edicao !== null,
+    // Qualquer formulário de correção: corrigir, juntar ou dividir pautas, descrever o trecho.
+    comCorrecaoAberta: edicao !== null || estrutura !== null || descrevendo,
   })
 
   // A sessão de revisão (#251) vale no modo de revisão; a pessoa não vê nada dela.
@@ -1192,7 +1193,11 @@ export function Video({
             instante={instante}
             duracaoMs={duracaoDaLinhaMs}
             secao={secao}
-            aoTrocarSecao={setSecao}
+            aoTrocarSecao={(s) => {
+              // A correção do inventário mora na seção Objetos: recolhê-la descarta a correção, que não trava o Aprovar escondida.
+              if (edicao?.modo === 'inventario' && s !== 'objetos') fecharEdicao()
+              setSecao(s)
+            }}
             selecionada={selecionada}
             detalhe={detalhe && !!selecionado}
             aoAbrir={abrirItem}
