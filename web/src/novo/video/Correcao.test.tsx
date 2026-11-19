@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import catalogo from '../../catalogo.fixture.json'
-import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
+import { abrirVideo, botaoDoTopo, rotasDoVideo, simularPlayer, type Usuario } from './abrir-teste.tsx'
 
 // A paridade da correção com o Catalogacao.test.tsx, o Trecho.test.tsx (o campo de nome) e o
 // BuscaNoVisualizador.test.tsx (as marcas da correção) da interface antiga. Quem tem decupagem.editar
@@ -690,8 +690,6 @@ test('F2 e Del com a comparação aberta fecham a comparação e mostram o formu
 
 // ---------- #743: começar a correção fora do Revisar liga o modo ----------
 
-type Usuario = ReturnType<typeof userEvent.setup>
-const botaoDoTopo = () => screen.getByRole('button', { name: /^(Revisar|Aprovar Revisão)$/ })
 
 test.each([
   ['o botão Corrigir', abrirPauta, (u: Usuario) => u.click(detalhe().getByRole('button', { name: 'Corrigir' })), /Corrigir Eleição/],

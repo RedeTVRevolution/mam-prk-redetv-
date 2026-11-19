@@ -1,5 +1,6 @@
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, expect, vi } from 'vitest'
 import { criarClienteDaApi } from '../../api.ts'
@@ -11,6 +12,11 @@ import { TooltipProvider } from '../ui/tooltip.tsx'
 import { TelaDoVideo } from './TelaDoVideo.tsx'
 
 // O que os testes da tela do vídeo têm em comum: o Job, o servidor simulado e a montagem.
+
+export type Usuario = ReturnType<typeof userEvent.setup>
+
+/** O botão do topo: Revisar fora do modo, Aprovar Revisão dentro dele. */
+export const botaoDoTopo = () => screen.getByRole('button', { name: /^(Revisar|Aprovar Revisão)$/ })
 
 export const JOB: Job = {
   id: 'j1',

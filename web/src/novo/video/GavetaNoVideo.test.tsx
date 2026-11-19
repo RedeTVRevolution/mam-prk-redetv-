@@ -5,7 +5,7 @@ import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import catalogo from '../../catalogo.fixture.json'
 import { criarClienteDeConsultas } from '../consultas.ts'
-import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
+import { abrirVideo, botaoDoTopo, rotasDoVideo, simularPlayer, type Usuario } from './abrir-teste.tsx'
 import { correcaoDoHistorico, DECUPAGEM } from './curadoria-teste.ts'
 import { chaveDoVideo } from './tipos.ts'
 
@@ -248,10 +248,6 @@ test('uma decupagem nova (reprocessar) traz o histórico e a fila de novo; a mes
 })
 
 // #744: enviar uma decisão da gaveta fora do Revisar liga o modo; aprovar a revisão espera a decisão em curso.
-
-type Usuario = ReturnType<typeof userEvent.setup>
-
-const botaoDoTopo = () => screen.getByRole('button', { name: /^(Revisar|Aprovar Revisão)$/ })
 
 const FILA_COM_CANDIDATO = {
   ...FILA_ESTRUTURAL,

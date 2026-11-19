@@ -206,6 +206,8 @@ export function Gaveta({
     setAviso(aoSaltar(correcao) ? null : 'Este item não está mais na decupagem.')
   }
 
+  // O aviso da própria gaveta vence o da tela.
+  const avisoVisivel = aviso ?? avisoDaTela
   const noHistorico = aba === 'historico'
   const atalhos: Atalho[] = [
     {
@@ -286,9 +288,9 @@ export function Gaveta({
           {podeAprovar && <Aba valor="aprovacao">{`Aprovação (${pendentes.length})`}</Aba>}
         </Tabs.List>
         <div ref={lista} className="grid content-start gap-2 p-3">
-          {(aviso ?? avisoDaTela) && (
+          {avisoVisivel && (
             <p role="status" className="text-sm">
-              {aviso ?? avisoDaTela}
+              {avisoVisivel}
             </p>
           )}
           {erro && (
