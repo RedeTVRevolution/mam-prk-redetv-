@@ -155,8 +155,11 @@ class ApiLocal:
 
 
 def _criar(mundo: Mundo, chave: str, sistema: str = "Legado A") -> tuple[int, Any]:
+    # Um nome por chave: o mesmo nome com a mesma data cairia na trava do
+    # envio repetido, que em paralelo só às vezes vê o Job do vizinho.
+    corpo = {**CORPO, "nome": f"{chave}.mp4"}
     return ApiLocal(mundo).requisitar(
-        "POST", "/jobs", sistema=sistema, corpo=CORPO, chave=chave
+        "POST", "/jobs", sistema=sistema, corpo=corpo, chave=chave
     )
 
 
