@@ -42,6 +42,7 @@ from api.indice_da_busca import (
     IndiceDaBusca,
     Registro,
     TipoDeRegistro,
+    palavras,
 )
 from api.jobs import VALIDADE_DA_IMAGEM, VALIDADE_INFORMADA_DA_IMAGEM, Armazenamento
 from api.lixeira_na_leitura import (
@@ -56,7 +57,7 @@ from api.marcas import (
     MarcaDoCatalogo,
 )
 from api.modelo_do_job import CursorInvalido, Job, RepositorioDeJobs
-from api.numero import com_as_formas, mesma_palavra, raizes, singular
+from api.numero import com_as_formas, em_grupo, mesma_palavra, raizes, singular
 from api.quem_conta import QuemConta
 from api.texto import chave_da_marca, normalizar
 from api.variantes import Variantes
@@ -413,7 +414,7 @@ class Busca:
         nomes_do_acervo: Callable[[], list[str]] | None = None,
     ) -> None:
         self._marcas = marcas or CatalogoDeMarcasEmMemoria()
-        self._nomes_do_acervo = nomes_do_acervo or list
+        self._nomes_do_acervo = nomes_do_acervo
         # A tabela muda uma vez por dia: relida a cada hora, também quando a leitura falha.
         self._copia_das_variantes = CopiaCurta(
             self._ler_variantes, relogio, VALIDADE_DAS_VARIANTES
@@ -635,7 +636,7 @@ class Busca:
         decidir(entendida.pessoas)
         carregar_nomes(entendida.pessoas)
         intocadas = _intocadas(entendida, nome, self._copia_das_marcas.itens())
-        do_nome = _grafias(entendida, nome, self._copia_das_variantes.itens()[0])
+        do_nome = _grafias(entendida, nome, self.variantes())
         clausulas = self._clausulas(entendida, nome, contam, intocadas, do_nome)
         t_entender = _agora() - inicio
         facetado = ajustes or Ajustes()
@@ -733,7 +734,8 @@ class Busca:
         t_ranking = _agora() - inicio
         _conferir(cancelado)
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
-        termos = _termos(entendida, nome) + do_nome.usadas
+        usadas = do_nome.usadas()
+        termos = _termos(entendida, nome) + usadas
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
         todos = self._videos(trechos, job, termos, ordem, cancelado)
         videos = todos[:limite]
@@ -821,7 +823,7 @@ class Busca:
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
                 termo_da_foto=entendida.saneada if termo_da_foto else None,
-                variantes=[g.capitalize() for g in do_nome.usadas],
+                variantes=[g.capitalize() for g in usadas],
             ),
             videos=videos,
             sem_aparicoes=vazios,
@@ -990,9 +992,14 @@ class Busca:
             return None
         return achado
 
+    def variantes(self) -> Variantes:
+        """As grafias dos nomes do acervo, da cópia de 1 h (lida também na partida)."""
+        return self._copia_das_variantes.itens()[0]
+
     def _ler_variantes(self) -> list[Variantes]:
-        """As grafias dos nomes do acervo; sem elas (falha na leitura), a busca segue sem
-        variantes."""
+        """Sem a tabela (ou com a leitura falhando), a busca segue sem variantes."""
+        if self._nomes_do_acervo is None:
+            return [Variantes()]
         try:
             return [Variantes(self._nomes_do_acervo())]
         except Exception:
@@ -1497,12 +1504,8 @@ class _Grafias:
 
     def no_nome(self, quem: str) -> str:
         """O nome sem acento, com cada palavra que tem outra grafia num grupo OR."""
-        return " ".join(
-            f"({' OR '.join([p, *sorted(outras)])})" if (outras := self.de(p)) else p
-            for p in normalizar(quem).split()
-        )
+        return " ".join(em_grupo(p, self.de(p)) for p in normalizar(quem).split())
 
-    @property
     def usadas(self) -> list[str]:
         return sorted({g for p in self.palavras for g in self.variantes.de(p)})
 
@@ -1511,12 +1514,7 @@ def _grafias(
     e: ConsultaEntendida, nome: Callable[[str | None], str | None], v: Variantes
 ) -> _Grafias:
     nomes = [q for p in e.pessoas if (q := nome(p))]
-    return _Grafias(
-        v,
-        frozenset(
-            re.findall(r"\w+", normalizar(" ".join([e.texto_livre or "", *nomes])))
-        ),
-    )
+    return _Grafias(v, frozenset(palavras(" ".join([e.texto_livre or "", *nomes]))))
 
 
 def _termos(

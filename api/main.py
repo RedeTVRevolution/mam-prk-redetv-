@@ -622,23 +622,27 @@ def criar_app(
             copia_das_pessoas.descartar,
         )
     )
+    busca = Busca(
+        transporte=transporte_da_consulta or SemModelo(),
+        catalogo=catalogo_de_pessoas,
+        indice=indice_da_busca,
+        ranking=ranking or RankingEmOrdem(),
+        repositorio=repositorio_de_jobs,
+        armazenamento=armazenamento_dos_jobs,
+        relogio=relogio,
+        copia_do_catalogo=copia_das_pessoas,
+        listas=listas_da_busca,
+        versao_da_lixeira=versao_da_lixeira,
+        marcas=catalogo_de_marcas,
+        purgas=registro_das_purgas,
+        nomes_do_acervo=nomes_do_acervo,
+    )
+    if nomes_do_acervo:
+        # A tabela dos nomes do acervo (#734) lida em segundo plano: a 1ª busca não espera.
+        aquecer_na_partida([busca.variantes])
     v1.include_router(
         criar_rotas_da_busca(
-            Busca(
-                transporte=transporte_da_consulta or SemModelo(),
-                catalogo=catalogo_de_pessoas,
-                indice=indice_da_busca,
-                ranking=ranking or RankingEmOrdem(),
-                repositorio=repositorio_de_jobs,
-                armazenamento=armazenamento_dos_jobs,
-                relogio=relogio,
-                copia_do_catalogo=copia_das_pessoas,
-                listas=listas_da_busca,
-                versao_da_lixeira=versao_da_lixeira,
-                marcas=catalogo_de_marcas,
-                purgas=registro_das_purgas,
-                nomes_do_acervo=nomes_do_acervo,
-            ),
+            busca,
             relogio,
             busca_por_minuto,
             tempo_maximo_da_busca_s,

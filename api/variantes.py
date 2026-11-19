@@ -11,8 +11,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from api.copia_bigquery import transporte_http
-from api.relatorios import linhas_da_consulta
+from api.relatorios import config_e_transporte_do_ambiente, linhas_da_consulta
 from api.texto import normalizar
 
 _TROCAS = (("ph", "f"), ("th", "t"), ("y", "i"), ("k", "c"), ("w", "v"))
@@ -41,15 +40,19 @@ class Variantes:
 def nomes_do_ambiente(ambiente: Any) -> Callable[[], list[str]] | None:
     """A leitura da tabela dos nomes do acervo, ou `None` se o ambiente não diz onde ela
     mora. Uma consulta lê a tabela inteira (poucos MB, uma vez por hora por instância)."""
-    if "BIGQUERY_TABELA_DE_NOMES" not in ambiente:
+    onde = config_e_transporte_do_ambiente(ambiente)
+    if onde is None or "BIGQUERY_TABELA_DE_NOMES" not in ambiente:
         return None
-    projeto, dataset = ambiente["GCP_PROJECT_ID"], ambiente["BIGQUERY_DATASET"]
-    tabela = f"`{projeto}.{dataset}.{ambiente['BIGQUERY_TABELA_DE_NOMES']}`"
-    transporte = transporte_http(projeto)
-    regiao = ambiente["BIGQUERY_REGIAO"]
+    config, transporte = onde
+    tabela = (
+        f"`{config.projeto}.{config.dataset}.{ambiente['BIGQUERY_TABELA_DE_NOMES']}`"
+    )
 
     def ler() -> list[str]:
         sql = f"SELECT palavra FROM {tabela}"
-        return [linha[0] for linha in linhas_da_consulta(transporte, regiao, sql)]
+        linhas = linhas_da_consulta(
+            transporte, config.regiao, sql, o_que="nomes do acervo"
+        )
+        return [linha[0] for linha in linhas]
 
     return ler

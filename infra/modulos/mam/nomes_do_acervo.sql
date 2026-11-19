@@ -18,9 +18,9 @@ nomes AS (
   HAVING COUNTIF(maiuscula) / COUNT(*) >= 0.6
 ),
 todas AS (
-  SELECT REGEXP_REPLACE(w, r"\pM", "") AS palavra
+  SELECT palavra
   FROM `${tabela_de_momentos}`,
-    UNNEST(REGEXP_EXTRACT_ALL(LOWER(NORMALIZE(texto, NFD)), r"[a-z\x{0300}-\x{036f}]+")) AS w
+    UNNEST(REGEXP_EXTRACT_ALL(REGEXP_REPLACE(LOWER(NORMALIZE(texto, NFD)), r"\pM", ""), r"[a-z]+")) AS palavra
   WHERE tipo IN ("fala", "texto_na_tela", "plano", "pauta")
 )
 SELECT palavra, COUNT(*) AS ocorrencias

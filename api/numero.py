@@ -2,7 +2,7 @@
 "microfone" e "microfones" como a mesma palavra, sem depender do índice."""
 
 import re
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Iterable
 from functools import lru_cache
 
 from api.texto import normalizar
@@ -118,8 +118,14 @@ def mesma_palavra(a: str, b: str) -> bool:
     return not raizes(a).isdisjoint(raizes(b))
 
 
+def em_grupo(palavra: str, outras: Iterable[str]) -> str:
+    """A palavra e as `outras` num grupo OR, como o índice lê; sozinha se não há outras."""
+    grupo = [palavra, *sorted(outras)]
+    return f"({' OR '.join(grupo)})" if len(grupo) > 1 else palavra
+
+
 def com_as_formas(
-    texto: str, variantes: Callable[[str], Collection[str]] = lambda _: ()
+    texto: str, variantes: Callable[[str], set[str]] = lambda _: set()
 ) -> str:
     """Formas sem acento em grupos OR, com as `variantes` de grafia da palavra; palavras
     repetidas e pontuação ficam de fora."""
@@ -130,7 +136,7 @@ def com_as_formas(
         if digitada in vistas:
             continue
         vistas.add(digitada)
-        outras = (formas(digitada) | set(variantes(digitada))) - {digitada}
-        grupo = [digitada, *sorted(outras)]
-        saida.append(f"({' OR '.join(grupo)})" if outras else digitada)
+        saida.append(
+            em_grupo(digitada, (formas(digitada) | variantes(digitada)) - {digitada})
+        )
     return " ".join(saida)
