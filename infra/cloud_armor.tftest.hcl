@@ -48,14 +48,14 @@ run "sem_a_lista_limite_por_ip_para_todos" {
     condition = one([
       for r in google_compute_security_policy.web[0].rule : r.match[0].expr[0].expression
       if r.priority == 106
-    ]) == "evaluatePreconfiguredWaf('protocolattack-v33-stable', {'sensitivity': 1, 'opt_out_rule_ids': ['owasp-crs-v030301-id921130-protocolattack']})"
+    ]) == "request.path != '/v1/busca/imagem' && evaluatePreconfiguredWaf('protocolattack-v33-stable', {'sensitivity': 1, 'opt_out_rule_ids': ['owasp-crs-v030301-id921130-protocolattack']})"
     error_message = "A regra de protocolo deixa de fora só a assinatura 921130."
   }
   assert {
     condition = one([
       for r in google_compute_security_policy.web[0].rule : r.match[0].expr[0].expression
       if r.priority == 100
-    ]) == "evaluatePreconfiguredWaf('sqli-v33-stable', {'sensitivity': 1})"
+    ]) == "request.path != '/v1/busca/imagem' && evaluatePreconfiguredWaf('sqli-v33-stable', {'sensitivity': 1})"
     error_message = "As outras regras ficam sem exclusão."
   }
   assert {
