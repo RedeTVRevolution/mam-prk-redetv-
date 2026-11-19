@@ -136,8 +136,10 @@ export function Gaveta({
   catalogo,
   falhaAoCarregar,
   aoMudar,
+  aoEnviar,
   aoSaltar,
   aoRefazerAMao,
+  avisoDaTela,
 }: {
   aba: AbaDaGaveta
   aoTrocarAba: (aba: AbaDaGaveta) => void
@@ -151,10 +153,14 @@ export function Gaveta({
   falhaAoCarregar: boolean
   /** Recarrega a decupagem, o histórico e a fila depois de uma decisão. */
   aoMudar: () => void
+  /** Acompanha cada decisão enviada até a resposta, mesmo que a gaveta feche antes dela. */
+  aoEnviar: (decisao: Promise<void>) => Promise<void>
   /** Salta o player ao item da correção; `false` se o item não está mais na decupagem. */
   aoSaltar: (correcao: ItemDoHistorico) => boolean
   /** Juntar ou dividir pautas que a reprocessagem não reaplicou: refazer na lista de pautas. */
   aoRefazerAMao?: () => void
+  /** O aviso da tela do vídeo (ex.: o Aprovar Revisão esperando), que no inspetor ficaria escondido. */
+  avisoDaTela?: string | null
 }) {
   const pendentes = historico.filter((h) => h.estado === 'pendente')
   const [selecionado, setSelecionado] = useState(0)
@@ -231,7 +237,7 @@ export function Gaveta({
     setErro(null)
     setAviso(null)
     try {
-      await acao()
+      await aoEnviar(acao())
       setRecusando(null)
     } catch (e) {
       setOcupado(null)
@@ -280,9 +286,9 @@ export function Gaveta({
           {podeAprovar && <Aba valor="aprovacao">{`Aprovação (${pendentes.length})`}</Aba>}
         </Tabs.List>
         <div ref={lista} className="grid content-start gap-2 p-3">
-          {aviso && (
+          {(aviso ?? avisoDaTela) && (
             <p role="status" className="text-sm">
-              {aviso}
+              {aviso ?? avisoDaTela}
             </p>
           )}
           {erro && (

@@ -89,6 +89,7 @@ function Montada({
   abaInicial = 'historico',
   api,
   aoMudar = () => {},
+  aoEnviar = (decisao) => decisao,
   aoSaltar = () => true,
   falhaAoCarregar = false,
   aoRefazerAMao,
@@ -100,6 +101,7 @@ function Montada({
   abaInicial?: AbaDaGaveta
   api: ClienteDoJob
   aoMudar?: () => void
+  aoEnviar?: (decisao: Promise<void>) => Promise<void>
   aoSaltar?: (c: ItemDoHistorico) => boolean
   falhaAoCarregar?: boolean
 }) {
@@ -120,6 +122,7 @@ function Montada({
             catalogo={null}
             falhaAoCarregar={falhaAoCarregar}
             aoMudar={aoMudar}
+            aoEnviar={aoEnviar}
             aoSaltar={aoSaltar}
             aoRefazerAMao={aoRefazerAMao}
           />

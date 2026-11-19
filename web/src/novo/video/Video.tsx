@@ -1181,8 +1181,14 @@ export function Video({
             catalogo={catalogo.data ?? null}
             falhaAoCarregar={historico.isError || fila.isError}
             aoMudar={() => recarregar()}
+            aoEnviar={(decisao) => {
+              // Enviar a decisão fora do Revisar liga o modo; aprovar a revisão espera a decisão chegar (#744).
+              revisao.entrar()
+              return revisao.ocupar(decisao)
+            }}
             aoSaltar={saltarAoItemDaCorrecao}
             aoRefazerAMao={refazerPautasAMao}
+            avisoDaTela={aviso}
           />
         ) : inspetorAberto ? (
           <Inspetor
