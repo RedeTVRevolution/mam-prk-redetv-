@@ -4460,6 +4460,14 @@
               }
             ],
             "title": "Termo Da Foto"
+          },
+          "variantes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variantes",
+            "default": []
           }
         },
         "type": "object",

@@ -28,6 +28,9 @@ CRIADOS_DEPOIS = {
     "google_kms_crypto_key.segredos_do_webhook",
     "google_kms_crypto_key_iam_member.secret_manager_cifra",
     "google_secret_manager_secret.segredos_do_webhook",
+    # Nomes do acervo (#734).
+    "google_bigquery_data_transfer_config.nomes_do_acervo",
+    "google_bigquery_table.nomes_do_acervo",
 }
 
 

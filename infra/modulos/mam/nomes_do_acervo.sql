@@ -7,8 +7,9 @@ WITH no_meio AS (
     REGEXP_REPLACE(LOWER(NORMALIZE(w, NFD)), r"\pM", "") AS palavra,
     REGEXP_CONTAINS(w, r"^\p{Lu}\p{Ll}") AS maiuscula
   FROM `${tabela_de_momentos}`,
-    UNNEST(REGEXP_EXTRACT_ALL(texto, r"[^.!?:;\n]\s+(\p{L}+)")) AS w
-  WHERE tipo IN ("fala", "plano")
+    UNNEST(REGEXP_EXTRACT_ALL(texto, r"[^.!?:;\n]+")) AS frase,
+    UNNEST(REGEXP_EXTRACT_ALL(frase, r"\p{L}+")) AS w WITH OFFSET AS posicao
+  WHERE tipo IN ("fala", "plano") AND posicao > 0
 ),
 nomes AS (
   SELECT palavra

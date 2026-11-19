@@ -158,8 +158,11 @@ class CopiaCurta[T]:
         ler: Callable[[], list[T]],
         relogio: Callable[[], datetime],
         validade: timedelta = VALIDADE_DA_COPIA,
+        espera_a_primeira: bool = True,
     ):
+        """Com `espera_a_primeira` falso, quem chega durante a 1ª leitura leva a lista vazia."""
         self._ler, self._relogio, self._validade = ler, relogio, validade
+        self._espera = espera_a_primeira
         self._lida_em: datetime | None = None
         self._itens: list[T] = []
         self._geracao = 0
@@ -173,7 +176,7 @@ class CopiaCurta[T]:
         if self._vale():
             return self._itens
         # Expirada, mas ainda boa para quem não vai recarregar; descartada, não.
-        if not self._recarga.acquire(blocking=self._lida_em is None):
+        if not self._recarga.acquire(blocking=self._lida_em is None and self._espera):
             return self._itens
         try:
             if not self._vale():

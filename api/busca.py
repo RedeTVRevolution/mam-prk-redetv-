@@ -417,7 +417,10 @@ class Busca:
         self._nomes_do_acervo = nomes_do_acervo
         # A tabela muda uma vez por dia: relida a cada hora, também quando a leitura falha.
         self._copia_das_variantes = CopiaCurta(
-            self._ler_variantes, relogio, VALIDADE_DAS_VARIANTES
+            self._ler_variantes,
+            relogio,
+            VALIDADE_DAS_VARIANTES,
+            espera_a_primeira=False,
         )
         # Só para não pôr acento numa marca citada (#731): relida a cada 30 s, não por busca,
         # nem quando a leitura falha.
@@ -993,8 +996,10 @@ class Busca:
         return achado
 
     def variantes(self) -> Variantes:
-        """As grafias dos nomes do acervo, da cópia de 1 h (lida também na partida)."""
-        return self._copia_das_variantes.itens()[0]
+        """As grafias dos nomes do acervo, da cópia de 1 h (lida também na partida); sem
+        variantes enquanto a 1ª leitura não termina."""
+        lidas = self._copia_das_variantes.itens()
+        return lidas[0] if lidas else Variantes()
 
     def _ler_variantes(self) -> list[Variantes]:
         """Sem a tabela (ou com a leitura falhando), a busca segue sem variantes."""
@@ -1514,7 +1519,9 @@ def _grafias(
     e: ConsultaEntendida, nome: Callable[[str | None], str | None], v: Variantes
 ) -> _Grafias:
     nomes = [q for p in e.pessoas if (q := nome(p))]
-    return _Grafias(v, frozenset(palavras(" ".join([e.texto_livre or "", *nomes]))))
+    livre = set(palavras(e.texto_livre or ""))
+    so_na_frase = set(palavras(e.frase_exata or "")) - livre
+    return _Grafias(v, frozenset(livre | set(palavras(" ".join(nomes))) - so_na_frase))
 
 
 def _termos(

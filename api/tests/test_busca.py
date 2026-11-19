@@ -2890,6 +2890,41 @@ def test_sem_a_lista_de_nomes_a_consulta_fica_como_antes() -> None:
     assert resultado.entendida.variantes == []
 
 
+def test_nome_so_entre_aspas_fica_exato() -> None:
+    m = Mundo(
+        pedido(
+            pessoas=["Jorge Lordello"], frase_exata="Jorge Lordello", texto_livre=None
+        )
+    )
+    m.catalogo.acrescentar("Jorge Lordello", "apresentador", [])
+    resultado = m.busca(nomes=lambda: ["Lordello", "Lordelo"]).buscar(
+        '"Jorge Lordello"'
+    )
+    enviadas = {p for c in m.indice.consultas for p in palavras(c.texto or "")}
+    assert "lordelo" not in enviadas
+    assert resultado.entendida.variantes == []
+
+
+def test_a_busca_nao_espera_a_primeira_leitura_dos_nomes() -> None:
+    m = Mundo(pedido(texto_livre="Lordelo"))
+    solta = threading.Event()
+
+    def lenta() -> list[str]:
+        solta.wait(5)
+        return ["Lordello", "Lordelo"]
+
+    busca = m.busca(nomes=lenta)
+    leitura = threading.Thread(target=busca.variantes)
+    leitura.start()
+    time.sleep(0.05)
+    try:
+        assert busca.buscar("Lordelo").entendida.variantes == []
+    finally:
+        solta.set()
+        leitura.join()
+    assert busca.buscar("Lordelo").entendida.variantes == ["Lordello"]
+
+
 def test_pessoa_do_catalogo_e_achada_e_contada_na_outra_grafia() -> None:
     m = Mundo(pedido(pessoas=["Jorge Lordello"]))
     m.catalogo.acrescentar("Jorge Lordello", "apresentador", [])
