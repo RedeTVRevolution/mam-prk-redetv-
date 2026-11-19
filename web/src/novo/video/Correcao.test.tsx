@@ -690,17 +690,18 @@ test('F2 e Del com a comparação aberta fecham a comparação e mostram o formu
 
 // ---------- #743: começar a correção fora do Revisar liga o modo ----------
 
+type Usuario = ReturnType<typeof userEvent.setup>
 const botaoDoTopo = () => screen.getByRole('button', { name: /^(Revisar|Aprovar Revisão)$/ })
 
 test.each([
-  ['o botão Corrigir', abrirPauta, (u: ReturnType<typeof userEvent.setup>) => u.click(detalhe().getByRole('button', { name: 'Corrigir' })), /Corrigir Eleição/],
-  ['o F2', abrirPauta, (u: ReturnType<typeof userEvent.setup>) => u.keyboard('{F2}'), /Corrigir Eleição/],
-  ['o botão Não é isto', abrirObjeto, (u: ReturnType<typeof userEvent.setup>) => u.click(detalhe().getByRole('button', { name: 'Não é isto' })), null],
-  ['o Del', abrirAparicao, (u: ReturnType<typeof userEvent.setup>) => u.keyboard('{Delete}'), null],
+  ['o botão Corrigir', abrirPauta, (u: Usuario) => u.click(detalhe().getByRole('button', { name: 'Corrigir' })), /Corrigir Eleição/],
+  ['o F2', abrirPauta, (u: Usuario) => u.keyboard('{F2}'), /Corrigir Eleição/],
+  ['o botão Não é isto', abrirObjeto, (u: Usuario) => u.click(detalhe().getByRole('button', { name: 'Não é isto' })), null],
+  ['o Del', abrirAparicao, (u: Usuario) => u.keyboard('{Delete}'), null],
   [
     'o Acrescentar',
     abrirAparicao,
-    (u: ReturnType<typeof userEvent.setup>) => u.click(detalhe().getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' })),
+    (u: Usuario) => u.click(detalhe().getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' })),
     /Acrescentar aparição/,
   ],
 ])('fora do Revisar, %s abre a correção e liga o modo', async (_, abrir, gesto, formulario) => {
@@ -730,22 +731,6 @@ test('fora do Revisar, F2 e Del sem item que possa ser corrigido avisam e não l
   expect(botaoDoTopo().textContent).toBe('Revisar')
 })
 
-test('dentro do Revisar, o gesto não muda o modo; cancelar deixa o modo ligado, sem gravar nem aprovar', async () => {
-  const usuario = await abrirPauta()
-  await usuario.keyboard('e')
-  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
-
-  await usuario.keyboard('{F2}')
-  await screen.findByRole('form', { name: /Corrigir Eleição/ })
-  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
-  await usuario.keyboard('{Escape}')
-  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
-
-  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
-  expect(correcoes).toEqual([])
-  expect(aprovacoesDaRevisao).toBe(0)
-})
-
 test('com a correção aberta, Aprovar Revisão (botão e E) não envia o pedido', async () => {
   const usuario = await abrirPauta()
   await usuario.keyboard('{F2}')
@@ -759,6 +744,21 @@ test('com a correção aberta, Aprovar Revisão (botão e E) não envia o pedido
   expect(aprovacoesDaRevisao).toBe(0)
   expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
   expect(screen.getByRole('form', { name: /Corrigir Eleição/ })).toBeTruthy()
+
+  // Cancelar deixa o modo ligado, sem gravar nem aprovar.
+  await usuario.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
+  expect(correcoes).toEqual([])
+  expect(aprovacoesDaRevisao).toBe(0)
+})
+
+test('dentro do Revisar, o gesto não muda o modo', async () => {
+  const usuario = await abrirPauta()
+  await usuario.keyboard('e')
+  await usuario.keyboard('{F2}')
+  await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
 })
 
 test('fluxo completo: corrigir fora do modo, gravar e aprovar a revisão com um único pedido, nunca durante a gravação', async () => {

@@ -464,12 +464,9 @@ export function Video({
       mostrarAviso('Selecione um item que possa ser corrigido (↑ ↓).')
       return
     }
-    revisao.entrar()
     setEstrutura(null)
-    setDescrevendo(false)
     abrirItem(item.chave, false)
-    setTemposDaAlca(null)
-    setEdicao({ chave: item.chave, modo: 'editar' })
+    abrirEdicao({ chave: item.chave, modo: 'editar' })
   }
 
   function removerItem(item: ItemDoPainel | undefined) {
@@ -478,12 +475,17 @@ export function Video({
       mostrarAviso('Não há "não é isto" para o item selecionado.')
       return
     }
-    revisao.entrar()
     setEstrutura(null)
-    setDescrevendo(false)
     abrirItem(item.chave, false)
+    abrirEdicao({ chave: item.chave, modo: 'remover' })
+  }
+
+  /** Abre o formulário ou a confirmação da correção; fora do Revisar, liga o modo antes (#743). */
+  function abrirEdicao(e: Edicao) {
+    revisao.entrar()
+    setDescrevendo(false)
     setTemposDaAlca(null)
-    setEdicao({ chave: item.chave, modo: 'remover' })
+    setEdicao(e)
   }
 
   // ---------- juntar e dividir pautas ----------
@@ -713,29 +715,27 @@ export function Video({
     if (edicao.modo === 'inventario') {
       const { tipo, alvo } = edicao
       const ids = alvo.ocorrencias.map((x) => x.id)
-      // Sair do Revisar esconde a correção do objeto do plano.
-      if (revisao.revisando)
-        conteudoDaEdicao =
-          tipo === 'inventario.nao_existe' ? (
-            <ConfirmacaoDeRemocao
-              texto={ids.length === 1 ? `Este objeto (${alvo.nome}) não está na imagem?` : `Estes ${alcanceDoInventario(alvo)}, não estão na imagem?`}
-              aoConfirmar={async () => {
-                const pedido = pedidoDoInventario(tipo, ids)
-                const falha = await gravar([pedido], motivoDaRemocao(pedido))
-                if (falha) mostrarAviso(falha)
-              }}
-              aoCancelar={fecharEdicao}
-            />
-          ) : (
-            <FormularioDeCorrecao
-              key={edicao.chave + tipo}
-              editor={editorDoInventario(tipo, alvo.ocorrencias, catalogoPronto)}
-              rotulo={`${ROTULO_DO_INVENTARIO[tipo]} de ${alcanceDoInventario(alvo)}`}
-              limiteDoMotivo={catalogoPronto.limites.motivo}
-              aoSalvar={gravar}
-              aoCancelar={fecharEdicao}
-            />
-          )
+      conteudoDaEdicao =
+        tipo === 'inventario.nao_existe' ? (
+          <ConfirmacaoDeRemocao
+            texto={ids.length === 1 ? `Este objeto (${alvo.nome}) não está na imagem?` : `Estes ${alcanceDoInventario(alvo)}, não estão na imagem?`}
+            aoConfirmar={async () => {
+              const pedido = pedidoDoInventario(tipo, ids)
+              const falha = await gravar([pedido], motivoDaRemocao(pedido))
+              if (falha) mostrarAviso(falha)
+            }}
+            aoCancelar={fecharEdicao}
+          />
+        ) : (
+          <FormularioDeCorrecao
+            key={edicao.chave + tipo}
+            editor={editorDoInventario(tipo, alvo.ocorrencias, catalogoPronto)}
+            rotulo={`${ROTULO_DO_INVENTARIO[tipo]} de ${alcanceDoInventario(alvo)}`}
+            limiteDoMotivo={catalogoPronto.limites.motivo}
+            aoSalvar={gravar}
+            aoCancelar={fecharEdicao}
+          />
+        )
     } else if (edicao.modo === 'fundir') {
       const pessoa = d.pessoas.find((p) => `fundir:${p.id}` === edicao.chave)
       if (pessoa?.catalogo_id)
@@ -826,11 +826,7 @@ export function Video({
     }
   }
 
-  const abrirPessoa = (modo: 'fundir' | 'renomear') => (pessoa: string) => {
-    setDescrevendo(false)
-    setTemposDaAlca(null)
-    setEdicao({ chave: `${modo}:${pessoa}`, modo })
-  }
+  const abrirPessoa = (modo: 'fundir' | 'renomear' | 'acrescentar' | 'separar') => (pessoa: string) => abrirEdicao({ chave: `${modo}:${pessoa}`, modo })
   const acoes: AcoesDeCorrecao | undefined =
     d && catalogoPronto
       ? {
@@ -838,22 +834,12 @@ export function Video({
           podeRemover: (i) => podeRemover(d, i),
           corrigir: corrigirItem,
           remover: removerItem,
-          acrescentar: (pessoa) => {
-            revisao.entrar()
-            setDescrevendo(false)
-            setTemposDaAlca(null)
-            setEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
-          },
+          acrescentar: abrirPessoa('acrescentar'),
           pessoaJuntada: (id) => {
             const p = d.pessoas.find((x) => x.id === id)
             return !!p && juntada(p)
           },
-          separar: (pessoa) => {
-            revisao.entrar()
-            setDescrevendo(false)
-            setTemposDaAlca(null)
-            setEdicao({ chave: `separar:${pessoa}`, modo: 'separar' })
-          },
+          separar: abrirPessoa('separar'),
           pautas: revisao.revisando
             ? {
                 marcada: (i) => {
@@ -871,9 +857,7 @@ export function Video({
                   mostrarAviso(`Grupo grande demais: são ${alvo.ocorrencias.length} objetos, e o limite é ${LIMITE_DO_GRUPO}. Corrija pelos objetos.`)
                   return
                 }
-                setDescrevendo(false)
-                setTemposDaAlca(null)
-                setEdicao({ chave: alvo.chave, modo: 'inventario', tipo, alvo })
+                abrirEdicao({ chave: alvo.chave, modo: 'inventario', tipo, alvo })
               }
             : undefined,
           pessoaDoCatalogo: (id) => !!d.pessoas.find((p) => p.id === id)?.catalogo_id,
