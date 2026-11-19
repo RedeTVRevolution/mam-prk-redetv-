@@ -21,7 +21,12 @@ def objeto_dos_itens(job_id: str) -> str:
 def itens_do_tipo(modelo: dict[str, Any], tipo: str) -> int:
     """Quantos itens do tipo do item que a correção do `tipo` corrige."""
     do_item = TIPOS[tipo].tipo_do_item
-    tipos = get_args(TipoDoItem) if do_item is None else (do_item,)
+    # O `item.tempos` não vale para o objeto do plano, que só tem os tempos do plano (#740).
+    tipos = (
+        [t for t in get_args(TipoDoItem) if t != "inventario"]
+        if do_item is None
+        else (do_item,)
+    )
     return sum(len(itens(modelo, t)) for t in tipos)
 
 

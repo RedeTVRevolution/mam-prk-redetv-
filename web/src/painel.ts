@@ -189,7 +189,10 @@ export interface ContagemDoValor {
 
 /** Uma ocorrência do objeto num plano, com o nome, a cor e a marca como foram gravados. */
 export interface OcorrenciaDoObjeto {
+  /** O id do item na API (`{plano_id}:{k}`), alvo das correções do objeto do plano. */
+  id: string
   nome: string
+  categoria: CategoriaDeObjeto
   cor?: CorBase | null
   marca?: string | null
   destaque: 1 | 2 | 3
@@ -285,7 +288,7 @@ export function inventarioDoVideo(
         ? `tipo:${tipo}`
         : `nome:${o.categoria}:${assinatura(o.nome, o.cor ? [o.cor] : []) || nomeNormalizado(o.nome)}`
       const caixa = maiorCaixa(o)
-      const ocorrencia = { nome: o.nome, cor: o.cor, marca: o.marca, destaque: o.destaque, caixa, plano }
+      const ocorrencia = { id: o.id ?? '', nome: o.nome, categoria: o.categoria, cor: o.cor, marca: o.marca, destaque: o.destaque, caixa, plano }
       if (o.cor) somar(cores, chave, o.cor, p.id)
       if (o.marca) somar(marcas, chave, o.marca, p.id)
       const achado = porChave.get(chave)

@@ -16,6 +16,18 @@ from api.regras_das_correcoes import aplicar, corrigir
 from api.tests.test_correcoes import BASE, MODELO, _pauta, _pessoa
 from api.tests.test_planos_e_falas import _fala, _plano
 
+_ITEM_DO_PLANO = {
+    "nome": "relógio de parede",
+    "categoria": "decoracao",
+    "cor": None,
+    "marca": None,
+    "caixas": [
+        {"quadro": "q/a.jpg", "x": 0.1, "y": 0.1, "largura": 0.2, "altura": 0.2}
+    ],
+    "destaque": 1,
+}
+
+
 MODELO_RICO: dict[str, Any] = {
     **MODELO,
     "pautas": [
@@ -67,7 +79,10 @@ MODELO_RICO: dict[str, Any] = {
             "evidencias": ["logo"],
         },
     ],
-    "planos": [_plano("pla01", 0, 10000), _plano("pla02", 10000, 20000)],
+    "planos": [
+        _plano("pla01", 0, 10000, inventario=[_ITEM_DO_PLANO]),
+        _plano("pla02", 10000, 20000),
+    ],
     "transcricao": [_fala(0, 4000, "bom dia"), _fala(4000, 9000, "hoje temos")],
     "textos_na_tela": [
         {"inicio_ms": 0, "fim_ms": 3000, "tipo": "gc", "texto": "Ana Souza"}
@@ -188,6 +203,15 @@ PEDIDOS: dict[str, dict[str, Any]] = {
         "valor": _j(pessoa="p2", relacao="veste"),
     },
     "objeto.nao_existe": {"item_id": "obj01", "valor": "nao_existe"},
+    "inventario.nao_existe": {"item_id": "pla01:0", "valor": "nao_existe"},
+    "inventario.nome": {
+        "item_id": "pla01:0",
+        "valor": _j(nome="quadro", categoria="decoracao"),
+    },
+    "inventario.cor_marca": {
+        "item_id": "pla01:0",
+        "valor": _j(cor="azul", marca="Nike"),
+    },
     "objeto.acrescentar": {
         "item_id": "",
         "valor": _j(

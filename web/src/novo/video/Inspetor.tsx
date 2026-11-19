@@ -17,7 +17,7 @@ import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual'
 import { cn } from 'cn'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAtalhos } from '../../atalhos.ts'
-import { type Marca, ROTULO_NA_BUSCA } from '../../catalogacao.ts'
+import { type Marca, ROTULO_DO_INVENTARIO, ROTULO_NA_BUSCA, type TipoDoInventario } from '../../catalogacao.ts'
 import { CORES_DE_OBJETO } from '../../cores.ts'
 import type { Decupagem } from '../../decupagem.ts'
 import { type Intervalo, relogio, SEM_OBJETOS } from '../../linhaDoTempo.ts'
@@ -33,6 +33,7 @@ import {
   nomeNormalizado,
   type ObjetoDoVideo,
   objetosDaAba,
+  type OcorrenciaDoObjeto,
   semDecupagemEm,
   type Selo,
   textoDoSemDecupagem,
@@ -75,24 +76,35 @@ export interface AcoesDeCorrecao {
   pessoaDoCatalogo: (pessoa: string) => boolean
   renomear?: (pessoa: string) => void
   fundir?: (pessoa: string) => void
+  /** Corrigir objetos do plano (só no modo de revisão): o grupo inteiro ou um objeto só. */
+  inventario?: (tipo: TipoDoInventario, alvo: AlvoDoInventario) => void
   /** O formulário (ou a confirmação) aberto: a chave do item, ou `acrescentar:<pessoa>`. */
   edicao: { chave: string; conteudo: ReactNode } | null
   /** "aguardando o Curador", "indexando", "na busca", por chave de item. */
   marcas?: Record<string, Marca>
 }
 
+/** O que a correção do objeto do plano alcança: todos os do grupo ou um só (`chave` é a da edição). */
+export interface AlvoDoInventario {
+  chave: string
+  nome: string
+  ocorrencias: OcorrenciaDoObjeto[]
+  planos: number
+}
+
 type Linha =
   | { tipo: 'item'; chave: string; item: ItemDoPainel; recuo: boolean }
   | { tipo: 'pessoa'; chave: string; id: string; nome: string; apoio: string | null; aparicoes: ItemDoPainel[]; miniatura: string | undefined; aberta: boolean }
   | { tipo: 'objeto'; chave: string; dados: DadosDoObjeto; ocorrencias: ItemDoPainel[]; aberta: boolean }
-  // O inventário dos planos: a categoria, o objeto (que abre os planos em que aparece) e o plano.
+  // O inventário dos planos: a categoria, o grupo (que abre os objetos de cada plano), as correções do grupo e o objeto.
   | { tipo: 'categoria'; chave: string; nome: string }
   | { tipo: 'inventario'; chave: string; objeto: ObjetoDoVideo; aberta: boolean }
-  | { tipo: 'plano'; chave: string; plano: ObjetoDoVideo['planos'][number] }
+  | { tipo: 'acoesDoGrupo'; chave: string; alvo: AlvoDoInventario }
+  | { tipo: 'ocorrencia'; chave: string; ocorrencia: OcorrenciaDoObjeto; aberta: boolean }
 
 type Inventario = ReturnType<typeof inventarioDoVideo>
 
-const ALTURA_ESTIMADA: Record<Linha['tipo'], number> = { item: 44, pessoa: 52, objeto: 60, categoria: 28, inventario: 52, plano: 32 }
+const ALTURA_ESTIMADA: Record<Linha['tipo'], number> = { item: 44, pessoa: 52, objeto: 60, categoria: 28, inventario: 52, acoesDoGrupo: 40, ocorrencia: 32 }
 
 const tempos = (i: Intervalo): string => `${relogio(i.inicio_ms)}–${relogio(i.fim_ms)}`
 
@@ -122,6 +134,7 @@ function linhasDaSecao(
   abertas: ReadonlySet<string>,
   filtro: string,
   grupo: string,
+  corrigeInventario: boolean,
 ): Linha[] {
   const doTipo = (t: string) => porTipo.get(t) ?? []
   const item = (i: ItemDoPainel, recuo = false): Linha => ({ tipo: 'item', chave: i.chave, item: i, recuo })
@@ -157,7 +170,13 @@ function linhasDaSecao(
         const chave = `inventario:${o.chave}`
         const aberta = abertas.has(chave)
         linhas.push({ tipo: 'inventario', chave, objeto: o, aberta })
-        if (aberta) linhas.push(...o.planos.map((plano): Linha => ({ tipo: 'plano', chave: `${chave}:${plano.id}`, plano })))
+        if (!aberta) continue
+        if (corrigeInventario) linhas.push({ tipo: 'acoesDoGrupo', chave: `${chave}:acoes`, alvo: { chave, nome: o.nome, ocorrencias: o.ocorrencias, planos: o.planos.length } })
+        // A chave é o id do objeto, não o do plano: o mesmo tipo pode aparecer duas vezes num plano.
+        for (const x of o.ocorrencias) {
+          const daOcorrencia = `${chave}:${x.id}`
+          linhas.push({ tipo: 'ocorrencia', chave: daOcorrencia, ocorrencia: x, aberta: abertas.has(daOcorrencia) })
+        }
       }
     }
     return linhas
@@ -171,8 +190,8 @@ function linhasDaSecao(
 /** O tempo está numa linha: o item, ou uma das ocorrências da pessoa ou do objeto. */
 function linhaNoTempo(l: Linha, ms: number): boolean {
   if (l.tipo === 'item') return contem(l.item, ms)
-  if (l.tipo === 'categoria') return false
-  if (l.tipo === 'plano') return contem(l.plano, ms)
+  if (l.tipo === 'categoria' || l.tipo === 'acoesDoGrupo') return false
+  if (l.tipo === 'ocorrencia') return contem(l.ocorrencia.plano, ms)
   return (l.tipo === 'pessoa' ? l.aparicoes : l.tipo === 'objeto' ? l.ocorrencias : l.objeto.planos).some((i) => contem(i, ms))
 }
 
@@ -252,9 +271,10 @@ export function Inspetor({
   }
 
   const filtroNormalizado = nomeNormalizado(filtro)
+  const corrigeInventario = !!acoes?.inventario
   const linhas = useMemo(
-    () => (d && secao ? linhasDaSecao(secao, d, porTipo, inventario, abertas, filtroNormalizado, grupo) : []),
-    [d, secao, porTipo, inventario, abertas, filtroNormalizado, grupo],
+    () => (d && secao ? linhasDaSecao(secao, d, porTipo, inventario, abertas, filtroNormalizado, grupo, corrigeInventario) : []),
+    [d, secao, porTipo, inventario, abertas, filtroNormalizado, grupo, corrigeInventario],
   )
   const navegaveis = useMemo(() => linhas.flatMap((l) => (l.tipo === 'item' ? [l.chave] : [])), [linhas])
 
@@ -416,6 +436,9 @@ export function Inspetor({
                             </select>
                           </div>
                         )}
+                        {s.chave === 'objetos' && acoes?.edicao?.chave.startsWith('inventario:') && (
+                          <div className="shrink-0 border-b p-3">{acoes.edicao.conteudo}</div>
+                        )}
                         {linhas.length === 0 ? (
                           <p className="px-3 py-8 text-center text-sm text-muted-foreground">
                             {filtro ? `Nada com “${filtro}” em ${s.rotulo.toLowerCase()}.` : s.vazio}
@@ -456,14 +479,26 @@ export function Inspetor({
                                     alternarGrupo(l.chave)
                                   }}
                                 />
+                              ) : l.tipo === 'acoesDoGrupo' ? (
+                                <CorrecoesDoInventario
+                                  rotulo={`Corrigir todos: ${l.alvo.nome}`}
+                                  className="pl-8"
+                                  aoCorrigir={(tipo) => acoes?.inventario?.(tipo, l.alvo)}
+                                />
                               ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => aoSaltar(l.plano.inicio_ms)}
-                                  className={cn('relative flex w-full border-b border-border/60 py-1.5 pr-3 pl-8 text-left text-xs text-muted-foreground hover:bg-card', atual && ATUAL)}
-                                >
-                                  {`${l.plano.ambiente} · ${relogio(l.plano.inicio_ms)}`}
-                                </button>
+                                <OcorrenciaDoInventario
+                                  linha={l}
+                                  atual={atual}
+                                  urlDoQuadro={urlDoQuadro}
+                                  aoAlternar={() => {
+                                    if (!l.aberta) aoSaltar(l.ocorrencia.plano.inicio_ms)
+                                    alternarGrupo(l.chave)
+                                  }}
+                                  aoCorrigir={
+                                    acoes?.inventario &&
+                                    ((tipo) => acoes.inventario?.(tipo, { chave: l.chave, nome: l.ocorrencia.nome, ocorrencias: [l.ocorrencia], planos: 1 }))
+                                  }
+                                />
                               )
                             }
                           />
@@ -556,8 +591,8 @@ function Lista({
   )
 }
 
-/** A miniatura do quadro: a URL assinada só é pedida quando a linha existe, e a lista é virtual. */
-function Miniatura({ caminho, urlDoQuadro, className }: { caminho: string | null | undefined; urlDoQuadro: (c: string) => Promise<string>; className?: string }) {
+/** A URL assinada do quadro, pedida só quando quem a mostra existe (a lista é virtual). */
+function useUrlDoQuadro(caminho: string | null | undefined, urlDoQuadro: (c: string) => Promise<string>): string | null {
   const [achada, setAchada] = useState<{ caminho: string; url: string } | null>(null)
   useEffect(() => {
     if (!caminho) return
@@ -570,7 +605,11 @@ function Miniatura({ caminho, urlDoQuadro, className }: { caminho: string | null
       ativo = false
     }
   }, [caminho, urlDoQuadro])
-  const url = achada && achada.caminho === caminho ? urlSegura(achada.url) : null
+  return achada && achada.caminho === caminho ? urlSegura(achada.url) : null
+}
+
+function Miniatura({ caminho, urlDoQuadro, className }: { caminho: string | null | undefined; urlDoQuadro: (c: string) => Promise<string>; className?: string }) {
+  const url = useUrlDoQuadro(caminho, urlDoQuadro)
   return (
     <span aria-hidden className={cn('block shrink-0 overflow-hidden rounded-xs bg-input', className)}>
       {url && <img src={url} alt="" loading="lazy" className="size-full bg-black object-contain" />}
@@ -795,6 +834,73 @@ function LinhaDoInventario({
       <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{quantos}</span>
       <IconChevronRight size={14} aria-hidden className={cn('shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none', linha.aberta && 'rotate-90')} />
     </button>
+  )
+}
+
+/** As três correções do objeto do plano, para o grupo inteiro ou um objeto só. */
+function CorrecoesDoInventario({ rotulo, className, aoCorrigir }: { rotulo: string; className?: string; aoCorrigir: (tipo: TipoDoInventario) => void }) {
+  return (
+    <div role="group" aria-label={rotulo} className={cn('flex flex-wrap gap-1.5 border-b border-border/60 px-3 py-1.5', className)}>
+      {(Object.entries(ROTULO_DO_INVENTARIO) as [TipoDoInventario, string][]).map(([tipo, texto]) => (
+        <Button key={tipo} type="button" size="sm" variant={tipo === 'inventario.nao_existe' ? 'destructive' : 'secondary'} onClick={() => aoCorrigir(tipo)}>
+          {texto}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+/** Um objeto do grupo: nome, cor, marca e plano; aberto, o quadro com a caixa dele e, no Revisar, as correções. */
+function OcorrenciaDoInventario({
+  linha,
+  atual,
+  urlDoQuadro,
+  aoAlternar,
+  aoCorrigir,
+}: {
+  linha: Extract<Linha, { tipo: 'ocorrencia' }>
+  atual: boolean
+  urlDoQuadro: (c: string) => Promise<string>
+  aoAlternar: () => void
+  aoCorrigir?: (tipo: TipoDoInventario) => void
+}) {
+  const { ocorrencia: x } = linha
+  const texto = [x.nome, x.cor, x.marca, x.plano.ambiente, relogio(x.plano.inicio_ms)].filter(Boolean).join(' · ')
+  return (
+    <div className="border-b border-border/60">
+      <button
+        type="button"
+        aria-expanded={linha.aberta}
+        onClick={aoAlternar}
+        className={cn('relative flex w-full py-1.5 pr-3 pl-8 text-left text-xs text-muted-foreground hover:bg-card', atual && ATUAL)}
+      >
+        {texto}
+      </button>
+      {linha.aberta && (
+        <>
+          <QuadroComCaixa caixa={x.caixa} urlDoQuadro={urlDoQuadro} />
+          {aoCorrigir && <CorrecoesDoInventario rotulo={`Corrigir este: ${x.nome}`} className="border-b-0 pl-8" aoCorrigir={aoCorrigir} />}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** O quadro inteiro com a caixa do objeto: a imagem dita a altura, e a caixa (em fração) cai no lugar em 16:9 ou 4:3. */
+function QuadroComCaixa({ caixa, urlDoQuadro }: { caixa: OcorrenciaDoObjeto['caixa']; urlDoQuadro: (c: string) => Promise<string> }) {
+  const url = useUrlDoQuadro(caixa.quadro, urlDoQuadro)
+  if (!url) return null
+  const pct = (v: number) => `${v * 100}%`
+  return (
+    <div className="relative mx-3 mb-2 ml-8 bg-black">
+      <img src={url} alt="" className="block h-auto w-full" />
+      <span
+        data-testid="caixa-do-objeto"
+        aria-hidden
+        className="absolute border-2 border-primary"
+        style={{ left: pct(caixa.x), top: pct(caixa.y), width: pct(caixa.largura), height: pct(caixa.altura) }}
+      />
+    </div>
   )
 }
 

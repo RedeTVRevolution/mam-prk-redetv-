@@ -492,10 +492,17 @@ def test_tipo_novo_com_irmao_mantem_o_video_na_taxa() -> None:
     assert _taxa(linhas, "Jornal", "pessoa.renomear").correcoes == 2
 
 
-def test_tipo_novo_sem_irmao_tira_o_video_da_taxa() -> None:
-    tipos_da_pauta = [t for t in CORRIGIVEIS if t.startswith("pauta.")]
+@pytest.mark.parametrize("prefixo", ["pauta.", "inventario."])
+def test_tipo_novo_sem_irmao_sai_da_taxa_e_o_resto_do_video_fica(
+    prefixo: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    sem_contagem = [t for t in CORRIGIVEIS if t.startswith(prefixo)]
 
-    assert _taxa_com_contagem_sem(*tipos_da_pauta) == []
+    linhas = _taxa_com_contagem_sem(*sem_contagem)
+
+    assert not {x.tipo for x in linhas} & set(sem_contagem)
+    assert _taxa(linhas, "Jornal", "pessoa.renomear").itens == 10
+    assert "fora da taxa" in caplog.text
 
 
 _PAUTA = {"id": "t0", "titulo": "x", "inicio_ms": 0, "fim_ms": 1_000}

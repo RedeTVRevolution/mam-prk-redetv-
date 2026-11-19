@@ -12,8 +12,9 @@ from api.regressao_da_versao import REQUISITO_DO_TIPO
 
 METAS = Path(__file__).parents[2] / "evals" / "regressao" / "metas.json"
 # Tipos de item com conversão própria em `regressao._itens_da_correcao`, fora da tabela
-# `_CATEGORIA_DO_ITEM`: a pessoa vira `aparicao` ou `mencao`, o objeto tem as suas regras.
-COM_CONVERSAO_PROPRIA = {"pessoa", "objeto"}
+# `_CATEGORIA_DO_ITEM`: a pessoa vira `aparicao` ou `mencao`, o objeto tem as suas regras e o
+# objeto do plano sai do conjunto com aviso (`regressao._SEM_CONVERSAO`).
+COM_CONVERSAO_PROPRIA = {"pessoa", "objeto", "inventario"}
 
 
 def test_todo_tipo_do_pareamento_tem_requisito_e_nenhum_sobra() -> None:

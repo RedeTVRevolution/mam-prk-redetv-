@@ -393,9 +393,16 @@ def test_dono_e_acrescentar_saem_com_aviso_proprio(
     correcoes = [
         _do_objeto("d", "objeto.dono", "{}"),
         _do_objeto("x", "objeto.acrescentar", "{}"),
+        # Os objetos do plano (#740) também não têm regra para o conjunto.
+        _do_objeto("i1", "inventario.nao_existe", "nao_existe"),
+        _do_objeto("i2", "inventario.nome", "{}"),
+        _do_objeto("i3", "inventario.cor_marca", "{}"),
+        # O grupo avisa uma vez, não uma por objeto.
+        _do_objeto("g1", "inventario.nome", "{}").model_copy(update={"grupo": "G"}),
+        _do_objeto("g2", "inventario.nome", "{}").model_copy(update={"grupo": "G"}),
     ]
     assert casos_das_correcoes(MODELO_COM_OBJETO, "v", correcoes) == []
-    assert caplog.text.count("operação de objeto sem conversão") == 2
+    assert caplog.text.count("operação de objeto sem conversão") == 6
     assert "ilegível" not in caplog.text
 
 

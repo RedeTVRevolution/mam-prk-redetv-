@@ -29,13 +29,18 @@ import {
   editorDeNovaAparicao,
   editorDeSeparacao,
   juntada,
+  editorDoInventario,
   editorDoItem,
   itemDaCorrecao,
+  LIMITE_DO_GRUPO,
   marcasDosItens,
   motivoDaRemocao,
   type Pedido,
   pedidoDeRemocao,
+  pedidoDoInventario,
   podeRemover,
+  ROTULO_DO_INVENTARIO,
+  type TipoDoInventario,
 } from '../../catalogacao.ts'
 import type { ItemDoHistorico, Pauta } from '../../decupagem.ts'
 import { ABAS_DO_TRECHO } from '../../trecho.ts'
@@ -73,7 +78,7 @@ import { RenomeacaoEmLote } from './RenomeacaoEmLote.tsx'
 import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
 import { EdicaoDoVideo } from './EdicaoDoVideo.tsx'
 import { criarInstante, type Instante, useNoInstante } from './instante.ts'
-import { type AcoesDeCorrecao, Inspetor } from './Inspetor.tsx'
+import { type AcoesDeCorrecao, type AlvoDoInventario, Inspetor } from './Inspetor.tsx'
 import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo, type TrechoMarcado } from './LinhaDoTempo.tsx'
 
 export interface Permissoes {
@@ -110,7 +115,13 @@ function tocar(player: HTMLVideoElement) {
   Promise.resolve(player.play()).catch(() => {})
 }
 
-type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'separar' | 'fundir' | 'renomear' }
+type Edicao =
+  | { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'separar' | 'fundir' | 'renomear' }
+  | { chave: string; modo: 'inventario'; tipo: TipoDoInventario; alvo: AlvoDoInventario }
+
+/** "3 objetos, em 2 planos": o alcance da correção do objeto do plano. */
+const alcanceDoInventario = ({ ocorrencias, planos }: AlvoDoInventario): string =>
+  `${ocorrencias.length} ${ocorrencias.length === 1 ? 'objeto' : 'objetos'}, em ${planos} ${planos === 1 ? 'plano' : 'planos'}`
 
 /**
  * O vídeo aberto: o `<video>` com o proxy assinado, as barras, a linha do tempo e o inspetor. O
@@ -694,7 +705,33 @@ export function Video({
   let alcas: AlcasDaCorrecao | null = null
   if (d && catalogoPronto && edicao) {
     const item = itens.find((i) => i.chave === edicao.chave)
-    if (edicao.modo === 'fundir') {
+    if (edicao.modo === 'inventario') {
+      const { tipo, alvo } = edicao
+      const ids = alvo.ocorrencias.map((x) => x.id)
+      // Sair do Revisar esconde a correção do objeto do plano.
+      if (revisao.revisando)
+        conteudoDaEdicao =
+          tipo === 'inventario.nao_existe' ? (
+            <ConfirmacaoDeRemocao
+              texto={ids.length === 1 ? `Este objeto (${alvo.nome}) não está na imagem?` : `Estes ${alcanceDoInventario(alvo)}, não estão na imagem?`}
+              aoConfirmar={async () => {
+                const pedido = pedidoDoInventario(tipo, ids)
+                const falha = await gravar([pedido], motivoDaRemocao(pedido))
+                if (falha) mostrarAviso(falha)
+              }}
+              aoCancelar={fecharEdicao}
+            />
+          ) : (
+            <FormularioDeCorrecao
+              key={edicao.chave + tipo}
+              editor={editorDoInventario(tipo, alvo.ocorrencias, catalogoPronto)}
+              rotulo={`${ROTULO_DO_INVENTARIO[tipo]} de ${alcanceDoInventario(alvo)}`}
+              limiteDoMotivo={catalogoPronto.limites.motivo}
+              aoSalvar={gravar}
+              aoCancelar={fecharEdicao}
+            />
+          )
+    } else if (edicao.modo === 'fundir') {
       const pessoa = d.pessoas.find((p) => `fundir:${p.id}` === edicao.chave)
       if (pessoa?.catalogo_id)
         conteudoDaEdicao = (
@@ -818,6 +855,18 @@ export function Video({
                 },
                 alternar: alternarMarcaDaPauta,
                 dividir: dividirPauta,
+              }
+            : undefined,
+          inventario: revisao.revisando
+            ? (tipo, alvo) => {
+                // A API grava até 500 de uma vez; fatiar quebraria o "todos ou nenhum" do gesto.
+                if (alvo.ocorrencias.length > LIMITE_DO_GRUPO) {
+                  mostrarAviso(`Grupo grande demais: são ${alvo.ocorrencias.length} objetos, e o limite é ${LIMITE_DO_GRUPO}. Corrija pelos objetos.`)
+                  return
+                }
+                setDescrevendo(false)
+                setTemposDaAlca(null)
+                setEdicao({ chave: alvo.chave, modo: 'inventario', tipo, alvo })
               }
             : undefined,
           pessoaDoCatalogo: (id) => !!d.pessoas.find((p) => p.id === id)?.catalogo_id,

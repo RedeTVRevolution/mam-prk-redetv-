@@ -129,6 +129,17 @@ def _dono_do_objeto(o: dict[str, Any]) -> str:
     return f"dono: {o['pessoa']} ({o['relacao']})"
 
 
+def _nome_no_inventario(o: dict[str, Any]) -> str:
+    return f"{o['nome']} ({NOME_DA_CATEGORIA[o['categoria']]})"
+
+
+def _cor_e_marca(o: dict[str, Any]) -> str:
+    if len(o) == 1:  # só um dos dois: o outro ficou como estava em cada objeto
+        [(campo, valor)] = o.items()
+        return f"{campo} {valor}" if valor else f"sem {campo}"
+    return " · ".join(x for x in (o["cor"], o["marca"]) if x) or "sem cor e sem marca"
+
+
 def _pauta_estrutural(p: dict[str, Any]) -> str:
     """O título e a faixa de uma pauta (antes e depois de juntar, antes de dividir) ou
     as duas metades de uma divisão."""
@@ -180,6 +191,8 @@ pauta_estrutural = de_json(_pauta_estrutural)
 atributos_do_objeto = de_json(_atributos_do_objeto)
 dono_do_objeto = de_json(_dono_do_objeto)
 objeto_acrescentado = de_json(_objeto_acrescentado)
+nome_no_inventario = de_json(_nome_no_inventario)
+cor_e_marca_no_inventario = de_json(_cor_e_marca)
 papel_visual = de_json(_papel_visual)
 fontes_do_nome = de_json(_fontes)
 descricao_do_plano = de_json(_plano)

@@ -240,8 +240,16 @@ _NOME_NOVO: dict[str, Callable[[str], str]] = {
 # Dizem o que a pessoa não é: não há item esperado para medir.
 _SEM_ITEM = frozenset({"pessoa.nao_e", "objeto.nao_existe"})
 # Sem regra aprovada para o conjunto: saem com aviso próprio (a âncora juntaria as
-# ocorrências do objeto num intervalo só).
-_SEM_CONVERSAO = frozenset({"objeto.dono", "objeto.acrescentar"})
+# ocorrências do objeto num intervalo só; o objeto do plano, #740, não tem regra ainda).
+_SEM_CONVERSAO = frozenset(
+    {
+        "objeto.dono",
+        "objeto.acrescentar",
+        "inventario.nao_existe",
+        "inventario.nome",
+        "inventario.cor_marca",
+    }
+)
 
 
 def _nomes_novos(
@@ -340,6 +348,7 @@ def casos_das_correcoes(
     estado = estado_das(correcoes)
     nomes = _nomes_novos(correcoes, estado.em_vigor)
     casos: list[Caso] = []
+    grupos_avisados: set[str] = set()
     for c in correcoes:
         if c.tipo not in CORRIGIVEIS or not estado.em_vigor(c.id):
             continue
@@ -347,6 +356,11 @@ def casos_das_correcoes(
             log.warning("correção %s de outro JSON do modelo: fora do conjunto", c.id)
             continue
         if c.tipo in _SEM_CONVERSAO:
+            # Um aviso por gesto: o grupo de objetos do plano (#740) tem até 500 registros.
+            if c.grupo is not None:
+                if c.grupo in grupos_avisados:
+                    continue
+                grupos_avisados.add(c.grupo)
             log.warning(
                 "correção %s: operação de objeto sem conversão para o conjunto de regressão",
                 c.id,
