@@ -78,8 +78,10 @@ def roteiro(
     """Roda o roteiro e cancela no fim os Jobs que criou. Cada rodada usa chaves novas."""
     relatorio = Relatorio()
     chave = f"caos-{uuid.uuid4()}"
+    # Nome novo a cada rodada: o envio recusa o mesmo nome e data de um Job que ficou (#763).
+    rodada = {**CORPO, "nome": f"{chave}.mp4"}
 
-    def criar(sistema: str, chave: str | None, corpo: dict[str, Any] = CORPO) -> Any:
+    def criar(sistema: str, chave: str | None, corpo: dict[str, Any] = rodada) -> Any:
         return api.requisitar(
             "POST", "/jobs", sistema=sistema, corpo=corpo, chave=chave
         )
@@ -110,13 +112,14 @@ def roteiro(
     )
 
     # 3. A mesma chave com outro corpo é erro, e não cria Job.
-    status_outro, _ = criar(sistema_a, chave, {**CORPO, "tamanho_bytes": 2000})
+    status_outro, _ = criar(sistema_a, chave, {**rodada, "tamanho_bytes": 2000})
     relatorio.conferir(
         "mesma chave com outro corpo: 409", status_outro == 409, str(status_outro)
     )
 
-    # 4. O outro sistema com a mesma chave e o mesmo corpo tem o Job dele.
-    status_b, criado_b = criar(sistema_b, chave)
+    # 4. O outro sistema com a mesma chave tem o Job dele. Outro nome: o mesmo arquivo
+    # com a mesma data seria recusado como repetido.
+    status_b, criado_b = criar(sistema_b, chave, {**rodada, "nome": f"{chave}-b.mp4"})
     job_b = criado_b.get("id", "") if status_b == 202 else ""
     relatorio.jobs_criados.append(job_b)
     relatorio.conferir(

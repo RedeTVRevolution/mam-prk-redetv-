@@ -118,11 +118,12 @@ def test_pessoa_continua_podendo_tudo(
     assert resposta.status_code in (200, 202)
 
 
-def test_dois_sistemas_com_arquivo_igual_nao_enxergam_o_job_um_do_outro() -> None:
+def test_dois_sistemas_nao_enxergam_o_job_um_do_outro() -> None:
     mundo = Mundo()
     a, b = mundo.chave("A", *ESCOPOS), mundo.chave("B", *ESCOPOS)
+    outro = {**NOVO_JOB, "nome": "outro.mp4"}
     id_a = mundo.cliente.post("/v1/jobs", json=NOVO_JOB, headers=a).json()["id"]
-    id_b = mundo.cliente.post("/v1/jobs", json=NOVO_JOB, headers=b).json()["id"]
+    id_b = mundo.cliente.post("/v1/jobs", json=outro, headers=b).json()["id"]
     for job_id in (id_a, id_b):
         mundo.jobs.salvar(
             mundo.jobs.obter(job_id).model_copy(update={"estado": "concluido"})  # type: ignore[union-attr]

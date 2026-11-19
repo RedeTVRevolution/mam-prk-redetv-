@@ -112,7 +112,7 @@ export function consultaNova(q: string): ConsultaDaBusca {
     pessoa: null,
     marca: null,
     tipo: null,
-    ordem: 'relevancia',
+    ordem: 'data',
   }
 }
 
@@ -129,7 +129,7 @@ export function consultaDaBusca(busca: string): ConsultaDaBusca {
     pessoa: p.get('pessoa') || null,
     marca: p.get('marca') || null,
     tipo: TIPOS_DE_MOMENTO.includes(p.get('tipo') ?? '') ? (p.get('tipo') as TipoDeMomento) : null,
-    ordem: p.get('ordem') === 'data' ? 'data' : 'relevancia',
+    ordem: p.get('ordem') === 'relevancia' ? 'relevancia' : 'data',
   }
 }
 
@@ -144,7 +144,7 @@ export function consultaParaEndereco(c: ConsultaDaBusca): string {
   if (c.pessoa !== null) p.set('pessoa', c.pessoa)
   if (c.marca !== null) p.set('marca', c.marca)
   if (c.tipo !== null) p.set('tipo', c.tipo)
-  if (c.ordem !== 'relevancia') p.set('ordem', c.ordem)
+  if (c.ordem !== 'data') p.set('ordem', c.ordem)
   const texto = p.toString()
   return texto ? `?${texto}` : ''
 }

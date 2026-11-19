@@ -35,10 +35,13 @@ class Erro:
     exemplo: Any = None
     # Resposta sem corpo (o 304): não há `detail` nem exemplo.
     sem_corpo: bool = False
+    # Campos que o corpo traz além do `detail`.
+    outros_campos: dict[str, Any] | None = None
 
     @property
     def corpo(self) -> dict[str, Any]:
-        return {"detail": self.detalhe if self.exemplo is None else self.exemplo}
+        detalhe = self.detalhe if self.exemplo is None else self.exemplo
+        return {"detail": detalhe, **(self.outros_campos or {})}
 
 
 @dataclass(frozen=True)
@@ -362,6 +365,11 @@ OPERACOES: tuple[Operacao, ...] = (
         "pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo "
         "Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já "
         "foi feito. A mesma chave com outro corpo dá 409. A chave vale por sistema.\n\n"
+        "Um vídeo novo com o mesmo `nome` e a mesma `data_exibicao` de um Job que já "
+        "existe é recusado com 409 (veja abaixo). Não contam o Job na lixeira ou purgado, "
+        "o que falhou por `upload_expirado` e o que falhou e passou do prazo de "
+        "reprocessamento (`reprocessavel_ate`). O nome é comparado como veio, com "
+        "maiúsculas e extensão.\n\n"
         "O `nome` termina em `.mp4` e o `tipo` é sempre `video/mp4`; arquivos `.mov` "
         "não são aceitos, mesmo com conteúdo MP4: envie com nome `.mp4`.",
         {
@@ -383,6 +391,15 @@ OPERACOES: tuple[Operacao, ...] = (
                 409,
                 "Idempotency-Key já usada com outro corpo",
                 "Use uma chave nova para um pedido novo; a antiga é lembrada por 48 h.",
+            ),
+            Erro(
+                409,
+                "Já existe um vídeo com este nome e esta data de exibição",
+                "O vídeo já foi enviado e o Job não foi criado. `job_id` traz o Job "
+                "existente quando ele é desta chave; o de outro sistema ou de uma pessoa "
+                "vem sem `job_id`. Se o Job falhou, reprocesse-o em vez de reenviar; se é "
+                "outro vídeo, mande com outro nome.",
+                outros_campos={"job_id": ID_DO_JOB},
             ),
             Erro(
                 410,

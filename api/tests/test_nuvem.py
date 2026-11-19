@@ -89,9 +89,9 @@ def _anonima() -> AnonymousCredentials:
 
 
 def _job(id: str, criado_em: datetime, **extra: object) -> Job:
+    extra.setdefault("nome", f"{id}.mp4")
     return Job(
         id=id,
-        nome=f"{id}.mp4",
         tamanho_bytes=1000,
         estado="aguardando_upload",
         criado_por="uid-1",
@@ -294,6 +294,26 @@ class TestRepositorioFirestore:
 
         assert repositorio.contar_do_programa("TV Fama") == 1
         assert repositorio.contar_do_programa("Nenhum") == 0
+
+    def test_com_nome_e_data_traz_so_os_dois_iguais_lixeira_inclusive(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        lixeira = EnvioParaLixeira(
+            em=BASE, por_uid="adm", por_email="ana@redetv.com", motivo="x"
+        )
+        dia = date(2026, 10, 1)
+        repositorio.salvar(_job("a", BASE, nome="x.mp4", data_exibicao=dia))
+        repositorio.salvar(
+            _job("b", BASE, nome="x.mp4", data_exibicao=dia, lixeira=lixeira)
+        )
+        repositorio.salvar(
+            _job("c", BASE, nome="x.mp4", data_exibicao=date(2026, 10, 2))
+        )
+        repositorio.salvar(_job("d", BASE, nome="X.mp4", data_exibicao=dia))
+
+        achados = sorted(j.id for j in repositorio.com_nome_e_data("x.mp4", dia))
+
+        assert achados == ["a", "b"]
 
     def test_lixeira_traz_so_os_da_lixeira_do_envio_mais_recente_ao_mais_antigo(
         self, repositorio: RepositorioFirestore

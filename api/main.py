@@ -102,6 +102,7 @@ from api.jobs import (
     ArmazenamentoIndisponivel,
     DisparoDaIndexacao,
     DisparoDaIndexacaoIndisponivel,
+    EnvioRepetido,
     RepositorioIndisponivel,
     TipoNaoSuportado,
     aceita_gzip,
@@ -396,6 +397,11 @@ def criar_app(
     @app.exception_handler(TipoNaoSuportado)
     def _tipo_errado(_request: Request, _erro: TipoNaoSuportado) -> JSONResponse:
         return JSONResponse({"detail": "Só video/mp4"}, status_code=415)
+
+    @app.exception_handler(EnvioRepetido)
+    def _repetido(_request: Request, erro: EnvioRepetido) -> JSONResponse:
+        extra = {} if erro.job_id is None else {"job_id": erro.job_id}
+        return JSONResponse({"detail": str(erro), **extra}, status_code=409)
 
     # O erro que ninguém tratou não passa pelos middlewares: quem responde é o
     # `ServerErrorMiddleware`, por fora deles, e o 500 sairia sem os cabeçalhos de

@@ -80,7 +80,8 @@ export function useEntrandoNaBusca(ativo: boolean, intervaloMs = 15_000, ociosoM
   const contar = (jobs: Job[] | undefined) => (jobs ?? []).filter((j) => finalizando(j)).length
   const q = useQuery({
     queryKey: ['entrando-na-busca'],
-    queryFn: () => api.acervo({ ...SEM_FILTROS, estado: ['concluido'] }, null, { capa: false }),
+    // Os recém-enviados: pela exibição, o padrão da tela, um vídeo novo de data antiga ficaria fora da página.
+    queryFn: () => api.acervo({ ...SEM_FILTROS, estado: ['concluido'], ordem: 'enviado' }, null, { capa: false }),
     refetchInterval: (c) => (contar(c.state.data?.jobs) > 0 ? intervaloMs : ociosoMs),
     enabled: ativo,
   })

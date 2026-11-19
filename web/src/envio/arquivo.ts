@@ -1,4 +1,4 @@
-import { PedidoInvalido } from '../api.ts'
+import { ConflitoNaApi, PedidoInvalido } from '../api.ts'
 
 // Conveniência: a API e a validação da quarentena repetem estas conferências.
 
@@ -31,5 +31,7 @@ export function mensagemDoErroDoEnvio(erro: unknown): string {
   if (erro instanceof PedidoInvalido && erro.message === 'Data de exibição no futuro') {
     return 'A data de exibição não pode ser no futuro. Corrija a data e envie de novo.'
   }
+  // O único 409 do envio é o vídeo repetido (#763): a tela não manda Idempotency-Key.
+  if (erro instanceof ConflitoNaApi) return `${erro.message}.`
   return 'Não foi possível enviar o vídeo. Tente de novo.'
 }
