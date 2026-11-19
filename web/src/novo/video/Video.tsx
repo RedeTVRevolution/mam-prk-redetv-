@@ -1044,6 +1044,12 @@ export function Video({
               {reprocessou && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
             </p>
           )}
+          {/* O aviso da tela fica na coluna do vídeo: aparece com o inspetor recolhido, a gaveta ou a comparação abertas. */}
+          {aviso && (
+            <p role="status" className="shrink-0 border-b px-3 py-1.5 text-sm">
+              {aviso}
+            </p>
+          )}
           {/* O vídeo não tem `controls`: a tela cheia leva o transporte junto. Fora dela, `contents` deixa
               a moldura e o transporte no layout da seção, com o mesmo tamanho. */}
           <div ref={moldura} className="contents [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:bg-background">
@@ -1188,7 +1194,6 @@ export function Video({
             }}
             aoSaltar={saltarAoItemDaCorrecao}
             aoRefazerAMao={refazerPautasAMao}
-            avisoDaTela={aviso}
           />
         ) : inspetorAberto ? (
           <Inspetor
@@ -1216,7 +1221,6 @@ export function Video({
             aoTocarTrecho={tocarTrecho}
             urlDoQuadro={urlDoQuadro}
             acoes={acoes}
-            aviso={aviso}
             acima={
               revisao.revisando ? (
                 <>

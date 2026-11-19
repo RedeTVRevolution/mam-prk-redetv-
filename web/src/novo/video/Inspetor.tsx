@@ -221,7 +221,6 @@ export function Inspetor({
   aoTocarTrecho,
   urlDoQuadro,
   acoes,
-  aviso,
   acima,
   indexando,
   aoRecolher,
@@ -246,7 +245,6 @@ export function Inspetor({
   aoTocarTrecho: (i: Intervalo) => void
   urlDoQuadro: (caminho: string) => Promise<string>
   acoes?: AcoesDeCorrecao
-  aviso: string | null
   /** O que a revisão põe acima do "Agora": as pautas marcadas. */
   acima?: ReactNode
   indexando: boolean
@@ -352,11 +350,6 @@ export function Inspetor({
           <IconLayoutSidebarRightCollapse size={16} stroke={1.75} aria-hidden />
         </BotaoDeIcone>
       </div>
-      {aviso && (
-        <p role="status" className="shrink-0 border-b px-3 py-2 text-sm">
-          {aviso}
-        </p>
-      )}
       {!d ? (
         <p className="p-8 text-center text-sm text-muted-foreground">
           {carregando ? 'Carregando a decupagem…' : 'O inspetor aparece quando a decupagem estiver pronta.'}

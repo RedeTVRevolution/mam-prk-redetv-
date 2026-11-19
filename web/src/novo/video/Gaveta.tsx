@@ -139,7 +139,6 @@ export function Gaveta({
   aoEnviar,
   aoSaltar,
   aoRefazerAMao,
-  avisoDaTela,
 }: {
   aba: AbaDaGaveta
   aoTrocarAba: (aba: AbaDaGaveta) => void
@@ -159,8 +158,6 @@ export function Gaveta({
   aoSaltar: (correcao: ItemDoHistorico) => boolean
   /** Juntar ou dividir pautas que a reprocessagem não reaplicou: refazer na lista de pautas. */
   aoRefazerAMao?: () => void
-  /** O aviso da tela do vídeo (ex.: o Aprovar Revisão esperando), que no inspetor ficaria escondido. */
-  avisoDaTela?: string | null
 }) {
   const pendentes = historico.filter((h) => h.estado === 'pendente')
   const [selecionado, setSelecionado] = useState(0)
@@ -206,8 +203,6 @@ export function Gaveta({
     setAviso(aoSaltar(correcao) ? null : 'Este item não está mais na decupagem.')
   }
 
-  // O aviso da própria gaveta vence o da tela.
-  const avisoVisivel = aviso ?? avisoDaTela
   const noHistorico = aba === 'historico'
   const atalhos: Atalho[] = [
     {
@@ -288,9 +283,9 @@ export function Gaveta({
           {podeAprovar && <Aba valor="aprovacao">{`Aprovação (${pendentes.length})`}</Aba>}
         </Tabs.List>
         <div ref={lista} className="grid content-start gap-2 p-3">
-          {avisoVisivel && (
+          {aviso && (
             <p role="status" className="text-sm">
-              {avisoVisivel}
+              {aviso}
             </p>
           )}
           {erro && (

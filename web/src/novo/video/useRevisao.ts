@@ -73,8 +73,11 @@ export function useRevisao({
     setRevisando(!revisando)
   }
 
+  /** Liga o modo sem aprovar nada. Não espera a decupagem: uma decisão da gaveta grava sem ela (#744). */
   function entrar() {
-    if (!revisando) alternar()
+    if (!pode || revisando) return
+    aoAlternar()
+    setRevisando(true)
   }
 
   /** Conta a gravação em curso até ela terminar, mesmo que o formulário ou a gaveta saiam da tela. */

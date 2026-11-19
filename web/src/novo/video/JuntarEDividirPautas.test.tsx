@@ -261,6 +261,21 @@ test('com a junção aberta, Aprovar Revisão (E) espera: avisa e não sai do mo
   expect(screen.getByRole('form', { name: 'Juntar 2 pautas' })).toBeTruthy()
 })
 
+test('com a junção aberta e o inspetor recolhido, o aviso do Aprovar Revisão aparece na coluna do vídeo', async () => {
+  const { usuario } = await abrir()
+  await usuario.click(screen.getByRole('button', { name: 'Marcar Abertura para juntar' }))
+  await usuario.click(screen.getByRole('button', { name: 'Marcar Debate para juntar' }))
+  await usuario.keyboard('u')
+  await screen.findByRole('form', { name: 'Juntar 2 pautas' })
+  await usuario.click(screen.getByRole('button', { name: 'Recolher o inspetor' }))
+  await usuario.click(document.body)
+
+  await usuario.click(screen.getByRole('button', { name: 'Aprovar Revisão' }))
+
+  const aviso = await screen.findByText('Salve ou cancele a correção aberta antes de aprovar a revisão.')
+  expect(screen.getByRole('region', { name: 'Vídeo' }).contains(aviso)).toBe(true)
+})
+
 test('sair do modo de revisão (E) esquece as pautas marcadas', async () => {
   const { usuario } = await abrir()
   await usuario.click(screen.getByRole('button', { name: 'Marcar Abertura para juntar' }))

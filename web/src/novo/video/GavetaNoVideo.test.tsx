@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -352,6 +352,33 @@ test('ler, navegar, escolher, abrir confirmações e cancelar não ligam o modo 
   expect(decisoes).toEqual([])
   expect(botaoDoTopo().textContent).toContain('Revisar')
   expect(botaoDoTopo().textContent).not.toContain('Aprovar Revisão')
+})
+
+test('sem a decupagem na tela (reprocessando), a decisão liga o modo, e aprovar a revisão espera a decupagem', async () => {
+  historico = [correcaoDoHistorico('c1', 'bia@redetv.com.br')]
+  const consultas = criarClienteDeConsultas()
+  const usuario = userEvent.setup()
+  await abrirVideo({ permissoes: ['decupagem.editar'], consultas })
+  await usuario.click(await screen.findByRole('button', { name: /^Histórico/ }))
+  await gaveta().findByRole('button', { name: 'Desfazer' })
+  // Como a reprocessagem pela análise: o Job volta a analisar e a decupagem sai da tela até a nova chegar.
+  servidor.use(http.get('/v1/jobs/j1/decupagem', () => new Promise<never>(() => {})))
+  act(() => {
+    consultas.removeQueries({ queryKey: chaveDoVideo('j1', 'decupagem') })
+    consultas.setQueryData(chaveDoVideo('j1', 'job'), (j: object) => ({ ...j, estado: 'analisando', etapa_atual: 'analise' }))
+  })
+  expect(await screen.findByText(/em andamento/)).toBeTruthy()
+  // O Job conclui, e o GET da decupagem nova fica pendente.
+  act(() => consultas.setQueryData(chaveDoVideo('j1', 'job'), (j: object) => ({ ...j, estado: 'concluido', etapa_atual: null })))
+  await waitFor(() => expect(screen.queryByText(/em andamento/)).toBeNull())
+
+  await usuario.click(gaveta().getByRole('button', { name: 'Desfazer' }))
+
+  await waitFor(() => expect(decisoes).toEqual(['/v1/jobs/j1/correcoes/c1/desfazer']))
+  expect(botaoDoTopo().textContent).toContain('Aprovar Revisão')
+  await usuario.click(botaoDoTopo())
+  expect(await screen.findByText('Espere a decupagem carregar para revisar ou aprovar a revisão.')).toBeTruthy()
+  expect(aprovacoesDaRevisao).toBe(0)
 })
 
 test('dentro do Revisar, a decisão não muda o modo', async () => {
