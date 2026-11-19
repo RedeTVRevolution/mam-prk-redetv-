@@ -42,6 +42,7 @@ from api.indice_da_busca import (
     IndiceDaBusca,
     Registro,
     TipoDeRegistro,
+    palavras,
 )
 from api.jobs import VALIDADE_DA_IMAGEM, VALIDADE_INFORMADA_DA_IMAGEM, Armazenamento
 from api.lixeira_na_leitura import (
@@ -56,9 +57,10 @@ from api.marcas import (
     MarcaDoCatalogo,
 )
 from api.modelo_do_job import CursorInvalido, Job, RepositorioDeJobs
-from api.numero import com_as_formas, mesma_palavra, raizes, singular
+from api.numero import com_as_formas, em_grupo, mesma_palavra, raizes, singular
 from api.quem_conta import QuemConta
 from api.texto import chave_da_marca, normalizar
+from api.variantes import Variantes
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +81,8 @@ TETO_DE_REGISTROS = 500
 TETO_DO_RANKING = 100
 # Quanto vale o cursor da busca: o Firestore apaga a lista depois (política de TTL).
 VALIDADE_DA_LISTA = timedelta(minutes=15)
+# A tabela dos nomes do acervo (`variantes.py`) é refeita uma vez por dia.
+VALIDADE_DAS_VARIANTES = timedelta(hours=1)
 # O campo comprimido da lista, bem abaixo do 1 MiB do documento do Firestore.
 TETO_DA_LISTA_BYTES = 800_000
 TETO_DE_VIDEOS = 50
@@ -191,6 +195,8 @@ class Entendida(BaseModel):
     # Só na busca por foto (#443): o termo que o modelo deu para o objeto e que a busca usou,
     # como se tivesse sido digitado. A tela o mostra para a pessoa poder refinar digitando.
     termo_da_foto: str | None = None
+    # As outras grafias dos nomes que a busca incluiu ("incluindo Lordello").
+    variantes: list[str] = []
 
 
 @dataclass(frozen=True)
@@ -405,8 +411,17 @@ class Busca:
         versao_da_lixeira: VersaoDaLixeira | None = None,
         marcas: CatalogoDeMarcas | None = None,
         purgas: PurgasDeMarca | None = None,
+        nomes_do_acervo: Callable[[], list[str]] | None = None,
     ) -> None:
         self._marcas = marcas or CatalogoDeMarcasEmMemoria()
+        self._nomes_do_acervo = nomes_do_acervo
+        # A tabela muda uma vez por dia: relida a cada hora, também quando a leitura falha.
+        self._copia_das_variantes = CopiaCurta(
+            self._ler_variantes,
+            relogio,
+            VALIDADE_DAS_VARIANTES,
+            espera_a_primeira=False,
+        )
         # Só para não pôr acento numa marca citada (#731): relida a cada 30 s, não por busca,
         # nem quando a leitura falha.
         self._copia_das_marcas = CopiaCurta(self._ler_marcas, relogio)
@@ -624,7 +639,8 @@ class Busca:
         decidir(entendida.pessoas)
         carregar_nomes(entendida.pessoas)
         intocadas = _intocadas(entendida, nome, self._copia_das_marcas.itens())
-        clausulas = self._clausulas(entendida, nome, contam, intocadas)
+        do_nome = _grafias(entendida, nome, self.variantes())
+        clausulas = self._clausulas(entendida, nome, contam, intocadas, do_nome)
         t_entender = _agora() - inicio
         facetado = ajustes or Ajustes()
         # As facetas vão ao índice, para não filtrar só o que coube no teto de registros;
@@ -721,7 +737,8 @@ class Busca:
         t_ranking = _agora() - inicio
         _conferir(cancelado)
         motivo_de = {r.id: clausulas[c].motivo(r) for r, c, _ in fundidos}
-        termos = _termos(entendida, nome)
+        usadas = do_nome.usadas()
+        termos = _termos(entendida, nome) + usadas
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
         todos = self._videos(trechos, job, termos, ordem, cancelado)
         videos = todos[:limite]
@@ -745,7 +762,7 @@ class Busca:
             quem = nome(c.pessoa_na_imagem) or ""
             for q in (
                 *([] if sem_facetas else [c.consulta]),
-                *_consultas_das_mencoes(quem, entendida),
+                *_consultas_das_mencoes(quem, entendida, do_nome),
             ):
                 if q not in pedidas and all(q != p for p, _ in prontas):
                     pedidas.append(q)
@@ -778,7 +795,11 @@ class Busca:
                 pool.shutdown(wait=False, cancel_futures=True)
         vazios = [
             self._sem_aparicao(
-                nome(c.pessoa_na_imagem) or "", c.pessoa_na_imagem, entendida, consultar
+                nome(c.pessoa_na_imagem) or "",
+                c.pessoa_na_imagem,
+                entendida,
+                consultar,
+                do_nome,
             )
             for c, achados_da_clausula in candidatas
             if not (achados_da_clausula if sem_facetas else consultar(c.consulta))
@@ -805,6 +826,7 @@ class Busca:
                 desde=entendida.exibido_desde,
                 ate=entendida.exibido_ate,
                 termo_da_foto=entendida.saneada if termo_da_foto else None,
+                variantes=[g.capitalize() for g in usadas],
             ),
             videos=videos,
             sem_aparicoes=vazios,
@@ -973,6 +995,24 @@ class Busca:
             return None
         return achado
 
+    def variantes(self) -> Variantes:
+        """As grafias dos nomes do acervo, da cópia de 1 h (lida também na partida); sem
+        variantes enquanto a 1ª leitura não termina."""
+        lidas = self._copia_das_variantes.itens()
+        return lidas[0] if lidas else Variantes()
+
+    def _ler_variantes(self) -> list[Variantes]:
+        """Sem a tabela (ou com a leitura falhando), a busca segue sem variantes."""
+        if self._nomes_do_acervo is None:
+            return [Variantes()]
+        try:
+            return [Variantes(self._nomes_do_acervo())]
+        except Exception:
+            log.warning(
+                "nomes do acervo não lidos; a busca segue sem variantes", exc_info=True
+            )
+            return [Variantes()]
+
     def _ler_marcas(self) -> list[MarcaDoCatalogo]:
         """As marcas do catálogo; sem elas (falha na leitura), nenhuma fica protegida do
         acento e a busca segue."""
@@ -1000,12 +1040,15 @@ class Busca:
         nome: Callable[[str | None], str | None],
         contam: Collection[str],
         intocadas: Collection[str],
+        grafias: "_Grafias",
     ) -> list[_Clausula]:
         base = _base(e)
         clausulas: list[_Clausula] = []
         for pessoa in e.pessoas:
             clausulas.extend(
-                _clausulas_da_pessoa(pessoa, e, base, nome, pessoa in contam, intocadas)
+                _clausulas_da_pessoa(
+                    pessoa, e, base, nome, pessoa in contam, intocadas, grafias
+                )
             )
         if livre := _texto_da_busca(e):
             significado = com_acento(livre, intocadas)
@@ -1028,7 +1071,7 @@ class Busca:
                     _Clausula(
                         Consulta(
                             filtros=replace(base, tipo=tipo_do_texto),
-                            texto=com_as_formas(livre),
+                            texto=com_as_formas(livre, grafias.de),
                             significado=significado,
                             cortar_significado=True,
                         ),
@@ -1116,9 +1159,10 @@ class Busca:
         pessoa: str | None,
         e: ConsultaEntendida,
         consultar: Callable[[Consulta], list[Registro]],
+        grafias: "_Grafias",
     ) -> SemAparicao:
         """Quantas vezes a pessoa sem aparição é citada, no mesmo programa e período."""
-        fala, tela = _consultas_das_mencoes(quem, e)
+        fala, tela = _consultas_das_mencoes(quem, e, grafias)
         na_fala = consultar(fala)
         na_tela = consultar(tela)
         return SemAparicao(
@@ -1130,11 +1174,11 @@ class Busca:
 
 
 def _consultas_das_mencoes(
-    quem: str, e: ConsultaEntendida
+    quem: str, e: ConsultaEntendida, grafias: "_Grafias"
 ) -> tuple[Consulta, Consulta]:
     """O nome na fala e no texto na tela, no programa e período da busca, sem a frase."""
     base = _base(e)
-    texto = normalizar(quem)
+    texto = grafias.no_nome(quem)
     return (
         Consulta(filtros=replace(base, tipo="fala"), texto=texto),
         Consulta(filtros=replace(base, tipo="texto_na_tela"), texto=texto),
@@ -1376,6 +1420,7 @@ def _clausulas_da_pessoa(
     nome: Callable[[str | None], str | None],
     conta: bool,
     intocadas: Collection[str],
+    grafias: "_Grafias",
 ) -> list[_Clausula]:
     """A pessoa que não conta (lixeira do catálogo, #583) não gera a cláusula de aparição;
     o nome dela segue achado pelo texto."""
@@ -1395,7 +1440,7 @@ def _clausulas_da_pessoa(
             )
         )
     if quem:
-        clausulas.extend(_clausulas_das_mencoes(quem, e, base, nome))
+        clausulas.extend(_clausulas_das_mencoes(quem, e, base, nome, grafias))
     return clausulas
 
 
@@ -1404,6 +1449,7 @@ def _clausulas_das_mencoes(
     e: ConsultaEntendida,
     base: Filtros,
     nome: Callable[[str | None], str | None],
+    grafias: "_Grafias",
 ) -> list[_Clausula]:
     """O nome na fala e no texto na tela, quando as evidências pedidas os incluem."""
     evidencias = _evidencias(e)
@@ -1411,7 +1457,9 @@ def _clausulas_das_mencoes(
     if "fala" in evidencias or "citada" in evidencias:
         clausulas.append(
             _Clausula(
-                Consulta(filtros=replace(base, tipo="fala"), texto=normalizar(quem)),
+                Consulta(
+                    filtros=replace(base, tipo="fala"), texto=grafias.no_nome(quem)
+                ),
                 lambda r: _motivo(r, nome),
             )
         )
@@ -1419,7 +1467,8 @@ def _clausulas_das_mencoes(
         clausulas.append(
             _Clausula(
                 Consulta(
-                    filtros=replace(base, tipo="texto_na_tela"), texto=normalizar(quem)
+                    filtros=replace(base, tipo="texto_na_tela"),
+                    texto=grafias.no_nome(quem),
                 ),
                 lambda r: _motivo(r, nome),
             )
@@ -1444,6 +1493,35 @@ def _motivo(r: Registro, nome: Callable[[str | None], str | None]) -> str:
     if r.tipo == "texto_na_tela":
         return f"GC: {r.texto}"
     return f"Plano: {r.descricao}" if r.descricao else "Plano"
+
+
+@dataclass(frozen=True)
+class _Grafias:
+    """As outras grafias (`Variantes`) das palavras do texto livre e dos nomes citados; a
+    frase entre aspas fica exata."""
+
+    variantes: Variantes
+    palavras: frozenset[str]
+
+    def de(self, palavra: str) -> set[str]:
+        n = normalizar(palavra)
+        return self.variantes.de(n) if n in self.palavras else set()
+
+    def no_nome(self, quem: str) -> str:
+        """O nome sem acento, com cada palavra que tem outra grafia num grupo OR."""
+        return " ".join(em_grupo(p, self.de(p)) for p in normalizar(quem).split())
+
+    def usadas(self) -> list[str]:
+        return sorted({g for p in self.palavras for g in self.variantes.de(p)})
+
+
+def _grafias(
+    e: ConsultaEntendida, nome: Callable[[str | None], str | None], v: Variantes
+) -> _Grafias:
+    nomes = [q for p in e.pessoas if (q := nome(p))]
+    livre = set(palavras(e.texto_livre or ""))
+    so_na_frase = set(palavras(e.frase_exata or "")) - livre
+    return _Grafias(v, frozenset(livre | set(palavras(" ".join(nomes))) - so_na_frase))
 
 
 def _termos(

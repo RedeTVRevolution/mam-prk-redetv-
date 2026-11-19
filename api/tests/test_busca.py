@@ -49,6 +49,7 @@ from api.indice_da_busca import (
     IndiceDaBusca,
     IndiceEmMemoria,
     Registro,
+    palavras,
 )
 from api.jobs import RepositorioEmMemoria
 from api.main import criar_app
@@ -158,6 +159,7 @@ class Mundo:
         relogio: Callable[[], datetime] = lambda: BASE,
         cache: CacheCurto | None = None,
         indice: IndiceDaBusca | None = None,
+        nomes: Callable[[], list[str]] | None = None,
     ) -> Busca:
         return Busca(
             transporte=self.transporte,
@@ -169,6 +171,7 @@ class Mundo:
             relogio=relogio,
             cache_de_candidatos=cache,
             marcas=self.marcas,
+            nomes_do_acervo=nomes,
         )
 
     def com(self, j: Job, *registros: Registro) -> None:
@@ -2860,3 +2863,104 @@ def test_sem_as_marcas_a_busca_segue_e_nao_relê_o_catalogo_a_cada_busca(
     for _ in range(3):
         assert busca.buscar("praca").videos
     assert len(leituras) == 1
+
+
+@pytest.mark.parametrize(
+    ("digitada", "gravada"), [("Lordelo", "Lordello"), ("Lordello", "Lordelo")]
+)
+def test_nome_com_outra_grafia_acha_o_registro_e_a_tela_avisa(
+    digitada: str, gravada: str
+) -> None:
+    m = Mundo(pedido(texto_livre=digitada))
+    m.com(job("j1"), _fala("f1", f"Com Jorge {gravada} no estúdio"))
+    resultado = m.busca(nomes=lambda: ["Lordello", "Lordelo"]).buscar(digitada)
+    momento = resultado.videos[0].momentos[0]
+    assert [momento.motivo[d.inicio : d.fim] for d in momento.destaques] == [gravada]
+    assert resultado.entendida.variantes == [gravada]
+
+
+def test_sem_a_lista_de_nomes_a_consulta_fica_como_antes() -> None:
+    m = Mundo(pedido(texto_livre="Lordelo"))
+
+    def falha() -> list[str]:
+        raise RuntimeError("BigQuery fora")
+
+    resultado = m.busca(nomes=falha).buscar("Lordelo")
+    assert {c.texto for c in m.indice.consultas} == {"(lordelo OR lordelos)"}
+    assert resultado.entendida.variantes == []
+
+
+def test_nome_so_entre_aspas_fica_exato() -> None:
+    m = Mundo(
+        pedido(
+            pessoas=["Jorge Lordello"], frase_exata="Jorge Lordello", texto_livre=None
+        )
+    )
+    m.catalogo.acrescentar("Jorge Lordello", "apresentador", [])
+    resultado = m.busca(nomes=lambda: ["Lordello", "Lordelo"]).buscar(
+        '"Jorge Lordello"'
+    )
+    enviadas = {p for c in m.indice.consultas for p in palavras(c.texto or "")}
+    assert "lordelo" not in enviadas
+    assert resultado.entendida.variantes == []
+
+
+def test_a_busca_nao_espera_a_primeira_leitura_dos_nomes() -> None:
+    m = Mundo(pedido(texto_livre="Lordelo"))
+    solta = threading.Event()
+
+    def lenta() -> list[str]:
+        solta.wait(5)
+        return ["Lordello", "Lordelo"]
+
+    busca = m.busca(nomes=lenta)
+    leitura = threading.Thread(target=busca.variantes)
+    leitura.start()
+    time.sleep(0.05)
+    try:
+        assert busca.buscar("Lordelo").entendida.variantes == []
+    finally:
+        solta.set()
+        leitura.join()
+    assert busca.buscar("Lordelo").entendida.variantes == ["Lordello"]
+
+
+def test_pessoa_do_catalogo_e_achada_e_contada_na_outra_grafia() -> None:
+    m = Mundo(pedido(pessoas=["Jorge Lordello"]))
+    m.catalogo.acrescentar("Jorge Lordello", "apresentador", [])
+    m.com(
+        job("j1"),
+        _fala("f1", "com Jorge Lordelo no estúdio"),
+        Registro(
+            id="t1",
+            tipo="texto_na_tela",
+            job_id="j1",
+            inicio_ms=0,
+            fim_ms=1_000,
+            texto="JORGE LORDELLO",
+        ),
+    )
+    busca = m.busca(nomes=lambda: ["Lordello", "Lordelo"])
+
+    achados = busca.buscar("Jorge Lordello")
+    assert {mo.tipo for v in achados.videos for mo in v.momentos} == {
+        "fala",
+        "texto_na_tela",
+    }
+    assert achados.entendida.variantes == ["Lordelo"]
+
+    sem = busca.buscar("Jorge Lordello", ajustes=Ajustes(evidencias=("imagem",)))
+    (vazio,) = sem.sem_aparicoes
+    assert (vazio.mencoes_na_fala, vazio.mencoes_na_tela) == (1, 1)
+
+
+@pytest.mark.parametrize(("digitada", "outra"), [("Bruno", "bruna"), ("carro", "caro")])
+def test_vogal_trocada_e_palavra_comum_nao_ganham_outra_grafia(
+    digitada: str, outra: str
+) -> None:
+    m = Mundo(pedido(texto_livre=digitada, evidencias=["fala"]))
+    resultado = m.busca(nomes=lambda: ["Bruno", "Bruna", "Caro"]).buscar(digitada)
+    enviadas = {p for c in m.indice.consultas for p in palavras(c.texto or "")}
+    assert digitada.lower() in enviadas
+    assert outra not in enviadas
+    assert resultado.entendida.variantes == []
