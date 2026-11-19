@@ -2,6 +2,7 @@
 "microfone" e "microfones" como a mesma palavra, sem depender do índice."""
 
 import re
+from collections.abc import Callable, Collection
 from functools import lru_cache
 
 from api.texto import normalizar
@@ -117,8 +118,11 @@ def mesma_palavra(a: str, b: str) -> bool:
     return not raizes(a).isdisjoint(raizes(b))
 
 
-def com_as_formas(texto: str) -> str:
-    """Formas sem acento em grupos OR; palavras repetidas e pontuação ficam de fora."""
+def com_as_formas(
+    texto: str, variantes: Callable[[str], Collection[str]] = lambda _: ()
+) -> str:
+    """Formas sem acento em grupos OR, com as `variantes` de grafia da palavra; palavras
+    repetidas e pontuação ficam de fora."""
     saida: list[str] = []
     vistas: set[str] = set()
     for palavra in re.findall(r"\w+", texto):
@@ -126,7 +130,7 @@ def com_as_formas(texto: str) -> str:
         if digitada in vistas:
             continue
         vistas.add(digitada)
-        outras = formas(digitada) - {digitada}
+        outras = (formas(digitada) | set(variantes(digitada))) - {digitada}
         grupo = [digitada, *sorted(outras)]
         saida.append(f"({' OR '.join(grupo)})" if outras else digitada)
     return " ".join(saida)

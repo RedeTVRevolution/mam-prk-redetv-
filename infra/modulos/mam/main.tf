@@ -950,6 +950,8 @@ locals {
   tabela_de_revisao_do_painel = "revisao_do_painel"
   # Tabela da taxa de correção por dia (#455), em `taxa_diaria.tf`.
   tabela_da_taxa_de_correcao = "taxa_de_correcao_por_dia"
+  # Tabela dos nomes próprios do acervo (#734), em `nomes_do_acervo.tf`.
+  tabela_de_nomes_do_acervo = "nomes_do_acervo"
 }
 
 locals {
@@ -1194,6 +1196,11 @@ resource "google_cloud_run_v2_service" "web" {
       env {
         name  = "BIGQUERY_TABELA_DA_TAXA"
         value = local.tabela_da_taxa_de_correcao
+      }
+      # Os nomes próprios do acervo, para as variantes de grafia da busca (nomes_do_acervo.tf, #734).
+      env {
+        name  = "BIGQUERY_TABELA_DE_NOMES"
+        value = local.tabela_de_nomes_do_acervo
       }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"

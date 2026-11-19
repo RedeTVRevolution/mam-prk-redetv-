@@ -430,7 +430,11 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
             <p>Nenhum momento encontrado para “{consulta.q}”. Tente outras palavras ou tire um filtro.</p>
           )
         }
-        contagem={(busca) => contagemDaGrade(busca, contagemDeMomentos)}
+        contagem={(busca) => {
+          // As outras grafias dos nomes que a busca incluiu (#734): "Lordelo" acha também "Lordello".
+          const variantes = busca.paginas?.[0]?.entendida.variantes ?? []
+          return contagemDaGrade(busca, contagemDeMomentos) + (variantes.length ? `, incluindo ${variantes.join(', ')}` : '')
+        }}
       />
     </div>
   )

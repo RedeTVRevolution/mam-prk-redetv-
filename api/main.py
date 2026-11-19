@@ -234,6 +234,7 @@ from api.usuarios import (
     ContasIndisponiveis,
     criar_rotas_dos_usuarios,
 )
+from api.variantes import nomes_do_ambiente
 
 # Build do front (`npm run build`). Sem ele, só a API sobe.
 PASTA_WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
@@ -381,6 +382,7 @@ def criar_app(
     apagar_dados_da_purga: Callable[[str], None] | None = None,
     versao_da_lixeira: VersaoDaLixeira | None = None,
     purgas_de_marca: PurgasDeMarca | None = None,
+    nomes_do_acervo: Callable[[], list[str]] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="MAM RedeTV", dependencies=[Depends(conferir_ids_e_consultas)])
 
@@ -635,6 +637,7 @@ def criar_app(
                 versao_da_lixeira=versao_da_lixeira,
                 marcas=catalogo_de_marcas,
                 purgas=registro_das_purgas,
+                nomes_do_acervo=nomes_do_acervo,
             ),
             relogio,
             busca_por_minuto,
@@ -925,6 +928,7 @@ if _projeto:
         faturamento=faturamento_do_ambiente(os.environ),
         tempo_de_revisao=revisao_do_ambiente(os.environ),
         taxa_de_correcao=taxa_do_ambiente(os.environ),
+        nomes_do_acervo=nomes_do_ambiente(os.environ),
         relatorio_de_marcas=_com_cache(marcas_do_ambiente(os.environ), MarcasComCache),
         cache_do_painel=CacheCurto(),
         passadas=PassadasStorage(

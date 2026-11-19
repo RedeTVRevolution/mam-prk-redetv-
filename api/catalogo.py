@@ -153,8 +153,13 @@ class CopiaCurta[T]:
     só relê; as outras usam a cópia anterior, e só esperam se não há cópia (a primeira
     leitura, ou depois de `descartar`)."""
 
-    def __init__(self, ler: Callable[[], list[T]], relogio: Callable[[], datetime]):
-        self._ler, self._relogio = ler, relogio
+    def __init__(
+        self,
+        ler: Callable[[], list[T]],
+        relogio: Callable[[], datetime],
+        validade: timedelta = VALIDADE_DA_COPIA,
+    ):
+        self._ler, self._relogio, self._validade = ler, relogio, validade
         self._lida_em: datetime | None = None
         self._itens: list[T] = []
         self._geracao = 0
@@ -162,7 +167,7 @@ class CopiaCurta[T]:
 
     def _vale(self) -> bool:
         lida_em = self._lida_em
-        return lida_em is not None and self._relogio() - lida_em < VALIDADE_DA_COPIA
+        return lida_em is not None and self._relogio() - lida_em < self._validade
 
     def itens(self) -> list[T]:
         if self._vale():

@@ -172,6 +172,13 @@ function segurarABusca() {
   return liberar
 }
 
+test('com outra grafia de nome incluída, a contagem diz qual', async () => {
+  resposta = () => HttpResponse.json(resultado({ entendida: { evidencias: [], programa: null, desde: null, ate: null, variantes: ['Lordello'] } }))
+  await abrir('/busca?q=Lordelo')
+
+  expect(await screen.findByText('3 momentos em 2 vídeos, incluindo Lordello')).toBeTruthy()
+})
+
 test('a URL reproduz a busca: q, ev, programa, ano e ordem vão à API', async () => {
   await abrir('/busca?q=sapato&ev=fala&ev=objeto&programa=TV+Fama&ano=2024&ordem=data')
 

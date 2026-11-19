@@ -87,6 +87,8 @@ export interface ResultadoDaBusca {
     ate: string | null
     /** Só na busca por foto: o termo que o modelo deu para o objeto e que a busca usou. */
     termo_da_foto?: string | null
+    /** As outras grafias dos nomes que a busca incluiu ("Lordello" para "Lordelo"). */
+    variantes?: string[]
   }
   videos: VideoDoResultado[]
   sem_aparicoes: SemAparicao[]
