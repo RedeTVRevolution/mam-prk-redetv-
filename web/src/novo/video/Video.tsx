@@ -295,6 +295,7 @@ export function Video({
       setTrecho(null)
       setDescrevendo(false)
     },
+    comCorrecaoAberta: edicao !== null,
   })
 
   // A sessão de revisão (#251) vale no modo de revisão; a pessoa não vê nada dela.
@@ -463,6 +464,7 @@ export function Video({
       mostrarAviso('Selecione um item que possa ser corrigido (↑ ↓).')
       return
     }
+    revisao.entrar()
     setEstrutura(null)
     setDescrevendo(false)
     abrirItem(item.chave, false)
@@ -476,6 +478,7 @@ export function Video({
       mostrarAviso('Não há "não é isto" para o item selecionado.')
       return
     }
+    revisao.entrar()
     setEstrutura(null)
     setDescrevendo(false)
     abrirItem(item.chave, false)
@@ -646,7 +649,7 @@ export function Video({
     setComparandoCom(null)
     setInspetorAberto(true)
     setSecao('pautas')
-    if (!revisao.revisando) revisao.alternar()
+    revisao.entrar()
     mostrarAviso('Marque as pautas (M) e junte (U), ou divida (D).')
   }
 
@@ -663,7 +666,9 @@ export function Video({
   }
 
   /** Grava os pedidos em sequência com o motivo; devolve o erro que fica no formulário, ou `null`. */
-  async function gravar(pedidos: Pedido[], motivo: string): Promise<string | null> {
+  const gravar = (pedidos: Pedido[], motivo: string) => revisao.ocupar(gravarEmSequencia(pedidos, motivo))
+
+  async function gravarEmSequencia(pedidos: Pedido[], motivo: string): Promise<string | null> {
     if (!d) return null
     let gravadas = 0
     try {
@@ -834,6 +839,7 @@ export function Video({
           corrigir: corrigirItem,
           remover: removerItem,
           acrescentar: (pessoa) => {
+            revisao.entrar()
             setDescrevendo(false)
             setTemposDaAlca(null)
             setEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
@@ -843,6 +849,7 @@ export function Video({
             return !!p && juntada(p)
           },
           separar: (pessoa) => {
+            revisao.entrar()
             setDescrevendo(false)
             setTemposDaAlca(null)
             setEdicao({ chave: `separar:${pessoa}`, modo: 'separar' })

@@ -7,8 +7,8 @@ import catalogo from '../../catalogo.fixture.json'
 import { abrirVideo, rotasDoVideo, simularPlayer } from './abrir-teste.tsx'
 
 // A paridade da correção com o Catalogacao.test.tsx, o Trecho.test.tsx (o campo de nome) e o
-// BuscaNoVisualizador.test.tsx (as marcas da correção) da interface antiga. Sem o modo de
-// catalogação (fase 5): quem tem decupagem.editar corrige pelo detalhe do item, com F2 e Del.
+// BuscaNoVisualizador.test.tsx (as marcas da correção) da interface antiga. Quem tem decupagem.editar
+// corrige pelo detalhe do item, com F2 e Del; começar a correção fora do Revisar liga o modo (#743).
 
 const DECUPAGEM = {
   versao_decupagem: 'v1',
@@ -47,6 +47,8 @@ const criados: { nome: string }[] = []
 let historico: Record<string, unknown>[] = []
 let cargas = 0
 let decupagem: Record<string, unknown> = DECUPAGEM
+let aprovacoesDaRevisao = 0
+let reterCorrecao: Promise<void> | null = null
 
 const servidor = setupServer(
   ...rotasDoVideo(
@@ -58,8 +60,14 @@ const servidor = setupServer(
   ),
   http.get('/v1/correcoes/catalogo', () => HttpResponse.json(catalogo)),
   http.get('/v1/jobs/j1/correcoes', () => HttpResponse.json(historico)),
+  http.get('/v1/eu', () => HttpResponse.json({ uid: 'u1', email: 'ana@redetv.com.br', permissoes: ['decupagem.editar'] })),
+  http.post('/v1/jobs/j1/revisao/aprovar', () => {
+    aprovacoesDaRevisao += 1
+    return HttpResponse.json({ indexacao: 'pendente' }, { status: 202 })
+  }),
   http.post('/v1/jobs/j1/correcoes', async ({ request }) => {
     correcoes.push((await request.json()) as Record<string, unknown>)
+    if (reterCorrecao) await reterCorrecao
     return HttpResponse.json({}, { status: 201 })
   }),
   http.get('/v1/catalogo/pessoas', ({ request }) => {
@@ -80,6 +88,8 @@ beforeEach(() => {
   historico = []
   cargas = 0
   decupagem = DECUPAGEM
+  aprovacoesDaRevisao = 0
+  reterCorrecao = null
 })
 afterEach(() => {
   servidor.resetHandlers()
@@ -464,6 +474,8 @@ test('separar pessoa: mostra o motivo de cada origem e grava pessoa.separar', as
   const usuario = await abrirItem('Pessoas', /^não identificado.*01:10 a 01:20/i, /^não identificado/i)
   await usuario.click(detalhe().getByRole('button', { name: 'Separar pessoa' }))
   const formulario = await screen.findByRole('form', { name: 'Separar Não identificado, blusa vermelha' })
+  // Separar fora do Revisar liga o modo (#743).
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
   await usuario.click(within(formulario).getByRole('combobox', { name: 'Pessoa a separar' }))
   expect(screen.getByRole('option', { name: /calvo \(01:30–01:40\), modelo forte: sim \(0.62\)/ })).toBeTruthy()
   await usuario.click(screen.getByRole('option', { name: /calvo/ }))
@@ -674,4 +686,101 @@ test('F2 e Del com a comparação aberta fecham a comparação e mostram o formu
 
   expect(await screen.findByRole('form', { name: /Corrigir Eleição/ })).toBeTruthy()
   expect(screen.queryByRole('complementary', { name: 'Comparação com a passada' })).toBeNull()
+})
+
+// ---------- #743: começar a correção fora do Revisar liga o modo ----------
+
+const botaoDoTopo = () => screen.getByRole('button', { name: /^(Revisar|Aprovar Revisão)$/ })
+
+test.each([
+  ['o botão Corrigir', abrirPauta, (u: ReturnType<typeof userEvent.setup>) => u.click(detalhe().getByRole('button', { name: 'Corrigir' })), /Corrigir Eleição/],
+  ['o F2', abrirPauta, (u: ReturnType<typeof userEvent.setup>) => u.keyboard('{F2}'), /Corrigir Eleição/],
+  ['o botão Não é isto', abrirObjeto, (u: ReturnType<typeof userEvent.setup>) => u.click(detalhe().getByRole('button', { name: 'Não é isto' })), null],
+  ['o Del', abrirAparicao, (u: ReturnType<typeof userEvent.setup>) => u.keyboard('{Delete}'), null],
+  [
+    'o Acrescentar',
+    abrirAparicao,
+    (u: ReturnType<typeof userEvent.setup>) => u.click(detalhe().getByRole('button', { name: 'Acrescentar aparição de Leão Lobo' })),
+    /Acrescentar aparição/,
+  ],
+])('fora do Revisar, %s abre a correção e liga o modo', async (_, abrir, gesto, formulario) => {
+  const usuario = await abrir()
+  expect(botaoDoTopo().textContent).toBe('Revisar')
+
+  await gesto(usuario)
+
+  if (formulario) expect(await screen.findByRole('form', { name: formulario })).toBeTruthy()
+  else expect(await screen.findByRole('group', { name: 'Confirmar a remoção' })).toBeTruthy()
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
+  expect(aprovacoesDaRevisao).toBe(0)
+})
+
+test('fora do Revisar, F2 e Del sem item que possa ser corrigido avisam e não ligam o modo', async () => {
+  const usuario = userEvent.setup()
+  await abrirVideo({ permissoes: ['decupagem.editar'] })
+  await waitFor(() => expect(cargas).toBe(1))
+  await screen.findByRole('button', { name: 'Revisar' })
+  await new Promise((r) => setTimeout(r, 50))
+
+  await usuario.keyboard('{F2}')
+  expect(await screen.findByText('Selecione um item que possa ser corrigido (↑ ↓).')).toBeTruthy()
+  await usuario.keyboard('{Delete}')
+  expect(await screen.findByText('Não há "não é isto" para o item selecionado.')).toBeTruthy()
+
+  expect(botaoDoTopo().textContent).toBe('Revisar')
+})
+
+test('dentro do Revisar, o gesto não muda o modo; cancelar deixa o modo ligado, sem gravar nem aprovar', async () => {
+  const usuario = await abrirPauta()
+  await usuario.keyboard('e')
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
+
+  await usuario.keyboard('{F2}')
+  await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
+  await usuario.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
+  expect(correcoes).toEqual([])
+  expect(aprovacoesDaRevisao).toBe(0)
+})
+
+test('com a correção aberta, Aprovar Revisão (botão e E) não envia o pedido', async () => {
+  const usuario = await abrirPauta()
+  await usuario.keyboard('{F2}')
+  await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  ;(document.activeElement as HTMLElement).blur()
+
+  await usuario.keyboard('e')
+  await usuario.click(botaoDoTopo())
+
+  expect(await screen.findByText('Salve ou cancele a correção aberta antes de aprovar a revisão.')).toBeTruthy()
+  expect(aprovacoesDaRevisao).toBe(0)
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
+  expect(screen.getByRole('form', { name: /Corrigir Eleição/ })).toBeTruthy()
+})
+
+test('fluxo completo: corrigir fora do modo, gravar e aprovar a revisão com um único pedido, nunca durante a gravação', async () => {
+  let liberar = () => {}
+  reterCorrecao = new Promise<void>((r) => (liberar = r))
+  const usuario = await abrirPauta()
+  await usuario.keyboard('{F2}')
+  const formulario = await screen.findByRole('form', { name: /Corrigir Eleição/ })
+  await usuario.type(within(formulario).getByLabelText('Título'), ' II')
+  await usuario.keyboard('{Enter}')
+  await waitFor(() => expect(correcoes).toHaveLength(1))
+
+  // Com a gravação em curso, o E não aprova.
+  ;(document.activeElement as HTMLElement).blur()
+  await usuario.keyboard('e')
+  expect(aprovacoesDaRevisao).toBe(0)
+
+  liberar()
+  await waitFor(() => expect(screen.queryByRole('form')).toBeNull())
+  expect(botaoDoTopo().textContent).toBe('Aprovar Revisão')
+
+  await usuario.click(botaoDoTopo())
+  await waitFor(() => expect(aprovacoesDaRevisao).toBe(1))
+  expect(botaoDoTopo().textContent).toBe('Revisar')
 })

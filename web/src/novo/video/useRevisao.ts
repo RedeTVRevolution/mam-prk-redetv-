@@ -12,7 +12,9 @@ const MOTIVO_DO_DESFAZER = 'correção desfeita pelo editor'
 /**
  * O modo de revisão (tecla E): `alternar` entra nele e, dentro dele, aprova a revisão. Aprovar sai do
  * modo na hora e pede a reindexação em segundo plano (#328): a tela não espera por ela, só acompanha
- * o histórico. `desfazer` (Ctrl+Z) desfaz a correção mais recente do próprio editor.
+ * o histórico. `entrar` só liga o modo (começar uma correção fora dele, #743). Aprovar espera a
+ * correção aberta e as gravações em curso (`ocupar`), para não indexar antes de a correção chegar.
+ * `desfazer` (Ctrl+Z) desfaz a correção mais recente do próprio editor.
  */
 export function useRevisao({
   id,
@@ -22,6 +24,7 @@ export function useRevisao({
   historico,
   mostrarAviso,
   aoAlternar,
+  comCorrecaoAberta,
 }: {
   id: string
   pode: boolean
@@ -31,12 +34,16 @@ export function useRevisao({
   mostrarAviso: (texto: string) => void
   /** Chamado a cada entrada e saída: o que a revisão abriu (trecho, marcas) se descarta aqui. */
   aoAlternar: () => void
+  /** Um formulário ou uma confirmação de correção aberta: aprovar a revisão espera por ela. */
+  comCorrecaoAberta: boolean
 }) {
   const api = useApi()
   const consultas = useQueryClient()
   const cliente = useMemo(() => api.job(id), [api, id])
   const [revisando, setRevisando] = useState(false)
   const desfazendo = useRef(false)
+  // Uma ref, não um estado: a gravação pode terminar entre o render e o E.
+  const gravando = useRef(0)
   const eu = useQuery({ queryKey: ['eu'], queryFn: () => api.eu(), enabled: pode && revisando, retry: false, staleTime: Infinity })
   const doEditor = (h: ItemDoHistorico[]) => h.find((c) => c.autor_email === eu.data?.email && desfazivel(c))
   const temParaDesfazer = !!historico && !!doEditor(historico)
@@ -45,6 +52,14 @@ export function useRevisao({
     if (!pode) return
     if (!decupagemPronta) {
       mostrarAviso('Espere a decupagem carregar para revisar ou aprovar a revisão.')
+      return
+    }
+    if (revisando && comCorrecaoAberta) {
+      mostrarAviso('Salve ou cancele a correção aberta antes de aprovar a revisão.')
+      return
+    }
+    if (revisando && gravando.current > 0) {
+      mostrarAviso('Espere a correção ser gravada para aprovar a revisão.')
       return
     }
     aoAlternar()
@@ -56,6 +71,20 @@ export function useRevisao({
         },
       )
     setRevisando(!revisando)
+  }
+
+  function entrar() {
+    if (!revisando) alternar()
+  }
+
+  /** Conta a gravação em curso até ela terminar, mesmo que o formulário ou a gaveta saiam da tela. */
+  async function ocupar<T>(gravacao: Promise<T>): Promise<T> {
+    gravando.current += 1
+    try {
+      return await gravacao
+    } finally {
+      gravando.current -= 1
+    }
   }
 
   async function desfazer() {
@@ -83,7 +112,7 @@ export function useRevisao({
     }
   }
 
-  return { revisando, alternar, desfazer, temParaDesfazer }
+  return { revisando, alternar, entrar, ocupar, desfazer, temParaDesfazer }
 }
 
 export type Revisao = ReturnType<typeof useRevisao>
