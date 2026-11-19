@@ -376,6 +376,8 @@ test('sem a decupagem na tela (reprocessando), a decisão liga o modo, e aprovar
 
   await waitFor(() => expect(decisoes).toEqual(['/v1/jobs/j1/correcoes/c1/desfazer']))
   expect(botaoDoTopo().textContent).toContain('Aprovar Revisão')
+  // Sem a decupagem não há onde gravar um trecho: as ferramentas dele esperam, como os atalhos I, O e A.
+  expect(screen.queryByRole('group', { name: 'Ferramentas do trecho' })).toBeNull()
   await usuario.click(botaoDoTopo())
   expect(await screen.findByText('Espere a decupagem carregar para revisar ou aprovar a revisão.')).toBeTruthy()
   expect(aprovacoesDaRevisao).toBe(0)

@@ -1110,7 +1110,7 @@ export function Video({
               aoTelaCheia={telaCheia}
               comparando={comparandoCom !== null}
               ferramentas={
-                revisao.revisando ? (
+                revisao.revisando && d ? (
                   <FerramentasDoTrecho
                     completo={trecho?.fim_ms != null}
                     aoMarcarEntrada={marcarEntrada}
