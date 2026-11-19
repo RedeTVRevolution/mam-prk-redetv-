@@ -2977,14 +2977,7 @@ def test_coca_cola_com_hifen_solto_ou_espaco_destaca_coca_e_cola() -> None:
     m = Mundo(pedido(texto_livre="Coca-Cola"))
     m.com(
         job("j1"),
-        Registro(
-            id="f1",
-            tipo="fala",
-            job_id="j1",
-            inicio_ms=0,
-            fim_ms=1_000,
-            texto="Refrigerante, selo, vermelho. Coca -Cola?",
-        ),
+        _fala("f1", "Refrigerante, selo, vermelho. Coca -Cola?"),
         Registro(
             id="p1",
             tipo="plano",
@@ -2998,39 +2991,28 @@ def test_coca_cola_com_hifen_solto_ou_espaco_destaca_coca_e_cola() -> None:
     assert sorted(_destacados(x) for x in momentos) == [["Coca", "Cola"]] * 2
 
 
-def fala(id: str, texto: str, inicio: int = 0) -> Registro:
-    return Registro(
-        id=id,
-        tipo="fala",
-        job_id="j1",
-        inicio_ms=inicio,
-        fim_ms=inicio + 1_000,
-        texto=texto,
-    )
-
-
 def test_coca_cola_entre_aspas_destaca_coca_e_cola_na_fala_com_hifen_solto() -> None:
     m = Mundo(pedido(frase_exata="Coca-Cola"))
-    m.com(job("j1"), fala("f1", "Ganhei uma Coca -Cola aqui"))
+    m.com(job("j1"), _fala("f1", "Ganhei uma Coca -Cola aqui"))
     (momento,) = buscar(m, '"Coca-Cola"').videos[0].momentos
     assert _destacados(momento) == ["Coca", "Cola"]
 
 
 def test_coca_cola_escrito_junto_continua_destacado_inteiro() -> None:
     m = Mundo(pedido(texto_livre="Coca-Cola"))
-    m.com(job("j1"), fala("f1", "Ganhei uma Coca-Cola aqui"))
+    m.com(job("j1"), _fala("f1", "Ganhei uma Coca-Cola aqui"))
     (momento,) = buscar(m, "Coca-Cola").videos[0].momentos
     assert _destacados(momento) == ["Coca-Cola"]
 
 
 def test_o_corte_por_palavra_nao_acrescenta_termos_de_uma_ou_duas_letras() -> None:
     m = Mundo(pedido(texto_livre="TV-Rede"))
-    m.com(job("j1"), fala("f1", "a TV na Rede e a TV"))
+    m.com(job("j1"), _fala("f1", "a TV na Rede e a TV"))
     (momento,) = buscar(m, "TV-Rede").videos[0].momentos
     assert _destacados(momento) == ["Rede"]
 
 
-def garrafa(id: str, inicio: int, **mudancas: Any) -> Registro:
+def garrafa(id: str, inicio: int, job: str = "j1", **mudancas: Any) -> Registro:
     base: dict[str, Any] = {
         "categoria": "bebida",
         "tipo_do_objeto": "garrafa",
@@ -3039,7 +3021,7 @@ def garrafa(id: str, inicio: int, **mudancas: Any) -> Registro:
         "texto": "garrafa vermelho Coca-Cola",
         "marca": "Coca-Cola",
     }
-    return objeto(id, "j1", inicio, inicio + 1_000, **base | mudancas)
+    return objeto(id, job, inicio, inicio + 1_000, **base | mudancas)
 
 
 def test_o_objeto_com_marca_mostra_a_marca_destacada_e_depois_o_dono() -> None:
@@ -3072,7 +3054,7 @@ def test_objetos_iguais_de_marcas_diferentes_a_menos_de_3_s_viram_dois_momentos(
 def test_a_segunda_pagina_tem_o_motivo_com_a_marca_e_os_destaques_da_primeira() -> None:
     m = Mundo(pedido(texto_livre="Coca-Cola"))
     for i in (1, 2):
-        m.com(job(f"j{i}"), replace(garrafa(f"o{i}", 0), job_id=f"j{i}"))
+        m.com(job(f"j{i}"), garrafa(f"o{i}", 0, f"j{i}"))
     busca = m.busca()
     primeira = busca.buscar("Coca-Cola", limite=1, dono="u1")
     segunda = busca.buscar(
