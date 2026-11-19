@@ -111,6 +111,32 @@ test('a cor de um objeto só vai pelo id dele, e mudar o nome do grupo guarda a 
   })
 }, 15_000)
 
+test('a correção aberta toma o lugar da lista na seção, que volta ao cancelar', async () => {
+  const usuario = await abrir()
+  const grupo = /^relógio de parede .*2 planos$/
+  await usuario.click(within(inspetor().getByRole('group', { name: 'Corrigir todos: relógio de parede' })).getByRole('button', { name: 'Corrigir nome' }))
+  const formulario = await screen.findByRole('form', { name: 'Corrigir nome de 3 objetos, em 2 planos' })
+
+  // Com a janela baixa, o formulário acima da lista passava por cima das seções de baixo.
+  expect(inspetor().queryByRole('button', { name: grupo })).toBeNull()
+  expect(formulario.parentElement?.className).toContain('overflow-y-auto')
+
+  await usuario.click(within(formulario).getByRole('button', { name: 'Cancelar' }))
+  expect(await inspetor().findByRole('button', { name: grupo })).toBeTruthy()
+})
+
+test('na correção de um objeto só, o quadro com a caixa dele fica à vista acima do formulário', async () => {
+  const usuario = await abrir()
+  await usuario.click(inspetor().getByRole('button', { name: 'relógio de parede · preto · Externa · 00:30' }))
+  await usuario.click(within(inspetor().getByRole('group', { name: 'Corrigir este: relógio de parede' })).getByRole('button', { name: 'Não é isto' }))
+  expect(await screen.findByText('Este objeto (relógio de parede) não está na imagem?')).toBeTruthy()
+  // Com dois relógios no plano, só a caixa diz qual deles sai.
+  expect(await inspetor().findByTestId('caixa-do-objeto')).toBeTruthy()
+  // O quadro vem do alvo da correção, não da lista: um filtro que esconde o objeto não o tira.
+  await usuario.type(inspetor().getByRole('textbox', { name: /^Filtrar/ }), 'xyz')
+  expect(inspetor().getByTestId('caixa-do-objeto')).toBeTruthy()
+})
+
 test('fora do Revisar, os objetos do plano não têm botões de correção', async () => {
   const usuario = await abrir({ revisando: false })
   await usuario.click(inspetor().getByRole('button', { name: 'relógio de parede · preto · Externa · 00:30' }))

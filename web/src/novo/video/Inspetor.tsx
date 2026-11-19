@@ -78,8 +78,8 @@ export interface AcoesDeCorrecao {
   fundir?: (pessoa: string) => void
   /** Corrigir objetos do plano (só no modo de revisão): o grupo inteiro ou um objeto só. */
   inventario?: (tipo: TipoDoInventario, alvo: AlvoDoInventario) => void
-  /** O formulário (ou a confirmação) aberto: a chave do item, ou `acrescentar:<pessoa>`. */
-  edicao: { chave: string; conteudo: ReactNode } | null
+  /** O formulário (ou a confirmação) aberto: a chave do item, ou `acrescentar:<pessoa>`; `caixa`, a do objeto só em correção. */
+  edicao: { chave: string; conteudo: ReactNode; caixa?: OcorrenciaDoObjeto['caixa'] } | null
   /** "aguardando o Curador", "indexando", "na busca", por chave de item. */
   marcas?: Record<string, Marca>
 }
@@ -429,10 +429,15 @@ export function Inspetor({
                             </select>
                           </div>
                         )}
-                        {s.chave === 'objetos' && acoes?.edicao?.chave.startsWith('inventario:') && (
-                          <div className="shrink-0 border-b p-3">{acoes.edicao.conteudo}</div>
-                        )}
-                        {linhas.length === 0 ? (
+                        {/* A correção de um objeto toma o lugar da lista e rola na seção: acima dela, com a janela
+                            baixa, passava por cima das seções de baixo. */}
+                        {s.chave === 'objetos' && acoes?.edicao?.chave.startsWith('inventario:') ? (
+                          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                            {/* De um objeto só, o quadro com a caixa diz qual deles a correção pega. */}
+                            {acoes.edicao.caixa && <QuadroComCaixa caixa={acoes.edicao.caixa} urlDoQuadro={urlDoQuadro} className="mb-3" />}
+                            {acoes.edicao.conteudo}
+                          </div>
+                        ) : linhas.length === 0 ? (
                           <p className="px-3 py-8 text-center text-sm text-muted-foreground">
                             {filtro ? `Nada com “${filtro}” em ${s.rotulo.toLowerCase()}.` : s.vazio}
                           </p>
@@ -880,12 +885,20 @@ function OcorrenciaDoInventario({
 }
 
 /** O quadro inteiro com a caixa do objeto: a imagem dita a altura, e a caixa (em fração) cai no lugar em 16:9 ou 4:3. */
-function QuadroComCaixa({ caixa, urlDoQuadro }: { caixa: OcorrenciaDoObjeto['caixa']; urlDoQuadro: (c: string) => Promise<string> }) {
+function QuadroComCaixa({
+  caixa,
+  urlDoQuadro,
+  className = 'mx-3 mb-2 ml-8',
+}: {
+  caixa: OcorrenciaDoObjeto['caixa']
+  urlDoQuadro: (c: string) => Promise<string>
+  className?: string
+}) {
   const url = useUrlDoQuadro(caixa.quadro, urlDoQuadro)
   if (!url) return null
   const pct = (v: number) => `${v * 100}%`
   return (
-    <div className="relative mx-3 mb-2 ml-8 bg-black">
+    <div className={cn('relative bg-black', className)}>
       <img src={url} alt="" className="block h-auto w-full" />
       <span
         data-testid="caixa-do-objeto"

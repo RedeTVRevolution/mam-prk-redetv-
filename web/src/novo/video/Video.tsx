@@ -864,7 +864,14 @@ export function Video({
           pessoaDoCatalogo: (id) => !!d.pessoas.find((p) => p.id === id)?.catalogo_id,
           renomear: revisao.revisando && pode.aprovar ? abrirPessoa('renomear') : undefined,
           fundir: revisao.revisando && pode.fundir ? abrirPessoa('fundir') : undefined,
-          edicao: edicao && conteudoDaEdicao ? { chave: edicao.chave, conteudo: conteudoDaEdicao } : null,
+          edicao:
+            edicao && conteudoDaEdicao
+              ? {
+                  chave: edicao.chave,
+                  conteudo: conteudoDaEdicao,
+                  caixa: edicao.modo === 'inventario' && edicao.alvo.ocorrencias.length === 1 ? edicao.alvo.ocorrencias[0].caixa : undefined,
+                }
+              : null,
           marcas,
         }
       : undefined
