@@ -1484,8 +1484,8 @@ def _motivo(r: Registro, nome: Callable[[str | None], str | None]) -> str:
             for p in (r.tipo_do_objeto or r.categoria, r.cor or " ".join(r.cor_base))
             if p
         )
-        dono = nome(r.dono)
-        return f"Objeto: {peca} · {dono}" if dono else f"Objeto: {peca}"
+        # A marca já é o rótulo (`MarcasCanonicas`) e separa momentos no `_juntar` (#738).
+        return " · ".join(p for p in (f"Objeto: {peca}", r.marca, nome(r.dono)) if p)
     if r.tipo == "comercial":
         return f"Comercial: {r.texto}"
     if r.tipo == "fala":
@@ -1527,14 +1527,14 @@ def _grafias(
 def _termos(
     e: ConsultaEntendida, nome: Callable[[str | None], str | None]
 ) -> list[str]:
-    """O que se destaca no motivo: a frase, o texto livre e o nome das pessoas citadas."""
-    termos = [e.frase_exata] if e.frase_exata else []
-    if e.texto_livre:
-        # Palavras de uma ou duas letras ("de", "da") acenderiam dentro de outras.
-        termos += [
-            e.texto_livre,
-            *(p for p in normalizar(e.texto_livre).split() if len(p) > 2),
-        ]
+    """O que se destaca no motivo: a frase, o texto livre e o nome das pessoas citadas.
+    A frase e o texto livre entram inteiros e palavra por palavra, cortados como o índice
+    os corta: "Coca-Cola" acende também "Coca -Cola" e "Coca Cola" (#738)."""
+    termos: list[str] = []
+    for texto in (e.frase_exata, e.texto_livre):
+        if texto:
+            # Palavras de uma ou duas letras ("de", "da") acenderiam dentro de outras.
+            termos += [texto, *(p for p in palavras(texto) if len(p) > 2)]
     termos += [q for p in e.pessoas if (q := nome(p))]
     return termos
 
