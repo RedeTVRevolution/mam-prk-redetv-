@@ -29,13 +29,18 @@ import {
   editorDeNovaAparicao,
   editorDeSeparacao,
   juntada,
+  editorDoInventario,
   editorDoItem,
   itemDaCorrecao,
+  LIMITE_DO_GRUPO,
   marcasDosItens,
   motivoDaRemocao,
   type Pedido,
   pedidoDeRemocao,
+  pedidoDoInventario,
   podeRemover,
+  ROTULO_DO_INVENTARIO,
+  type TipoDoInventario,
 } from '../../catalogacao.ts'
 import type { ItemDoHistorico, Pauta } from '../../decupagem.ts'
 import { ABAS_DO_TRECHO } from '../../trecho.ts'
@@ -73,7 +78,7 @@ import { RenomeacaoEmLote } from './RenomeacaoEmLote.tsx'
 import { type DialogoDoVideo, DialogosDoVideo } from './dialogos.tsx'
 import { EdicaoDoVideo } from './EdicaoDoVideo.tsx'
 import { criarInstante, type Instante, useNoInstante } from './instante.ts'
-import { type AcoesDeCorrecao, Inspetor } from './Inspetor.tsx'
+import { type AcoesDeCorrecao, type AlvoDoInventario, Inspetor } from './Inspetor.tsx'
 import { ChipsDasFaixas, type AlcasDaCorrecao, LinhaDoTempo, type TrechoMarcado } from './LinhaDoTempo.tsx'
 
 export interface Permissoes {
@@ -110,7 +115,13 @@ function tocar(player: HTMLVideoElement) {
   Promise.resolve(player.play()).catch(() => {})
 }
 
-type Edicao = { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'separar' | 'fundir' | 'renomear' }
+type Edicao =
+  | { chave: string; modo: 'editar' | 'remover' | 'acrescentar' | 'separar' | 'fundir' | 'renomear' }
+  | { chave: string; modo: 'inventario'; tipo: TipoDoInventario; alvo: AlvoDoInventario }
+
+/** "3 objetos, em 2 planos": o alcance da correção do objeto do plano. */
+const alcanceDoInventario = ({ ocorrencias, planos }: AlvoDoInventario): string =>
+  `${ocorrencias.length} ${ocorrencias.length === 1 ? 'objeto' : 'objetos'}, em ${planos} ${planos === 1 ? 'plano' : 'planos'}`
 
 /**
  * O vídeo aberto: o `<video>` com o proxy assinado, as barras, a linha do tempo e o inspetor. O
@@ -284,6 +295,8 @@ export function Video({
       setTrecho(null)
       setDescrevendo(false)
     },
+    // Qualquer formulário de correção: corrigir, juntar ou dividir pautas, descrever o trecho.
+    comCorrecaoAberta: edicao !== null || estrutura !== null || descrevendo,
   })
 
   // A sessão de revisão (#251) vale no modo de revisão; a pessoa não vê nada dela.
@@ -453,10 +466,8 @@ export function Video({
       return
     }
     setEstrutura(null)
-    setDescrevendo(false)
     abrirItem(item.chave, false)
-    setTemposDaAlca(null)
-    setEdicao({ chave: item.chave, modo: 'editar' })
+    abrirEdicao({ chave: item.chave, modo: 'editar' })
   }
 
   function removerItem(item: ItemDoPainel | undefined) {
@@ -466,10 +477,16 @@ export function Video({
       return
     }
     setEstrutura(null)
-    setDescrevendo(false)
     abrirItem(item.chave, false)
+    abrirEdicao({ chave: item.chave, modo: 'remover' })
+  }
+
+  /** Abre o formulário ou a confirmação da correção; fora do Revisar, liga o modo antes (#743). */
+  function abrirEdicao(e: Edicao) {
+    revisao.entrar()
+    setDescrevendo(false)
     setTemposDaAlca(null)
-    setEdicao({ chave: item.chave, modo: 'remover' })
+    setEdicao(e)
   }
 
   // ---------- juntar e dividir pautas ----------
@@ -635,7 +652,7 @@ export function Video({
     setComparandoCom(null)
     setInspetorAberto(true)
     setSecao('pautas')
-    if (!revisao.revisando) revisao.alternar()
+    revisao.entrar()
     mostrarAviso('Marque as pautas (M) e junte (U), ou divida (D).')
   }
 
@@ -652,7 +669,9 @@ export function Video({
   }
 
   /** Grava os pedidos em sequência com o motivo; devolve o erro que fica no formulário, ou `null`. */
-  async function gravar(pedidos: Pedido[], motivo: string): Promise<string | null> {
+  const gravar = (pedidos: Pedido[], motivo: string) => revisao.ocupar(gravarEmSequencia(pedidos, motivo))
+
+  async function gravarEmSequencia(pedidos: Pedido[], motivo: string): Promise<string | null> {
     if (!d) return null
     let gravadas = 0
     try {
@@ -694,7 +713,31 @@ export function Video({
   let alcas: AlcasDaCorrecao | null = null
   if (d && catalogoPronto && edicao) {
     const item = itens.find((i) => i.chave === edicao.chave)
-    if (edicao.modo === 'fundir') {
+    if (edicao.modo === 'inventario') {
+      const { tipo, alvo } = edicao
+      const ids = alvo.ocorrencias.map((x) => x.id)
+      conteudoDaEdicao =
+        tipo === 'inventario.nao_existe' ? (
+          <ConfirmacaoDeRemocao
+            texto={ids.length === 1 ? `Este objeto (${alvo.nome}) não está na imagem?` : `Estes ${alcanceDoInventario(alvo)}, não estão na imagem?`}
+            aoConfirmar={async () => {
+              const pedido = pedidoDoInventario(tipo, ids)
+              const falha = await gravar([pedido], motivoDaRemocao(pedido))
+              if (falha) mostrarAviso(falha)
+            }}
+            aoCancelar={fecharEdicao}
+          />
+        ) : (
+          <FormularioDeCorrecao
+            key={edicao.chave + tipo}
+            editor={editorDoInventario(tipo, alvo.ocorrencias, catalogoPronto)}
+            rotulo={`${ROTULO_DO_INVENTARIO[tipo]} de ${alcanceDoInventario(alvo)}`}
+            limiteDoMotivo={catalogoPronto.limites.motivo}
+            aoSalvar={gravar}
+            aoCancelar={fecharEdicao}
+          />
+        )
+    } else if (edicao.modo === 'fundir') {
       const pessoa = d.pessoas.find((p) => `fundir:${p.id}` === edicao.chave)
       if (pessoa?.catalogo_id)
         conteudoDaEdicao = (
@@ -784,11 +827,7 @@ export function Video({
     }
   }
 
-  const abrirPessoa = (modo: 'fundir' | 'renomear') => (pessoa: string) => {
-    setDescrevendo(false)
-    setTemposDaAlca(null)
-    setEdicao({ chave: `${modo}:${pessoa}`, modo })
-  }
+  const abrirPessoa = (modo: 'fundir' | 'renomear' | 'acrescentar' | 'separar') => (pessoa: string) => abrirEdicao({ chave: `${modo}:${pessoa}`, modo })
   const acoes: AcoesDeCorrecao | undefined =
     d && catalogoPronto
       ? {
@@ -796,20 +835,12 @@ export function Video({
           podeRemover: (i) => podeRemover(d, i),
           corrigir: corrigirItem,
           remover: removerItem,
-          acrescentar: (pessoa) => {
-            setDescrevendo(false)
-            setTemposDaAlca(null)
-            setEdicao({ chave: `acrescentar:${pessoa}`, modo: 'acrescentar' })
-          },
+          acrescentar: abrirPessoa('acrescentar'),
           pessoaJuntada: (id) => {
             const p = d.pessoas.find((x) => x.id === id)
             return !!p && juntada(p)
           },
-          separar: (pessoa) => {
-            setDescrevendo(false)
-            setTemposDaAlca(null)
-            setEdicao({ chave: `separar:${pessoa}`, modo: 'separar' })
-          },
+          separar: abrirPessoa('separar'),
           pautas: revisao.revisando
             ? {
                 marcada: (i) => {
@@ -818,6 +849,16 @@ export function Video({
                 },
                 alternar: alternarMarcaDaPauta,
                 dividir: dividirPauta,
+              }
+            : undefined,
+          inventario: revisao.revisando
+            ? (tipo, alvo) => {
+                // A API grava até 500 de uma vez; fatiar quebraria o "todos ou nenhum" do gesto.
+                if (alvo.ocorrencias.length > LIMITE_DO_GRUPO) {
+                  mostrarAviso(`Grupo grande demais: são ${alvo.ocorrencias.length} objetos, e o limite é ${LIMITE_DO_GRUPO}. Corrija pelos objetos.`)
+                  return
+                }
+                abrirEdicao({ chave: alvo.chave, modo: 'inventario', tipo, alvo })
               }
             : undefined,
           pessoaDoCatalogo: (id) => !!d.pessoas.find((p) => p.id === id)?.catalogo_id,
@@ -1003,6 +1044,12 @@ export function Video({
               {reprocessou && job.estado === 'analisando' && ' A Decupagem está sendo refeita e volta quando a análise terminar.'}
             </p>
           )}
+          {/* O aviso da tela fica na coluna do vídeo: aparece com o inspetor recolhido, a gaveta ou a comparação abertas. */}
+          {aviso && (
+            <p role="status" className="shrink-0 border-b px-3 py-1.5 text-sm">
+              {aviso}
+            </p>
+          )}
           {/* O vídeo não tem `controls`: a tela cheia leva o transporte junto. Fora dela, `contents` deixa
               a moldura e o transporte no layout da seção, com o mesmo tamanho. */}
           <div ref={moldura} className="contents [&:fullscreen]:flex [&:fullscreen]:flex-col [&:fullscreen]:bg-background">
@@ -1063,7 +1110,7 @@ export function Video({
               aoTelaCheia={telaCheia}
               comparando={comparandoCom !== null}
               ferramentas={
-                revisao.revisando ? (
+                revisao.revisando && d ? (
                   <FerramentasDoTrecho
                     completo={trecho?.fim_ms != null}
                     aoMarcarEntrada={marcarEntrada}
@@ -1140,6 +1187,11 @@ export function Video({
             catalogo={catalogo.data ?? null}
             falhaAoCarregar={historico.isError || fila.isError}
             aoMudar={() => recarregar()}
+            aoEnviar={(decisao) => {
+              // Enviar a decisão fora do Revisar liga o modo; aprovar a revisão espera a decisão chegar (#744).
+              revisao.entrar()
+              return revisao.ocupar(decisao)
+            }}
             aoSaltar={saltarAoItemDaCorrecao}
             aoRefazerAMao={refazerPautasAMao}
           />
@@ -1152,7 +1204,11 @@ export function Video({
             instante={instante}
             duracaoMs={duracaoDaLinhaMs}
             secao={secao}
-            aoTrocarSecao={setSecao}
+            aoTrocarSecao={(s) => {
+              // A correção do inventário mora na seção Objetos: recolhê-la descarta a correção, que não trava o Aprovar escondida.
+              if (edicao?.modo === 'inventario' && s !== 'objetos') fecharEdicao()
+              setSecao(s)
+            }}
             selecionada={selecionada}
             detalhe={detalhe && !!selecionado}
             aoAbrir={abrirItem}
@@ -1165,7 +1221,6 @@ export function Video({
             aoTocarTrecho={tocarTrecho}
             urlDoQuadro={urlDoQuadro}
             acoes={acoes}
-            aviso={aviso}
             acima={
               revisao.revisando ? (
                 <>

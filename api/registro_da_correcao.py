@@ -34,6 +34,7 @@ from api.modelo_do_job import Job, RepositorioDeJobs
 from api.regras_das_correcoes import (
     aplicar,
     corrigir,
+    corrigir_grupo,
     decidir,
     descartar,
     desfazer,
@@ -44,7 +45,9 @@ log = logging.getLogger(__name__)
 
 # O tipo do item que uma Correção corrige, quando não é pessoa nem comercial: ela não pode
 # mexer nos `catalogo_id` nem, indiretamente, no efeito de outra Correção sobre eles.
-_SEM_CATALOGO = frozenset({"pauta", "plano", "fala", "texto_na_tela", "objeto"})
+_SEM_CATALOGO = frozenset(
+    {"pauta", "plano", "fala", "texto_na_tela", "objeto", "inventario"}
+)
 
 
 def pode_mudar_os_ids(tipo: str) -> bool:
@@ -92,19 +95,34 @@ class RegistroDaCorrecao:
         """A Correção gravada e a versão da Decupagem em que ela se apoia."""
         modelo, versao = ler_modelo(self._decupagens, job.id)
         todas = self._correcoes.listar(job.id)
-        correcao = corrigir(
-            modelo,
-            versao,
-            todas,
-            novo,
-            job.id,
-            autoria,
-            exige_aprovacao=exige_aprovacao,
-            catalogo=self._catalogo,
-            marcas=self._marcas,
+        registros = (
+            corrigir_grupo(
+                modelo,
+                versao,
+                todas,
+                novo,
+                job.id,
+                autoria,
+                exige_aprovacao=exige_aprovacao,
+            )
+            if novo.item_ids
+            else [
+                corrigir(
+                    modelo,
+                    versao,
+                    todas,
+                    novo,
+                    job.id,
+                    autoria,
+                    exige_aprovacao=exige_aprovacao,
+                    catalogo=self._catalogo,
+                    marcas=self._marcas,
+                )
+            ]
         )
-        self._gravar(job, correcao, autoria, todas, lido=(modelo, versao))
-        return correcao, versao
+        return self._gravar(
+            job, registros, autoria, todas, lido=(modelo, versao)
+        ), versao
 
     def desfazer(
         self, job: Job, alvo_id: str, motivo: str, autoria: Autoria
@@ -121,9 +139,9 @@ class RegistroDaCorrecao:
     ) -> Correcao:
         return self._sobre_o_modelo(
             job,
-            lambda m, v, todas: reaplicar(
-                m, v, todas, alvo_id, item_id, motivo, job.id, autoria
-            ),
+            lambda m, v, todas: [
+                reaplicar(m, v, todas, alvo_id, item_id, motivo, job.id, autoria)
+            ],
             autoria,
             NaoNaFila,
         )
@@ -133,9 +151,9 @@ class RegistroDaCorrecao:
     ) -> Correcao:
         return self._sobre_o_modelo(
             job,
-            lambda m, v, todas: descartar(
-                m, v, todas, alvo_id, motivo, job.id, autoria
-            ),
+            lambda m, v, todas: [
+                descartar(m, v, todas, alvo_id, motivo, job.id, autoria)
+            ],
             autoria,
             NaoNaFila,
         )
@@ -143,9 +161,10 @@ class RegistroDaCorrecao:
     def decidir(
         self, job: Job, alvo_id: str, aprovada: bool, motivo: str, autoria: Autoria
     ) -> Correcao:
-        """Aprova ou recusa uma Correção pendente; não lê a Decupagem antes de gravar."""
+        """Aprova ou recusa uma Correção pendente (ou o grupo dela); não lê a Decupagem
+        antes de gravar."""
         correcoes = self._correcoes.listar(job.id)
-        registro = decidir(
+        registros = decidir(
             correcoes,
             alvo_id,
             aprovada,
@@ -153,21 +172,21 @@ class RegistroDaCorrecao:
             job.id,
             autoria,
         )
-        return self._gravar(job, registro, autoria, correcoes, NaoPendente)
+        return self._gravar(job, registros, autoria, correcoes, NaoPendente)
 
     def _sobre_o_modelo(
         self,
         job: Job,
-        regra: Callable[[dict[str, Any], str, list[Correcao]], Correcao],
+        regra: Callable[[dict[str, Any], str, list[Correcao]], list[Correcao]],
         autoria: Autoria,
         se_ja_existe: type[Exception],
     ) -> Correcao:
-        """Lê o modelo e as Correções, aplica a regra e grava o registro que ela devolve."""
+        """Lê o modelo e as Correções, aplica a regra e grava os registros que ela devolve."""
         modelo, versao = ler_modelo(self._decupagens, job.id)
         todas = self._correcoes.listar(job.id)
-        registro = regra(modelo, versao, todas)
+        registros = regra(modelo, versao, todas)
         return self._gravar(
-            job, registro, autoria, todas, se_ja_existe, lido=(modelo, versao)
+            job, registros, autoria, todas, se_ja_existe, lido=(modelo, versao)
         )
 
     # ponytail: sem chave de idempotência. O web não repete o POST; repetir continua dando 409
@@ -178,21 +197,26 @@ class RegistroDaCorrecao:
     def _gravar(
         self,
         job: Job,
-        registro: Correcao,
+        registros: list[Correcao],
         autoria: Autoria,
         antes: list[Correcao],
         se_ja_existe: type[Exception] | None = None,
         *,
         lido: tuple[dict[str, Any], str] | None = None,
     ) -> Correcao:
-        """Grava, registra o evento e atualiza o Catálogo do Job. `antes` são as Correções que
+        """Grava os `registros` de um gesto (os de um grupo numa escrita só, todos ou
+        nenhum) e devolve o primeiro. Um evento e um recálculo por gesto. Grava, registra o evento e atualiza o Catálogo do Job. `antes` são as Correções que
         a operação leu; `se_ja_existe` é a exceção dela para o registro que outro pedido gravou
         no meio. O catálogo só é recalculado se o tipo da Correção criada ou do alvo pode mudar
         o conjunto de `catalogo_id` (`pode_mudar_os_ids`) ou, com o modelo `lido`, se a
         comparação em memória o muda; o recálculo reusa o `lido`. O `decidir` não leu o modelo:
         vale só o tipo."""
+        registro = registros[0]
         try:
-            self._correcoes.acrescentar(registro)
+            if len(registros) == 1:
+                self._correcoes.acrescentar(registro)
+            else:
+                self._correcoes.acrescentar_varios(registros)
         except CorrecaoJaExiste as erro:
             if se_ja_existe is None:
                 raise
@@ -206,7 +230,7 @@ class RegistroDaCorrecao:
             programa=job.programa,
             tipo_de_correcao=registro.tipo,
         )
-        if self._recalcula(registro, antes, lido):
+        if self._recalcula(registros, antes, lido):
             # ponytail: reusa o modelo já lido (#720). Se a identificação gravar outra
             # Decupagem nesse meio-tempo, o Catálogo do Job sai da versão velha até a
             # próxima Correção ou o `make preencher-catalogo-dos-jobs` (aceito em 18/11).
@@ -215,10 +239,11 @@ class RegistroDaCorrecao:
 
     @staticmethod
     def _recalcula(
-        registro: Correcao,
+        registros: list[Correcao],
         antes: list[Correcao],
         lido: tuple[dict[str, Any], str] | None,
     ) -> bool:
+        registro = registros[0]
         alvo = (
             registro.desfaz or registro.aprova or registro.recusa or registro.descarta
         )
@@ -228,7 +253,7 @@ class RegistroDaCorrecao:
         if lido is None:
             return False
         try:
-            return _ids(*lido, antes) != _ids(*lido, [*antes, registro])
+            return _ids(*lido, antes) != _ids(*lido, [*antes, *registros])
         except Exception:
             log.exception("conjunto de ids de %s não comparado", registro.job_id)
             return True

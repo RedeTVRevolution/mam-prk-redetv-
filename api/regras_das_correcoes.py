@@ -7,15 +7,18 @@ este módulo (sem ciclo).
 
 import json
 import uuid
+from bisect import bisect_right
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, cast
+from itertools import accumulate
+from typing import Any, NamedTuple, cast
 
 from api.canonicos import com_os_canonicos
 from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.correcoes import (
     CORRIGIVEIS,
     GRUPOS_DE_FALAS,
+    INVENTARIO_POR_ID,
     PREFIXO_ACRESCENTADO,
     TIPOS,
     TOLERANCIA_DO_PLANO_MS,
@@ -42,6 +45,7 @@ from api.correcoes import (
     acha_ocorrencia,
     ancora_do_item,
     em_ordem,
+    id_no_inventario,
     identidade_da_pessoa,
     identidade_do_comercial,
     ids_das_pessoas,
@@ -49,6 +53,7 @@ from api.correcoes import (
     intervalo_da_pessoa,
     intervalo_do_item,
     intervalo_do_objeto,
+    inventario,
     itens_com_o_id,
     objetos,
     pautas,
@@ -118,6 +123,8 @@ def itens(modelo: dict[str, Any], tipo_do_item: str) -> list[dict[str, Any]]:
         return _textos(modelo)
     if tipo_do_item == "objeto":
         return objetos(modelo)
+    if tipo_do_item == "inventario":
+        return inventario(modelo)
     return pautas(modelo)
 
 
@@ -132,6 +139,8 @@ def _rotulo_do_item(item: dict[str, Any], tipo_do_item: str) -> str:
         return f"{item['tipo']}: {str(item['texto'])[:60]}"
     if tipo_do_item == "objeto":
         return str(item["tipo"])
+    if tipo_do_item == "inventario":
+        return str(item["nome"])
     return str(item["nome" if tipo_do_item == "pessoa" else "titulo"])
 
 
@@ -264,6 +273,46 @@ def corrigir(
     )
 
 
+def corrigir_grupo(
+    modelo: dict[str, Any],
+    versao: str,
+    correcoes: list[Correcao],
+    novo: NovaCorrecao,
+    job_id: str,
+    autoria: Autoria,
+    *,
+    exige_aprovacao: bool = False,
+) -> list[Correcao]:
+    """Um registro por objeto de `novo.item_ids`, todos com o mesmo `grupo` (#740). Uma
+    leitura e um índice por id para o grupo inteiro: o custo não cresce por item lido.
+    Se um id falta, nenhum é gravado."""
+    if novo.versao != versao:
+        raise VersaoDesatualizada(novo.versao)
+    ids = novo.item_ids or []
+    entregue = {i["id"]: i for i in inventario(aplicar(modelo, versao, correcoes))}
+    do_modelo = {i["id"]: i for i in inventario(modelo)}
+    faltando = next((i for i in ids if i not in entregue or i not in do_modelo), None)
+    if faltando is not None:
+        raise ItemInexistente(faltando)
+    grupo = uuid.uuid4().hex
+    return [
+        _registro(
+            job_id,
+            autoria,
+            uuid.uuid4().hex,
+            tipo=novo.tipo,
+            motivo=novo.motivo,
+            exige_aprovacao=exige_aprovacao,
+            grupo=grupo,
+            item_id=i,
+            antes=valor_do_item(entregue[i], novo.tipo),
+            depois=novo.valor,
+            ancora=ancora_do_item(do_modelo[i], "inventario", versao),
+        )
+        for i in ids
+    ]
+
+
 def _id_no_catalogo(
     novo: NovaCorrecao, catalogo: Catalogo | None, marcas: CatalogoDeMarcas | None
 ) -> str | None:
@@ -349,8 +398,9 @@ def desfazer(
     motivo: str,
     job_id: str,
     autoria: Autoria,
-) -> Correcao:
+) -> list[Correcao]:
     """O registro que reverte o alvo; nada é apagado. Um desfazer não se desfaz.
+    O alvo de um grupo reverte o grupo inteiro: um registro por objeto.
 
     Antes e depois são o nome entregue sem e com o desfazer: com uma correção
     mais nova no mesmo campo, desfazer a antiga não muda o que se vê. A de outra
@@ -358,8 +408,13 @@ def desfazer(
     A decupagem é aplicada com o alvo e sem ele: duas, e só.
     """
     alvo = _alvo(correcoes, alvo_id)
-    if alvo.tipo not in CORRIGIVEIS or not estado_das(correcoes).casavel(alvo.id):
+    estado = estado_das(correcoes)
+    if alvo.tipo not in CORRIGIVEIS or not estado.casavel(alvo.id):
         raise NaoDesfazivel(alvo.id)
+    if alvo.grupo is not None:
+        return _desfazer_o_grupo(
+            modelo, versao, correcoes, alvo, motivo, job_id, autoria, estado
+        )
     restantes = [c for c in correcoes if c.id != alvo.id]
     com = aplicar(modelo, versao, correcoes)
     sem = aplicar(modelo, versao, restantes)
@@ -382,19 +437,70 @@ def desfazer(
         antes, depois = (
             _valor_ou_vazio(entregue, alvo_atual) for entregue in (com, sem)
         )
-    return _registro(
-        job_id,
-        autoria,
-        id_do_desfazer(alvo.id),
-        tipo="desfazer",
-        desfaz=alvo.id,
-        item_id=alvo_atual.item_id,
-        ocorrencia=alvo_atual.ocorrencia,
-        motivo=motivo,
-        antes=antes,
-        depois=depois,
-        ancora=alvo_atual.ancora,
+    return [
+        _registro(
+            job_id,
+            autoria,
+            id_do_desfazer(alvo.id),
+            tipo="desfazer",
+            desfaz=alvo.id,
+            item_id=alvo_atual.item_id,
+            ocorrencia=alvo_atual.ocorrencia,
+            motivo=motivo,
+            antes=antes,
+            depois=depois,
+            ancora=alvo_atual.ancora,
+        )
+    ]
+
+
+def _desfazer_o_grupo(
+    modelo: dict[str, Any],
+    versao: str,
+    correcoes: list[Correcao],
+    alvo: Correcao,
+    motivo: str,
+    job_id: str,
+    autoria: Autoria,
+    estado: EstadoDasCorrecoes,
+) -> list[Correcao]:
+    """Desfaz os objetos do grupo que ainda valem, com duas aplicações e uma
+    reconciliação para o grupo inteiro. O de outra versão que não casou fica na fila."""
+    membros = [c for c in correcoes if c.grupo == alvo.grupo and estado.casavel(c.id)]
+    ids = {c.id for c in membros}
+    com, sem = (
+        {i["id"]: i for i in inventario(aplicar(modelo, versao, lista))}
+        for lista in (correcoes, [c for c in correcoes if c.id not in ids])
     )
+    casadas = (
+        {c.id: c for c in reconciliar(modelo, versao, correcoes).casadas}
+        if any(c.ancora.versao != versao for c in membros)
+        else {}
+    )
+    registros = []
+    for c in membros:
+        atual = c if c.ancora.versao == versao else casadas.get(c.id)
+        if atual is None:
+            continue
+        de_hoje, sem_ela = com.get(atual.item_id), sem.get(atual.item_id)
+        registros.append(
+            _registro(
+                job_id,
+                autoria,
+                id_do_desfazer(c.id),
+                tipo="desfazer",
+                desfaz=c.id,
+                item_id=atual.item_id,
+                motivo=motivo,
+                # O objeto que a correção tirou não está na decupagem com ela.
+                antes=c.depois if de_hoje is None else valor_do_item(de_hoje, c.tipo),
+                depois="" if sem_ela is None else valor_do_item(sem_ela, c.tipo),
+                ancora=atual.ancora,
+            )
+        )
+    if not registros:
+        raise NaoDesfazivel(alvo.id)
+    return registros
 
 
 def historico(correcoes: list[Correcao]) -> list[ItemDoHistorico]:
@@ -476,6 +582,64 @@ def _valor_atual(
     if entrada.acrescenta is not None or de_ocorrencia:
         return ""
     raise ItemInexistente(item_id)
+
+
+class _PorInicio(NamedTuple):
+    """Objetos dos planos por início, com o maior fim até cada posição: quem sobrepõe
+    uma âncora sai por `bisect`, não por varredura (#740)."""
+
+    inicios: list[int]
+    fins_max: list[int]
+    itens: list[tuple[tuple[int, int], dict[str, Any]]]
+
+    def sobrepostos(self, ancora: tuple[int, int]) -> list[dict[str, Any]]:
+        """Na ordem de início. Só quem começa até o fim da âncora pode sobrepor; de trás
+        para a frente, para quando nenhum dos anteriores termina depois do início dela."""
+        j = bisect_right(self.inicios, ancora[1]) - 1
+        achados: list[dict[str, Any]] = []
+        while j >= 0 and self.fins_max[j] >= ancora[0]:
+            intervalo, item = self.itens[j]
+            if sobrepoe_de_verdade(ancora, intervalo):
+                achados.append(item)
+            j -= 1
+        achados.reverse()
+        return achados
+
+
+def _por_inicio(itens: list[dict[str, Any]]) -> _PorInicio:
+    pares = sorted(
+        ((intervalo_da_pauta(i), i) for i in itens), key=lambda par: par[0][0]
+    )
+    return _PorInicio(
+        [par[0][0] for par in pares],
+        list(accumulate((par[0][1] for par in pares), max)),
+        pares,
+    )
+
+
+def _por_nome(modelo: dict[str, Any]) -> dict[str, _PorInicio]:
+    """Os objetos dos planos pelo nome normalizado: um índice por leitura, não um laço
+    por correção (#740)."""
+    soltos: dict[str, list[dict[str, Any]]] = {}
+    for item in inventario(modelo):
+        soltos.setdefault(normalizar(str(item["nome"])), []).append(item)
+    return {nome: _por_inicio(lista) for nome, lista in soltos.items()}
+
+
+def _candidatos_no_inventario(
+    por_nome: dict[str, _PorInicio], c: Correcao
+) -> list[dict[str, Any]]:
+    """Os de mesmo nome (ou já com o nome novo) num plano que sobrepõe o ancorado. Dois
+    iguais no mesmo trecho desempatam pelo id: o da mesma posição, se ainda existe."""
+    ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
+    achados = [
+        i
+        for nome in TIPOS[c.tipo].identidades(c)
+        if nome in por_nome
+        for i in por_nome[nome].sobrepostos(ancora)
+    ]
+    mesmo_id = [i for i in achados if i["id"] == c.item_id]
+    return mesmo_id if len(achados) > 1 and mesmo_id else achados
 
 
 def _candidatos(modelo: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
@@ -575,6 +739,7 @@ def reconciliar(
     """
     estado = estado_das(correcoes)
     resultado = Reconciliacao(casadas=[], atendidas=[], sem_casar=[])
+    por_nome: dict[str, _PorInicio] | None = None
     for c in em_ordem(correcoes):
         if (
             c.ancora.versao == versao
@@ -593,7 +758,11 @@ def reconciliar(
             if achada[1]:
                 resultado.atendidas.append(achada[0])
             continue
-        candidatos = _candidatos(modelo, c)
+        if c.ancora.tipo_do_item == "inventario":
+            por_nome = _por_nome(modelo) if por_nome is None else por_nome
+            candidatos = _candidatos_no_inventario(por_nome, c)
+        else:
+            candidatos = _candidatos(modelo, c)
         acrescenta = TIPOS[c.tipo].acrescenta
         if acrescenta is not None and acrescenta.acrescenta(c):
             # Não corrige item nenhum: não vai para a fila. Se o modelo já traz
@@ -812,6 +981,13 @@ def aplicar(
             if isinstance(real, dict):
                 real["id"] = id_posicional(chave, n)
                 posicionais.append(real)
+    # Os objetos dos planos também, e um mapa para a correção achá-los pelo id (#740).
+    por_id = resultado[INVENTARIO_POR_ID] = {}
+    for plano in _planos(resultado):
+        for k, item in enumerate(plano.get("inventario") or []):
+            if isinstance(item, dict):
+                item["id"] = id_no_inventario(plano["id"], k)
+                por_id[item["id"]] = item
     for item in [*as_pessoas, *pautas(resultado), *_planos(resultado), *posicionais]:
         # O nome confirmado pelo código (`modelo_forte`) segue como o modelo gravou.
         if item.get("origem") != "modelo_forte":
@@ -902,6 +1078,12 @@ def aplicar(
     _juntar_as_do_mesmo_nome(resultado, renomeadas)
     resultado.pop("_separadas", None)
     resultado.pop(GRUPOS_DE_FALAS, None)
+    if any(i.get("_removido") for i in resultado.pop(INVENTARIO_POR_ID).values()):
+        for plano in _planos(resultado):
+            if plano.get("inventario"):
+                plano["inventario"] = [
+                    i for i in plano["inventario"] if not i.get("_removido")
+                ]
     # A pessoa que ficou sem nenhuma ocorrência some da decupagem, e das pautas.
     sumidas = [e for e in esvaziadas if not any(e[lista] for lista in LISTAS)]
     if sumidas:
@@ -943,17 +1125,30 @@ def fila(
     """As correções que não casaram, da mais antiga para a mais nova, cada uma
     com as pessoas da versão atual que sobrepõem o intervalo ancorado."""
     sugestoes = []
+    # Os itens de cada tipo, lidos uma vez por fila e não por correção.
+    lidos: dict[str, list[dict[str, Any]]] = {}
+    do_inventario: _PorInicio | None = None
     for c in reconciliar(modelo, versao, correcoes).sem_casar:
         ancora = (c.ancora.inicio_ms, c.ancora.fim_ms)
         tipo_do_item = c.ancora.tipo_do_item
         candidatos = []
-        # Juntar e dividir não se reaplicam num item só: ficam na fila para descartar.
-        for item in [] if TIPOS[c.tipo].reestrutura else itens(modelo, tipo_do_item):
+        if TIPOS[c.tipo].reestrutura:
+            # Juntar e dividir não se reaplicam num item só: ficam na fila para descartar.
+            do_tipo = []
+        elif tipo_do_item == "inventario":
+            if do_inventario is None:
+                do_inventario = _por_inicio(inventario(modelo))
+            do_tipo = do_inventario.sobrepostos(ancora)
+        else:
+            if tipo_do_item not in lidos:
+                lidos[tipo_do_item] = itens(modelo, tipo_do_item)
+            do_tipo = lidos[tipo_do_item]
+        for item in do_tipo:
             intervalo = intervalo_do_item(item, tipo_do_item)
-            # Plano e fala que só encostam no ancorado não são o mesmo trecho.
+            # Plano, fala e objeto do plano que só encostam no ancorado não são o mesmo trecho.
             casa = (
                 sobrepoe_de_verdade
-                if tipo_do_item in ("plano", "fala", "texto_na_tela")
+                if tipo_do_item in ("plano", "fala", "texto_na_tela", "inventario")
                 else sobrepoe
             )
             # Reaplicar numa pessoa sem a aparição ou menção não mudaria nada.
@@ -1013,6 +1208,8 @@ def reaplicar(
         id_da_resolucao(alvo.id),
         tipo=alvo.tipo,
         reaplica=alvo.id,
+        # O reaplicado segue no grupo: desfazer e decidir alcançam ele (#740).
+        grupo=alvo.grupo,
         item_id=item_id,
         motivo=motivo,
         ocorrencia=alvo.ocorrencia,
@@ -1070,26 +1267,36 @@ def decidir(
     motivo: str,
     job_id: str,
     autoria: Autoria,
-) -> Correcao:
+) -> list[Correcao]:
     """O registro em que um Curador aprova ou recusa o alvo, que tem de estar
-    pendente. A recusa traz o motivo."""
+    pendente. A recusa traz o motivo. O alvo de um grupo decide o grupo inteiro:
+    um registro por objeto ainda pendente."""
     alvo = _alvo(correcoes, alvo_id)
-    if not alvo.exige_aprovacao or alvo.id in estado_das(correcoes).decididas:
+    estado = estado_das(correcoes)
+    if not estado.espera_decisao(alvo.id):
         raise NaoPendente(alvo.id)
-    return _registro(
-        job_id,
-        autoria,
-        id_da_decisao(alvo.id),
-        tipo="aprovar" if aprovada else "recusar",
-        aprova=alvo.id if aprovada else None,
-        recusa=None if aprovada else alvo.id,
-        item_id=alvo.item_id,
-        ocorrencia=alvo.ocorrencia,
-        motivo=motivo,
-        antes=alvo.antes,
-        depois=alvo.depois,
-        ancora=alvo.ancora,
+    membros = (
+        [c for c in correcoes if c.grupo == alvo.grupo and estado.espera_decisao(c.id)]
+        if alvo.grupo is not None
+        else [alvo]
     )
+    return [
+        _registro(
+            job_id,
+            autoria,
+            id_da_decisao(c.id),
+            tipo="aprovar" if aprovada else "recusar",
+            aprova=c.id if aprovada else None,
+            recusa=None if aprovada else c.id,
+            item_id=c.item_id,
+            ocorrencia=c.ocorrencia,
+            motivo=motivo,
+            antes=c.antes,
+            depois=c.depois,
+            ancora=c.ancora,
+        )
+        for c in membros
+    ]
 
 
 def decupagem_com_correcoes(

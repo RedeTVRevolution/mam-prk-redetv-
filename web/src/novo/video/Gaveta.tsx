@@ -136,6 +136,7 @@ export function Gaveta({
   catalogo,
   falhaAoCarregar,
   aoMudar,
+  aoEnviar,
   aoSaltar,
   aoRefazerAMao,
 }: {
@@ -151,6 +152,8 @@ export function Gaveta({
   falhaAoCarregar: boolean
   /** Recarrega a decupagem, o histórico e a fila depois de uma decisão. */
   aoMudar: () => void
+  /** Acompanha cada decisão enviada até a resposta, mesmo que a gaveta feche antes dela. */
+  aoEnviar: (decisao: Promise<void>) => Promise<void>
   /** Salta o player ao item da correção; `false` se o item não está mais na decupagem. */
   aoSaltar: (correcao: ItemDoHistorico) => boolean
   /** Juntar ou dividir pautas que a reprocessagem não reaplicou: refazer na lista de pautas. */
@@ -231,7 +234,7 @@ export function Gaveta({
     setErro(null)
     setAviso(null)
     try {
-      await acao()
+      await aoEnviar(acao())
       setRecusando(null)
     } catch (e) {
       setOcupado(null)

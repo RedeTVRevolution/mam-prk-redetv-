@@ -606,10 +606,10 @@ test('o palpite não confirmado leva o selo em texto ao lado do nome, na pessoa,
 const CAIXA_PEQUENA = { quadro: 'quadros/plano-0-0.jpg', x: 0.5, y: 0.5, largura: 0.1, altura: 0.1 }
 const CAIXA_GRANDE = { quadro: 'quadros/plano-0-1.jpg', x: 0.1, y: 0.2, largura: 0.3, altura: 0.4 }
 const INVENTARIO = [
-  { nome: 'caneca', categoria: 'utensilio', caixas: [CAIXA_PEQUENA], destaque: 1 },
-  { nome: 'carro azul', categoria: 'veiculo', cor: 'azul', marca: 'BYD', caixas: [CAIXA_PEQUENA, CAIXA_GRANDE], destaque: 3 },
-  { nome: 'blazer preto', categoria: 'roupa', caixas: [CAIXA_PEQUENA], destaque: 2 },
-  { nome: 'camisa', categoria: 'roupa', caixas: [CAIXA_PEQUENA], destaque: 3 },
+  { id: 'p1:0', nome: 'caneca', categoria: 'utensilio', caixas: [CAIXA_PEQUENA], destaque: 1 },
+  { id: 'p1:1', nome: 'carro azul', categoria: 'veiculo', cor: 'azul', marca: 'BYD', caixas: [CAIXA_PEQUENA, CAIXA_GRANDE], destaque: 3 },
+  { id: 'p1:2', nome: 'blazer preto', categoria: 'roupa', caixas: [CAIXA_PEQUENA], destaque: 2 },
+  { id: 'p1:3', nome: 'camisa', categoria: 'roupa', caixas: [CAIXA_PEQUENA], destaque: 3 },
 ]
 
 test('Objetos lista o inventário dos planos por categoria, sem repetir, a contagem o inclui, e o objeto leva aos planos', async () => {
@@ -618,7 +618,7 @@ test('Objetos lista o inventário dos planos por categoria, sem repetir, a conta
     ...DECUPAGEM,
     planos: [
       { ...DECUPAGEM.planos[0], inventario: INVENTARIO },
-      { ...DECUPAGEM.planos[1], inventario: [INVENTARIO[1]] },
+      { ...DECUPAGEM.planos[1], inventario: [{ ...INVENTARIO[1], id: 'p2:0', marca: null }] },
     ],
   }
   const player = await abrirVideo()
@@ -636,16 +636,23 @@ test('Objetos lista o inventário dos planos por categoria, sem repetir, a conta
   ])
   expect(objetos.getByRole('button', { name: 'sandália, 2 ocorrências' })).toBeTruthy()
 
-  // Abrir leva o player ao plano da maior caixa e lista os planos; fechar não mexe no player.
+  // Abrir leva o player ao plano da maior caixa e lista cada objeto (nome, cor, marca, plano); fechar não mexe no player.
   const carro = objetos.getByRole('button', { name: 'carro azul (azul · BYD), 2 planos' })
   await usuario.click(carro)
   expect(player.currentTime).toBe(200)
-  await usuario.click(objetos.getByRole('button', { name: 'Externa · 12:04' }))
+  expect(objetos.getByRole('button', { name: 'carro azul · azul · BYD · Estúdio · 03:20' })).toBeTruthy()
+  const externo = objetos.getByRole('button', { name: 'carro azul · azul · Externa · 12:04' })
+  await usuario.click(externo)
   expect(player.currentTime).toBe(724)
-  expect(objetos.getByRole('button', { name: 'Estúdio · 03:20' })).toBeTruthy()
+  // O detalhe do objeto mostra o quadro com a caixa dele; fora do Revisar, sem botões de correção.
+  expect(externo.getAttribute('aria-expanded')).toBe('true')
+  const caixa = await objetos.findByTestId('caixa-do-objeto')
+  expect(caixa.style.left).toBe('10%')
+  expect(caixa.style.width).toBe('30%')
+  expect(objetos.queryByRole('button', { name: 'Não é isto' })).toBeNull()
   await usuario.click(carro)
   expect(player.currentTime).toBe(724)
-  expect(objetos.queryByRole('button', { name: 'Externa · 12:04' })).toBeNull()
+  expect(objetos.queryByRole('button', { name: /Externa · 12:04/ })).toBeNull()
 
   await usuario.type(inspetor().getByRole('textbox', { name: 'Filtrar objetos' }), 'byd')
   expect(objetos.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['veículo nos planos'])

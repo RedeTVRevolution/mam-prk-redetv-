@@ -11,6 +11,7 @@ import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import cached_property
 from typing import Annotated, Any, Literal, Protocol, Self, get_args
 
 from pydantic import (
@@ -81,10 +82,20 @@ TipoNovo = Literal[
     "objeto.dono",
     "objeto.nao_existe",
     "objeto.acrescentar",
+    "inventario.nao_existe",
+    "inventario.nome",
+    "inventario.cor_marca",
 ]
 TipoDeCorrecao = Literal[TipoNovo, "desfazer", "descartar", "aprovar", "recusar"]
 TipoDoItem = Literal[
-    "pessoa", "pauta", "comercial", "plano", "fala", "texto_na_tela", "objeto"
+    "pessoa",
+    "pauta",
+    "comercial",
+    "plano",
+    "fala",
+    "texto_na_tela",
+    "objeto",
+    "inventario",
 ]
 CORRIGIVEIS = get_args(TipoNovo)
 Lista = Literal["na_imagem", "citada_na_fala", "citada_no_texto"]
@@ -188,6 +199,9 @@ class Correcao(BaseModel):
     # catálogo, escolhida pela revisora (`NovaCorrecao.catalogo_id`) ou, na pessoa, a
     # única que casa com o nome.
     catalogo_id: str | None = None
+    # Nas correções de um grupo de objetos (#740): o mesmo em todas as do gesto, que se
+    # desfazem, aprovam e recusam juntas.
+    grupo: str | None = None
     antes: str
     depois: str
     ancora: Ancora
@@ -574,6 +588,12 @@ def _json_do_comercial(comercial: dict[str, Any]) -> str:
     )
 
 
+# O id do objeto do plano é "<id do plano>:<posição>" (`id_no_inventario`).
+LIMITE_DO_ID_DO_ITEM = LIMITE_DO_ID + 8
+# Um lote de escrita do Firestore (`acrescentar_varios`) leva até 500 documentos.
+LIMITE_DO_GRUPO = 500
+
+
 class NovaCorrecao(BaseModel):
     """Corpo de `POST /v1/jobs/{id}/correcoes`."""
 
@@ -585,8 +605,16 @@ class NovaCorrecao(BaseModel):
     # O id da pessoa ou da marca do catálogo que o nome novo é (`pessoa.renomear` e
     # `comercial.marca`); o servidor confere que existe e que o nome é o dela.
     catalogo_id: Annotated[str, Linha(64, min_length=1), ID_SEGURO] | None = None
-    # Vazio só no `comercial.acrescentar` e na aparição de pessoa nova.
-    item_id: Annotated[str, Linha(LIMITE_DO_ID)] = ""
+    # Vazio só no `comercial.acrescentar`, na aparição de pessoa nova e no grupo.
+    item_id: Annotated[str, Linha(LIMITE_DO_ID_DO_ITEM)] = ""
+    # Os objetos do grupo, todos corrigidos num gesto só (só nos tipos do inventário).
+    item_ids: (
+        Annotated[
+            list[Annotated[str, Linha(LIMITE_DO_ID_DO_ITEM, min_length=1)]],
+            Field(min_length=1, max_length=LIMITE_DO_GRUPO),
+        ]
+        | None
+    ) = None
     # `item.tempos`: "<inicio_ms>-<fim_ms>"; `comercial.tipo`: um tipo do
     # esquema; `comercial.acrescentar`: o JSON do comercial; `pessoa.nao_e`:
     # "Não identificado"; `pessoa.aparicao_para_mencao`: a lista de destino;
@@ -608,7 +636,12 @@ class NovaCorrecao(BaseModel):
     @model_validator(mode="after")
     def _valor_do_tipo(self) -> Self:
         entrada = TIPOS[self.tipo]
-        if not self.item_id and entrada.acrescenta is None:
+        if self.item_ids is not None:
+            if entrada.tipo_do_item != "inventario" or self.item_id:
+                raise ValueError("item_ids vale só, e sem item_id, no objeto do plano")
+            if len(set(self.item_ids)) != len(self.item_ids):
+                raise ValueError("item_ids repetido")
+        elif not self.item_id and entrada.acrescenta is None:
             raise ValueError("item_id obrigatório")
         if self.tipo_do_item is not None and entrada.tipo_do_item is not None:
             raise ValueError("tipo_do_item só vale no item.tempos")
@@ -653,7 +686,7 @@ class NovaRecusa(NovaResolucao):
 class NovaReaplicacao(NovaResolucao):
     """Corpo de `POST /v1/jobs/{id}/fila/{cid}/reaplicar`."""
 
-    item_id: Annotated[str, Linha(LIMITE_DO_ID, min_length=1)]
+    item_id: Annotated[str, Linha(LIMITE_DO_ID_DO_ITEM, min_length=1)]
 
 
 class RepositorioDeAprovacao(Protocol):
@@ -705,6 +738,10 @@ class RepositorioDeCorrecoes(Protocol):
         """`CorrecaoJaExiste` se o id já foi gravado."""
         ...
 
+    def acrescentar_varios(self, correcoes: list[Correcao]) -> None:
+        """Todas ou nenhuma, numa escrita só; `CorrecaoJaExiste` se um id já foi gravado."""
+        ...
+
     def listar(self, job_id: str) -> list[Correcao]:
         """Da mais antiga para a mais recente."""
         ...
@@ -730,6 +767,13 @@ class RepositorioDeCorrecoesEmMemoria:
         if any(c.id == correcao.id for c in self._correcoes):
             raise CorrecaoJaExiste(correcao.id)
         self._correcoes.append(correcao)
+
+    def acrescentar_varios(self, correcoes: list[Correcao]) -> None:
+        gravados = {c.id for c in self._correcoes}
+        repetido = next((c.id for c in correcoes if c.id in gravados), None)
+        if repetido is not None:
+            raise CorrecaoJaExiste(repetido)
+        self._correcoes.extend(correcoes)
 
     def listar(self, job_id: str) -> list[Correcao]:
         return em_ordem([c for c in self._correcoes if c.job_id == job_id])
@@ -797,6 +841,32 @@ def pautas(modelo: dict[str, Any]) -> list[dict[str, Any]]:
 
 def objetos(modelo: dict[str, Any]) -> list[dict[str, Any]]:
     return [o for o in modelo.get("objetos", []) if isinstance(o, dict)]
+
+
+# Os objetos dos planos pelo id, na aplicação: nasce no começo de `aplicar` e sai no fim.
+INVENTARIO_POR_ID = "_inventario_por_id"
+
+
+def id_no_inventario(plano_id: str, k: int) -> str:
+    """O id de um objeto do plano: o do plano e a posição no inventário do modelo (#740)."""
+    return f"{plano_id}:{k}"
+
+
+def inventario(modelo: dict[str, Any]) -> list[dict[str, Any]]:
+    """Os objetos dos planos (cópias rasas), cada um com o id e o intervalo do plano. O que
+    já traz id (decupagem entregue) o mantém."""
+    return [
+        {
+            "id": id_no_inventario(p["id"], k),
+            **item,
+            "inicio_ms": p["inicio_ms"],
+            "fim_ms": p["fim_ms"],
+        }
+        for p in modelo.get("planos", [])
+        if isinstance(p, dict)
+        for k, item in enumerate(p.get("inventario") or [])
+        if isinstance(item, dict)
+    ]
 
 
 def intervalo_da_pauta(pauta: dict[str, Any]) -> tuple[int, int]:
@@ -906,6 +976,8 @@ def ancora_do_item(
         identidade = normalizar(str(item["texto"]))
     elif tipo_do_item == "objeto":
         identidade = normalizar(str(item["tipo"]))
+    elif tipo_do_item == "inventario":
+        identidade = normalizar(str(item["nome"]))
     else:
         identidade = normalizar(str(item["titulo"]))
     return Ancora(
@@ -947,7 +1019,7 @@ class EstadoDasCorrecoes:
     recusadas: frozenset[str]
     exigem_aprovacao: frozenset[str]
 
-    @property
+    @cached_property  # uma união por estado, não uma por consulta num laço
     def decididas(self) -> frozenset[str]:
         return self.aprovadas | self.recusadas
 
@@ -1029,6 +1101,9 @@ _CHAVE_DO_ITEM = {
 
 
 def itens_com_o_id(resultado: dict[str, Any], c: Correcao) -> list[dict[str, Any]]:
+    if c.ancora.tipo_do_item == "inventario":
+        item = resultado.get(INVENTARIO_POR_ID, {}).get(c.item_id)
+        return [] if item is None else [item]
     chave = _CHAVE_DO_ITEM[c.ancora.tipo_do_item]
     return [
         item
@@ -1523,12 +1598,82 @@ def _valor_do_existe(item: dict[str, Any]) -> str:
 
 def _canonizar_nao_existe(n: NovaCorrecao) -> str:
     if n.valor != "nao_existe":
-        raise ValueError("o valor de objeto.nao_existe é nao_existe")
+        raise ValueError(f"o valor de {n.tipo} é nao_existe")
     return n.valor
 
 
 def _marca_o_objeto_removido(item: dict[str, Any], c: Correcao) -> None:
     item["_removido"] = True
+
+
+class _NomeNoInventario(BaseModel):
+    """O valor de um `inventario.nome`: o nome e a categoria do objeto do plano."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nome: _Rotulo
+    categoria: CategoriaDeObjeto
+
+    @field_validator("nome")
+    @classmethod
+    def _nome_sem_controle(cls, valor: str) -> str:
+        return sem_controle(valor)
+
+
+class _CorEMarcaNoInventario(BaseModel):
+    """O valor de um `inventario.cor_marca`; `None` apaga o campo e o ausente o mantém
+    (o grupo de cores diferentes muda só a marca)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cor: CorBase | None = None
+    marca: _Rotulo | None = None
+
+    @field_validator("marca")
+    @classmethod
+    def _marca_sem_controle(cls, valor: str | None) -> str | None:
+        return None if valor is None else sem_controle(valor)
+
+    @model_validator(mode="after")
+    def _um_dos_dois(self) -> Self:
+        if not self.model_fields_set:
+            raise ValueError("cor ou marca")
+        return self
+
+
+def _canonizar_cor_e_marca(n: NovaCorrecao) -> str:
+    valor = _CorEMarcaNoInventario.model_validate_json(n.valor)
+    return _json_canonico(valor.model_dump(exclude_unset=True))
+
+
+def _valor_do_nome_no_inventario(item: dict[str, Any]) -> str:
+    return _json_canonico({"nome": item["nome"], "categoria": item["categoria"]})
+
+
+def _valor_da_cor_e_marca(item: dict[str, Any]) -> str:
+    return _json_canonico({"cor": item.get("cor"), "marca": item.get("marca")})
+
+
+def _nome_no_inventario(item: dict[str, Any], c: Correcao) -> None:
+    item.update(json.loads(c.depois))
+    # O tipo canônico gravado é do nome antigo: a leitura o deriva do nome novo (#544).
+    item.pop("tipo_canonico", None)
+
+
+def _traz_a_cor_e_a_marca(c: Correcao, item: dict[str, Any]) -> bool:
+    return all(item.get(k) == v for k, v in json.loads(c.depois).items())
+
+
+def _cor_e_marca_no_inventario(item: dict[str, Any], c: Correcao) -> None:
+    for campo, valor in json.loads(c.depois).items():
+        if valor is None:
+            item.pop(campo, None)
+        else:
+            item[campo] = valor
+
+
+def _identidades_do_nome_no_inventario(c: Correcao) -> set[str]:
+    return {c.ancora.identidade, normalizar(json.loads(c.depois)["nome"])}
 
 
 def _valor_do_texto_na_tela(item: dict[str, Any]) -> str:
@@ -2431,6 +2576,35 @@ TIPOS: dict[str, Tipo] = {
         traz_o_campo=_traz_objetos,
         acrescenta=_OBJETO_NOVO,
         confere=_confere_o_dono,
+    ),
+    "inventario.nao_existe": Tipo(
+        canonizar=_canonizar_nao_existe,
+        rotulo="Objeto do plano na imagem",
+        legivel=textos.objeto_na_imagem,
+        tipo_do_item="inventario",
+        valor_do_item=_valor_do_existe,
+        aplicar_no_item=_marca_o_objeto_removido,
+    ),
+    "inventario.nome": Tipo(
+        canonizar=_canonizar_como(_NomeNoInventario),
+        rotulo="Nome do objeto do plano",
+        legivel=textos.nome_no_inventario,
+        tipo_do_item="inventario",
+        json_longo=True,
+        valor_do_item=_valor_do_nome_no_inventario,
+        aplicar_no_item=_nome_no_inventario,
+        ja_traz=_ja_traz_o_valor,
+        identidades=_identidades_do_nome_no_inventario,
+    ),
+    "inventario.cor_marca": Tipo(
+        canonizar=_canonizar_cor_e_marca,
+        rotulo="Cor e marca do objeto do plano",
+        legivel=textos.cor_e_marca_no_inventario,
+        tipo_do_item="inventario",
+        json_longo=True,
+        valor_do_item=_valor_da_cor_e_marca,
+        aplicar_no_item=_cor_e_marca_no_inventario,
+        ja_traz=_traz_a_cor_e_a_marca,
     ),
 }
 

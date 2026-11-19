@@ -1334,6 +1334,17 @@ class RepositorioDeCorrecoesFirestore:
         except AlreadyExists:
             raise CorrecaoJaExiste(correcao.id) from None
 
+    def acrescentar_varios(self, correcoes: list[Correcao]) -> None:
+        # O `create` do documento já é um lote de um: no lote, o id repetido falha igual
+        # e nada do lote é gravado.
+        lote = self._cliente.batch()
+        for c in correcoes:
+            lote.create(_documento(self._colecao, c.id), c.model_dump())
+        try:
+            lote.commit()
+        except AlreadyExists:
+            raise CorrecaoJaExiste(correcoes[0].id) from None
+
     def listar(self, job_id: str) -> list[Correcao]:
         docs = self._colecao.where(filter=FieldFilter("job_id", "==", job_id)).stream()
         achadas = [Correcao(**(doc.to_dict() or {})) for doc in docs]

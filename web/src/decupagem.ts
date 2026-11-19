@@ -60,6 +60,8 @@ export interface CaixaDoQuadro {
 
 /** Um objeto do inventário do plano (#244), em português; `destaque` vai de 1 a 3. */
 export interface ObjetoDoInventario {
+  /** `{plano_id}:{k}`, que a API põe na entrega; nunca derivar da posição, que muda depois de uma remoção. */
+  id?: string
   nome: string
   categoria: CategoriaDeObjeto
   /** O tipo da lista fechada (#544), ao lado do nome livre; `outro` ou ausente (acervo antigo) agrupa pelo nome. */
@@ -216,6 +218,9 @@ export interface ItemDoHistorico {
     | 'objeto.dono'
     | 'objeto.nao_existe'
     | 'objeto.acrescentar'
+    | 'inventario.nao_existe'
+    | 'inventario.nome'
+    | 'inventario.cor_marca'
     | 'desfazer'
     | 'descartar'
     | 'aprovar'

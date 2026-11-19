@@ -3,7 +3,7 @@ import type { CatalogoDeNomes } from './api.ts'
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
 import { type Intervalo, lerTempo, nomeExibido, ocorrenciasDosObjetos, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
 import type { ItemDoPainel } from './painel.ts'
-import type { Decupagem, EstadoNaBusca, ItemDoHistorico, Objeto, Pessoa } from './decupagem.ts'
+import type { Decupagem, EstadoNaBusca, ItemDoHistorico, Objeto, ObjetoDoInventario, Pessoa } from './decupagem.ts'
 
 export type Valor = string | string[] | boolean
 
@@ -76,6 +76,8 @@ export interface CampoDoEditor {
 export interface Pedido {
   tipo: string
   item_id: string
+  /** Os itens do grupo (objetos do plano): a API grava todos ou nenhum, com `item_id` vazio. */
+  item_ids?: string[]
   valor: string
   tipo_do_item?: string
   ocorrencia?: { lista: string; inicio_ms: number; fim_ms: number }
@@ -134,6 +136,9 @@ const MOTIVOS: Record<string, string> = {
   'objeto.atributos': 'atributos do objeto corrigidos pelo editor',
   'objeto.dono': 'dono do objeto corrigido pelo editor',
   'objeto.nao_existe': 'objeto removido da imagem pelo editor',
+  'inventario.nao_existe': 'objeto do plano removido pelo editor',
+  'inventario.nome': 'nome do objeto do plano corrigido pelo editor',
+  'inventario.cor_marca': 'cor e marca do objeto do plano corrigidas pelo editor',
 }
 
 /** As entradas do histórico que decidem sobre outra correção, e não corrigem um item. */
@@ -557,7 +562,7 @@ export function pedidoDeRemocao(d: Decupagem, item: ItemDoPainel): Pedido | null
 
 /** O motivo do "não é isto": a menção não é uma aparição. */
 export function motivoDaRemocao(pedido: Pedido): string {
-  if (pedido.tipo === 'objeto.nao_existe') return MOTIVOS[pedido.tipo]
+  if (pedido.tipo === 'objeto.nao_existe' || pedido.tipo === 'inventario.nao_existe') return MOTIVOS[pedido.tipo]
   return pedido.ocorrencia?.lista === 'na_imagem' ? MOTIVOS['pessoa.nao_e'] : 'pessoa removida desta menção pelo editor'
 }
 
@@ -726,4 +731,97 @@ export function itemDaCorrecao(
     const id = identidadeDoItem(d, item)
     return id?.item_id === correcao.item_id && id.tipo_do_item === correcao.ancora.tipo_do_item
   })
+}
+
+/** O teto de itens de um gesto no grupo (o mesmo da API). */
+export const LIMITE_DO_GRUPO = 500
+
+/** A cor do grupo de cores diferentes: deixar assim não mexe na cor de ninguém. */
+export const VARIAS = '__varias__'
+
+export type TipoDoInventario = 'inventario.nao_existe' | 'inventario.nome' | 'inventario.cor_marca'
+
+/** O botão de cada correção do objeto do plano, que também nomeia o formulário. */
+export const ROTULO_DO_INVENTARIO: Record<TipoDoInventario, string> = {
+  'inventario.nao_existe': 'Não é isto',
+  'inventario.nome': 'Corrigir nome',
+  'inventario.cor_marca': 'Corrigir cor e marca',
+}
+
+/** O pedido de um objeto do plano (`item_id`) ou do grupo (`item_ids`, gravado todo ou nada). */
+export function pedidoDoInventario(tipo: TipoDoInventario, ids: string[], valor = 'nao_existe'): Pedido {
+  return ids.length === 1 ? { tipo, item_id: ids[0], valor } : { tipo, item_id: '', item_ids: ids, valor }
+}
+
+/** O valor que todos têm em comum, ou `undefined` se diferem. */
+function comum<T>(valores: T[]): T | undefined {
+  return valores.every((v) => v === valores[0]) ? valores[0] : undefined
+}
+
+/**
+ * O editor do nome ou da cor e marca de um objeto do plano ou do grupo. No grupo de valores diferentes,
+ * a cor começa em "cada um com a sua" e a marca em branco: o que não mudou não vai no pedido, e cada um
+ * guarda o seu.
+ */
+export function editorDoInventario(
+  tipo: 'inventario.nome' | 'inventario.cor_marca',
+  objetos: Pick<ObjetoDoInventario, 'id' | 'nome' | 'categoria' | 'cor' | 'marca'>[],
+  c: CatalogoDeCorrecoes,
+): Editor {
+  const ids = objetos.map((o) => o.id ?? '')
+  const pedir = (valor: Record<string, unknown>) => [pedidoDoInventario(tipo, ids, JSON.stringify(valor))]
+  if (tipo === 'inventario.nome') {
+    const inicial = {
+      nome: comum(objetos.map((o) => o.nome)) ?? '',
+      categoria: comum(objetos.map((o) => o.categoria)) ?? c.categorias_de_objeto[0].valor,
+    }
+    return montar(
+      [
+        { chave: 'nome', rotulo: 'Nome', tipo: 'texto', limite: c.limites.nome },
+        { chave: 'categoria', rotulo: 'Categoria', tipo: 'opcoes', opcoes: c.categorias_de_objeto },
+      ],
+      inicial,
+      [tipo],
+      (v) => {
+        const nome = texto(v.nome)
+        if (!nome) return null
+        if (nome === inicial.nome && v.categoria === inicial.categoria) return []
+        return pedir({ nome, categoria: v.categoria })
+      },
+    )
+  }
+  const cor = comum(objetos.map((o) => o.cor ?? ''))
+  const marca = comum(objetos.map((o) => o.marca ?? ''))
+  const inicial = { cor: cor ?? VARIAS, marca: marca ?? '' }
+  return montar(
+    [
+      {
+        chave: 'cor',
+        rotulo: 'Cor',
+        tipo: 'opcoes',
+        opcoes: [
+          ...(cor === undefined ? [{ valor: VARIAS, rotulo: 'Cada um com a sua' }] : []),
+          { valor: '', rotulo: 'Sem cor' },
+          ...c.cores_base,
+        ],
+      },
+      {
+        chave: 'marca',
+        rotulo: marca === undefined ? 'Marca (em branco, cada um fica com a sua)' : 'Marca',
+        tipo: 'nome',
+        catalogo: 'marcas',
+        limite: c.limites.nome,
+      },
+    ],
+    inicial,
+    [tipo],
+    (v) => {
+      const valor: Record<string, string | null> = {}
+      if (v.cor !== inicial.cor) valor.cor = (v.cor as string) || null
+      const m = texto(v.marca)
+      // Marca em branco no grupo de marcas diferentes mantém a de cada um.
+      if (m !== inicial.marca && (m || marca !== undefined)) valor.marca = m || null
+      return Object.keys(valor).length ? pedir(valor) : []
+    },
+  )
 }

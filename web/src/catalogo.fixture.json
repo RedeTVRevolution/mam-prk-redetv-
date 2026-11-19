@@ -109,6 +109,18 @@
       "rotulo": "Objeto acrescentado"
     },
     {
+      "valor": "inventario.nao_existe",
+      "rotulo": "Objeto do plano na imagem"
+    },
+    {
+      "valor": "inventario.nome",
+      "rotulo": "Nome do objeto do plano"
+    },
+    {
+      "valor": "inventario.cor_marca",
+      "rotulo": "Cor e marca do objeto do plano"
+    },
+    {
       "valor": "desfazer",
       "rotulo": "Desfazer"
     },

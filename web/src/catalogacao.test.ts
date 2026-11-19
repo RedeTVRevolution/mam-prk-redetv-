@@ -6,12 +6,15 @@ import {
   aindaIndexando,
   editorDeNovaAparicao,
   editorDeSeparacao,
+  editorDoInventario,
   editorDoItem,
   marcasDosItens,
   motivoDaRemocao,
   podeRemover,
   pedidoDeRemocao,
+  pedidoDoInventario,
   TIPOS_FORA_DESTE_TICKET,
+  VARIAS,
   teclasDasOpcoes,
 } from './catalogacao.ts'
 import { itensDoPainel } from './painel.ts'
@@ -185,6 +188,9 @@ test('cada tipo de correção do catálogo tem caminho pelo teclado, menos os da
   }
   caminhos.add('pessoa.nao_e')
   caminhos.add('objeto.nao_existe')
+  caminhos.add(pedidoDoInventario('inventario.nao_existe', ['pl1:0']).tipo)
+  for (const tipo of ['inventario.nome', 'inventario.cor_marca'] as const)
+    for (const t of editorDoInventario(tipo, [OBJETO_DO_PLANO], catalogo).tiposPossiveis) caminhos.add(t)
   caminhos.add('desfazer')
   for (const t of editorDeNovaAparicao(D.pessoas[0], 0, catalogo).tiposPossiveis) caminhos.add(t)
   for (const t of editorDeSeparacao(JUNTADA).tiposPossiveis) caminhos.add(t)
@@ -451,4 +457,56 @@ test('marcas: uma decupagem de 2 h com 300 correções não trava a tela (teto d
   // Cerca de 5 ms numa máquina parada; o teto largo evita falha por carga (vários agentes) e ainda pega o
   // caso quadrático (centenas de ms).
   expect(gasto).toBeLessThan(150)
+})
+
+const OBJETO_DO_PLANO = { id: 'pl1:0', nome: 'vaso', categoria: 'decoracao' as const, cor: 'azul' as const, marca: 'Tok' }
+
+test('objeto do plano: um item vai por item_id, o grupo por item_ids, e só muda o que mudou', () => {
+  expect(pedidoDoInventario('inventario.nao_existe', ['pl1:0'])).toEqual({ tipo: 'inventario.nao_existe', item_id: 'pl1:0', valor: 'nao_existe' })
+  expect(pedidoDoInventario('inventario.nao_existe', ['pl1:0', 'pl2:1'])).toEqual({
+    tipo: 'inventario.nao_existe',
+    item_id: '',
+    item_ids: ['pl1:0', 'pl2:1'],
+    valor: 'nao_existe',
+  })
+
+  const nome = editorDoInventario('inventario.nome', [OBJETO_DO_PLANO], catalogo)
+  expect(nome.inicial).toEqual({ nome: 'vaso', categoria: 'decoracao' })
+  expect(nome.pedidos(nome.inicial)).toEqual([])
+  expect(nome.pedidos({ ...nome.inicial, nome: '  ' })).toBeNull()
+  expect(nome.pedidos({ nome: 'jarro', categoria: 'utensilio' })).toEqual([
+    { tipo: 'inventario.nome', item_id: 'pl1:0', valor: JSON.stringify({ nome: 'jarro', categoria: 'utensilio' }) },
+  ])
+  expect(nome.motivo(nome.pedidos({ nome: 'jarro', categoria: 'utensilio' })!)).toBe('nome do objeto do plano corrigido pelo editor')
+
+  const cor = editorDoInventario('inventario.cor_marca', [OBJETO_DO_PLANO], catalogo)
+  expect(cor.inicial).toEqual({ cor: 'azul', marca: 'Tok' })
+  expect(cor.pedidos(cor.inicial)).toEqual([])
+  // Vazio apaga; o que não mudou não vai.
+  expect(cor.pedidos({ cor: '', marca: 'Tok' })).toEqual([{ tipo: 'inventario.cor_marca', item_id: 'pl1:0', valor: JSON.stringify({ cor: null }) }])
+  expect(cor.pedidos({ cor: 'verde', marca: '' })).toEqual([
+    { tipo: 'inventario.cor_marca', item_id: 'pl1:0', valor: JSON.stringify({ cor: 'verde', marca: null }) },
+  ])
+})
+
+test('grupo de cores e marcas diferentes: começa em "cada um com a sua" e mudar só a marca guarda a cor de cada um', () => {
+  const grupo = [OBJETO_DO_PLANO, { ...OBJETO_DO_PLANO, id: 'pl2:0', cor: 'verde' as const, marca: null }]
+  const cor = editorDoInventario('inventario.cor_marca', grupo, catalogo)
+  expect(cor.inicial).toEqual({ cor: VARIAS, marca: '' })
+  expect(cor.campos[0].opcoes?.slice(0, 2).map((o) => o.valor)).toEqual([VARIAS, ''])
+  expect(cor.campos[1].rotulo).toBe('Marca (em branco, cada um fica com a sua)')
+
+  expect(cor.pedidos({ cor: VARIAS, marca: 'Etna' })).toEqual([
+    { tipo: 'inventario.cor_marca', item_id: '', item_ids: ['pl1:0', 'pl2:0'], valor: JSON.stringify({ marca: 'Etna' }) },
+  ])
+  expect(cor.pedidos({ cor: '', marca: '' })).toEqual([
+    { tipo: 'inventario.cor_marca', item_id: '', item_ids: ['pl1:0', 'pl2:0'], valor: JSON.stringify({ cor: null }) },
+  ])
+
+  // O nome comum começa preenchido; o de nomes diferentes começa vazio e pede um.
+  const nome = editorDoInventario('inventario.nome', grupo, catalogo)
+  expect(nome.inicial).toEqual({ nome: 'vaso', categoria: 'decoracao' })
+  const misturado = editorDoInventario('inventario.nome', [OBJETO_DO_PLANO, { ...OBJETO_DO_PLANO, id: 'pl2:0', nome: 'jarro' }], catalogo)
+  expect(misturado.inicial.nome).toBe('')
+  expect(misturado.pedidos(misturado.inicial)).toBeNull()
 })

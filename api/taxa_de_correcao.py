@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import sys
+from collections import Counter
 from collections.abc import Callable, Mapping
 from collections.abc import Set as AbstractSet
 from datetime import UTC, date, datetime, time, timedelta
@@ -179,10 +180,20 @@ def calcular_com_itens(
             vigor = _em_vigor_no_periodo(
                 feitas, contagem.versao_do_modelo, desde, ate, reconciliadas
             )
-            do_job = {
-                tipo: (sum(c.tipo == tipo for c in vigor), contagem.itens_do_tipo(tipo))
-                for tipo in CORRIGIVEIS
-            }
+            do_job: dict[str, tuple[int, int]] = {}
+            sem_contagem: list[str] = []
+            n_por_tipo = Counter(c.tipo for c in vigor)
+            for tipo in CORRIGIVEIS:
+                try:
+                    itens = contagem.itens_do_tipo(tipo)
+                except KeyError:
+                    # Contagem gravada antes do tipo existir, sem irmão (#740): só a linha
+                    # dele sai; um 0 tiraria o tipo do denominador sem aviso.
+                    sem_contagem.append(tipo)
+                    continue
+                do_job[tipo] = (n_por_tipo[tipo], itens)
+            if sem_contagem:
+                log.warning("contagem de %s sem %s: fora da taxa", job.id, sem_contagem)
         except (ValueError, KeyError, TypeError):
             log.warning("decupagem de %s não lida: fora da taxa", job.id)
             continue
