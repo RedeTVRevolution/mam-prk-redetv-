@@ -11,6 +11,7 @@ Sai com 0 se tudo passou, 1 se algo falhou e 2 se faltou configuração.
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +58,8 @@ def enviar_clipe(api: ApiNoAr, sistema: str, clipe: Path) -> Relatorio:
     relatorio = Relatorio()
     dados = clipe.read_bytes()
     corpo: dict[str, Any] = {
-        "nome": clipe.name,
+        # Nome novo a cada rodada: o mesmo nome e data de um envio anterior dá 409 (#763).
+        "nome": f"caos-{uuid.uuid4().hex[:8]}-{clipe.name}",
         "tamanho_bytes": len(dados),
         "tipo": CORPO["tipo"],
         "data_exibicao": CORPO["data_exibicao"],

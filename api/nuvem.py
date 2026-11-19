@@ -480,6 +480,13 @@ class RepositorioFirestore:
         )
         return sum(1 for doc in docs if (doc.to_dict() or {}).get("lixeira") is None)
 
+    def com_nome_e_data(self, nome: str, data_exibicao: date) -> list[Job]:
+        # Duas igualdades: os índices automáticos de cada campo bastam, sem índice composto.
+        consulta: Any = self._colecao.where(
+            filter=FieldFilter("nome", "==", nome)
+        ).where(filter=FieldFilter("data_exibicao", "==", data_exibicao.isoformat()))
+        return [Job(**(doc.to_dict() or {})) for doc in consulta.stream()]
+
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode

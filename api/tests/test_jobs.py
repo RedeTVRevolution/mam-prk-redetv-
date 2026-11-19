@@ -81,9 +81,13 @@ class Relogio:
 
 
 class Ambiente:
-    def __init__(self, tamanho_maximo: int = 4 * 1024**3) -> None:
+    def __init__(
+        self,
+        tamanho_maximo: int = 4 * 1024**3,
+        repositorio: RepositorioEmMemoria | None = None,
+    ) -> None:
         self.idempotencia = RepositorioDeIdempotenciaEmMemoria()
-        self.repositorio = RepositorioEmMemoria()
+        self.repositorio = repositorio or RepositorioEmMemoria()
         self.armazenamento = ArmazenamentoFalso()
         self.relogio = Relogio()
         papeis = RepositorioDePapeisEmMemoria()
@@ -938,7 +942,7 @@ def test_idempotency_key_com_outro_corpo_recebe_409_e_chaves_diferentes_criam_jo
     primeira = _criar_com_chave(ambiente, "k1")
 
     assert _criar_com_chave(ambiente, "k1", tamanho_bytes=2000).status_code == 409
-    outra = _criar_com_chave(ambiente, "k2")
+    outra = _criar_com_chave(ambiente, "k2", nome="outro.mp4")
 
     assert outra.status_code == 202
     assert outra.json()["id"] != primeira.json()["id"]
@@ -990,18 +994,22 @@ def test_idempotency_key_invalida_recebe_422() -> None:
     assert ambiente.cliente.get("/v1/jobs", headers=AUTORIZACAO).json() == []
 
 
+def _soltar_a_marca_de_gravado(ambiente: Ambiente) -> None:
+    """Desfaz a marca de Job gravado da única reserva: a queda foi antes de gravar."""
+    (id_,) = ambiente.idempotencia._reservas
+    reserva = ambiente.idempotencia._reservas[id_]
+    ambiente.idempotencia._reservas[id_] = reserva.model_copy(
+        update={"job_gravado": False}
+    )
+
+
 def test_repeticao_que_grava_o_job_que_faltou_usa_a_hora_de_agora() -> None:
     # O processo caiu entre reservar e gravar: a repetição, horas depois, grava o Job.
     # Com a hora da reserva, o prazo do upload já estaria quase vencido ao dar a URL.
     ambiente = Ambiente()
     primeira = _criar_com_chave(ambiente, "k1").json()
     del ambiente.repositorio._jobs[primeira["id"]]
-    # Sem a marca de Job gravado: a queda foi antes de gravar.
-    (id_,) = ambiente.idempotencia._reservas
-    reserva = ambiente.idempotencia._reservas[id_]
-    ambiente.idempotencia._reservas[id_] = reserva.model_copy(
-        update={"job_gravado": False}
-    )
+    _soltar_a_marca_de_gravado(ambiente)
     ambiente.relogio.agora = INICIO + timedelta(hours=30)
 
     repeticao = _criar_com_chave(ambiente, "k1")

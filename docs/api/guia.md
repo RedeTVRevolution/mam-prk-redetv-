@@ -87,6 +87,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 403 | `Chave sem o escopo criar ou ler` | `GET /v1/programas` pede `criar` ou `ler`. |
 | 404 | `Job não encontrado` | O id não existe ou o Job é de outro sistema. |
 | 409 | `Idempotency-Key já usada com outro corpo` | Use uma chave nova para um pedido novo. |
+| 409 | `Já existe um vídeo com este nome e esta data de exibição` | O `POST /v1/jobs` recusa um vídeo novo com o mesmo `nome` e a mesma `data_exibicao` de um que já está no MAM. Não reenvie. Se o vídeo existente for do seu sistema, o campo `job_id` traz o id dele. Um Job na lixeira, com o upload expirado ou que falhou há mais de 7 dias não conta. |
 | 409 | `Job em <estado>, não concluido` | O Job não terminou ou falhou. Espere o webhook ou consulte o Job. |
 | 409 | `Job em <estado>, não cancelável` | O Job já terminou; não há o que cancelar. |
 | 410 | `Este Job foi apagado` | Repetição com o `Idempotency-Key` de um Job na lixeira ou purgado. Use uma chave nova para enviar de novo. |

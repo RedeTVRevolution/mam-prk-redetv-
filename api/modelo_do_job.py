@@ -444,6 +444,10 @@ class RepositorioDeJobs(Protocol):
         """Quantos Jobs do programa estão fora da lixeira; lê só o campo da lixeira."""
         ...
 
+    def com_nome_e_data(self, nome: str, data_exibicao: date) -> list[Job]:
+        """Os Jobs com este nome e esta data de exibição, lixeira inclusive."""
+        ...
+
 
 def agora_utc() -> datetime:
     return datetime.now(UTC)

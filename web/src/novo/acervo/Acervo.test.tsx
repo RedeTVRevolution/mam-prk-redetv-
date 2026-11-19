@@ -197,7 +197,7 @@ test('pede a primeira página com 50 por vez, do mais recente ao mais antigo', a
   await screen.findByText('Nenhum vídeo enviado ainda.')
 
   expect(ultimaChamada().get('limite')).toBe('50')
-  expect(ultimaChamada().get('ordem')).toBe('enviado')
+  expect(ultimaChamada().get('ordem')).toBe('exibicao')
 })
 
 test('o cartão com falha mostra a frase em português, e o código só na dica', async () => {
@@ -447,18 +447,19 @@ test('o X do filtro limpa só aquele filtro', async () => {
   await waitFor(() => expect(location.search).toBe('?programa=TV+Fama'))
 })
 
-test('a ordem muda pelo menu e fica na URL; o padrão é a data de envio', async () => {
+test('a ordem muda pelo menu e fica na URL; o padrão é a data de exibição (#763)', async () => {
   const usuario = userEvent.setup()
   jobs = [job({ id: 'a', nome: 'um.mp4' })]
   await abrir()
   await screen.findByText('um.mp4')
+  expect(location.search).toBe('')
 
-  await usuario.click(screen.getByRole('button', { name: 'Ordenar por data de envio' }))
-  await usuario.click(await screen.findByRole('menuitemradio', { name: 'Data de exibição' }))
+  await usuario.click(screen.getByRole('button', { name: 'Ordenar por data de exibição' }))
+  await usuario.click(await screen.findByRole('menuitemradio', { name: 'Data de envio' }))
 
-  await waitFor(() => expect(ultimaChamada().get('ordem')).toBe('exibicao'))
-  expect(location.search).toBe('?ordem=exibicao')
-  expect(screen.getByRole('button', { name: 'Ordenar por data de exibição' })).toBeTruthy()
+  await waitFor(() => expect(ultimaChamada().get('ordem')).toBe('enviado'))
+  expect(location.search).toBe('?ordem=enviado')
+  expect(screen.getByRole('button', { name: 'Ordenar por data de envio' })).toBeTruthy()
 })
 
 test('rolar até o fim traz a página seguinte, pelo cursor, e para na última', async () => {
@@ -968,7 +969,7 @@ test('U não abre o envio num campo de texto nem com um menu aberto', async () =
   await screen.findByText('um.mp4')
 
   await usuario.type(screen.getByLabelText('Buscar por nome'), 'u')
-  await usuario.click(screen.getByRole('button', { name: 'Ordenar por data de envio' }))
+  await usuario.click(screen.getByRole('button', { name: 'Ordenar por data de exibição' }))
   await screen.findByRole('menu')
   await usuario.keyboard('u')
 
@@ -985,6 +986,23 @@ test('data de exibição no futuro vira uma mensagem em português com a ação'
   await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
 
   expect((await dialogo.findByRole('alert')).textContent).toContain('data de exibição não pode ser no futuro')
+})
+
+test('o vídeo repetido (mesmo nome e data) mostra a recusa e não começa o upload (#763)', async () => {
+  servidor.use(
+    http.post('/v1/jobs', () =>
+      HttpResponse.json({ detail: 'Já existe um vídeo com este nome e esta data de exibição', job_id: 'a' }, { status: 409 }),
+    ),
+  )
+  const usuario = userEvent.setup()
+  await abrir()
+  const dialogo = within(await abrirEnvio(usuario))
+
+  preencherData(dialogo)
+  await usuario.upload(dialogo.getByLabelText('Arquivo MP4'), mp4())
+
+  expect((await dialogo.findByRole('alert')).textContent).toContain('Já existe um vídeo com este nome e esta data de exibição')
+  expect(pedacosEnviados).toEqual([])
 })
 
 test('uma falha ao criar o Job vira mensagem em português', async () => {

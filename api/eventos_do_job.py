@@ -14,7 +14,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Iterable, Mapping
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Protocol
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -210,6 +210,9 @@ class _RepositorioQueRepassa:
 
     def contar_do_programa(self, nome: str) -> int:
         return self._repositorio.contar_do_programa(nome)
+
+    def com_nome_e_data(self, nome: str, data_exibicao: date) -> list[Job]:
+        return self._repositorio.com_nome_e_data(nome, data_exibicao)
 
 
 class RepositorioQuePublicaOFim(_RepositorioQueRepassa):

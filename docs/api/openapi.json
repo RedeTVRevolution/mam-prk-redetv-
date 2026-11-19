@@ -230,11 +230,23 @@
             }
           },
           "409": {
-            "description": "Idempotency-Key já usada com outro corpo. Use uma chave nova para um pedido novo; a antiga é lembrada por 48 h.",
+            "description": "Idempotency-Key já usada com outro corpo. Use uma chave nova para um pedido novo; a antiga é lembrada por 48 h.\n\nJá existe um vídeo com este nome e esta data de exibição. O vídeo já foi enviado e o Job não foi criado. `job_id` traz o Job existente quando ele é desta chave; o de outro sistema ou de uma pessoa vem sem `job_id`. Se o Job falhou, reprocesse-o em vez de reenviar; se é outro vídeo, mande com outro nome.",
             "content": {
               "application/json": {
-                "example": {
-                  "detail": "Idempotency-Key já usada com outro corpo"
+                "examples": {
+                  "Idempotency-Key já usada com outro corpo": {
+                    "summary": "Idempotency-Key já usada com outro corpo",
+                    "value": {
+                      "detail": "Idempotency-Key já usada com outro corpo"
+                    }
+                  },
+                  "Já existe um vídeo com este nome e esta data de exibição": {
+                    "summary": "Já existe um vídeo com este nome e esta data de exibição",
+                    "value": {
+                      "detail": "Já existe um vídeo com este nome e esta data de exibição",
+                      "job_id": "5f0c2b6e8d3a4c1f9a7e0b2d4c6f8a1b"
+                    }
+                  }
                 },
                 "schema": {
                   "$ref": "#/components/schemas/ErroEmTexto"
@@ -350,7 +362,7 @@
             }
           }
         },
-        "description": "Registra o pedido de decupagem de um MP4 e devolve o Job em `aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 15 min, que abre um upload retomável no Cloud Storage (veja o guia); o `POST` que abre a sessão leva o cabeçalho `x-goog-if-generation-match: 0`. Escopo `criar`.\n\nO cabeçalho `Idempotency-Key` (até 255 caracteres ASCII imprimíveis) torna o pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já foi feito. A mesma chave com outro corpo dá 409. A chave vale por sistema.\n\nO `nome` termina em `.mp4` e o `tipo` é sempre `video/mp4`; arquivos `.mov` não são aceitos, mesmo com conteúdo MP4: envie com nome `.mp4`.",
+        "description": "Registra o pedido de decupagem de um MP4 e devolve o Job em `aguardando_upload` com a `url_de_upload`: uma URL assinada, válida por 15 min, que abre um upload retomável no Cloud Storage (veja o guia); o `POST` que abre a sessão leva o cabeçalho `x-goog-if-generation-match: 0`. Escopo `criar`.\n\nO cabeçalho `Idempotency-Key` (até 255 caracteres ASCII imprimíveis) torna o pedido repetível: a repetição com o mesmo corpo, em até 48 h, devolve o mesmo Job com **200** (e não 202), e `url_de_upload` pode vir `null` se o upload já foi feito. A mesma chave com outro corpo dá 409. A chave vale por sistema.\n\nUm vídeo novo com o mesmo `nome` e a mesma `data_exibicao` de um Job que já existe é recusado com 409 (veja abaixo). Não contam o Job na lixeira ou purgado, o que falhou por `upload_expirado` e o que falhou e passou do prazo de reprocessamento (`reprocessavel_ate`). O nome é comparado como veio, com maiúsculas e extensão.\n\nO `nome` termina em `.mp4` e o `tipo` é sempre `video/mp4`; arquivos `.mov` não são aceitos, mesmo com conteúdo MP4: envie com nome `.mp4`.",
         "tags": [
           "sistemas"
         ]

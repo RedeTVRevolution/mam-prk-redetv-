@@ -180,7 +180,7 @@ test('com outra grafia de nome incluída, a contagem diz qual', async () => {
 })
 
 test('a URL reproduz a busca: q, ev, programa, ano e ordem vão à API', async () => {
-  await abrir('/busca?q=sapato&ev=fala&ev=objeto&programa=TV+Fama&ano=2024&ordem=data')
+  await abrir('/busca?q=sapato&ev=fala&ev=objeto&programa=TV+Fama&ano=2024&ordem=relevancia')
 
   expect(await screen.findByText('3 momentos em 2 vídeos')).toBeTruthy()
   const p = buscas[0]
@@ -189,7 +189,7 @@ test('a URL reproduz a busca: q, ev, programa, ano e ordem vão à API', async (
   expect(p.get('programa')).toBe('TV Fama')
   expect(p.get('desde')).toBe('2024-01-01')
   expect(p.get('ate')).toBe('2024-12-31')
-  expect(p.get('ordem')).toBe('data')
+  expect(p.get('ordem')).toBe('relevancia')
   expect(p.get('limite')).toBe('20')
 })
 
@@ -377,16 +377,17 @@ test('termo novo com resultado na tela mostra o carregando e tira o resultado an
   expect(screen.queryByRole('status', { name: 'Buscando' })).toBeNull()
 })
 
-test('trocar a ordem mantém a lista e mostra o "Atualizando" até a resposta (#396)', async () => {
+test('a busca abre pela data de exibição; trocar a ordem mantém a lista e mostra o "Atualizando" até a resposta (#396, #763)', async () => {
   const usuario = userEvent.setup()
   await abrir('/busca?q=sapato')
   await screen.findByText('3 momentos em 2 vídeos')
   const liberar = segurarABusca()
 
-  await usuario.click(screen.getByRole('button', { name: 'Ordenar por relevância' }))
-  await usuario.click(await screen.findByRole('menuitemradio', { name: 'Data de exibição' }))
+  expect(buscas.at(-1)?.get('ordem')).toBe('data')
+  await usuario.click(screen.getByRole('button', { name: 'Ordenar por data de exibição' }))
+  await usuario.click(await screen.findByRole('menuitemradio', { name: 'Relevância' }))
 
-  expect(location.search).toBe('?q=sapato&ordem=data')
+  expect(location.search).toBe('?q=sapato&ordem=relevancia')
   expect(await screen.findByRole('status', { name: 'Atualizando' })).toBeTruthy()
   expect(screen.getByText('3 momentos em 2 vídeos')).toBeTruthy()
   expect(screen.queryByRole('status', { name: 'Buscando' })).toBeNull()
@@ -394,7 +395,7 @@ test('trocar a ordem mantém a lista e mostra o "Atualizando" até a resposta (#
   liberar()
   expect(await screen.findByText('1 momento em 1 vídeo')).toBeTruthy()
   expect(screen.queryByRole('status', { name: 'Atualizando' })).toBeNull()
-  expect(buscas.at(-1)?.get('ordem')).toBe('data')
+  expect(buscas.at(-1)?.get('ordem')).toBe('relevancia')
 })
 
 test('limpar o ano escolhido pede todos os períodos', async () => {
@@ -529,7 +530,7 @@ test('rolar até o fim traz a página seguinte pelo X-Proximo-Cursor (#426)', as
     const inicio = cursor ? 20 : 0
     return HttpResponse.json(resultado({ videos: muitos.slice(inicio, inicio + 20) }), { headers: cursor ? {} : { 'X-Proximo-Cursor': 'abc.20' } })
   }
-  await abrir('/busca?q=item')
+  await abrir('/busca?q=item&ordem=relevancia')
   expect(await screen.findByText('Mais de 20 momentos')).toBeTruthy()
 
   const rolagem = screen.getByRole('link', { name: /^v0\.mp4/ }).closest('.overflow-y-auto') as HTMLElement
@@ -538,6 +539,8 @@ test('rolar até o fim traz a página seguinte pelo X-Proximo-Cursor (#426)', as
 
   expect(await screen.findByText('30 momentos em 30 vídeos')).toBeTruthy()
   expect(buscas.map((p) => p.get('cursor'))).toEqual([null, 'abc.20'])
+  // A 2ª página segue a ordem escolhida (#763).
+  expect(buscas.map((p) => p.get('ordem'))).toEqual(['relevancia', 'relevancia'])
 })
 
 test('vídeos concluídos com a indexação pendente mostram o aviso com a contagem (#404)', async () => {
@@ -545,6 +548,8 @@ test('vídeos concluídos com a indexação pendente mostram o aviso com a conta
   await abrir('/busca?q=sapato')
   expect(await screen.findByText('2 vídeos ainda estão entrando na busca e podem não aparecer aqui.')).toBeTruthy()
   expect(pedidosDoAcervo[0].getAll('estado')).toEqual(['concluido'])
+  // Os mais recentes pelo envio, não pela exibição, que virou o padrão do acervo (#763).
+  expect(pedidosDoAcervo[0].get('ordem')).toBe('enviado')
 })
 
 test('um vídeo entrando na busca leva o aviso no singular (#404)', async () => {

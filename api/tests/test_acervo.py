@@ -191,6 +191,25 @@ def test_paginas_na_ordem_por_exibicao_com_datas_repetidas_e_sem_data() -> None:
     assert todos[-2:] == sorted(["j4", "j5"], reverse=True)
 
 
+def test_paginas_por_exibicao_com_filtro_nao_pulam_nem_repetem() -> None:
+    # #763: a exibição é o padrão da tela, que pagina com filtro.
+    a = Ambiente()
+    dias = [20, 20, None, 20, 19, 19, None, 18]
+    for i, dia in enumerate(dias):
+        data = date(2026, 10, dia) if dia else None
+        _semear(
+            a, f"j{i}", i, programa="TV Fama" if i != 3 else "X", data_exibicao=data
+        )
+
+    paginas = _paginar(a, limite=2, ordem="exibicao", programa="TV Fama")
+
+    todos = [id for pagina in paginas for id in pagina]
+    assert len(paginas) > 2
+    assert len(todos) == len(set(todos)) == 7
+    assert todos == _ids(a, ordem="exibicao", programa="TV Fama")
+    assert todos[-2:] == ["j6", "j2"]
+
+
 def test_pagina_respeita_os_filtros() -> None:
     a = Ambiente()
     for i in range(6):

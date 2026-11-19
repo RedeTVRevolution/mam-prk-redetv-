@@ -39,6 +39,7 @@ from api.ciclo_de_vida import (
     JaTerminou,
     etapa_de_reprocesso,
     pedir_indexacao,
+    prazo_vencido,
     transitar,
 )
 from api.ciclo_de_vida import cancelar as cancelar_job
@@ -310,6 +311,41 @@ class QuadroDoLote(BaseModel):
     expira_em: datetime | None
 
 
+ENVIO_REPETIDO = "Já existe um vídeo com este nome e esta data de exibição"
+
+
+def _bloqueia_o_reenvio(job: Job, agora: datetime) -> bool:
+    """Se o Job barra um envio novo com o mesmo nome e data (#763). Não barram o da
+    lixeira, o que nunca recebeu o arquivo e o falho que já não se reprocessa (a API
+    manda reenviar)."""
+    if job.lixeira is not None:
+        return False
+    if job.estado == "falhou":
+        return job.codigo_falha != "upload_expirado" and not prazo_vencido(job, agora)
+    return True
+
+
+def _envio_repetido(
+    repositorio: RepositorioDeJobs, novo: "NovoJob", job_id: str, agora: datetime
+) -> Job | None:
+    """O Job que barra este envio, se há um. Se o Job da própria reserva (`job_id`)
+    já apareceu, gravado por uma repetição concorrente da mesma chave, nada barra: a
+    repetição devolve esse Job."""
+    iguais = repositorio.com_nome_e_data(novo.nome, novo.data_exibicao)
+    if any(j.id == job_id for j in iguais):
+        return None
+    return next((j for j in iguais if _bloqueia_o_reenvio(j, agora)), None)
+
+
+class EnvioRepetido(Exception):
+    """Já há um vídeo com o mesmo nome e data de exibição (#763): vira 409 com
+    `job_id` só quando quem chama enxerga o Job."""
+
+    def __init__(self, job_id: str | None) -> None:
+        super().__init__(ENVIO_REPETIDO)
+        self.job_id = job_id
+
+
 class TipoNaoSuportado(Exception):
     """Corpo com tipo diferente de video/mp4: vira 415, antes de qualquer 422."""
 
@@ -496,6 +532,13 @@ class RepositorioEmMemoria:
             1 for j in self._jobs.values() if j.programa == nome and j.lixeira is None
         )
 
+    def com_nome_e_data(self, nome: str, data_exibicao: date) -> list[Job]:
+        return [
+            j
+            for j in list(self._jobs.values())
+            if j.nome == nome and j.data_exibicao == data_exibicao
+        ]
+
 
 class RepositorioIndisponivel:
     def salvar(self, job: Job) -> None:
@@ -541,6 +584,9 @@ class RepositorioIndisponivel:
         raise ServicoIndisponivel
 
     def contar_do_programa(self, nome: str) -> int:
+        raise ServicoIndisponivel
+
+    def com_nome_e_data(self, nome: str, data_exibicao: date) -> list[Job]:
         raise ServicoIndisponivel
 
 
@@ -790,9 +836,13 @@ def criar_rotas(
             existente is None and job_gravado
         ):
             raise HTTPException(410, "Este Job foi apagado")
-        # O teto só barra Job novo: a repetição de um Job que já existe devolve o mesmo
-        # Job, e a reserva feita aqui deixa a repetição depois da espera criá-lo.
+        # A trava e o teto só barram Job novo: a repetição de um Job que já existe devolve
+        # o mesmo Job, e a reserva feita aqui deixa a repetição depois da espera criá-lo.
         if existente is None:
+            repetido = _envio_repetido(repositorio, novo, job.id, agora)
+            if repetido is not None:
+                visivel = not de_outro_sistema(chamador, repetido)
+                raise EnvioRepetido(repetido.id if visivel else None)
             teto = (
                 TETO_POR_HORA_DO_SISTEMA
                 if sistema is not None

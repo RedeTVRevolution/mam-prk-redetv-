@@ -203,6 +203,9 @@ Política do Artifact Registry nos repositórios `mam` e `mam-gpu` (`infra/modul
 **Chave de idempotência**:
 Identificador de uma intenção de envio do cliente, reutilizado em todas as repetições dessa intenção. No `POST /v1/jobs` vai no cabeçalho `Idempotency-Key` (`api/idempotencia.py`): a primeira chamada cria o Job (202) e as repetições devolvem o mesmo Job (200), por 48 h. A reserva é de quem chama: o mesmo texto em outro sistema é outra chave, e a mesma chave com outro corpo dá 409. Repetição de Job na lixeira ou purgado dá 410 `Este Job foi apagado`: a reserva ganha `job_gravado` depois de gravar o Job, e reserva marcada sem Job é Job purgado.
 
+**Envio repetido**:
+O `POST /v1/jobs` com chave nova recusa o vídeo com o mesmo `nome` (como veio, maiúscula conta) e a mesma `data_exibicao` de um Job que já está no MAM (#763): 409 `Já existe um vídeo com este nome e esta data de exibição`, com `job_id` quando quem chama enxerga esse Job. Conta o Job em qualquer estado, inclusive `cancelado` e o `falhou` dentro dos 7 dias; não contam o da lixeira, o `upload_expirado` e o que falhou há mais de 7 dias. A checagem vem depois da chave de idempotência (a repetição da mesma chave segue no 200) e antes do teto por hora. O acervo e a busca por texto da tela abrem ordenados pela data de exibição; os padrões da API não mudaram.
+
 **Teste de caos**:
 Roteiro que bate na API com envios repetidos ao mesmo tempo, entrega repetida e fora de ordem, destino de webhook que cai e volta, e dois sistemas lado a lado, e confere que sobra um Job por chave e que cada sistema vê só os seus (`api/caos.py`). Roda local contra os emuladores (`api/tests/test_caos.py`) e no dev por HTTP (`make caos-dev`).
 

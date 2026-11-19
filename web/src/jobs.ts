@@ -105,7 +105,7 @@ export const SEM_FILTROS: FiltrosDoAcervo = {
   de: '',
   ate: '',
   estado: [],
-  ordem: 'enviado',
+  ordem: 'exibicao',
 }
 
 /** Uma página do acervo; `proximo` é o cursor da seguinte, ausente na última. */
@@ -148,7 +148,7 @@ export function filtrosDaBusca(busca: string): FiltrosDoAcervo {
     ate: data('ate'),
     // Estado desconhecido num link editado à mão sai do filtro, em vez de fazer a API recusar.
     estado: [...new Set(p.getAll('estado'))].filter((e) => Object.hasOwn(ESTADOS_DO_JOB, e)),
-    ordem: p.get('ordem') === 'exibicao' ? 'exibicao' : 'enviado',
+    ordem: p.get('ordem') === 'enviado' ? 'enviado' : 'exibicao',
   }
 }
 

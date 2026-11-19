@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -84,7 +85,11 @@ class Mundo:
             )
 
     def criar(self, headers: dict[str, str]) -> int:
-        return self.cliente.post("/v1/jobs", json=NOVO_JOB, headers=headers).status_code
+        # Um nome por envio (o mesmo nome e data seria recusado como repetido, #763); a
+        # repetição com a mesma chave manda o mesmo corpo.
+        nome = f"{headers.get('Idempotency-Key', uuid.uuid4().hex)}.mp4"
+        corpo = {**NOVO_JOB, "nome": nome}
+        return self.cliente.post("/v1/jobs", json=corpo, headers=headers).status_code
 
 
 def test_sistema_que_passa_do_teto_recebe_429_com_retry_after() -> None:
@@ -92,7 +97,9 @@ def test_sistema_que_passa_do_teto_recebe_429_com_retry_after() -> None:
     chave = mundo.chave("Legado")
 
     assert [mundo.criar(chave) for _ in range(3)] == [202, 202, 202]
-    resposta = mundo.cliente.post("/v1/jobs", json=NOVO_JOB, headers=chave)
+    resposta = mundo.cliente.post(
+        "/v1/jobs", json={**NOVO_JOB, "nome": "outro.mp4"}, headers=chave
+    )
 
     assert resposta.status_code == 429
     assert resposta.headers["Retry-After"] == "3600"
