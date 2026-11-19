@@ -25,6 +25,10 @@ locals {
     "protocolattack-v33-stable" = ", 'opt_out_rule_ids': ['owasp-crs-v030301-id921130-protocolattack']"
   }
   restringe_ip = length(var.ips_da_redetv) > 0
+  # A foto da busca por imagem é binária e os bytes casam com as assinaturas ao acaso: a 921150
+  # barrava todo envio. Nenhuma regra do WAF olha essa rota, nem a query dela (programa, datas,
+  # cursor); ela exige login e a API valida a foto e os parâmetros.
+  fora_do_waf = "request.path != '/v1/busca/imagem' && "
 }
 
 resource "google_compute_security_policy" "web" {
@@ -40,7 +44,7 @@ resource "google_compute_security_policy" "web" {
       preview  = !var.waf_ativo
       match {
         expr {
-          expression = "evaluatePreconfiguredWaf('${rule.key}', {'sensitivity': 1${lookup(local.opcoes_waf, rule.key, "")}})"
+          expression = "${local.fora_do_waf}evaluatePreconfiguredWaf('${rule.key}', {'sensitivity': 1${lookup(local.opcoes_waf, rule.key, "")}})"
         }
       }
       description = "WAF ${rule.key}"
