@@ -102,6 +102,8 @@ export interface OpcoesDasPaginas<P, I> {
   retry?: false
   /** Outra consulta com a lista na tela: a anterior fica à vista até a nova chegar (#396). */
   manterAnterior?: (chaveAnterior: QueryKey) => boolean
+  /** Qual 422 com cursor recomeça a lista; sem ele, todos (o acervo). Os outros viram erro. */
+  recomeca?: (erro: PedidoInvalido) => boolean
 }
 
 /**
@@ -110,7 +112,7 @@ export interface OpcoesDasPaginas<P, I> {
  * esqueleto), e `aoVer` pede a página que falta. Um cursor recusado (422) recomeça do topo.
  */
 export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
-  const { chave, pedir, proximo, itens: juntar, tamanho, manterAnterior } = opcoes
+  const { chave, pedir, proximo, itens: juntar, tamanho, manterAnterior, recomeca: recomecaCom } = opcoes
   const cliente = useQueryClient()
   const hash = hashKey(chave)
   const g = guardadosDa(cliente, chave[0], hash)
@@ -126,7 +128,7 @@ export function usePaginas<P, I>(opcoes: OpcoesDasPaginas<P, I>) {
       try {
         return await pedir(pageParam)
       } catch (erro) {
-        throw pageParam && erro instanceof PedidoInvalido ? new CursorVencido(erro.message) : erro
+        throw pageParam && erro instanceof PedidoInvalido && (recomecaCom?.(erro) ?? true) ? new CursorVencido(erro.message) : erro
       }
     },
     // Volta do vídeo com o cache já vencido: recomeça na página do item de onde se saiu.
