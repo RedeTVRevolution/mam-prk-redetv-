@@ -328,17 +328,16 @@ def _cabe_no_firestore(
 
 
 def plano_da_consulta(
-    filtro: FiltroDeJobs, por_mes: bool
+    filtro: FiltroDeJobs,
 ) -> tuple[list[str] | None, list[str]]:
-    """Os meses (`mes_exibicao in`, só na ordem por envio com `por_mes`) e os programas
+    """Os meses (`mes_exibicao in`, só na ordem por envio) e os programas
     (`programa in`) que vão ao Firestore; o que não cabe nos tetos fica em
     `casa_com_o_filtro`. Sai primeiro o mês, depois os programas."""
     programas = sorted(filtro.programas) if len(filtro.programas) > 1 else []
     datas = _pontas_no_firestore(filtro)
     meses = None
     if (
-        por_mes
-        and filtro.ordem == "enviado"
+        filtro.ordem == "enviado"
         and filtro.exibicao_de is not None
         and filtro.exibicao_ate is not None
     ):
@@ -351,26 +350,14 @@ def plano_da_consulta(
     return meses, programas
 
 
-def listagem_por_mes_do_ambiente(ambiente: Mapping[str, str]) -> bool:
-    """`LISTAGEM_POR_MES`: ausente ou vazia, desligada; outro valor que não `true` ou
-    `false` levanta `ValueError`, em vez de deixar a lista no caminho de hoje sem aviso."""
-    valor = (ambiente.get("LISTAGEM_POR_MES") or "false").strip().lower()
-    if valor not in ("true", "false"):
-        raise ValueError(f"LISTAGEM_POR_MES inválida: {valor!r}")
-    return valor == "true"
-
-
 class RepositorioFirestore:
     def __init__(
         self,
         cliente: firestore.Client,
         colecao: str = COLECAO_DE_JOBS,
-        listagem_por_mes: bool = False,
     ) -> None:
         self._cliente = cliente
         self._colecao = cliente.collection(colecao)
-        # Só depois de `make gravar-mes-nos-jobs`: Job sem `mes_exibicao` some do filtro.
-        self._listagem_por_mes = listagem_por_mes
 
     def salvar(self, job: Job) -> None:
         _documento(self._colecao, job.id).set(job.model_dump())
@@ -490,7 +477,7 @@ class RepositorioFirestore:
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
-        # estar no campo da ordem; na ordem por envio, com `listagem_por_mes`, os meses do
+        # estar no campo da ordem; na ordem por envio, os meses do
         # período em `mes_exibicao`). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
         # Os índices estão no infra/modulos/mam/main.tf e no listagem_por_mes.tf.
         if filtro.sha256 is not None:
@@ -503,7 +490,7 @@ class RepositorioFirestore:
         if filtro.na_lixeira is True:
             return self._consultar_a_lixeira(filtro)
         consulta: Any = self._colecao
-        meses, programas = plano_da_consulta(filtro, self._listagem_por_mes)
+        meses, programas = plano_da_consulta(filtro)
         if programas:
             consulta = consulta.where(filter=FieldFilter("programa", "in", programas))
         elif len(filtro.programas) == 1:

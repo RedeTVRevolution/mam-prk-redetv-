@@ -12,7 +12,6 @@ from api.gravar_mes_nos_jobs import gravar
 from api.modelo_do_job import FiltroDeJobs, Job, PaginaDeJobs
 from api.nuvem import (
     RepositorioFirestore,
-    listagem_por_mes_do_ambiente,
     meses_do_periodo,
     plano_da_consulta,
 )
@@ -79,18 +78,15 @@ def test_meses_do_periodo_atravessa_a_virada_do_ano() -> None:
 
 class TestLimitesDoFirestore:
     def test_periodo_simples_usa_os_meses(self) -> None:
-        assert plano_da_consulta(_filtro(), True)[0] == [
+        assert plano_da_consulta(_filtro())[0] == [
             "2026-08",
             "2026-09",
             "2026-10",
         ]
 
     def test_sem_uma_ponta_do_periodo_nao_usa(self) -> None:
-        assert (
-            plano_da_consulta(FiltroDeJobs(exibicao_de=date(2026, 8, 1)), True)[0]
-            is None
-        )
-        assert plano_da_consulta(FiltroDeJobs(), True)[0] is None
+        assert plano_da_consulta(FiltroDeJobs(exibicao_de=date(2026, 8, 1)))[0] is None
+        assert plano_da_consulta(FiltroDeJobs())[0] is None
 
     def test_mais_de_30_disjuncoes_nao_usa(self) -> None:
         # 31 meses, sem estado: 31 disjunções.
@@ -98,7 +94,7 @@ class TestLimitesDoFirestore:
             exibicao_de=date(2024, 1, 1), exibicao_ate=date(2026, 7, 31)
         )
         assert len(meses_do_periodo(date(2024, 1, 1), date(2026, 7, 31))) == 31
-        assert plano_da_consulta(filtro, True)[0] is None
+        assert plano_da_consulta(filtro)[0] is None
 
     def test_5_meses_x_6_estados_com_programa_sistema_e_palavra_passa_dos_100_componentes(
         self,
@@ -114,60 +110,22 @@ class TestLimitesDoFirestore:
             palavras=("fama",),
         )
         assert len(filtro.estados) == 6
-        assert plano_da_consulta(filtro, True)[0] is None
+        assert plano_da_consulta(filtro)[0] is None
 
     def test_cabe_no_limite_de_componentes(self) -> None:
         # 3 meses × 2 estados × (programa, estado, mês + ordem + id) = 6 × 5 = 30.
         filtro = _filtro(
             estados=frozenset({"concluido", "falhou"}), programas=frozenset({"TV Fama"})
         )
-        assert plano_da_consulta(filtro, True)[0] == ["2026-08", "2026-09", "2026-10"]
-
-
-@pytest.mark.parametrize(
-    ("ambiente", "ligada"),
-    [
-        ({}, False),
-        ({"LISTAGEM_POR_MES": ""}, False),
-        ({"LISTAGEM_POR_MES": "false"}, False),
-        ({"LISTAGEM_POR_MES": " True "}, True),
-    ],
-)
-def test_variavel_do_ambiente(ambiente: dict[str, str], ligada: bool) -> None:
-    assert listagem_por_mes_do_ambiente(ambiente) is ligada
-
-
-def test_variavel_com_valor_errado_levanta() -> None:
-    with pytest.raises(ValueError, match="LISTAGEM_POR_MES"):
-        listagem_por_mes_do_ambiente({"LISTAGEM_POR_MES": "ture"})
-
-
-def test_repositorio_padrao_manda_os_meses_ao_firestore(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repositorio = RepositorioFirestore(_cliente(), colecao="jobs")
-    vista: dict[str, Any] = {}
-
-    def captura(consulta: Any, campo: str, f: FiltroDeJobs) -> PaginaDeJobs:
-        vista["consulta"], vista["campo"] = consulta, campo
-        return PaginaDeJobs([])
-
-    monkeypatch.setattr(repositorio, "_ordenar_e_ler", captura)
-    repositorio.consultar(_filtro())
-    assert [
-        f"{f.field.field_path}:{f.op.name}" for f in vista["consulta"]._field_filters
-    ] == ["mes_exibicao:IN"]
-    assert vista["campo"] == "criado_em"
+        assert plano_da_consulta(filtro)[0] == ["2026-08", "2026-09", "2026-10"]
 
 
 class TestConsulta:
     @staticmethod
     def _campos_da_consulta(
-        monkeypatch: pytest.MonkeyPatch, listagem_por_mes: bool, filtro: FiltroDeJobs
+        monkeypatch: pytest.MonkeyPatch, filtro: FiltroDeJobs
     ) -> tuple[list[str], list[str]]:
-        repositorio = RepositorioFirestore(
-            _cliente(), colecao="jobs", listagem_por_mes=listagem_por_mes
-        )
+        repositorio = RepositorioFirestore(_cliente(), colecao="jobs")
         vista: dict[str, Any] = {}
 
         def captura(consulta: Any, campo: str, f: FiltroDeJobs) -> PaginaDeJobs:
@@ -183,27 +141,18 @@ class TestConsulta:
         ]
         return filtros, [vista["campo"]]
 
-    def test_ligada_filtra_por_mes_e_ordena_por_envio(
+    def test_filtra_por_mes_e_ordena_por_envio(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        filtros, ordem = self._campos_da_consulta(monkeypatch, True, _filtro())
+        filtros, ordem = self._campos_da_consulta(monkeypatch, _filtro())
         assert filtros == ["mes_exibicao:IN"]
         assert ordem == ["criado_em"]
 
-    def test_ligada_com_os_outros_filtros(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_com_os_outros_filtros(self, monkeypatch: pytest.MonkeyPatch) -> None:
         filtros, ordem = self._campos_da_consulta(
-            monkeypatch, True, _filtro(programas=frozenset({"TV Fama"}))
+            monkeypatch, _filtro(programas=frozenset({"TV Fama"}))
         )
         assert filtros == ["programa:EQUAL", "mes_exibicao:IN"]
-        assert ordem == ["criado_em"]
-
-    def test_desligada_nao_manda_a_data_ao_firestore(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        filtros, ordem = self._campos_da_consulta(monkeypatch, False, _filtro())
-        assert filtros == []
         assert ordem == ["criado_em"]
 
     def test_limite_estourado_cai_no_caminho_de_hoje(
@@ -212,7 +161,7 @@ class TestConsulta:
         filtro = FiltroDeJobs(
             exibicao_de=date(2024, 1, 1), exibicao_ate=date(2026, 7, 31)
         )
-        filtros, ordem = self._campos_da_consulta(monkeypatch, True, filtro)
+        filtros, ordem = self._campos_da_consulta(monkeypatch, filtro)
         assert filtros == []
         assert ordem == ["criado_em"]
 
@@ -220,7 +169,7 @@ class TestConsulta:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         filtros, ordem = self._campos_da_consulta(
-            monkeypatch, True, _filtro(ordem="exibicao")
+            monkeypatch, _filtro(ordem="exibicao")
         )
         assert filtros == [
             "data_exibicao:GREATER_THAN_OR_EQUAL",
@@ -312,11 +261,8 @@ class TestCarga:
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
-def test_resultado_e_ordem_iguais_com_a_variavel_ligada_ou_desligada() -> None:
-    cliente = _cliente()
-    colecao = f"jobs-{uuid.uuid4().hex}"
-    desligada = RepositorioFirestore(cliente, colecao=colecao)
-    ligada = RepositorioFirestore(cliente, colecao=colecao, listagem_por_mes=True)
+def test_resultado_ordem_e_cursor_da_listagem_por_mes() -> None:
+    repositorio = RepositorioFirestore(_cliente(), colecao=f"jobs-{uuid.uuid4().hex}")
     datas = [
         date(2026, 8, 25),
         date(2026, 9, 1),
@@ -326,15 +272,16 @@ def test_resultado_e_ordem_iguais_com_a_variavel_ligada_ou_desligada() -> None:
         date(2026, 7, 31),
     ]
     for i, d in enumerate(datas):
-        desligada.salvar(_job(f"j{i}", i, data_exibicao=d))
+        repositorio.salvar(_job(f"j{i}", i, data_exibicao=d))
 
-    for limite in (None, 2):
-        filtro = _filtro(limite=limite)
-        esperado = desligada.consultar(filtro)
-        achado = ligada.consultar(filtro)
-        assert (
-            [j.id for j in achado.jobs]
-            == [j.id for j in esperado.jobs]
-            == (["j2", "j1", "j0"] if limite is None else ["j2", "j1"])
-        )
-        assert achado.proximo_cursor == esperado.proximo_cursor
+    tudo = repositorio.consultar(_filtro())
+    assert [j.id for j in tudo.jobs] == ["j2", "j1", "j0"]
+    assert tudo.proximo_cursor is None
+
+    primeira = repositorio.consultar(_filtro(limite=2))
+    assert [j.id for j in primeira.jobs] == ["j2", "j1"]
+    assert primeira.proximo_cursor == "j1"
+
+    segunda = repositorio.consultar(_filtro(limite=2, cursor="j1"))
+    assert [j.id for j in segunda.jobs] == ["j0"]
+    assert segunda.proximo_cursor is None
