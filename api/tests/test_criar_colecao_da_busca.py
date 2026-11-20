@@ -161,3 +161,58 @@ def test_o_aviso_de_reindexar_sai_logo_apos_o_patch_mesmo_se_o_indice_falha(
         rodar(IndiceFalha({"col-z": incompleto, "col-texto": texto}))
     saida = capsys.readouterr().out
     assert falta in saida and "make reindexar" in saida
+
+
+class SemPapelAinda(NuvemFalsa):
+    """O papel recém-concedido pelo apply ainda não propagou nas `falhas` primeiras chamadas."""
+
+    def __init__(self, falhas: int) -> None:
+        super().__init__()
+        self.falhas = falhas
+
+    def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        if self.falhas:
+            self.falhas -= 1
+            raise RuntimeError(f"{metodo} {caminho}: HTTP 403: IAM_PERMISSION_DENIED")
+        return super().__call__(metodo, caminho, corpo)
+
+
+@pytest.fixture
+def esperas(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    feitas: list[float] = []
+    monkeypatch.setattr(criar_colecao_da_busca, "sleep", feitas.append)
+    return feitas
+
+
+def test_no_deploy_espera_o_papel_novo_propagar(
+    rodar: Any, esperas: list[float]
+) -> None:
+    nuvem = SemPapelAinda(falhas=2)
+    rodar(nuvem, "--personificar", CONTA)
+    assert set(nuvem.colecoes) == {"col-z", "col-texto"}
+    assert len(esperas) == 2
+
+
+def test_no_deploy_desiste_depois_do_teto_da_propagacao(
+    rodar: Any, esperas: list[float]
+) -> None:
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        rodar(SemPapelAinda(falhas=1000), "--personificar", CONTA)
+    # O IAM leva até 7 min para propagar um papel novo.
+    assert 7 * 60 <= sum(esperas) <= 10 * 60
+
+
+def test_fora_do_deploy_o_403_falha_na_hora(rodar: Any, esperas: list[float]) -> None:
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        rodar(SemPapelAinda(falhas=1))
+    assert esperas == []
+
+
+def test_outro_erro_nao_espera(rodar: Any, esperas: list[float]) -> None:
+    class Quebrada(NuvemFalsa):
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            raise RuntimeError("HTTP 400: esquema recusado")
+
+    with pytest.raises(RuntimeError, match="HTTP 400"):
+        rodar(Quebrada(), "--personificar", CONTA)
+    assert esperas == []
