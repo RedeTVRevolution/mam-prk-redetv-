@@ -9,6 +9,7 @@ import { type CatalogoDeCorrecoes, rotuloDe } from '../../catalogo.ts'
 import type { ItemDaFila, ItemDoHistorico } from '../../decupagem.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import { Button } from '../ui/button.tsx'
+import { FUSO } from '../../fuso.ts'
 import { BotaoComDica, BotaoDeIcone } from './comum.tsx'
 import { CAMPO, Rotulo } from './Correcao.tsx'
 
@@ -32,7 +33,7 @@ function MostrarMais({ total, mostrados, aoMostrar }: { total: number; mostrados
   )
 }
 
-const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: FUSO })
 
 const COR_DO_ESTADO: Record<ItemDoHistorico['estado'], string> = {
   ativa: 'bg-ok/12 text-ok',
