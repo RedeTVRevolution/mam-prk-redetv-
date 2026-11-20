@@ -583,12 +583,16 @@ def test_a_consulta_trata_o_marcador_da_purga_com_dono_como_linha_de_job() -> No
         fonte_de_jobs = sql[
             sql.index("fonte_de_jobs AS (") : sql.index("dos_jobs AS (")
         ]
-        # Os Jobs e, na mesma fonte, os marcadores da purga com dono: o antigo
-        # (`sistema`/`purga`) fica de fora, e o Job que ainda existe vale uma vez só.
+        # Os Jobs e, na mesma fonte, os marcadores da purga com dono (`criado_em`), e o Job que ainda existe vale uma vez só.
         assert "FROM `proj.decupagens.tabela_de_jobs`" in fonte_de_jobs
         assert "FROM `proj.decupagens.tabela_de_eventos`" in fonte_de_jobs
         assert "tipo = 'purga'" in fonte_de_jobs
-        assert "NOT (quem_tipo = 'sistema' AND quem_id = 'purga')" in fonte_de_jobs
+        # Só o `criado_em` separa o marcador com dono do antigo: um sistema chamado `purga`
+        # é dono como outro qualquer.
+        assert "criado_em IS NOT NULL" in fonte_de_jobs
+        assert "'purga'" in fonte_de_jobs and "quem_id" not in fonte_de_jobs.split(
+            "WHERE"
+        )[1].replace("job_id NOT IN", "")
         assert "job_id NOT IN (SELECT id FROM `proj.decupagens.tabela_de_jobs`)" in (
             fonte_de_jobs
         )
@@ -603,3 +607,16 @@ def test_a_consulta_trata_o_marcador_da_purga_com_dono_como_linha_de_job() -> No
     assert (
         "j.programa = @programa" in com_filtro and "j.quem_id = @usuario" in com_filtro
     )
+
+
+def test_o_custo_do_purgado_de_um_sistema_chamado_purga_fica_no_dono() -> None:
+    job = _job(
+        "p2", datetime(2026, 11, 1, 15, tzinfo=UTC), quem="chave", sistema="purga"
+    )
+    fonte = CustoEmMemoria([_linha(date(2026, 11, 1), "p2", 2.0)], purgados=[job])
+
+    base = fonte.custos(FiltroDeCusto(None, None, None, "purga"))
+
+    assert [(c.quem_tipo, c.quem_id, c.custo) for c in base.dos_jobs] == [
+        ("sistema", "purga", 2.0)
+    ]

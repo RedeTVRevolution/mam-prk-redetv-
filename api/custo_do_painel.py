@@ -13,8 +13,8 @@ deles cai aqui também, e o dos embeddings, que vão sem rótulo.
 
 O vídeo purgado não tem mais linha na tabela dos Jobs, mas o custo dele segue o dono pelo
 marcador da purga (#780), que guarda programa, dono e `criado_em`: a consulta lê a tabela dos
-Jobs e esses marcadores como a mesma fonte de linhas por Job. O marcador antigo (`sistema`,
-`purga`) não guarda dono, então o custo desses vídeos fica sem dono.
+Jobs e esses marcadores como a mesma fonte de linhas por Job. O marcador antigo (sem `criado_em`)
+não guarda dono, então o custo desses vídeos fica sem dono.
 
 O custo de um Job conta no mês em que o Job foi criado (dia de São Paulo), e o filtro de
 período compara esse dia; o custo sem dono conta no dia em que foi cobrado. Com filtro de
@@ -326,8 +326,8 @@ class FaturamentoBigQuery:
             "  GROUP BY dia, job_id, etapa, servico, moeda\n"
             "),\n"
             # A fonte das linhas por Job: a tabela dos Jobs e os marcadores da purga que guardam
-            # o dono (a purga apaga a linha do Job; o marcador antigo, `sistema`/`purga`, não
-            # tem dono e fica fora). O Job que ainda tem linha vale uma vez só.
+            # o dono (a purga apaga a linha do Job; o marcador antigo ou sem dono tem
+            # `criado_em` nulo e fica fora). O Job que ainda tem linha vale uma vez só.
             "fonte_de_jobs AS (\n"
             "  SELECT id, programa, quem_tipo, quem_id, estado, duracao_ms, criado_em"
             f" FROM {jobs}\n"
@@ -336,7 +336,6 @@ class FaturamentoBigQuery:
             " duracao_do_video_ms, criado_em\n"
             f"  FROM {eventos}\n"
             "  WHERE tipo = 'purga' AND criado_em IS NOT NULL\n"
-            "    AND NOT (quem_tipo = 'sistema' AND quem_id = 'purga')\n"
             f"    AND job_id NOT IN (SELECT id FROM {jobs})\n"
             "),\n"
             "dos_jobs AS (\n"
