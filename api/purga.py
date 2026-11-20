@@ -202,6 +202,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
         decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
         referencias = exigir_do_ambiente(ambiente, "BUCKET_REFERENCIAS")
+        exigir_do_ambiente(ambiente, "BUSCA_COLECAO")
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2

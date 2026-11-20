@@ -19,7 +19,7 @@ AMBIENTE = {
     "BIGQUERY_DATASET": "dados",
     "BIGQUERY_REGIAO": "regiao-teste",
     "BIGQUERY_TABELA": "momentos_atuais",
-    "BIGQUERY_TABELA_ANTIGA": "momentos_antigos",
+    "BIGQUERY_TABELA_DA_TAXA": "taxa",
     "BIGQUERY_TABELA_DE_JOBS": "jobs",
     "BIGQUERY_TABELA_DE_REVISAO": "revisao",
     "BIGQUERY_TABELA_DE_EVENTOS": "eventos",
@@ -80,7 +80,7 @@ class BigQueryFalso:
         self.chamadas: list[dict[str, Any]] = []
         for tabela, campo in [
             ("momentos_atuais", "job_id"),
-            ("momentos_antigos", "job_id"),
+            ("taxa", "job_id"),
             ("jobs", "id"),
             ("revisao", "job_id"),
         ]:
@@ -89,6 +89,7 @@ class BigQueryFalso:
                 f"INSERT INTO `projeto-teste.dados.{tabela}` VALUES (?)",
                 [("j1",), ("j2",)],
             )
+        self.banco.execute("INSERT INTO `projeto-teste.dados.taxa` VALUES (NULL)")
         self.banco.execute(
             "CREATE TABLE `projeto-teste.dados.eventos` "
             "(id, tipo, quando, quem_tipo, quem_id, job_id)"
@@ -143,10 +144,14 @@ def test_apaga_dados_so_do_video_e_repetir_nao_subtrai_duas_vezes(
     assert banco.dados[COLECAO_DOS_TIPOS_DE_OBJETO]["saia"]["total"] == 0
     assert set(banco.dados[COLECAO_DOS_TIPOS_DE_OBJETO_POR_JOB]) == {"j2"}
     assert set(banco.dados[COLECAO_DA_REVISAO]) == {"j2:a"}
-    for tabela in ("momentos_atuais", "momentos_antigos", "jobs", "revisao"):
+    for tabela in ("momentos_atuais", "jobs", "revisao"):
         assert bq.banco.execute(
             f"SELECT * FROM `projeto-teste.dados.{tabela}`"
         ).fetchall() == [("j2",)]
+    # A linha antiga, sem job_id, não se apaga por vídeo.
+    assert bq.banco.execute(
+        "SELECT * FROM `projeto-teste.dados.taxa` ORDER BY job_id"
+    ).fetchall() == [(None,), ("j2",)]
     assert bq.banco.execute(
         "SELECT tipo, job_id FROM `projeto-teste.dados.eventos`"
     ).fetchall() == [("purga", "j1")]
@@ -200,32 +205,16 @@ def test_purga_manual_usa_a_mesma_limpeza_dos_dados(
     ]
 
 
-def test_sem_tabela_antiga_configurada_a_purga_continua(
+def test_sem_a_tabela_da_taxa_a_purga_falha_no_meio_e_desfaz_o_bigquery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from api.dados_da_purga import DadosDaPurga
-
-    banco = FirestoreFalso(monkeypatch)
-    bq = BigQueryFalso()
-    bq.banco.execute("DROP TABLE `projeto-teste.dados.momentos_antigos`")
-    ambiente = {k: v for k, v in AMBIENTE.items() if k != "BIGQUERY_TABELA_ANTIGA"}
-    dados = DadosDaPurga(banco, ambiente, bq)  # type: ignore[arg-type]
-    dados.apagar("j1")
-    assert bq.banco.execute("SELECT * FROM `projeto-teste.dados.jobs`").fetchall() == [
-        ("j2",)
-    ]
-
-
-def test_sem_a_tabela_antiga_a_purga_falha_antes_de_apagar_e_desfaz_o_bigquery(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Entre os dois applies da #567 a variável aponta para uma tabela que não existe."""
+    """A falha na tabela da taxa, já dentro da transação, desfaz os DELETEs e o marcador."""
     from api.dados_da_purga import DadosDaPurga
 
     banco = FirestoreFalso(monkeypatch)
     banco.dados[COLECAO_DA_REVISAO] = {"j1:a": {"job_id": "j1"}}
     bq = BigQueryFalso()
-    bq.banco.execute("DROP TABLE `projeto-teste.dados.momentos_antigos`")
+    bq.banco.execute("DROP TABLE `projeto-teste.dados.taxa`")
     bq.banco.commit()
     mundo = Mundo()
     dados = DadosDaPurga(banco, AMBIENTE, bq)  # type: ignore[arg-type]

@@ -48,10 +48,11 @@ class DadosDaPurga:
         prefixo = f"{c.projeto}.{c.dataset}"
         jobs = f"`{prefixo}.{ambiente['BIGQUERY_TABELA_DE_JOBS']}`"
         eventos = f"`{prefixo}.{ambiente['BIGQUERY_TABELA_DE_EVENTOS']}`"
-        tabelas = [c.tabela]
-        if antiga := ambiente.get("BIGQUERY_TABELA_ANTIGA"):
-            tabelas.append(antiga)
-        tabelas.append(ambiente["BIGQUERY_TABELA_DE_REVISAO"])
+        tabelas = [
+            c.tabela,
+            ambiente["BIGQUERY_TABELA_DE_REVISAO"],
+            ambiente["BIGQUERY_TABELA_DA_TAXA"],
+        ]
         apagamentos = "\n".join(
             f"DELETE FROM `{prefixo}.{tabela}` WHERE job_id = @job_id;"
             for tabela in tabelas
