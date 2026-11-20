@@ -701,12 +701,10 @@ def test_reprocessar_a_transcricao_roda_os_dois_ramos() -> None:
         "- parte_da_etapa:"
     )[0]
     assert "roda_a_transcricao: true" in atribuicoes
-    assert "roda_a_leitura_da_tela: true" in atribuicoes
-    # Cada ramo só roda se a sua variável deixa.
+    # A transcrição só roda se a variável deixa; a leitura da tela roda sempre.
     assert "condition: $${roda_a_transcricao}" in _ramo(texto, "ramo_da_transcricao")
-    assert "condition: $${roda_a_leitura_da_tela}" in _ramo(
-        texto, "ramo_da_leitura_da_tela"
-    )
+    assert "condition" not in _ramo(texto, "ramo_da_leitura_da_tela")
+    assert "roda_a_leitura_da_tela" not in texto
 
 
 def test_reprocessar_a_leitura_da_tela_roda_so_o_ocr_e_ele_mostra_a_etapa() -> None:
@@ -938,10 +936,10 @@ def test_o_inventario_de_objetos_fica_entre_os_quadros_chave_e_a_indexacao() -> 
     assert "etapa: inventario_de_objetos" in _passo_do_inventario()
 
 
-def test_o_motor_florence_roda_a_gpu_sem_plano_b_e_depois_o_job_em_cpu() -> None:
+def test_o_florence_roda_a_gpu_sem_plano_b_e_depois_o_job_em_cpu() -> None:
     passo = _passo_do_inventario()
 
-    assert '"${motor_objetos}" == "florence"' in passo
+    assert "motor_objetos" not in passo
     florence = passo[
         passo.index("- roda_o_florence:") : passo.index("- roda_o_inventario:")
     ]
@@ -951,8 +949,6 @@ def test_o_motor_florence_roda_a_gpu_sem_plano_b_e_depois_o_job_em_cpu() -> None
     cpu = passo[passo.index("- roda_o_inventario:") :]
     assert "jobs/${job_de_inventario}" in cpu
     assert "timeout: 3900" in cpu
-    # O motor gemini pula o Job com GPU.
-    assert passo.index("next: roda_o_florence") < passo.index("next: roda_o_inventario")
 
 
 def test_a_falha_do_inventario_marca_a_etapa_e_segue_para_a_indexacao() -> None:

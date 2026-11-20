@@ -2,7 +2,7 @@
 
 > **Região substituída em 09/11/2026 pela [ADR 0019](0019-tudo-em-us-east4.md):** todo o MAM, dados incluídos, passa a ficar em `us-east4`. O que esta ADR diz sobre guardar dados no Brasil ou sobre a região dos buckets, do Firestore e do BigQuery deixou de valer.
 
-A etapa de inventário de objetos (objetos de cena: veículo, produto, eletrônico, animal, comida) roda o Florence-2 num Job do Cloud Run com GPU L4 em `us-east4`, o `mam-objetos-gpu`, ao lado dos Jobs da [ADR 0007](0007-transcricao-e-ocr-em-gpu-no-us-east4.md). O Job lê a Decupagem do bucket das decupagens (que traz os quadros-chave de cada plano), roda o modelo em cada quadro e grava o resultado bruto em `<job>/objetos/florence.json`, no mesmo bucket, em São Paulo. A variável `motor_objetos` (`florence`, o padrão, ou `gemini`) escolhe o motor; o Workflows passa a usá-la no ticket da orquestração.
+A etapa de inventário de objetos (objetos de cena: veículo, produto, eletrônico, animal, comida) roda o Florence-2 num Job do Cloud Run com GPU L4 em `us-east4`, o `mam-objetos-gpu`, ao lado dos Jobs da [ADR 0007](0007-transcricao-e-ocr-em-gpu-no-us-east4.md). O Job lê a Decupagem do bucket das decupagens (que traz os quadros-chave de cada plano), roda o modelo em cada quadro e grava o resultado bruto em `<job>/objetos/florence.json`, no mesmo bucket, em São Paulo. O Workflows roda sempre o Florence: a variável `motor_objetos` (`florence` ou `gemini`) foi retirada do Terraform e do Workflows em 19/11/2026.
 
 **Modelo:** `florence-community/Florence-2-large`, revisão `4271c66b88cdbc05735372ec13b2360108de5317`. É a conversão oficial para o `transformers` (nativa a partir do 4.56; fixamos o `transformers==4.57.6` e o `torch==2.15.0`) do Florence-2-large da Microsoft, com 0,77 bilhão de parâmetros, licença MIT, e roda sem `trust_remote_code`: o repositório original da Microsoft pede código remoto, que não aceitamos executar. Os pesos têm cerca de 1,6 GB em float16, bem abaixo dos 24 GB da L4 e dos 16 GiB do Job. As tarefas são `<OD>` (objetos com caixa) e `<DENSE_REGION_CAPTION>` (regiões com legenda); a geração usa `num_beams=3`. Na CPU, só no teste da imagem, o dtype é float32.
 
@@ -16,7 +16,7 @@ A etapa de inventário de objetos (objetos de cena: veículo, produto, eletrôni
 
 Alternativas recusadas:
 - **Florence-2 da Microsoft com código remoto:** exige executar código baixado em tempo de execução.
-- **Florence-2 em CPU:** seria mais um Job lento em CPU por quadro. Como na decisão de 07/11/2026 da ADR 0007, não há plano B em CPU: o Florence espera na fila FIFO e, se falhar, a decupagem segue sem inventário. `motor_objetos=gemini` é uma escolha de configuração, não um desvio automático.
+- **Florence-2 em CPU:** seria mais um Job lento em CPU por quadro. Como na decisão de 07/11/2026 da ADR 0007, não há plano B em CPU: o Florence espera na fila FIFO e, se falhar, a decupagem segue sem inventário. O motor `gemini` não é desvio automático nem configuração: saiu do Terraform e do Workflows em 19/11/2026.
 - **Outra região:** o jurídico aprovou `us-east4`.
 
 ## Revisão de 07/11/2026 — base, geração gulosa e lote 16 (#490)

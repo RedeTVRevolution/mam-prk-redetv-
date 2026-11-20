@@ -4,7 +4,7 @@ O Workflows passa `JOB_ID` depois dos quadros-chave. Com o motor `florence` (pad
 Job lê o resultado bruto do Job com GPU e o converte para o português numa chamada só de
 texto ao Gemini; com o motor `gemini`, o modelo olha os quadros-chave. Em qualquer caso
 o Job grava a Decupagem com o inventário de cada plano e o grupo dos planos recorrentes
-(#546). O motor e o modelo vêm do ambiente (`MOTOR_OBJETOS`, `MODELO_OBJETOS`). Uma falha sobe: o Workflows marca a etapa
+(#546). O modelo vem do ambiente (`MODELO_OBJETOS`); o motor é o `florence` quando `MOTOR_OBJETOS` não existe. Uma falha sobe: o Workflows marca a etapa
 como `falhou` e a indexação roda mesmo assim, sem inventário.
 """
 

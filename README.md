@@ -142,7 +142,7 @@ Os corpos REST seguem o documento de discovery da API (`v1beta`, revisão 202610
 
 `api/versao_pipeline.py` é o único lugar que define a `VERSAO_PIPELINE` (por exemplo `2026.11.1`) e o manifesto: o modelo de cada etapa, o hash de cada instrução, a versão do esquema e os motores de transcrição, OCR e objetos. Cada decupagem nova grava `versao_pipeline` e `manifesto_do_pipeline` (ao fim da análise); a anterior, sem o campo, continua válida e aparece como "anterior à versão". O Visualizador mostra a versão ao lado do nome do vídeo.
 
-Trocar modelo, instrução, esquema ou motor exige trocar a versão: `api/tests/test_versao_pipeline.py` compara o manifesto com `api/tests/versao_pipeline_fixada.json` e falha com a instrução de regravar o arquivo. O motor de objetos (`MOTOR_OBJETOS`/`MODELO_OBJETOS` do inventário) vem do ambiente do Job e não está no manifesto; o manifesto leva o Florence.
+Trocar modelo, instrução, esquema ou motor exige trocar a versão: `api/tests/test_versao_pipeline.py` compara o manifesto com `api/tests/versao_pipeline_fixada.json` e falha com a instrução de regravar o arquivo. O modelo de objetos (`MODELO_OBJETOS` do inventário) vem do ambiente do Job e não está no manifesto; o manifesto leva o Florence.
 
 Reprocessar o acervo de propósito, depois de trocar a versão e fazer o deploy:
 
