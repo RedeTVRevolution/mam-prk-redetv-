@@ -1,5 +1,5 @@
 import { useQuery, type QueryKey } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useState } from 'react'
 import type { PaginaDaBusca } from '../../api.ts'
 import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type Momento, type VideoDoResultado } from '../../busca.ts'
 import { finalizando, SEM_FILTROS, type Job } from '../../jobs.ts'
@@ -50,8 +50,8 @@ export function useBusca(pedido: PedidoDaBusca | null) {
   const chave = chaveDa(pedido)
   const termo = pedido?.tipo === 'texto' ? pedido.consulta.q : null
   // A consulta que produziu a lista à vista: com a nova em pedido (`atualizando`), é a anterior.
-  const exibida = useRef<ConsultaDaBusca | null>(null)
   const pedida = pedido?.tipo === 'texto' ? pedido.consulta : null
+  const [exibida, setExibida] = useState(pedida)
   const paginas = usePaginas({
     chave,
     pedir: (cursor) => {
@@ -70,11 +70,8 @@ export function useBusca(pedido: PedidoDaBusca | null) {
     retry: false,
     manterAnterior: (anterior) => termo !== null && anterior[0] === 'busca' && anterior[1] === 'texto' && anterior[2] === termo,
   })
-  const consultaExibida = paginas.atualizando ? exibida.current : pedida
-  useEffect(() => {
-    if (!paginas.atualizando) exibida.current = pedida
-  })
-  return { ...paginas, consultaExibida }
+  if (!paginas.atualizando && exibida !== pedida) setExibida(pedida)
+  return { ...paginas, consultaExibida: paginas.atualizando ? exibida : pedida }
 }
 
 /**
