@@ -24,6 +24,7 @@ import {
 import { periodoInvertido } from "../../auditoria.ts";
 import {
   ABAS_DO_PAINEL,
+  filtrosParaEnderecoDoPainel,
   programaEUsuarioJuntos,
   type AbaDoPainel,
   type FiltrosDoPainel,
@@ -399,7 +400,7 @@ export default function PainelDaDiretoria({
             )}
           </Campo>
           <BaixarCsv
-            key={aba}
+            key={aba + filtrosParaEnderecoDoPainel(filtros)}
             arquivo={`${aba}.csv`}
             pedir={() => definicao.csv(api, filtros, agrupar)}
             desligado={

@@ -50,6 +50,10 @@ resource "google_cloud_run_v2_job" "purga" {
           value = local.tabela_de_revisao_do_painel
         }
         env {
+          name  = "BIGQUERY_TABELA_DA_TAXA"
+          value = local.tabela_da_taxa_de_correcao
+        }
+        env {
           name  = "BIGQUERY_TABELA_DE_EVENTOS"
           value = local.tabela_de_eventos_de_uso
         }

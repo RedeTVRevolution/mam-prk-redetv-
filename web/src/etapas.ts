@@ -11,7 +11,7 @@ const NOMES: Record<string, string> = {
 }
 
 export function nomeDaEtapa(etapa: string): string {
-  return NOMES[etapa] ?? etapa
+  return Object.hasOwn(NOMES, etapa) ? NOMES[etapa] : etapa
 }
 
 /** As etapas do Job, na ordem em que rodam (a de `NomeDaEtapa` em api/modelo_do_job.py). */

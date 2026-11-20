@@ -75,7 +75,10 @@ const ADMIN_D: Destino = { endereco: ADMIN, rotulo: 'Administração', Icone: Ic
 function gruposDoTrilho(permissoes: string[]): Destino[][] {
   return [
     [ACERVO_D, BUSCA_D],
-    [TEMPO_D, MARCAS_D, ...(permissoes.includes('painel.ver') ? [PAINEL_D] : [])],
+    [
+      ...(permissoes.includes('decupagem.ver') ? [TEMPO_D, MARCAS_D] : []),
+      ...(permissoes.includes('painel.ver') ? [PAINEL_D] : []),
+    ],
     podeAdministrar(permissoes) ? [ADMIN_D] : [],
   ].filter((g) => g.length > 0)
 }

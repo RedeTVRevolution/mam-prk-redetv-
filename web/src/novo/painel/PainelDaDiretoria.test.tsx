@@ -1032,8 +1032,13 @@ test("a aba Custo mostra o total, o mês, o usuário, a etapa e o custo sem dono
     "ana@redetv.com.br",
     REAL("100,00"),
   ]);
+  expect(
+    await screen.findByRole("img", {
+      name: /^Custo por etapa.*Análise/,
+    }),
+  ).toBeTruthy();
   expect(linhasDe(await tabela("Custo por etapa"))).toEqual([
-    ["analise", REAL("100,00")],
+    ["Análise", REAL("100,00")],
   ]);
   expect(linhasDe(await tabela("Custo sem dono por serviço"))).toEqual([
     ["Cloud Run", REAL("50,00")],
@@ -1241,4 +1246,65 @@ test("ao abrir sem filtro, o período é os últimos 7 dias, na tela e no pedido
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("a falha do CSV some ao trocar um filtro", async () => {
+  const usuario = userEvent.setup();
+  servidor.use(
+    http.get("/v1/painel/buscas", ({ request }) =>
+      new URL(request.url).searchParams.get("formato") === "csv"
+        ? new HttpResponse(null, { status: 500 })
+        : HttpResponse.json(BUSCAS),
+    ),
+  );
+  await abrir("/painel/buscas");
+  await tabela("Buscas por dia");
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+  await screen.findByRole("alert");
+
+  fireEvent.change(screen.getByLabelText("De"), {
+    target: { value: "2020-01-01" },
+  });
+
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});
+
+test("Custo por etapa: etapa que a tabela de nomes não conhece mostra o código", async () => {
+  servidor.use(
+    relatorio("custo", () =>
+      HttpResponse.json({
+        ...CUSTO,
+        por_etapa: [
+          { etapa: "etapa_nova", custo: 100 },
+          { etapa: "constructor", custo: 50 },
+        ],
+      }),
+    ),
+  );
+  await abrir("/painel/custo");
+
+  expect(linhasDe(await tabela("Custo por etapa"))).toEqual([
+    ["etapa_nova", REAL("100,00")],
+    ["constructor", REAL("50,00")],
+  ]);
+});
+
+test("clicar na aba já ativa não apaga a falha do CSV quando o filtro efetivo não muda", async () => {
+  const usuario = userEvent.setup();
+  servidor.use(
+    http.get("/v1/painel/buscas", ({ request }) =>
+      new URL(request.url).searchParams.get("formato") === "csv"
+        ? new HttpResponse(null, { status: 500 })
+        : HttpResponse.json(BUSCAS),
+    ),
+  );
+  await abrir("/painel/buscas?agrupar=auto");
+  await tabela("Buscas por dia");
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+  await screen.findByRole("alert");
+
+  await usuario.click(screen.getByRole("tab", { name: "Buscas" }));
+  await new Promise((r) => setTimeout(r, 50));
+
+  expect(screen.getByRole("alert")).toBeTruthy();
 });
