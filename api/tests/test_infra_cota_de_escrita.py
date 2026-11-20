@@ -59,8 +59,10 @@ def test_colecao_de_texto_chega_aos_tres_escritores_e_aos_outputs() -> None:
     ):
         assert 'output "busca_colecao_de_texto"' in raiz.read_text()
     makefile = (MODULO.parents[2] / "Makefile").read_text()
-    assert "BUSCA_COLECAO_DE_TEXTO=" in makefile
-    assert "output -raw busca_colecao_de_texto" in makefile
+    # O ponto único entrega a variável ao alvo da busca, lida do output busca_colecao_de_texto.
+    ambiente = makefile[makefile.index("AMBIENTE_DA_BUSCA = ") :].split("\n\n")[0]
+    assert re.search(r"\$\(call LER_AMBIENTE,[^)]*\bBUSCA_COLECAO_DE_TEXTO\b", ambiente)
+    assert "terraform output -raw" not in makefile
 
 
 def test_o_valor_da_cota_acompanha_a_cota_do_dev_em_6000() -> None:

@@ -1,6 +1,7 @@
 """Comparação dos motores do inventário de objetos (#244), sem nuvem."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -246,6 +247,6 @@ def test_o_alvo_do_makefile_le_os_nomes_do_terraform_e_passa_o_job() -> None:
     alvo = makefile[makefile.index("\ncomparar-objetos:") :].split("\n\n")[0]
 
     assert "comparar-objetos" in makefile.splitlines()[0]
-    for saida in ("bucket_decupagens", "regiao_gpu", "job_de_objetos_gpu"):
-        assert f"output -raw {saida}" in alvo
+    for variavel in ("BUCKET_DECUPAGENS", "REGIAO_GPU", "JOB_DE_OBJETOS_GPU"):
+        assert re.search(rf"\$\(call LER_AMBIENTE,[^)]*\b{variavel}\b", alvo)
     assert "python -m api.comparar_objetos" in alvo and '"$(JOB)"' in alvo

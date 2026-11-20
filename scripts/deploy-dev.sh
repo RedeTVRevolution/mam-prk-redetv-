@@ -35,6 +35,14 @@ fi
 
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
 tf() { terraform -chdir=infra "$@"; }
+# O ponto único que lê os outputs (#756): um `terraform output -json` por chamada, e o valor do
+# Terraform vale sobre o ambiente. Saída obrigatória ausente ou vazia derruba o deploy; `VAR=output?`
+# é opcional. Nada do JSON é impresso (há output sensitive).
+ler_ambiente() {
+  local lido
+  lido=$(scripts/ler-ambiente.sh --deploy "$@") || return
+  eval "$lido"
+}
 
 # O estado precisa existir antes do `terraform init`. Bucket privado, sem acesso
 # público: só papéis do projeto o alcançam, e no dev são o Owner e a mam-terraform.
@@ -78,21 +86,26 @@ scripts/aplicar-sem-destruir.sh -target=module.mam.google_artifact_registry_repo
   -target=module.mam.google_project_iam_member.terraform_predicao_vertex \
   -var imagem=pendente -var imagem_validacao=pendente \
   -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente -var imagem_objetos=pendente
-# O nome do repositório vem do Terraform, o único lugar que monta os nomes.
-REPOSITORIO=$(tf output -raw repositorio)
+# Primeira leitura dos outputs, depois do apply direcionado: só o que o build precisa. O Terraform é
+# o único lugar que monta os nomes. O serviço web, a URL e os nomes dos Jobs ainda podem não existir
+# num estado novo, então os Jobs são opcionais aqui (a imagem anterior só é lida dos que estão no estado).
+ler_ambiente REPOSITORIO=repositorio REPOSITORIO_GPU=repositorio_gpu LIMPEZA=limpeza_de_imagens \
+  CONTA_BUILD=conta_build BUCKET_FONTES=bucket_fontes IDENTITY_API_KEY=identity_api_key \
+  GPU_REGIAO=regiao_gpu:opcional JOB_TRANSCRICAO_GPU=job_de_transcricao_gpu:opcional JOB_OCR_GPU=job_de_ocr_gpu:opcional \
+  JOB_OBJETOS_GPU=job_de_objetos_gpu:opcional
 COMMIT=$(git rev-parse --short HEAD)
 WEB="$REPOSITORIO/web:$COMMIT"
 # A imagem do Job de validação (#38).
 VALIDACAO="$REPOSITORIO/validacao:$COMMIT"
 # O cache das camadas (#211): uma tag por alvo no mesmo repositório, sobrescrita a cada montagem.
-CACHE="$REPOSITORIO/cache"
+PACOTE_DO_CACHE=$(jq -er '.pacotes_do_cache[0]' <<<"$LIMPEZA")
+CACHE="$REPOSITORIO/$PACOTE_DO_CACHE"
 # As imagens dos Jobs com GPU (E1, ADR 0007, #238) e o cache delas ficam no repositório da
 # região da GPU: o envio da imagem não reenvia as camadas que o cache já pôs lá.
-REPOSITORIO_GPU=$(tf output -raw repositorio_gpu)
 TRANSCRICAO_GPU="$REPOSITORIO_GPU/transcricao-gpu:$COMMIT"
 OCR_GPU="$REPOSITORIO_GPU/ocr-gpu:$COMMIT"
 OBJETOS_GPU="$REPOSITORIO_GPU/objetos-gpu:$COMMIT"
-CACHE_GPU="$REPOSITORIO_GPU/cache"
+CACHE_GPU="$REPOSITORIO_GPU/$PACOTE_DO_CACHE"
 # Os Jobs com GPU e as imagens que têm hoje, lidas antes do apply, para o teste depois da
 # publicação saber quais imagens mudaram e a que voltar. Vazias na primeira publicação: o
 # Job ainda não está no estado do Terraform. Isso se lê na lista do estado, não no output:
@@ -101,21 +114,20 @@ CACHE_GPU="$REPOSITORIO_GPU/cache"
 # publicação para aqui, para não seguir sem a imagem a que voltar. Um Job com GPU a mais entra no
 # teste com mais uma linha em JOBS_GPU, depois de ter o alvo de construção, o Job no
 # Terraform e a imagem lida aqui e publicada pelo digest, como estes dois.
-GPU_REGIAO=$(tf output -raw regiao_gpu 2>/dev/null || true)
 ESTADO_DOS_JOBS=$(tf state list)
-imagem_do_job() { # <recurso no módulo> <output com o nome do Job>
+imagem_do_job() { # <recurso no módulo> <nome do Job, lido dos outputs>
   grep -qxF "module.mam.google_cloud_run_v2_job.$1" <<<"$ESTADO_DOS_JOBS" || return 0
-  gc run jobs describe "$(tf output -raw "$2")" --region "$GPU_REGIAO" \
+  [[ -n $2 && -n $GPU_REGIAO ]] || { echo "Job $1 está no estado, mas o output com o nome dele ou a região da GPU falta." >&2; return 1; }
+  gc run jobs describe "$2" --region "$GPU_REGIAO" \
     --format='value(spec.template.spec.template.spec.containers[0].image)'
 }
-TRANSCRICAO_GPU_ANTES=$(imagem_do_job transcricao_gpu job_de_transcricao_gpu)
-OCR_GPU_ANTES=$(imagem_do_job ocr_gpu job_de_ocr_gpu)
-OBJETOS_GPU_ANTES=$(imagem_do_job objetos_gpu job_de_objetos_gpu)
+TRANSCRICAO_GPU_ANTES=$(imagem_do_job transcricao_gpu "$JOB_TRANSCRICAO_GPU")
+OCR_GPU_ANTES=$(imagem_do_job ocr_gpu "$JOB_OCR_GPU")
+OBJETOS_GPU_ANTES=$(imagem_do_job objetos_gpu "$JOB_OBJETOS_GPU")
 # A limpeza do registro (#456) guarda por tag o que o Cloud Run usa e o que o teste de GPU pode
 # restaurar: `volta` no digest que os Jobs com GPU têm agora, posta antes do build para o build
 # novo nunca encontrar a anterior sem proteção, e `em-uso` (mais abaixo) no que o apply publica.
 # A tag se move: a imagem que perde as duas volta às regras comuns (infra/modulos/mam/main.tf).
-LIMPEZA=$(tf output -json limpeza_de_imagens)
 TAG_EM_USO=$(jq -r .tag_do_build_em_uso <<<"$LIMPEZA")
 TAG_DA_VOLTA=$(jq -r .tag_da_volta <<<"$LIMPEZA")
 marcar() { # <repo/imagem@digest> <tag>: põe a tag no digest, movendo-a se já está em outro
@@ -141,9 +153,9 @@ esac
 
 # O Cloud Build constrói, em paralelo e com cache, e envia as cinco imagens (cloudbuild.yaml), como a mam-build.
 gc builds submit . --region "$GCP_REGION" --suppress-logs \
-  --service-account "$(tf output -raw conta_build)" \
-  --gcs-source-staging-dir "gs://$(tf output -raw bucket_fontes)/fontes" \
-  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_CACHE=$CACHE,_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_OBJETOS_GPU=$OBJETOS_GPU,_CACHE_GPU=$CACHE_GPU,_VITE_IDENTITY_API_KEY=$(tf output -raw identity_api_key)"
+  --service-account "$CONTA_BUILD" \
+  --gcs-source-staging-dir "gs://$BUCKET_FONTES/fontes" \
+  --substitutions "_WEB=$WEB,_VALIDACAO=$VALIDACAO,_CACHE=$CACHE,_TRANSCRICAO_GPU=$TRANSCRICAO_GPU,_OCR_GPU=$OCR_GPU,_OBJETOS_GPU=$OBJETOS_GPU,_CACHE_GPU=$CACHE_GPU,_VITE_IDENTITY_API_KEY=$IDENTITY_API_KEY"
 # Pelo digest da imagem linux/amd64, não pelo do índice OCI que o buildx envia: o índice
 # leva a atestação de proveniência SLSA, com a hora do build, e muda a cada build mesmo com a
 # imagem igual. Mesma imagem, mesmo digest, nenhuma revisão nova e nenhum teste de GPU à toa;
@@ -187,31 +199,34 @@ for imagem in "$IMAGEM" "$IMAGEM_VALIDACAO" \
   marcar "$imagem" "$TAG_EM_USO"
 done
 
+# Segunda leitura dos outputs, depois do apply completo: os nomes dos Jobs publicados, as esperas da
+# GPU (as mesmas do Workflows), a URL e o certificado, que é opcional (sem balanceador, o output é nulo).
+ler_ambiente GPU_REGIAO=regiao_gpu JOB_TRANSCRICAO_GPU=job_de_transcricao_gpu JOB_OCR_GPU=job_de_ocr_gpu \
+  JOB_OBJETOS_GPU=job_de_objetos_gpu GPU_ESPERA_TOTAL_S=gpu_espera_total_s GPU_ESPERA_S=gpu_espera_s \
+  GPU_FATOR_DA_ESPERA=gpu_fator_da_espera GPU_ESPERA_MAXIMA_S=gpu_espera_maxima_s URL=url \
+  CERTIFICADO=certificado_do_balanceador:opcional IP_DO_BALANCEADOR=ip_do_balanceador:opcional
+
 # Teste dos Jobs com GPU (#238), só dos que mudaram: se não passar, o script volta os Jobs
 # para a imagem anterior e esta publicação falha, e o Workflows não manda vídeo para uma
 # imagem com GPU quebrada. Os Jobs em CPU não entram.
 JOBS_GPU=(
-  "$(tf output -raw job_de_transcricao_gpu),$TRANSCRICAO_GPU_ANTES,$IMAGEM_TRANSCRICAO_GPU"
-  "$(tf output -raw job_de_ocr_gpu),$OCR_GPU_ANTES,$IMAGEM_OCR_GPU"
-  "$(tf output -raw job_de_objetos_gpu),$OBJETOS_GPU_ANTES,$IMAGEM_OBJETOS"
+  "$JOB_TRANSCRICAO_GPU,$TRANSCRICAO_GPU_ANTES,$IMAGEM_TRANSCRICAO_GPU"
+  "$JOB_OCR_GPU,$OCR_GPU_ANTES,$IMAGEM_OCR_GPU"
+  "$JOB_OBJETOS_GPU,$OBJETOS_GPU_ANTES,$IMAGEM_OBJETOS"
 )
-GPU_REGIAO=$(tf output -raw regiao_gpu) GPU_ESPERA_TOTAL_S=$(tf output -raw gpu_espera_total_s) \
-  GPU_ESPERA_S=$(tf output -raw gpu_espera_s) GPU_FATOR_DA_ESPERA=$(tf output -raw gpu_fator_da_espera) \
-  GPU_ESPERA_MAXIMA_S=$(tf output -raw gpu_espera_maxima_s) \
+GPU_REGIAO=$GPU_REGIAO GPU_ESPERA_TOTAL_S=$GPU_ESPERA_TOTAL_S \
+  GPU_ESPERA_S=$GPU_ESPERA_S GPU_FATOR_DA_ESPERA=$GPU_FATOR_DA_ESPERA \
+  GPU_ESPERA_MAXIMA_S=$GPU_ESPERA_MAXIMA_S \
   GCP_PROJECT_ID=$GCP_PROJECT_ID GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT \
   scripts/testar-jobs-gpu.sh "${JOBS_GPU[@]}"
 
 # Com o balanceador (#294), o run.app não responde de fora e o teste vai pelo domínio, mas o
 # certificado só fica ativo depois do DNS (até 24 h): até lá, só um aviso.
-URL=$(tf output -raw url)
-# Pela lista inteira: um output nulo (sem balanceador) não fica no estado, e pedido pelo
-# nome o `tf output` falha em vez de dar vazio (deploy de 2026-11-03).
-CERTIFICADO=$(tf output -json | jq -r '.certificado_do_balanceador.value // empty')
 if [[ -n $TF_VAR_dominio && $RESTRITO == true ]]; then
   aviso "/v1/health não testado: domínio restrito aos IPs da RedeTV."
 elif [[ -n $CERTIFICADO ]] &&
   [[ $(gc compute ssl-certificates describe "$CERTIFICADO" --global --format='value(managed.status)') != ACTIVE ]]; then
-  echo "Aviso: o certificado de $URL ainda não está ativo (registro A para $(tf output -raw ip_do_balanceador); infra/README.md). /v1/health não foi testado." >&2
+  echo "Aviso: o certificado de $URL ainda não está ativo (registro A para $IP_DO_BALANCEADOR; infra/README.md). /v1/health não foi testado." >&2
 else
   curl -sSf "$URL/v1/health" >/dev/null
   echo "No ar: $URL (/v1/health respondeu 200)"

@@ -64,8 +64,10 @@ def test_os_comandos_do_makefile_recebem_o_banco_de_seguranca() -> None:
     ):
         antes = makefile[: makefile.index(f"python -m {modulo}")]
         ultimo_alvo = antes[antes.rindex("\n\n") :]
-        assert f"{VARIAVEL}=" in ultimo_alvo, modulo
-        assert "output -raw banco_de_seguranca" in ultimo_alvo, modulo
+        # O ponto único (scripts/ler-ambiente.sh) entrega a variável, lida de banco_de_seguranca.
+        assert re.search(rf"\$\(call LER_AMBIENTE,[^)]*\b{VARIAVEL}\b", ultimo_alvo), (
+            modulo
+        )
 
 
 def test_so_a_web_e_a_purga_tem_datastore_user_sem_condicao() -> None:
