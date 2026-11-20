@@ -24,12 +24,11 @@ from api.auth import Usuario
 from api.bancos import auditoria_do_firestore, cliente_do_firestore
 from api.correcoes import RepositorioDeCorrecoes
 from api.dados_da_purga import dados_do_ambiente
-from api.eventos_do_job import (
-    PublicadorPubSub,
-    eventos_do_ambiente,
-    transporte_do_pubsub,
+from api.fim_do_job import (
+    avisar_fins_pendentes,
+    dependencias_do_aviso,
+    exigir_os_topicos_do_aviso,
 )
-from api.fim_do_job import avisar_fins_pendentes
 from api.fusao_de_pessoas import retomar_fusoes_pendentes
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import Armazenamento, expirar_uploads
@@ -53,7 +52,6 @@ from api.nuvem import (
     CatalogoFirestore,
     ReferenciasStorage,
     RepositorioDeCorrecoesFirestore,
-    RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
@@ -223,8 +221,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         referencias = exigir_do_ambiente(ambiente, "BUCKET_REFERENCIAS")
         exigir_do_ambiente(ambiente, "BUSCA_COLECAO")
         # Sem os tópicos o fim do upload expirado não sairia, e a marca de enviado seria falsa.
-        exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_EVENTOS")
-        exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_USO")
+        exigir_os_topicos_do_aviso(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -271,9 +268,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         ),
         lambda: avisar_fins_pendentes(
             repositorio,
-            RepositorioDeWebhooksFirestore(cliente),
-            PublicadorPubSub(ambiente["PUBSUB_TOPICO_EVENTOS"], transporte_do_pubsub()),
-            eventos_do_ambiente(ambiente),
+            *dependencias_do_aviso(cliente, ambiente)[1:],
             agora_utc(),
         ),
     )
