@@ -33,7 +33,7 @@ def _teto_da_tela_s() -> float:
     assert achado is not None
     conta = achado.group(1).split("//")[0].replace("_", "")
     assert re.fullmatch(r"[\d\s*+()]+", conta.strip()), conta
-    return eval(conta) / 1000
+    return float(eval(conta)) / 1000
 
 
 def _espera_de_gpu_s() -> int:

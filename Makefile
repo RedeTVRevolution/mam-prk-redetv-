@@ -1,4 +1,4 @@
-.PHONY: gravar-jobs-falsos medir-jobs-falsos apagar-jobs-falsos preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave registrar-webhook listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi aceitar-esquemas cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: gerar-copy-das-imagens-gpu gravar-jobs-falsos medir-jobs-falsos apagar-jobs-falsos preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave registrar-webhook listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi aceitar-esquemas cache-dos-quadros conferir-limpeza-de-imagens
 
 # O ponto único que lê os outputs do Terraform (#756): scripts/ler-ambiente.sh roda
 # `terraform output -json` uma vez e exporta só as variáveis pedidas, salvo as que já vierem no
@@ -412,3 +412,7 @@ atualizar-openapi:
 # e o terraform init feito; usa a config gcloud do MAM (mam-dev), como o deploy-dev.
 conferir-limpeza-de-imagens:
 	CLOUDSDK_ACTIVE_CONFIG_NAME="$${CLOUDSDK_ACTIVE_CONFIG_NAME:-mam-dev}" uv run --locked python -m api.limpeza_de_imagens
+
+# Reescreve no Dockerfile o COPY de api/ de cada imagem com GPU a partir do fecho de imports (#758).
+gerar-copy-das-imagens-gpu:
+	uv run --locked python -m scripts.copy_das_imagens_gpu

@@ -1,62 +1,19 @@
 """Cada imagem com GPU leva só os módulos de `api/` que o ponto de entrada importa (#388)."""
 
-import ast
 import re
 from pathlib import Path
 
 import pytest
 
+from scripts.copy_das_imagens_gpu import (
+    ALVOS,
+    arquivos_esperados,
+    copy_gerado,
+    fecho,
+    reescrever,
+)
+
 RAIZ = Path(__file__).parents[2]
-API = RAIZ / "api"
-ALVOS = {
-    "transcricao-gpu": "transcricao_job",
-    "ocr-gpu": "ocr_job",
-    "objetos-gpu": "objetos_job",
-}
-
-
-def _importados(modulo: str) -> set[str]:
-    """Os módulos de `api/` que o arquivo importa, também os importados dentro de funções."""
-    achados: set[str] = set()
-    for no in ast.walk(ast.parse((API / f"{modulo}.py").read_text())):
-        if isinstance(no, ast.Import):
-            achados |= {
-                a.name.split(".")[1] for a in no.names if a.name.startswith("api.")
-            }
-        elif isinstance(no, ast.ImportFrom) and no.level == 0 and no.module:
-            if no.module == "api":
-                achados |= {a.name for a in no.names}
-            elif no.module.startswith("api."):
-                achados.add(no.module.split(".")[1])
-        elif isinstance(no, ast.ImportFrom) and no.level == 1:
-            achados |= (
-                {no.module.split(".")[0]} if no.module else {a.name for a in no.names}
-            )
-    return achados
-
-
-def _fecho(entrada: str) -> set[str]:
-    vistos: set[str] = set()
-    pendentes = [entrada, "__init__"]
-    while pendentes:
-        modulo = pendentes.pop()
-        if modulo not in vistos:
-            vistos.add(modulo)
-            pendentes += _importados(modulo)
-    return vistos
-
-
-def _arquivos_esperados(entrada: str) -> set[str]:
-    modulos = _fecho(entrada)
-    # Os arquivos de dados de `api/` (não só `.toml`) que algum módulo do fecho cita pelo nome.
-    textos = [(API / f"{m}.py").read_text() for m in modulos]
-    dados = {
-        f"api/{arquivo.name}"
-        for arquivo in API.iterdir()
-        if arquivo.is_file() and arquivo.suffix not in {".py", ".pyc"}
-        if any(f'"{arquivo.name}"' in texto for texto in textos)
-    }
-    return {f"api/{m}.py" for m in modulos} | dados
 
 
 def _alvo(nome: str) -> str:
@@ -75,7 +32,7 @@ def _copiados(alvo: str) -> set[str]:
 @pytest.mark.parametrize(("alvo", "entrada"), ALVOS.items())
 def test_imagens_gpu_copiam_so_o_que_importam(alvo: str, entrada: str) -> None:
     copiados = _copiados(_alvo(alvo))
-    esperados = _arquivos_esperados(entrada)
+    esperados = arquivos_esperados(entrada)
 
     assert "COPY api/ api/" not in _alvo(alvo)
     assert esperados - copiados == set(), (
@@ -93,4 +50,27 @@ def test_painel_nao_entra_em_nenhuma_imagem_com_gpu() -> None:
             "api/resumos_de_uso.py",
             "api/main.py",
         } & _copiados(_alvo(alvo)), alvo
-        assert "painel" not in _fecho(entrada)
+        assert "painel" not in fecho(entrada)
+
+
+def test_a_lista_do_dockerfile_e_a_gerada() -> None:
+    for alvo, entrada in ALVOS.items():
+        assert f"# >>> copy gerado: {alvo}\n{copy_gerado(entrada)}# <<<" in _alvo(
+            alvo
+        ), f"Rode `make gerar-copy-das-imagens-gpu`: o COPY de {alvo} não é o gerado."
+
+
+def test_o_gerador_reescreve_igual_ao_arquivo_e_e_idempotente() -> None:
+    dockerfile = (RAIZ / "Dockerfile").read_text()
+    uma_vez = reescrever(dockerfile)
+    assert uma_vez == dockerfile
+    assert reescrever(uma_vez) == uma_vez
+    assert reescrever(uma_vez.replace("api/whisper.py", "api/x.py", 1)) == uma_vez
+
+
+def test_o_gerador_recusa_bloco_com_outra_instrucao() -> None:
+    dockerfile = (RAIZ / "Dockerfile").read_text()
+    fim = "# <<< copy gerado\n"
+    ruim = dockerfile.replace(fim, "RUN compileall -q api\n" + fim, 1)
+    with pytest.raises(AssertionError, match="COPY"):
+        reescrever(ruim)
