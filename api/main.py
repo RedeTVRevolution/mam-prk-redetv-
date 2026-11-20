@@ -146,7 +146,6 @@ from api.nuvem import (
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
-    listagem_por_mes_do_ambiente,
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
 from api.painel import AcessosAoPainel, criar_rotas_do_painel
@@ -861,7 +860,6 @@ if _projeto:
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(
             _comum,
-            listagem_por_mes=listagem_por_mes_do_ambiente(os.environ),
         ),
         ArmazenamentoStorage(
             ClienteStorage(project=_projeto),

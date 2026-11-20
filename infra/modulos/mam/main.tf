@@ -93,13 +93,6 @@ variable "indices_da_busca_ligados" {
   default = true
 }
 
-# A lista de vídeos por envio filtra o período por `mes_exibicao` no Firestore (#479). Só
-# ligar depois de `make gravar-mes-nos-jobs`: o Job antigo sem o campo some do filtro.
-variable "listagem_por_mes" {
-  type    = bool
-  default = false
-}
-
 variable "admins_emergencia" {
   description = "E-mails dos administradores de emergência, separados por vírgula"
   type        = string
@@ -1024,10 +1017,6 @@ resource "google_cloud_run_v2_service" "web" {
           name  = env.value.name
           value = env.value.value
         }
-      }
-      env {
-        name  = "LISTAGEM_POR_MES"
-        value = tostring(var.listagem_por_mes)
       }
       env {
         name  = "BIGQUERY_DATASET"

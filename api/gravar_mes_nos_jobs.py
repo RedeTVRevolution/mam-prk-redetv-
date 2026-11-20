@@ -2,8 +2,7 @@
 
 Grava `mes_exibicao` (`AAAA-MM`) em todo Job que tem `data_exibicao` e ainda não tem o
 campo certo (os da lixeira também). Passada única de linha de comando: lê o acervo inteiro,
-grava em lotes e só toca o Job que mudou, então repetir não muda nada. Só depois dela se
-liga `LISTAGEM_POR_MES` no Terraform.
+grava em lotes e só toca o Job que mudou, então repetir não muda nada.
 """
 
 import os
