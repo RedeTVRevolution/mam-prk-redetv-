@@ -11,6 +11,11 @@ serviços de rede) entram como custo **sem dono**, no mês em que foram cobrados
 Cloud Run não levam o id do Job: o Cloud Run não deixa rotular cada execução, então o custo
 deles cai aqui também, e o dos embeddings, que vão sem rótulo.
 
+O vídeo purgado não tem mais linha na tabela dos Jobs, mas o custo dele segue o dono pelo
+marcador da purga (#780), que guarda programa, dono e `criado_em`: a consulta lê a tabela dos
+Jobs e esses marcadores como a mesma fonte de linhas por Job. O marcador antigo (`sistema`,
+`purga`) não guarda dono, então o custo desses vídeos fica sem dono.
+
 O custo de um Job conta no mês em que o Job foi criado (dia de São Paulo), e o filtro de
 período compara esse dia; o custo sem dono conta no dia em que foi cobrado. Com filtro de
 programa ou de usuário só entra o custo dos Jobs: o sem dono não tem nem um nem outro. O custo
@@ -133,10 +138,15 @@ class CustoEmMemoria:
     mesma regra da consulta."""
 
     def __init__(
-        self, linhas: Sequence[CustoDoDia] = (), jobs: Iterable[Job] = ()
+        self,
+        linhas: Sequence[CustoDoDia] = (),
+        jobs: Iterable[Job] = (),
+        purgados: Iterable[Job] = (),
     ) -> None:
+        """`purgados` são os Jobs apagados com o marcador da purga que guarda o dono (#780):
+        valem como Jobs na conta. O marcador antigo não guarda dono: basta não passá-lo."""
         self._linhas = list(linhas)
-        self._jobs = {j.id: j for j in jobs}
+        self._jobs = {j.id: j for j in (*purgados, *jobs)}
 
     def custos(self, filtro: FiltroDeCusto) -> BaseDeCusto:
         desde, ate = filtro.desde, filtro.ate
@@ -198,6 +208,7 @@ class ConfigDoFaturamento:
     regiao: str
     dataset_dos_jobs: str
     tabela_dos_jobs: str
+    tabela_de_eventos: str
 
     @classmethod
     def do_ambiente(cls, ambiente: Any) -> "ConfigDoFaturamento":
@@ -208,6 +219,7 @@ class ConfigDoFaturamento:
             regiao=ambiente["BIGQUERY_REGIAO"],
             dataset_dos_jobs=ambiente["BIGQUERY_DATASET"],
             tabela_dos_jobs=ambiente["BIGQUERY_TABELA_DE_JOBS"],
+            tabela_de_eventos=ambiente["BIGQUERY_TABELA_DE_EVENTOS"],
         )
 
 
@@ -261,6 +273,7 @@ class FaturamentoBigQuery:
             parametros.append(parametro("usuario", filtro.usuario, "STRING"))
             onde_do_job.append("j.quem_id = @usuario")
         jobs = f"`{c.projeto}.{c.dataset_dos_jobs}.{c.tabela_dos_jobs}`"
+        eventos = f"`{c.projeto}.{c.dataset_dos_jobs}.{c.tabela_de_eventos}`"
         mes = "FORMAT_DATE('%Y-%m', {})"
         data_do_job = f"DATE(j.criado_em, {fuso})"
         # As colunas das quatro partes são as mesmas: tipo, mes, programa, quem_tipo, quem_id,
@@ -299,7 +312,7 @@ class FaturamentoBigQuery:
                 " l.servico AS rotulo, SUM(l.custo), 0, 0.0, l.moeda\n"
                 "FROM linhas AS l\n"
                 f"WHERE {' AND '.join(onde_do_custo_sem_dono)}\n"
-                f"  AND (l.job_id IS NULL OR l.job_id NOT IN (SELECT id FROM {jobs}))\n"
+                "  AND (l.job_id IS NULL OR l.job_id NOT IN (SELECT id FROM fonte_de_jobs))\n"
                 f"GROUP BY {mes.format('l.dia')}, rotulo, l.moeda"
             )
         return (
@@ -312,11 +325,25 @@ class FaturamentoBigQuery:
             f"  WHERE {onde_do_faturamento}\n"
             "  GROUP BY dia, job_id, etapa, servico, moeda\n"
             "),\n"
+            # A fonte das linhas por Job: a tabela dos Jobs e os marcadores da purga que guardam
+            # o dono (a purga apaga a linha do Job; o marcador antigo, `sistema`/`purga`, não
+            # tem dono e fica fora). O Job que ainda tem linha vale uma vez só.
+            "fonte_de_jobs AS (\n"
+            "  SELECT id, programa, quem_tipo, quem_id, estado, duracao_ms, criado_em"
+            f" FROM {jobs}\n"
+            "  UNION ALL\n"
+            "  SELECT job_id, programa, quem_tipo, quem_id, estado,"
+            " duracao_do_video_ms, criado_em\n"
+            f"  FROM {eventos}\n"
+            "  WHERE tipo = 'purga' AND criado_em IS NOT NULL\n"
+            "    AND NOT (quem_tipo = 'sistema' AND quem_id = 'purga')\n"
+            f"    AND job_id NOT IN (SELECT id FROM {jobs})\n"
+            "),\n"
             "dos_jobs AS (\n"
             "  SELECT l.etapa, l.custo, l.moeda, j.id, j.programa, j.quem_tipo, j.quem_id,"
             " j.estado, j.duracao_ms,"
             f" {mes.format(data_do_job)} AS mes\n"
-            f"  FROM linhas AS l JOIN {jobs} AS j ON j.id = l.job_id\n"
+            "  FROM linhas AS l JOIN fonte_de_jobs AS j ON j.id = l.job_id\n"
             f"  WHERE {' AND '.join(onde_do_job)}\n"
             "),\n"
             "por_job AS (\n"

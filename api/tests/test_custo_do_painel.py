@@ -363,6 +363,7 @@ def _fonte(linhas: list[list[Any]]) -> tuple[FaturamentoBigQuery, _Transporte]:
         "regiao-x",
         "decupagens",
         "tabela_de_jobs",
+        "tabela_de_eventos",
     )
     return FaturamentoBigQuery(config, transporte), transporte
 
@@ -436,7 +437,7 @@ def test_a_consulta_junta_o_faturamento_com_os_jobs_dentro_do_bigquery() -> None
     assert corpo["location"] == "regiao-x"
     sql = corpo["query"]
     assert "`proj.fat.gcp_billing_export_resource_v1_*`" in sql
-    assert "JOIN `proj.decupagens.tabela_de_jobs` AS j ON j.id = l.job_id" in sql
+    assert "FROM linhas AS l JOIN fonte_de_jobs AS j ON j.id = l.job_id" in sql
     assert "GROUP BY" in sql and "SUM(" in sql
     assert "key = 'job_id'" in sql and "key = 'etapa'" in sql
     # A etapa vazia é a análise principal, como a sem rótulo.
@@ -521,3 +522,84 @@ def test_o_csv_traz_o_numero_de_videos_concluidos_e_vazio_no_custo_sem_dono() ->
         if r["quem_tipo"] != "sem_dono"
     ] == [("bia", "Fala", "0"), ("Playout", "Hoje", "1"), ("bia", "Hoje", "2")]
     assert {r["videos"] for r in linhas if r["quem_tipo"] == "sem_dono"} == {""}
+
+
+# Um vídeo purgado com o marcador novo (dono, programa e criado_em) segue o Job: o marcador
+# guarda `criado_em` de agosto, não o dia da purga.
+PURGADO = _job(
+    "p1", datetime(2026, 10, 31, 15, tzinfo=UTC), programa="Fala", quem="carla"
+)
+
+
+def _custo_com_purgado() -> CustoEmMemoria:
+    return CustoEmMemoria(
+        [
+            *LINHAS,
+            _linha(date(2026, 11, 1), "p1", 4.0),
+            _linha(date(2026, 11, 2), "p1", 1.0, "referencias"),
+            _linha(date(2026, 11, 1), "antigo", 0.7),
+        ],
+        JOBS,
+        purgados=[PURGADO],
+    )
+
+
+def test_o_custo_do_video_purgado_fica_no_programa_no_dono_e_no_mes_de_criacao() -> (
+    None
+):
+    base = _custo_com_purgado().custos(FiltroDeCusto(None, None, None, None))
+
+    assert CustoDosJobs("2026-10", "Fala", "usuario", "carla", 5.0, 1, 1.0) in (
+        base.dos_jobs
+    )
+    # O marcador antigo (sem dono) e o Job que não existe continuam sem dono.
+    assert sum(s.custo for s in base.sem_dono) == 15.3 + 0.7
+
+
+def test_o_custo_do_purgado_aparece_com_filtro_de_programa_e_de_usuario() -> None:
+    fonte = _custo_com_purgado()
+
+    por_programa = fonte.custos(FiltroDeCusto(None, None, "Fala", None))
+    por_usuario = fonte.custos(FiltroDeCusto(None, None, None, "carla"))
+
+    assert sorted((c.mes, c.quem_id, c.custo) for c in por_programa.dos_jobs) == [
+        ("2026-10", "carla", 5.0),
+        ("2026-11", "bia", 0.5),
+    ]
+    assert [(c.mes, c.quem_id, c.custo) for c in por_usuario.dos_jobs] == [
+        ("2026-10", "carla", 5.0)
+    ]
+    assert por_usuario.sem_dono == []
+
+
+def test_a_consulta_trata_o_marcador_da_purga_com_dono_como_linha_de_job() -> None:
+    fonte, transporte = _fonte([])
+
+    fonte.custos(FiltroDeCusto(date(2026, 11, 1), None, "Fala", "carla"))
+    fonte.custos(FiltroDeCusto(date(2026, 11, 1), None, None, None))
+
+    com_filtro, sem_filtro = (c["query"] for c in transporte.corpos)
+    for sql in (com_filtro, sem_filtro):
+        fonte_de_jobs = sql[
+            sql.index("fonte_de_jobs AS (") : sql.index("dos_jobs AS (")
+        ]
+        # Os Jobs e, na mesma fonte, os marcadores da purga com dono: o antigo
+        # (`sistema`/`purga`) fica de fora, e o Job que ainda existe vale uma vez só.
+        assert "FROM `proj.decupagens.tabela_de_jobs`" in fonte_de_jobs
+        assert "FROM `proj.decupagens.tabela_de_eventos`" in fonte_de_jobs
+        assert "tipo = 'purga'" in fonte_de_jobs
+        assert "NOT (quem_tipo = 'sistema' AND quem_id = 'purga')" in fonte_de_jobs
+        assert "job_id NOT IN (SELECT id FROM `proj.decupagens.tabela_de_jobs`)" in (
+            fonte_de_jobs
+        )
+        # As partes dos Jobs leem só a fonte; a tabela dos Jobs não é lida em outro lugar.
+        assert "JOIN fonte_de_jobs AS j ON j.id = l.job_id" in sql
+        assert sql.count("`proj.decupagens.tabela_de_jobs`") == 2
+    # O sem dono exclui o que a fonte tem, para o custo contar uma vez só.
+    parte_sem_dono = sem_filtro[sem_filtro.index("SELECT 'sem_dono'") :]
+    assert "l.job_id NOT IN (SELECT id FROM fonte_de_jobs)" in parte_sem_dono
+    # O período e os filtros valem sobre o `criado_em` da fonte, no mês dele.
+    assert "j.criado_em >= TIMESTAMP(@desde" in com_filtro
+    assert (
+        "j.programa = @programa" in com_filtro and "j.quem_id = @usuario" in com_filtro
+    )
