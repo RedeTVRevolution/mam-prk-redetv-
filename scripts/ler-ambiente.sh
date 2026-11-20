@@ -42,8 +42,6 @@ for item in "$@"; do
       *) saida=$(tr '[:upper:]' '[:lower:]' <<<"$nome") ;;
     esac
   fi
-  # A cota de escrita da busca ainda não aplicada grava sem ritmo (#411): vazia é desejada.
-  [[ $nome == BUSCA_COTA_DE_ESCRITA ]] && opcional=1
   # Nos alvos locais, o que já vem no ambiente da pessoa não é lido.
   if [[ $deploy == 0 && -n ${!nome-} ]]; then continue; fi
   nomes+=("$nome") saidas+=("$saida") opcionais+=("$opcional")

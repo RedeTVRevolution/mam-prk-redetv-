@@ -7,13 +7,13 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-lido=$(PASTA_DO_AMBIENTE=infra scripts/ler-ambiente.sh --deploy BUSCA_REGIAO BUSCA_COLECAO \
-  BUSCA_COLECAO_DE_TEXTO BUSCA_INDICE_DESCRICAO BUSCA_DIMENSAO BUSCA_INDICES_LIGADOS) || exit 1
+vars=(BUSCA_REGIAO BUSCA_COLECAO BUSCA_COLECAO_DE_TEXTO BUSCA_INDICE_DESCRICAO BUSCA_DIMENSAO BUSCA_INDICES_LIGADOS)
+lido=$(PASTA_DO_AMBIENTE=infra scripts/ler-ambiente.sh --deploy "${vars[@]}") || exit 1
 # As demais BUSCA_* herdadas do arquivo de ambiente (cota, distância) não entram: o
 # ConfigDaBusca.do_ambiente converteria um valor local inválido.
 for v in $(compgen -e | grep '^BUSCA_' || true); do unset "$v"; done
 eval "$lido"
-export BUSCA_REGIAO BUSCA_COLECAO BUSCA_COLECAO_DE_TEXTO BUSCA_INDICE_DESCRICAO BUSCA_DIMENSAO BUSCA_INDICES_LIGADOS
+export "${vars[@]}"
 
 saida=$(mktemp)
 trap 'rm -f "$saida"' EXIT

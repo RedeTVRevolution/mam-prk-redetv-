@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+from api.tests.test_imagem_da_api import _alvo
+
 RAIZ = Path(__file__).parents[2]
 
 
@@ -53,7 +55,7 @@ def test_gitleaks_do_afk_e_do_ci_sao_os_mesmos() -> None:
 
 
 def test_alvo_validacao_sai_com_bytecode_pronto() -> None:
-    alvo = DOCKERFILE[DOCKERFILE.index("AS validacao") :].split("\nFROM ")[0]
+    alvo = _alvo("AS validacao")
     assert "uv sync --locked --no-dev --compile-bytecode" in alvo
     compilar = "RUN /app/.venv/bin/python -m compileall -q api"
     assert (

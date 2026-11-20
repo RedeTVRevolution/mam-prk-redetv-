@@ -166,7 +166,7 @@ def test_para_com_erro_se_falta_saida_obrigatoria_mas_nao_a_cota_de_escrita(
     faltou = _rodar(tmp_path, "BUCKET_ACEITOS", saidas=sem)
     assert faltou.returncode != 0 and "bucket_aceitos" in faltou.stderr
 
-    cota = _rodar(tmp_path, "BUSCA_COTA_DE_ESCRITA", saidas=sem)
+    cota = _rodar(tmp_path, "BUSCA_COTA_DE_ESCRITA:opcional", saidas=sem)
     assert cota.returncode == 0
     assert _exportado(cota)["BUSCA_COTA_DE_ESCRITA"] == ""
 
