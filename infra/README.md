@@ -86,6 +86,8 @@ A `mam-terraform` recebe do wizard os mesmos papéis que tem no dev (`PAPEIS_DA_
 - `roles/dns.admin`
 - `roles/iam.roleAdmin`
 
+O módulo também dá à `mam-terraform` dois papéis do Vector Search (`google_project_iam_member.terraform_busca`, em `modulos/mam/papel_vertex.tf`): `roles/vectorsearch.collectionWriter` e `roles/vectorsearch.indexWriter`, para o deploy criar as coleções e o índice da busca (#757, `scripts/criar-colecao-no-deploy.sh`) se faltarem. Não vêm do wizard: entram no primeiro `apply` (direcionado) do `deploy-dev.sh`, e no primeiro deploy a propagação do IAM pode dar 403 uma vez (o deploy para e basta rodá-lo de novo).
+
 A `mam-build` não é pré-requisito: o próprio módulo a cria (`google_service_account.mam["build"]`) e lhe dá os papéis no `apply`, os mesmos do dev:
 
 - `roles/logging.logWriter` no projeto;

@@ -85,6 +85,7 @@ scripts/aplicar-sem-destruir.sh -target=module.mam.google_artifact_registry_repo
   -target=module.mam.google_artifact_registry_repository.mam_gpu \
   -target=module.mam.google_artifact_registry_repository_iam_member.build_envia_gpu \
   -target=module.mam.google_project_iam_member.terraform_predicao_vertex \
+  -target=module.mam.google_project_iam_member.terraform_busca \
   -var imagem=pendente -var imagem_validacao=pendente \
   -var imagem_transcricao_gpu=pendente -var imagem_ocr_gpu=pendente -var imagem_objetos=pendente
 # Primeira leitura dos outputs, depois do apply direcionado: só o que o build precisa. O Terraform é
@@ -138,6 +139,11 @@ marcar() { # <repo/imagem@digest> <tag>: põe a tag no digest, movendo-a se já 
 for imagem in "$TRANSCRICAO_GPU_ANTES" "$OCR_GPU_ANTES" "$OBJETOS_GPU_ANTES"; do
   [[ -z $imagem ]] || marcar "$imagem" "$TAG_DA_VOLTA"
 done
+# As coleções e o índice da busca (#757), como a mam-terraform (os papéis vêm do apply acima):
+# criadas se faltarem, completadas por PATCH se faltar campo. Falha para o deploy aqui; o aviso
+# de reindexação aparece na saída e no resumo. Quem liga o índice ANN é o Terraform, não o deploy.
+GCP_PROJECT_ID=$GCP_PROJECT_ID GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT \
+  scripts/criar-colecao-no-deploy.sh
 # Aceite dos cinco esquemas do Gemini contra o Vertex (#617), como a mam-terraform: o CI usa
 # cassete e não vê um esquema recusado (400). Roda antes do build, para um esquema recusado não
 # ir ao ar: saída 1 (400) derruba o deploy. Saída 2 (sem prova: 403 de IAM ainda não propagado
