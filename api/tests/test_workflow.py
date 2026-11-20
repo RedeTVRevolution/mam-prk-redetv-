@@ -364,14 +364,17 @@ def _timeout_do_job(main: str, chave: str) -> int:
     return int(achado.group(1))
 
 
-def _valor_do_yaml(trecho: str, campo: str) -> int:
-    """O prazo que o YAML escreve em `campo`: o literal ou o `${prazo_do_conector_s.chave}`
-    do módulo (timeout do Job mais 300 s)."""
-    achado = re.search(rf"{campo}: (\d+|\$\{{prazo_do_conector_s\.(\w+)\}})", trecho)
-    assert achado is not None, campo
-    if achado.group(2) is None:
-        return int(achado.group(1))
-    return _timeout_do_job(MAIN.read_text(), achado.group(2)) + FOLGA_DO_CONECTOR_S
+def _valor_do_yaml(trecho: str, campo: str, job: str) -> int:
+    """O prazo que o YAML escreve em `campo`: tem de ser o `prazo_do_conector_s` do próprio
+    Job, que o módulo monta como o timeout dele mais 300 s."""
+    assert f"{campo}: ${{prazo_do_conector_s.{job}}}" in trecho, (campo, job)
+    assert re.search(
+        r"^  prazo_do_conector_s = \{ for k, v in local\.timeout_dos_jobs_s : "
+        rf"k => v \+ {FOLGA_DO_CONECTOR_S} \}}$",
+        MAIN.read_text(),
+        re.MULTILINE,
+    )
+    return _timeout_do_job(MAIN.read_text(), job) + FOLGA_DO_CONECTOR_S
 
 
 def test_conector_de_cada_passo_e_o_timeout_do_job_mais_300_s() -> None:
@@ -391,16 +394,19 @@ def test_conector_de_cada_passo_e_o_timeout_do_job_mais_300_s() -> None:
     }
     campos = {"validacao": "timeout", "analise": "timeout"}
     for job, trecho in passos.items():
-        conector = _valor_do_yaml(trecho, campos.get(job, "timeout_gpu"))
+        conector = _valor_do_yaml(trecho, campos.get(job, "timeout_gpu"), job)
         assert conector > _timeout_do_job(main, job), job
         assert conector == _timeout_do_job(main, job) + FOLGA_DO_CONECTOR_S, job
 
     # O prazo que cada etapa de melhor esforço passa ao subworkflow também.
     for nome, (_, _, job) in MELHOR_ESFORCO.items():
-        prazo = _valor_do_yaml(_passo(texto, nome), "prazo")
+        prazo = _valor_do_yaml(_passo(texto, nome), "prazo", job)
         assert prazo == _timeout_do_job(main, job) + FOLGA_DO_CONECTOR_S, nome
     # O inventário espera até o fim do Job (9000 s), não 3900 s.
-    assert _valor_do_yaml(_passo(texto, "roda_o_inventario"), "prazo") == 9300
+    assert (
+        _valor_do_yaml(_passo(texto, "roda_o_inventario"), "prazo", "inventario")
+        == 9300
+    )
 
     # O subworkflow e o de GPU repassam o prazo ao conector.
     assert "timeout: $${prazo}" in _subworkflow(texto, "roda_o_job_de_etapa")
@@ -411,13 +417,18 @@ def test_conector_de_cada_passo_e_o_timeout_do_job_mais_300_s() -> None:
 
 
 def _janelas_em_paralelo_do_modulo() -> int:
-    """O padrão de `variable "janelas_em_paralelo"` no módulo."""
-    bloco = (
-        MAIN.read_text().split('variable "janelas_em_paralelo" {')[1].split("\n}")[0]
-    )
-    achado = re.search(r"default\s*=\s*(\d+)", bloco)
-    assert achado is not None
-    return int(achado.group(1))
+    """O menor padrão de `variable "janelas_em_paralelo"`, no módulo e na raiz da prod."""
+    padroes = []
+    for arquivo in (MAIN, MAIN.parents[2] / "ambientes/prod/main.tf"):
+        bloco = (
+            arquivo.read_text()
+            .split('variable "janelas_em_paralelo" {')[1]
+            .split("\n}")[0]
+        )
+        achado = re.search(r"default\s*=\s*(\d+)", bloco)
+        assert achado is not None, arquivo
+        padroes.append(int(achado.group(1)))
+    return min(padroes)
 
 
 def _cobre_as_rodadas_sem_tentativa_extra(janelas_em_paralelo: int) -> bool:
