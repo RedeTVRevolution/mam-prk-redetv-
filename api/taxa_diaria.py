@@ -172,7 +172,8 @@ def atualizar(
     tabela: TabelaDaTaxa,
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> int:
-    """Refaz os `dias` na tabela e devolve quantas linhas gravou. Lê as medidas de revisão
+    """Refaz os `dias` na tabela e devolve quantas linhas enviou ao MERGE (o MERGE
+    descarta as de Job purgado, então não é o que ficou gravado). Lê as medidas de revisão
     uma vez, do menor dia pedido (a ordem dos `dias` não importa); sem dias, não lê."""
     medidas = revisao.todas(periodo_em_utc(min(dias), min(dias))[0]) if dias else []
     linhas = [
@@ -361,7 +362,7 @@ def main(argumentos: list[str]) -> int:
     itens = ItensNoStorage(cliente, os.environ["BUCKET_DECUPAGENS"])
     if preenchendo:
         print(f"{preencher_itens(jobs, decupagens, itens)} contagens gravadas")
-    gravadas = atualizar(
+    enviadas = atualizar(
         dias_recentes(agora_em_sao_paulo().date(), quantos),
         jobs,
         itens,
@@ -370,7 +371,7 @@ def main(argumentos: list[str]) -> int:
         tabela,
         lambda job_id: modelo_da_decupagem(decupagens, job_id),
     )
-    print(f"{gravadas} linhas gravadas em {quantos} dias")
+    print(f"{enviadas} linhas enviadas em {quantos} dias")
     return 0
 
 

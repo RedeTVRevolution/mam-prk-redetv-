@@ -7,6 +7,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -23,6 +24,7 @@ from api.taxa_diaria import (
     atualizar,
     dias_recentes,
     linhas_do_dia,
+    main,
     preencher_itens,
 )
 from api.tests.test_taxa_de_correcao import BASE, Decupagens, _c, _mundo, _pulsar
@@ -345,6 +347,79 @@ def test_a_tabela_de_eventos_vem_do_ambiente_e_o_nome_dela_chega_ao_merge() -> N
         TabelaDaTaxaBigQuery.do_ambiente(ambiente, transporte)
     # O leitor da web usa a mesma configuração e não precisa da tabela de eventos.
     assert ConfigDaTaxa.do_ambiente(ambiente).tabela == "taxa"
+
+
+AMBIENTE_DO_COMANDO = {
+    "GCP_PROJECT_ID": "proj",
+    "BUCKET_ACEITOS": "aceitos",
+    "BUCKET_DECUPAGENS": "decupagens-b",
+    "BIGQUERY_DATASET": "decupagens",
+    "BIGQUERY_REGIAO": "regiao-x",
+    "BIGQUERY_TABELA_DA_TAXA": "taxa",
+    "BIGQUERY_TABELA_DE_EVENTOS": "eventos",
+}
+
+
+def _comando_com_dubles(
+    monkeypatch: pytest.MonkeyPatch, ambiente: dict[str, str]
+) -> _Transporte:
+    jobs, decupagens, itens, correcoes, revisao = _mundo_com_itens()
+    transporte = _Transporte()
+    for nome, valor in ambiente.items():
+        monkeypatch.setenv(nome, valor)
+    for nome in set(AMBIENTE_DO_COMANDO) - set(ambiente):
+        monkeypatch.delenv(nome, raising=False)
+    alvo = "api.taxa_diaria."
+    monkeypatch.setattr(alvo + "ClienteStorage", lambda **_: object())
+    monkeypatch.setattr(
+        alvo + "DecupagensStorage",
+        SimpleNamespace(do_ambiente=lambda *_: decupagens),
+    )
+    monkeypatch.setattr(alvo + "transporte_http", lambda _projeto: transporte)
+    monkeypatch.setattr(alvo + "cliente_do_firestore", lambda _projeto: object())
+    monkeypatch.setattr(alvo + "RepositorioFirestore", lambda _banco: jobs)
+    monkeypatch.setattr(alvo + "ItensNoStorage", lambda *_: itens)
+    monkeypatch.setattr(alvo + "RepositorioDeCorrecoesFirestore", lambda _: correcoes)
+    monkeypatch.setattr(alvo + "RepositorioDeRevisaoFirestore", lambda _: revisao)
+    return transporte
+
+
+@pytest.mark.parametrize("argumentos", [["2"], ["PREENCHER", "2"]])
+def test_o_comando_leva_a_tabela_de_eventos_ao_merge_na_rodada_e_na_carga(
+    monkeypatch: pytest.MonkeyPatch, argumentos: list[str]
+) -> None:
+    transporte = _comando_com_dubles(monkeypatch, AMBIENTE_DO_COMANDO)
+
+    assert main(argumentos) == 0
+
+    assert transporte.corpos
+    assert all("`proj.decupagens.eventos`" in c["query"] for c in transporte.corpos)
+
+
+def test_o_comando_sem_a_tabela_de_eventos_sai_com_2_sem_chamar_o_bigquery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ambiente = {
+        k: v
+        for k, v in AMBIENTE_DO_COMANDO.items()
+        if k != "BIGQUERY_TABELA_DE_EVENTOS"
+    }
+    transporte = _comando_com_dubles(monkeypatch, ambiente)
+
+    assert main([]) == 2
+    assert transporte.corpos == []
+
+
+def test_o_comando_nao_promete_gravar_o_que_o_merge_pode_descartar(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _comando_com_dubles(monkeypatch, AMBIENTE_DO_COMANDO)
+
+    main(["2"])
+
+    saida = capsys.readouterr().out
+    assert "linhas enviadas" in saida
+    assert "gravadas em" not in saida
 
 
 def test_o_merge_que_nao_termina_no_prazo_e_erro() -> None:
