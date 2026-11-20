@@ -18,6 +18,7 @@ while IFS= read -r caminho; do
     docs/* | evals/* | prototipos/* | scripts/afk/* | .afk/* | .claude/* | .codex/* | .githooks/*) ;;
     # O .gitignore entra no .gcloudignore, mas só tira arquivos do envio: o que ele muda na
     # imagem não é um deploy que se quer, e o próximo deploy o leva do mesmo jeito.
+    scripts/copy_das_imagens_gpu.py) ;;
     *.md | .gitignore) ;;
     *) exit 0 ;;
   esac

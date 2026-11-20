@@ -5,6 +5,7 @@ reescreve, no `Dockerfile`, o trecho entre os marcadores de cada imagem.
 """
 
 import ast
+import re
 from pathlib import Path
 
 RAIZ = Path(__file__).parents[1]
@@ -75,6 +76,10 @@ def reescrever(dockerfile: str) -> str:
         )
         de = dockerfile.index(ini)
         ate = dockerfile.index(fim, de) + len(fim)
+        antigo = dockerfile[de + len(ini) : ate - len(fim)].replace("\\\n", " ")
+        assert re.fullmatch(r"COPY [^\n]*\n", antigo), (
+            f"O bloco de {alvo} tem de ser só o COPY: tire o resto dos marcadores."
+        )
         dockerfile = (
             dockerfile[:de] + ini + copy_gerado(entrada) + fim + dockerfile[ate:]
         )

@@ -54,10 +54,9 @@ def test_painel_nao_entra_em_nenhuma_imagem_com_gpu() -> None:
 
 
 def test_a_lista_do_dockerfile_e_a_gerada() -> None:
-    dockerfile = (RAIZ / "Dockerfile").read_text()
     for alvo, entrada in ALVOS.items():
-        assert (
-            f"# >>> copy gerado: {alvo}\n{copy_gerado(entrada)}# <<<" in dockerfile
+        assert f"# >>> copy gerado: {alvo}\n{copy_gerado(entrada)}# <<<" in _alvo(
+            alvo
         ), f"Rode `make gerar-copy-das-imagens-gpu`: o COPY de {alvo} não é o gerado."
 
 
@@ -67,3 +66,11 @@ def test_o_gerador_reescreve_igual_ao_arquivo_e_e_idempotente() -> None:
     assert uma_vez == dockerfile
     assert reescrever(uma_vez) == uma_vez
     assert reescrever(uma_vez.replace("api/whisper.py", "api/x.py", 1)) == uma_vez
+
+
+def test_o_gerador_recusa_bloco_com_outra_instrucao() -> None:
+    dockerfile = (RAIZ / "Dockerfile").read_text()
+    fim = "# <<< copy gerado\n"
+    ruim = dockerfile.replace(fim, "RUN compileall -q api\n" + fim, 1)
+    with pytest.raises(AssertionError, match="COPY"):
+        reescrever(ruim)
