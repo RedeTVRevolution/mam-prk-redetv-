@@ -20,9 +20,11 @@ def _agenda(nome: str) -> str:
 
 
 def _retencao(bloco: str) -> int:
-    achado = re.search(r'^\s*retention\s*=\s*"(\d+)s"', bloco, re.MULTILINE)
+    achado = re.search(r"^\s*retention\s*=\s*local\.(\w+)", bloco, re.MULTILINE)
     assert achado
-    return int(achado.group(1))
+    valor = re.search(rf'^\s*{achado.group(1)}\s*=\s*"(\d+)s"', TF, re.MULTILINE)
+    assert valor
+    return int(valor.group(1))
 
 
 def test_o_banco_liga_a_recuperacao_a_um_ponto_no_tempo() -> None:

@@ -31,13 +31,12 @@ resource "google_cloud_run_v2_job" "fim" {
           name  = "PUBSUB_TOPICO_USO"
           value = google_pubsub_topic.eventos_de_uso.id
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
       }
     }

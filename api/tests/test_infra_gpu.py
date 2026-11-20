@@ -84,7 +84,7 @@ def test_job_com_gpu_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu(
     assert imagem in job
     assert re.search(rf'timeout\s+= "{timeout}"', job)
     assert "max_retries     = 0" in job
-    assert 'local.buckets["aceitos"]' in job and "var.projeto" in job
+    assert 'local.buckets["aceitos"]' in job and "local.env_do_projeto" in job
     assert re.search(r'name\s+= "DISPOSITIVO"\s+value = "gpu"', job)
     assert re.search(r'name\s+= "TMPDIR"\s+value = "/saida"', job)
     assert (

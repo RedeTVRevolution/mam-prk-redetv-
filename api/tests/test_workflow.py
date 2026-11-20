@@ -327,8 +327,14 @@ def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
     assert "vpc_access" not in job
     assert 'args    = ["-m", "api.indexacao"]' in job
     assert "max_retries     = 0" in job
-    assert "BUSCA_COLECAO" in job and "BUSCA_INDICE_DESCRICAO" in job
-    assert "BUSCA_COLECAO_DE_TEXTO" in job
+    # As BUSCA_* chegam pelo `dynamic "env"` do local; o local as nomeia.
+    assert "for_each = local.env_da_busca" in job
+    for variavel in (
+        "BUSCA_COLECAO",
+        "BUSCA_INDICE_DESCRICAO",
+        "BUSCA_COLECAO_DE_TEXTO",
+    ):
+        assert f'name = "{variavel}"' in main
     assert re.search(
         r"job_de_indexacao\s+= google_cloud_run_v2_job\.indexacao\.name", main
     )
@@ -1245,8 +1251,11 @@ def test_o_job_do_aviso_do_fim_e_o_que_o_workflow_roda() -> None:
 
     assert 'resource "google_cloud_run_v2_job" "fim"' in fim
     assert '"api.fim_do_job"' in fim
-    for variavel in ("PUBSUB_TOPICO_EVENTOS", "PUBSUB_TOPICO_USO", "GCP_PROJECT_ID"):
+    for variavel in ("PUBSUB_TOPICO_EVENTOS", "PUBSUB_TOPICO_USO"):
         assert f'"{variavel}"' in fim
+    # O projeto chega pelo `dynamic "env"` do local, que o nomeia.
+    assert "for_each = local.env_do_projeto" in fim
+    assert 'name = "GCP_PROJECT_ID"' in MAIN.read_text()
     assert (
         "job_de_fim             = google_cloud_run_v2_job.fim.name" in MAIN.read_text()
     )

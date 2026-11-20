@@ -22,13 +22,12 @@ resource "google_cloud_run_v2_job" "purga" {
             memory = "512Mi"
           }
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BIGQUERY_DATASET"
@@ -74,33 +73,12 @@ resource "google_cloud_run_v2_job" "purga" {
           name  = "BUCKET_REFERENCIAS"
           value = local.buckets["referencias"]
         }
-        env {
-          name  = "BUSCA_REGIAO"
-          value = local.regiao_da_busca
-        }
-        env {
-          name  = "BUSCA_COLECAO"
-          value = local.colecao_da_busca
-        }
-        env {
-          name  = "BUSCA_COLECAO_DE_TEXTO"
-          value = local.colecao_de_texto_da_busca
-        }
-        env {
-          name  = "BUSCA_INDICE_DESCRICAO"
-          value = local.indice_da_descricao
-        }
-        env {
-          name  = "BUSCA_INDICES_LIGADOS"
-          value = tostring(var.indices_da_busca_ligados)
-        }
-        env {
-          name  = "BUSCA_DIMENSAO"
-          value = tostring(local.dimensao_dos_vetores)
-        }
-        env {
-          name  = "BUSCA_COTA_DE_ESCRITA"
-          value = tostring(local.cota_de_escrita_da_busca)
+        dynamic "env" {
+          for_each = local.env_da_busca
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
       }
     }

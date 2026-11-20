@@ -16,5 +16,5 @@ resource "google_project_iam_custom_role" "vertex_predicao" {
 resource "google_project_iam_member" "terraform_predicao_vertex" {
   project = var.projeto
   role    = google_project_iam_custom_role.vertex_predicao.id
-  member  = "serviceAccount:mam-terraform@${var.projeto}.iam.gserviceaccount.com"
+  member  = "serviceAccount:${local.conta_do_terraform}"
 }
