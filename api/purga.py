@@ -209,7 +209,7 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
     log_estruturado.configurar(logging.INFO)
     cliente = cliente_do_firestore(projeto, ambiente)
     auditoria = auditoria_do_firestore(projeto, ambiente)
-    busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
+    busca = ConfigDaBusca.do_ambiente(ambiente)
     repositorio = RepositorioFirestore(cliente)
     catalogo = CatalogoFirestore(cliente)
     storage = ClienteStorage(project=projeto)
@@ -217,15 +217,11 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         repositorio,
         RepositorioDeCorrecoesFirestore(cliente),
         ArquivosNoStorage(storage, aceitos, decupagens),
-        (
-            AgentRetrieval(
-                busca,
-                transporte_http(),
-                tentar_no_429=True,
-                orcamento=OrcamentoFirestore(cliente),
-            )
-            if busca
-            else None
+        AgentRetrieval(
+            busca,
+            transporte_http(),
+            tentar_no_429=True,
+            orcamento=OrcamentoFirestore(cliente),
         ),
         auditoria,
         agora_utc,

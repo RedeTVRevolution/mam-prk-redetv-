@@ -44,6 +44,7 @@ def test_a_varredura_conclui_as_duas_fases_e_a_segunda_nao_faz_nada(
 ) -> None:
     # Nenhum vídeo é purgado: o BigQuery não é chamado, e o transporte não pede credencial.
     monkeypatch.setattr(dados_da_purga, "transporte_http", lambda _projeto: None)
+    monkeypatch.setattr("api.purga.transporte_http", lambda: None)
     projeto = f"teste-{uuid.uuid4().hex[:12]}"
     ambiente = {
         "GCP_PROJECT_ID": projeto,
