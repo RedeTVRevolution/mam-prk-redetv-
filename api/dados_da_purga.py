@@ -5,7 +5,14 @@ from collections.abc import Mapping
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 
-from api.copia_bigquery import ConfigDoBigQuery, Transporte, parametro, transporte_http
+from api.copia_bigquery import (
+    PRAZO_CURTO,
+    ConfigDoBigQuery,
+    Transporte,
+    executar_dml,
+    parametro,
+    transporte_http,
+)
 from api.nuvem import COLECAO_DA_REVISAO, TiposDeObjetoFirestore
 from api.texto_como_dado import id_conferido
 
@@ -14,16 +21,16 @@ def executar(
     config: ConfigDoBigQuery, transporte: Transporte, consulta: str, job_id: str
 ) -> int:
     """Só confirma o apagamento quando o BigQuery confirma o término sem erro."""
-    resposta = transporte(
-        {
-            "query": consulta,
-            "useLegacySql": False,
-            "location": config.regiao,
-            "timeoutMs": 120_000,
-            "queryParameters": [parametro("job_id", job_id)],
-        }
+    resposta = executar_dml(
+        transporte,
+        config.regiao,
+        consulta,
+        [parametro("job_id", job_id)],
+        PRAZO_CURTO,
+        descricao=f"purga de {job_id} no BigQuery",
+        mensagem_do_prazo=f"purga de {job_id} no BigQuery não confirmada",
     )
-    if not resposta.get("jobComplete") or resposta.get("errors"):
+    if resposta.get("errors"):
         raise RuntimeError(f"purga de {job_id} no BigQuery não confirmada")
     return int(resposta.get("numDmlAffectedRows", 0))
 

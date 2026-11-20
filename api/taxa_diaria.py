@@ -34,7 +34,13 @@ from google.cloud.storage import Client as ClienteStorage
 from api import log_estruturado
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, parametro, transporte_http
+from api.copia_bigquery import (
+    PRAZO_CURTO,
+    Transporte,
+    executar_dml,
+    parametro,
+    transporte_http,
+)
 from api.correcoes import RepositorioDeCorrecoes
 from api.erros import ServicoIndisponivel
 from api.fuso import agora_em_sao_paulo, periodo_em_utc
@@ -283,35 +289,24 @@ WHEN NOT MATCHED BY SOURCE
   AND t.dia IN UNNEST(@dias)
 THEN DELETE
 """
-        resposta = self._transporte(
-            {
-                "query": consulta,
-                "useLegacySql": False,
-                "location": c.regiao,
-                "timeoutMs": 120_000,
-                "queryParameters": [
-                    parametro(
-                        "linhas",
-                        json.dumps([_json_da_linha(x) for x in linhas]),
-                    ),
-                    # ARRAY<DATE> e não JSON: o BigQuery recusa subconsulta no ON do MERGE.
-                    {
-                        "name": "dias",
-                        "parameterType": {
-                            "type": "ARRAY",
-                            "arrayType": {"type": "DATE"},
-                        },
-                        "parameterValue": {
-                            "arrayValues": [{"value": d.isoformat()} for d in dias]
-                        },
+        executar_dml(
+            self._transporte,
+            c.regiao,
+            consulta,
+            [
+                parametro("linhas", json.dumps([_json_da_linha(x) for x in linhas])),
+                # ARRAY<DATE> e não JSON: o BigQuery recusa subconsulta no ON do MERGE.
+                {
+                    "name": "dias",
+                    "parameterType": {"type": "ARRAY", "arrayType": {"type": "DATE"}},
+                    "parameterValue": {
+                        "arrayValues": [{"value": d.isoformat()} for d in dias]
                     },
-                ],
-            }
+                },
+            ],
+            PRAZO_CURTO,
+            descricao=f"a troca dos dias {dias[0]} a {dias[-1]}",
         )
-        if not resposta.get("jobComplete", False):
-            raise RuntimeError(
-                f"a troca dos dias {dias[0]} a {dias[-1]} não terminou no prazo"
-            )
 
 
 def main(argumentos: list[str]) -> int:

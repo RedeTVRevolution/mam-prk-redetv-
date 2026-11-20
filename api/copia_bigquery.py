@@ -182,7 +182,8 @@ class CopiaEmMemoria:
 # O corpo de um POST em `projects/<projeto>/queries` (`jobs.query`); devolve a resposta em
 # JSON. Com `jobId`, é a próxima página de uma consulta (`jobs.getQueryResults`, um GET em
 # `queries/<jobId>`) e o resto do dicionário vai na URL.
-# Com `jobReference`, consulta o estado (`jobs.get`); com `cancelar`, pede o cancelamento.
+# Com `jobReference`, consulta o estado (`jobs.get`); com `cancelar`, pede o cancelamento;
+# `limite_s` é o tempo máximo da chamada.
 Transporte = Callable[[dict[str, Any]], dict[str, Any]]
 
 
@@ -279,55 +280,128 @@ VALUES
    s.marca, s.tipo_de_insercao, s.texto, s.versao_pipeline, s.gravado_em,
    s.duracao_do_video_ms, s.tipo_canonico)
 """
-        inicio = monotonic()
-        resposta = self._transporte(
-            {
-                "query": consulta,
-                "useLegacySql": False,
-                "location": c.regiao,
-                "timeoutMs": 120_000,
-                "queryParameters": [
-                    parametro("job_id", job_id),
-                    parametro(
-                        "linhas",
-                        json.dumps(
-                            [_json_da_linha(x) for x in linhas], ensure_ascii=False
-                        ),
-                    ),
-                    *parametros,
-                ],
-            }
+        executar_dml(
+            self._transporte,
+            c.regiao,
+            consulta,
+            [
+                parametro("job_id", job_id),
+                parametro(
+                    "linhas",
+                    json.dumps([_json_da_linha(x) for x in linhas], ensure_ascii=False),
+                ),
+                *parametros,
+            ],
+            PRAZO_DA_COPIA,
+            # O ano já foi registrado; a próxima cópia limpa até um commit atrasado.
+            descricao=f"cópia de {job_id}",
         )
-        if resposta.get("jobComplete", False):
-            return
-        referencia = resposta.get("jobReference")
-        if not referencia:
-            raise RuntimeError(f"cópia de {job_id} sem referência do MERGE")
-        referencia = {"location": c.regiao, **referencia}
-        cancelamento_pedido = False
-        while True:
-            if monotonic() - inicio >= 900:
-                # O ano já foi registrado; a próxima cópia limpa até um commit atrasado.
-                raise RuntimeError(f"cópia de {job_id} não terminou no prazo")
-            if monotonic() - inicio >= 300 and not cancelamento_pedido:
-                try:
-                    self._transporte({"jobReference": referencia, "cancelar": True})
-                    cancelamento_pedido = True
-                except Exception:
-                    log.exception("cancelamento do MERGE de %s não confirmado", job_id)
+
+
+@dataclass(frozen=True)
+class PrazoDoDml:
+    """Quanto o pedido espera (`timeoutMs`) e, em segundos desde o envio, quando pedir o
+    cancelamento e quando desistir de acompanhar."""
+
+    timeout_ms: int
+    cancelar_s: int
+    desistir_s: int
+
+
+# MERGEs concorrentes do mesmo vídeo entram na fila do BigQuery: a espera longa é requisito
+# real da cópia dos momentos.
+PRAZO_DA_COPIA = PrazoDoDml(timeout_ms=120_000, cancelar_s=300, desistir_s=900)
+
+# Os 120 s do pedido valem para as cargas do painel, a taxa diária e a purga; passados eles
+# o cancelamento é pedido e, na janela curta que sobra, tentado de novo se falhar. O MERGE do
+# pulso de revisão roda dentro da requisição e não pode herdar a espera longa.
+JANELA_DO_CANCELAMENTO_S = 10
+PRAZO_CURTO = PrazoDoDml(
+    timeout_ms=120_000,
+    cancelar_s=120,
+    desistir_s=120 + JANELA_DO_CANCELAMENTO_S,
+)
+
+
+def executar_dml(
+    transporte: Transporte,
+    regiao: str,
+    consulta: str,
+    parametros: list[dict[str, Any]],
+    prazo: PrazoDoDml,
+    *,
+    descricao: str,
+    mensagem_do_prazo: str | None = None,
+) -> dict[str, Any]:
+    """Roda um DML e só volta com ele terminado sem erro, ou levanta `RuntimeError`.
+
+    Devolve a resposta da primeira chamada (a purga lê `numDmlAffectedRows`). Se o job não
+    terminou nela, consulta o estado de 5 em 5 s e pede o cancelamento ao passar o prazo.
+    Desistir não prova que o DML parou; só o `DONE` prova. Cada chamada de acompanhamento
+    leva `limite_s`, para não passar do tempo que falta até a desistência.
+    """
+    inicio = monotonic()
+    resposta = transporte(
+        {
+            "query": consulta,
+            "useLegacySql": False,
+            "location": regiao,
+            "timeoutMs": prazo.timeout_ms,
+            "queryParameters": parametros,
+        }
+    )
+    if resposta.get("jobComplete", False):
+        return resposta
+    referencia = resposta.get("jobReference")
+    if not referencia:
+        raise RuntimeError(f"{descricao} sem referência do MERGE")
+    referencia = {"location": regiao, **referencia}
+    cancelamento_pedido = cancelamento_tentado = False
+
+    def decorrido() -> float:
+        return monotonic() - inicio
+
+    def limite(falta: float) -> dict[str, float]:
+        # Só a chamada que não cabe nos 150 s do transporte leva `limite_s`.
+        return {"limite_s": falta} if falta < 150 else {}
+
+    while True:
+        if decorrido() >= prazo.cancelar_s and not cancelamento_pedido:
+            falta = max(1, prazo.desistir_s - decorrido())
+            cancelamento_tentado = True
             try:
-                estado = self._transporte({"jobReference": referencia})["status"]
+                transporte(
+                    {"jobReference": referencia, "cancelar": True, **limite(falta)}
+                )
+                cancelamento_pedido = True
             except Exception:
-                # Uma falha de transporte não prova que o MERGE parou de poder gravar.
-                log.exception("estado do MERGE de %s não confirmado", job_id)
-            else:
-                if estado["state"] == "DONE":
-                    if estado.get("errorResult"):
-                        raise RuntimeError(
-                            f"cópia de {job_id} falhou: {estado['errorResult']}"
-                        )
-                    return
-            sleep(5)
+                log.exception("cancelamento do MERGE de %s não confirmado", descricao)
+        agora = decorrido()
+        if agora >= prazo.desistir_s:
+            raise RuntimeError(
+                mensagem_do_prazo or f"{descricao} não terminou no prazo"
+            )
+        falta = prazo.desistir_s - agora
+        if not cancelamento_pedido and agora < prazo.cancelar_s:
+            # A consulta não pode empurrar o cancelamento para depois do marco.
+            falta = min(falta, prazo.cancelar_s - agora)
+        try:
+            estado = transporte({"jobReference": referencia, **limite(falta)})["status"]
+        except Exception:
+            # Uma falha de transporte não prova que o MERGE parou de poder gravar.
+            log.exception("estado do MERGE de %s não confirmado", descricao)
+        else:
+            if estado["state"] == "DONE":
+                if estado.get("errorResult"):
+                    raise RuntimeError(f"{descricao} falhou: {estado['errorResult']}")
+                return resposta
+        agora = decorrido()
+        espera = prazo.desistir_s - agora
+        if not cancelamento_pedido and agora < prazo.cancelar_s:
+            espera = min(espera, prazo.cancelar_s - agora)
+        # Passado o marco com o cancelamento por pedir, ele sai já, sem dormir antes.
+        if espera > 0 and (cancelamento_tentado or agora < prazo.cancelar_s):
+            sleep(min(5, espera))
 
 
 def parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
@@ -360,10 +434,13 @@ def transporte_http(projeto: str) -> Transporte:
                 f"/jobs/{referencia['jobId']}"
             )
             parametros = {"location": referencia["location"]}
+            limite = corpo.get("limite_s", 150)
             if corpo.get("cancelar"):
-                resposta = sessao.post(f"{url}/cancel", params=parametros, timeout=150)
+                resposta = sessao.post(
+                    f"{url}/cancel", params=parametros, timeout=limite
+                )
             else:
-                resposta = sessao.get(url, params=parametros, timeout=150)
+                resposta = sessao.get(url, params=parametros, timeout=limite)
         elif "jobId" in corpo:
             pagina = dict(corpo)
             url += f"/{pagina.pop('jobId')}"
