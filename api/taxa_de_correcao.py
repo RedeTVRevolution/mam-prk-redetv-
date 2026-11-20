@@ -28,7 +28,7 @@ import logging
 import os
 import sys
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from collections.abc import Set as AbstractSet
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
@@ -53,7 +53,7 @@ from api.nuvem import (
 )
 from api.permissoes import exige_uma_de
 from api.regras_das_correcoes import estado_das, reconciliar
-from api.revisao import RepositorioDeRevisao
+from api.revisao import Medida, RepositorioDeRevisao
 from api.texto_como_dado import LinhaDaConsulta
 from api.tipos_da_taxa import LinhaDaTaxa
 
@@ -106,7 +106,7 @@ def calcular(
         repositorio,
         lambda job_id: _itens_da_decupagem(decupagens, job_id),
         correcoes,
-        revisao,
+        revisao.todas(desde),
         desde,
         ate,
         programa,
@@ -136,24 +136,21 @@ def calcular_com_itens(
     repositorio: RepositorioDeJobs,
     itens_do_job: Callable[[str], ItensDaDecupagem],
     correcoes: RepositorioDeCorrecoes,
-    revisao: RepositorioDeRevisao,
+    medidas: Iterable[Medida],
     desde: datetime | None = None,
     ate: datetime | None = None,
     programa: str | None = None,
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[tuple[str, LinhaDaTaxa]]:
     """O cálculo por Job, com a contagem de itens vinda de `itens_do_job` (a decupagem
-    inteira, ou o objeto de contagem gravado com ela, #455). `itens_do_job` levanta
+    inteira, ou o objeto de contagem gravado com ela, #455). `medidas` são as de revisão já
+    lidas (`revisao.todas(desde)` ou mais): quem calcula vários períodos lê uma vez. `itens_do_job` levanta
     `ServicoIndisponivel`, `ValueError`, `KeyError` ou `TypeError` se não lê.
 
     `modelo_do_job` (o JSON da decupagem) só é chamado para o Job que tem correção em vigor
     feita sobre outra versão do JSON, para a `reconciliar` dizer quais casam com a atual
     (#571). Sem ele, essas ficam fora."""
-    pulsados = {
-        m.job_id
-        for m in revisao.todas(desde)
-        if _no_periodo(m.ultimo_pulso, desde, ate)
-    }
+    pulsados = {m.job_id for m in medidas if _no_periodo(m.ultimo_pulso, desde, ate)}
     # Só os vídeos com correção ou pulso no período; o acervo não é percorrido.
     candidatos = pulsados | correcoes.jobs_com_correcao(desde, ate)
     linhas: list[tuple[str, LinhaDaTaxa]] = []
