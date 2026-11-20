@@ -807,9 +807,6 @@ class RepositorioDePapeisFirestore:
         # merge: não apaga a marca `desativada`.
         _documento(self._colecao, uid).set({"papeis": papeis}, merge=True)
 
-    def desativada(self, uid: str) -> bool:
-        return self.ler(uid).desativada
-
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         _documento(self._colecao, uid).set({"desativada": desativada}, merge=True)
 

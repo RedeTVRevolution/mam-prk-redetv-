@@ -42,10 +42,6 @@ class PapeisContados(RepositorioDePapeisEmMemoria):
         self.leituras += 1
         return super().obter(uid)
 
-    def desativada(self, uid: str) -> bool:
-        self.leituras += 1
-        return super().desativada(uid)
-
 
 def _job(id: str = "j1") -> Job:
     return Job(

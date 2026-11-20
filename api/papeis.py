@@ -115,10 +115,6 @@ class RepositorioDePapeis(Protocol):
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None: ...
 
-    def desativada(self, uid: str) -> bool:
-        """A marca `desativada` do documento; a API a confere a cada requisição."""
-        ...
-
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         """Liga ou desliga a marca sem tocar nos papéis (nem criar papéis)."""
         ...
@@ -137,7 +133,7 @@ class RepositorioDePapeisEmMemoria:
 
     def ler(self, uid: str) -> DocumentoDePapeis:
         return DocumentoDePapeis(
-            uid, self.desativada(uid), self.obter(uid), uid in self._pendentes
+            uid, uid in self._desativadas, self.obter(uid), uid in self._pendentes
         )
 
     def obter(self, uid: str) -> list[Papel] | None:
@@ -145,9 +141,6 @@ class RepositorioDePapeisEmMemoria:
 
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         self._papeis[uid] = papeis
-
-    def desativada(self, uid: str) -> bool:
-        return uid in self._desativadas
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         (self._desativadas.add if desativada else self._desativadas.discard)(uid)
