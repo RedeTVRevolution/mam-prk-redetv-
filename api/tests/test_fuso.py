@@ -77,7 +77,7 @@ def test_so_o_modulo_de_fuso_escreve_o_nome_do_fuso() -> None:
     escrevem = [
         str(p.relative_to(RAIZ))
         for p in RAIZ.rglob("*.py")
-        if p.name != "fuso.py"
+        if p != RAIZ / "fuso.py"
         and "tests" not in p.parts
         and "America/Sao_Paulo" in p.read_text()
     ]
