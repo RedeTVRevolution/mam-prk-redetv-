@@ -30,8 +30,6 @@ resource "google_bigquery_table" "jobs_do_painel" {
     { name = "quem_id", type = "STRING", mode = "NULLABLE", description = "uid ou nome do sistema; nunca nome nem e-mail" },
     { name = "estado", type = "STRING", mode = "REQUIRED", description = "em_andamento até o fim; depois concluido ou falhou (o preenchimento dos Jobs antigos traz também cancelado)" },
     { name = "criado_em", type = "TIMESTAMP", mode = "REQUIRED", description = "Do envio; partição da tabela" },
-    { name = "concluido_em", type = "TIMESTAMP", mode = "NULLABLE", description = "Sem leitor nem escritor desde o #790; sai da tabela num deploy seguinte" },
-    { name = "atualizado_em", type = "TIMESTAMP", mode = "NULLABLE", description = "Sem leitor nem escritor desde o #790 (era REQUIRED, relaxada); sai da tabela num deploy seguinte" },
   ])
 }
 
