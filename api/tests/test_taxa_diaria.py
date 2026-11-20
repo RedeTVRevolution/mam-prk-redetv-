@@ -375,8 +375,8 @@ def test_o_terraform_da_tabela_tem_as_colunas_da_carga_e_particiona_por_dia() ->
 def test_o_job_agendado_recebe_os_nomes_do_terraform() -> None:
     tf = (MAM / "taxa_diaria.tf").read_text()
 
+    assert "for_each = local.env_do_projeto" in tf  # GCP_PROJECT_ID e o banco
     for variavel in (
-        "GCP_PROJECT_ID",
         "BUCKET_DECUPAGENS",
         "BIGQUERY_DATASET",
         "BIGQUERY_TABELA_DA_TAXA",
