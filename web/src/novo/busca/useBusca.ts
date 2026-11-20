@@ -59,17 +59,22 @@ export function useBusca(pedido: PedidoDaBusca | null) {
   const minha = hashKey(chave)
   const porImagem = async (p: Extract<PedidoDaBusca, { tipo: 'imagem' }>, cursor: string): Promise<PaginaDaBusca> => {
     ultimo.current = minha
-    const dele = token.current?.id === p.id ? token.current.valor : null
-    try {
-      const pagina = await api.buscarPorImagem(dele ? { token: dele } : p.foto, p.consulta, VIDEOS_POR_PAGINA, cursor)
+    const enviar = async (foto: File | { token: string }) => {
+      const pagina = await api.buscarPorImagem(foto, p.consulta, VIDEOS_POR_PAGINA, cursor)
       if (pagina.tokenDaFoto && ultimo.current === minha) token.current = { id: p.id, valor: pagina.tokenDaFoto }
       return pagina
+    }
+    const dele = token.current?.id === p.id ? token.current.valor : null
+    if (!dele) return enviar(p.foto)
+    try {
+      return await enviar({ token: dele })
     } catch (erro) {
-      if (!dele || !(erro instanceof PedidoInvalido) || erro.message !== TOKEN_DA_FOTO_INVALIDO) throw erro
+      if (!(erro instanceof PedidoInvalido) || erro.message !== TOKEN_DA_FOTO_INVALIDO) throw erro
       if (token.current?.valor === dele) token.current = null
-      // Sem cursor, reenvia a foto aqui mesmo; com cursor, a lista recomeça do topo (paginas.ts).
-      if (cursor) throw erro
-      return porImagem(p, cursor)
+      // Sem cursor, reenvia a foto aqui mesmo, uma vez e só se este ainda é o último pedido; com
+      // cursor, a lista recomeça do topo (paginas.ts).
+      if (cursor || ultimo.current !== minha) throw erro
+      return enviar(p.foto)
     }
   }
   const paginas = usePaginas({

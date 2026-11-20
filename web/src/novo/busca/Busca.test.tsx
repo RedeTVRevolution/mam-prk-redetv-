@@ -781,6 +781,51 @@ test('trocar o filtro antes de o token chegar: o pedido novo sai com a foto e a 
   expect(fotos[2].token).toBe('novo')
 })
 
+test('token recusado em dois filtros seguidos: só o último reenvia a foto, e o token dele fica (#805)', async () => {
+  const usuario = userEvent.setup()
+  let liberarA = () => {}
+  const esperaA = new Promise<void>((r) => (liberarA = r))
+  let liberarB = () => {}
+  const esperaB = new Promise<void>((r) => (liberarB = r))
+  servidor.use(
+    http.post('/v1/busca/imagem', async ({ request }) => {
+      const f = await request.formData()
+      const pedido = { params: new URL(request.url).searchParams, arquivo: f.get('arquivo') as File | null, token: f.get('token') as string | null }
+      fotos.push(pedido)
+      const n = fotos.length
+      if (pedido.arquivo) {
+        // O reenvio do 2º filtro (2024) só responde depois da recusa do 1º (Leo Dias).
+        if (n > 1) await esperaB
+        return HttpResponse.json(DA_FOTO, { headers: { 'X-Token-Da-Foto': `t${n}` } })
+      }
+      if (pedido.token !== 't1') return HttpResponse.json(DA_FOTO)
+      if (!pedido.params.get('desde')) await esperaA
+      return TOKEN_INVALIDO()
+    }),
+  )
+  await abrir('/busca?programa=TV+Fama')
+  await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
+  await screen.findByText('3 momentos em 2 vídeos')
+
+  await usuario.click(screen.getByRole('button', { name: 'Programa: TV Fama' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Leo Dias' }))
+  await waitFor(() => expect(fotos).toHaveLength(2))
+  await usuario.click(screen.getByRole('button', { name: 'Ano' }))
+  await usuario.click(await screen.findByRole('option', { name: '2024' }))
+  await waitFor(() => expect(fotos.filter((f) => f.arquivo)).toHaveLength(2))
+  const token = fotos.length
+  liberarA()
+  await new Promise((r) => setTimeout(r, 50))
+  liberarB()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(fotos.filter((f) => f.arquivo)).toHaveLength(2)
+
+  await usuario.click(screen.getByRole('button', { name: 'Ano: 2024' }))
+  await usuario.click(await screen.findByRole('option', { name: '2025' }))
+  await waitFor(() => expect(fotos.at(-1)?.params.get('desde')).toBe('2025-01-01'))
+  expect(fotos.at(-1)?.token).toBe(`t${token}`)
+})
+
 test('tipo ou tamanho errado: a mensagem da API aparece em português', async () => {
   respostaDaFoto = () => HttpResponse.json({ detail: 'Envie uma imagem JPEG ou PNG válida' }, { status: 422 })
   const usuario = userEvent.setup({ applyAccept: false })
