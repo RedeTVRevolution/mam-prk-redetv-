@@ -65,6 +65,12 @@ for i in "${!nomes[@]}"; do
   presente=0
   if jq -e --arg s "$saida" 'has($s) and .[$s].value != null' >/dev/null <<<"$json"; then
     presente=1
+    # Valor composto só nas saídas que o chamador usa como estruturadas (hoje, limpeza_de_imagens).
+    tipo=$(jq -r --arg s "$saida" '.[$s].value | type' <<<"$json")
+    if [[ ($tipo == object || $tipo == array) && $saida != limpeza_de_imagens ]]; then
+      echo "O output $saida do Terraform ($pasta) é um valor composto, e o chamador espera texto." >&2
+      exit 1
+    fi
     # tostring preserva o `false` (o Python assume true se a variável faltar ou vier vazia).
     valor=$(jq -r --arg s "$saida" '.[$s].value | if type == "string" then . elif type == "object" or type == "array" then tojson else tostring end' <<<"$json")
   fi
@@ -83,5 +89,6 @@ for i in "${!nomes[@]}"; do
     fi
   fi
   [[ $deploy == 1 ]] || printf 'export '
-  printf "%s='%s'\n" "$nome" "${valor//\'/\'\\\'\'}"
+  # Aspas simples, com cada apóstrofo fechado e reaberto: vale para bash 3.2 e dash (o `sh` do make).
+  printf "%s='%s'\n" "$nome" "$(printf '%s' "$valor" | sed "s/'/'\\\\''/g")"
 done

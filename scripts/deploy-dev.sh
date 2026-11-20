@@ -36,11 +36,12 @@ fi
 gc() { gcloud --project "$GCP_PROJECT_ID" --impersonate-service-account "$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT" "$@"; }
 tf() { terraform -chdir=infra "$@"; }
 # O ponto único que lê os outputs (#756): um `terraform output -json` por chamada, e o valor do
-# Terraform vale sobre o ambiente. Saída obrigatória ausente ou vazia derruba o deploy; `VAR=output?`
+# Terraform vale sobre o ambiente, e a pasta é sempre infra, a que o deploy aplica, mesmo com
+# PASTA_DO_AMBIENTE da prod herdada. Saída obrigatória ausente ou vazia derruba o deploy; `VAR=output:opcional`
 # é opcional. Nada do JSON é impresso (há output sensitive).
 ler_ambiente() {
   local lido
-  lido=$(scripts/ler-ambiente.sh --deploy "$@") || return
+  lido=$(PASTA_DO_AMBIENTE=infra scripts/ler-ambiente.sh --deploy "$@") || return
   eval "$lido"
 }
 

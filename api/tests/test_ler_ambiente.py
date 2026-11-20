@@ -383,3 +383,95 @@ def test_o_deploy_nao_le_mais_output_por_output() -> None:
 @pytest.mark.parametrize("arquivo", ["scripts/ler-ambiente.sh"])
 def test_o_script_e_executavel(arquivo: str) -> None:
     assert os.access(RAIZ / arquivo, os.X_OK)
+
+
+def test_o_deploy_le_sempre_a_pasta_infra_mesmo_com_a_da_prod_no_ambiente(
+    tmp_path: Path,
+) -> None:
+    inicio = DEPLOY.index("ler_ambiente() {")
+    funcao = DEPLOY[inicio : DEPLOY.index("\n}\n", inicio) + 3]
+    env = _terraform_simulado(tmp_path, SAIDAS)
+    env.update(
+        PASTA_DO_AMBIENTE="infra/ambientes/prod", GCP_PROJECT_ID="projeto-da-prod"
+    )
+    script = f'set -euo pipefail\n{funcao}\nler_ambiente URL=url\necho "$URL"\n'
+
+    feito = subprocess.run(
+        ["bash", "-c", script],
+        cwd=RAIZ,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert feito.returncode == 0, feito.stderr
+    assert _chamadas(tmp_path) == ["-chdir=infra output -json"]
+
+
+@pytest.mark.parametrize(
+    "valor",
+    ["d'Artagnan", 'aspas "duplas"', "$HOME `id`", "com espaço", "linha1\nlinha2", "'"],
+)
+def test_o_valor_com_caracteres_de_shell_volta_igual_depois_do_eval(
+    tmp_path: Path, valor: str
+) -> None:
+    feito = _rodar(tmp_path, "BUCKET_ACEITOS", saidas=_saidas(bucket_aceitos=valor))
+
+    assert feito.returncode == 0, feito.stderr
+    assert (
+        subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'eval {shlex.quote(feito.stdout)}; printf %s "$BUCKET_ACEITOS"',
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        == valor
+    )
+
+
+def test_valor_composto_e_recusado_salvo_na_saida_estruturada(tmp_path: Path) -> None:
+    for composto in (["a"], {"a": 1}):
+        feito = _rodar(tmp_path, "--deploy", "URL=url", saidas=_saidas(url=composto))
+        assert feito.returncode != 0 and "composto" in feito.stderr
+        local = _rodar(
+            tmp_path, "BUCKET_ACEITOS", saidas=_saidas(bucket_aceitos=composto)
+        )
+        assert local.returncode != 0
+
+    estruturada = _rodar(tmp_path, "--deploy", "LIMPEZA=limpeza_de_imagens")
+    assert estruturada.returncode == 0
+
+
+def test_o_alvo_da_busca_recebe_a_colecao_de_texto_do_ponto_unico(
+    tmp_path: Path,
+) -> None:
+    # O alvo usa a macro AMBIENTE_DA_BUSCA; roda-se o fragmento dele (sem o carregamento do arquivo
+    # de ambiente e com um comando que imprime a variável no lugar do Python) com o terraform simulado.
+    comando = subprocess.run(
+        ["make", "-n", "criar-colecao-da-busca"],
+        cwd=RAIZ,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    fim = 'eval "$ambiente" &&'
+    fragmento = comando[comando.index("ambiente=$(") :]
+    fragmento = fragmento[: fragmento.index(fim) + len(fim)]
+    assert "BUSCA_COLECAO_DE_TEXTO" in fragmento
+    env = _terraform_simulado(tmp_path, SAIDAS)
+
+    feito = subprocess.run(
+        ["bash", "-c", f"{fragmento} printenv BUSCA_COLECAO_DE_TEXTO"],
+        cwd=RAIZ,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert feito.stdout == "texto\n", feito.stderr
