@@ -2,13 +2,17 @@
 das linhas no BigQuery e o Terraform."""
 
 import json
+import re
+import sqlite3
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from api.ambiente import FaltaNoAmbiente
 from api.erros import ServicoIndisponivel
 from api.fuso import periodo_em_utc
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
@@ -20,6 +24,7 @@ from api.taxa_diaria import (
     atualizar,
     dias_recentes,
     linhas_do_dia,
+    main,
     preencher_itens,
 )
 from api.tests.test_taxa_de_correcao import BASE, Decupagens, _c, _mundo, _pulsar
@@ -237,13 +242,14 @@ class _Transporte:
 
 
 CONFIG = ConfigDaTaxa("proj", "decupagens", "regiao-x", "taxa")
+EVENTOS = "eventos"
 
 
 def test_o_bigquery_troca_os_dias_num_unico_merge() -> None:
     transporte = _Transporte()
     linhas = [LinhaDiaria(DIA, "j1", "Jornal", None, "pessoa.renomear", 2, 10)]
 
-    TabelaDaTaxaBigQuery(CONFIG, transporte).substituir([DIA], linhas)
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS).substituir([DIA], linhas)
 
     [corpo] = transporte.corpos
     consulta = corpo["query"]
@@ -280,11 +286,147 @@ def test_o_bigquery_troca_os_dias_num_unico_merge() -> None:
     ]
 
 
+def _origem_no_sqlite(consulta: str) -> str:
+    """A subconsulta `USING (...)` do MERGE, traduzida só nas funções do BigQuery."""
+    origem = consulta.split("USING (", 1)[1].split(") AS s\nON ", 1)[0]
+    origem = origem.replace("`proj.decupagens.eventos`", "eventos")
+    origem = origem.replace(
+        "FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l",
+        "FROM json_each(:linhas) AS l",
+    )
+    origem = re.sub(r"JSON_VALUE\(l, ('[^']*')\)", r"json_extract(l.value, \1)", origem)
+    return origem.replace("AS INT64", "AS INTEGER")
+
+
+def test_o_merge_nao_reinsere_o_job_que_a_purga_marcou() -> None:
+    transporte = _Transporte()
+    linhas = [
+        LinhaDiaria(DIA, job, "Jornal", None, "pessoa.renomear", 2, 10)
+        for job in ("purgado", "antigo", "vivo")
+    ]
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS).substituir([DIA], linhas)
+    [corpo] = transporte.corpos
+    banco = sqlite3.connect(":memory:")
+    banco.execute("CREATE TABLE eventos (tipo, job_id, quando)")
+    banco.executemany(
+        "INSERT INTO eventos VALUES (?, ?, ?)",
+        [
+            ("purga", "purgado", "2026-11-20T10:00:00+00:00"),
+            ("purga", "antigo", "2020-01-01T00:00:00+00:00"),  # fora de qualquer janela
+            ("envio", "vivo", "2026-11-20T10:00:00+00:00"),  # evento comum não barra
+        ],
+    )
+    [linhas_json] = [
+        p["parameterValue"]["value"]
+        for p in corpo["queryParameters"]
+        if p["name"] == "linhas"
+    ]
+
+    origem = banco.execute(
+        _origem_no_sqlite(corpo["query"]), {"linhas": linhas_json}
+    ).fetchall()
+
+    assert [linha[1] for linha in origem] == ["vivo"]
+
+
+def test_a_tabela_de_eventos_vem_do_ambiente_e_o_nome_dela_chega_ao_merge() -> None:
+    transporte = _Transporte()
+    ambiente = {
+        "GCP_PROJECT_ID": "proj",
+        "BIGQUERY_DATASET": "decupagens",
+        "BIGQUERY_REGIAO": "regiao-x",
+        "BIGQUERY_TABELA_DA_TAXA": "taxa",
+        "BIGQUERY_TABELA_DE_EVENTOS": "eventos",
+    }
+
+    TabelaDaTaxaBigQuery.do_ambiente(ambiente, transporte).substituir([DIA], [])
+
+    assert "`proj.decupagens.eventos`" in transporte.corpos[0]["query"]
+    del ambiente["BIGQUERY_TABELA_DE_EVENTOS"]
+    with pytest.raises(FaltaNoAmbiente):
+        TabelaDaTaxaBigQuery.do_ambiente(ambiente, transporte)
+    # O leitor da web usa a mesma configuração e não precisa da tabela de eventos.
+    assert ConfigDaTaxa.do_ambiente(ambiente).tabela == "taxa"
+
+
+AMBIENTE_DO_COMANDO = {
+    "GCP_PROJECT_ID": "proj",
+    "BUCKET_ACEITOS": "aceitos",
+    "BUCKET_DECUPAGENS": "decupagens-b",
+    "BIGQUERY_DATASET": "decupagens",
+    "BIGQUERY_REGIAO": "regiao-x",
+    "BIGQUERY_TABELA_DA_TAXA": "taxa",
+    "BIGQUERY_TABELA_DE_EVENTOS": "eventos",
+}
+
+
+def _comando_com_dubles(
+    monkeypatch: pytest.MonkeyPatch, ambiente: dict[str, str]
+) -> _Transporte:
+    jobs, decupagens, itens, correcoes, revisao = _mundo_com_itens()
+    transporte = _Transporte()
+    for nome, valor in ambiente.items():
+        monkeypatch.setenv(nome, valor)
+    for nome in set(AMBIENTE_DO_COMANDO) - set(ambiente):
+        monkeypatch.delenv(nome, raising=False)
+    alvo = "api.taxa_diaria."
+    monkeypatch.setattr(alvo + "ClienteStorage", lambda **_: object())
+    monkeypatch.setattr(
+        alvo + "DecupagensStorage",
+        SimpleNamespace(do_ambiente=lambda *_: decupagens),
+    )
+    monkeypatch.setattr(alvo + "transporte_http", lambda _projeto: transporte)
+    monkeypatch.setattr(alvo + "cliente_do_firestore", lambda _projeto: object())
+    monkeypatch.setattr(alvo + "RepositorioFirestore", lambda _banco: jobs)
+    monkeypatch.setattr(alvo + "ItensNoStorage", lambda *_: itens)
+    monkeypatch.setattr(alvo + "RepositorioDeCorrecoesFirestore", lambda _: correcoes)
+    monkeypatch.setattr(alvo + "RepositorioDeRevisaoFirestore", lambda _: revisao)
+    return transporte
+
+
+@pytest.mark.parametrize("argumentos", [["2"], ["PREENCHER", "2"]])
+def test_o_comando_leva_a_tabela_de_eventos_ao_merge_na_rodada_e_na_carga(
+    monkeypatch: pytest.MonkeyPatch, argumentos: list[str]
+) -> None:
+    transporte = _comando_com_dubles(monkeypatch, AMBIENTE_DO_COMANDO)
+
+    assert main(argumentos) == 0
+
+    assert transporte.corpos
+    assert all("`proj.decupagens.eventos`" in c["query"] for c in transporte.corpos)
+
+
+def test_o_comando_sem_a_tabela_de_eventos_sai_com_2_sem_chamar_o_bigquery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ambiente = {
+        k: v
+        for k, v in AMBIENTE_DO_COMANDO.items()
+        if k != "BIGQUERY_TABELA_DE_EVENTOS"
+    }
+    transporte = _comando_com_dubles(monkeypatch, ambiente)
+
+    assert main([]) == 2
+    assert transporte.corpos == []
+
+
+def test_o_comando_nao_promete_gravar_o_que_o_merge_pode_descartar(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _comando_com_dubles(monkeypatch, AMBIENTE_DO_COMANDO)
+
+    main(["2"])
+
+    saida = capsys.readouterr().out
+    assert "linhas enviadas" in saida
+    assert "gravadas em" not in saida
+
+
 def test_o_merge_que_nao_termina_no_prazo_e_erro() -> None:
     with pytest.raises(RuntimeError):
-        TabelaDaTaxaBigQuery(CONFIG, lambda corpo: {"jobComplete": False}).substituir(
-            [DIA], []
-        )
+        TabelaDaTaxaBigQuery(
+            CONFIG, lambda corpo: {"jobComplete": False}, EVENTOS
+        ).substituir([DIA], [])
 
 
 def test_os_dias_sao_trocados_em_lotes_para_caber_no_parametro() -> None:
@@ -292,7 +434,7 @@ def test_os_dias_sao_trocados_em_lotes_para_caber_no_parametro() -> None:
     dias = [DIA + timedelta(days=n) for n in range(400)]
     linhas = [LinhaDiaria(d, "j1", "J", None, "t", 1, 1) for d in dias]
 
-    TabelaDaTaxaBigQuery(CONFIG, transporte, dias_por_merge=100).substituir(
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS, dias_por_merge=100).substituir(
         dias, linhas
     )
 
@@ -308,7 +450,7 @@ def test_muitas_linhas_em_poucos_dias_respeitam_os_bytes_sem_partir_dia() -> Non
         for d in dias[1:]  # um dia vazio também precisa ser substituído
     ]
 
-    TabelaDaTaxaBigQuery(CONFIG, transporte).substituir(dias, linhas)
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS).substituir(dias, linhas)
 
     assert len(transporte.corpos) > 1
     dias_trocados: set[str] = set()
@@ -340,7 +482,7 @@ def test_dia_acima_do_teto_vai_sozinho_sem_perder_linhas(
         for n in range(quantidade)
     ]
 
-    TabelaDaTaxaBigQuery(CONFIG, transporte).substituir(dias, linhas)
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS).substituir(dias, linhas)
 
     assert len(transporte.corpos) == 3
     for corpo, dia, quantidade in zip(transporte.corpos, dias, [1, 20, 1], strict=True):
@@ -383,6 +525,7 @@ def test_o_job_agendado_recebe_os_nomes_do_terraform() -> None:
         "BUCKET_DECUPAGENS",
         "BIGQUERY_DATASET",
         "BIGQUERY_TABELA_DA_TAXA",
+        "BIGQUERY_TABELA_DE_EVENTOS",
         "BIGQUERY_REGIAO",
     ):
         assert f'"{variavel}"' in tf
@@ -390,6 +533,12 @@ def test_o_job_agendado_recebe_os_nomes_do_terraform() -> None:
     assert "google_cloud_scheduler_job" in tf
     main = (MAM.parent.parent / "main.tf").read_text()
     assert 'output "bigquery_tabela_da_taxa"' in main
+    assert 'output "bigquery_tabela_de_eventos"' in tf
+    for raiz in (
+        main,
+        (MAM.parent.parent / "ambientes" / "prod" / "main.tf").read_text(),
+    ):
+        assert "module.mam.bigquery_tabela_de_eventos" in raiz
 
 
 class _RevisaoQueConta:
