@@ -826,11 +826,20 @@ def _revisao_espelhada(banco: firestore.Client) -> RepositorioDeRevisao:
     )
 
 
+VALIDADE_DA_FALHA_S = (
+    10.0  # consulta do painel que falha: não refeita por cada pedido (#775)
+)
+
+
 def _com_cache[C, R](
     consulta: C | None, envolver: Callable[[C, CacheCurto], R]
 ) -> R | None:
     """A consulta do BigQuery com o cache curto de uma instância (#453); `None` fica `None`."""
-    return envolver(consulta, CacheCurto()) if consulta else None
+    return (
+        envolver(consulta, CacheCurto(validade_da_falha_s=VALIDADE_DA_FALHA_S))
+        if consulta
+        else None
+    )
 
 
 configurar_o_log()
@@ -940,7 +949,7 @@ if _projeto:
         taxa_de_correcao=taxa_do_ambiente(os.environ),
         nomes_do_acervo=nomes_do_ambiente(os.environ),
         relatorio_de_marcas=_com_cache(marcas_do_ambiente(os.environ), MarcasComCache),
-        cache_do_painel=CacheCurto(),
+        cache_do_painel=CacheCurto(validade_da_falha_s=VALIDADE_DA_FALHA_S),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],

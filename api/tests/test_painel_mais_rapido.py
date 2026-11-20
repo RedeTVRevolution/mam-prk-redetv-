@@ -7,7 +7,9 @@ from typing import Any
 import pytest
 
 from api.auditoria import RegistroDeAuditoria
+from api.custo_do_painel import CustoEmMemoria
 from api.painel import EmailsDasContas
+from api.qualidade_do_painel import QualidadeEmMemoria
 from api.relatorios import em_paralelo, linhas_da_consulta
 from api.resumos_de_uso import ResumosEmMemoria
 from api.tests.test_rotas_do_painel import LINHAS, USO, Mundo
@@ -191,3 +193,106 @@ def test_sem_gravar_a_auditoria_a_requisicao_falha(
     monkeypatch.setattr(mundo.auditoria, "acrescentar", nao_grava)
 
     assert mundo.get(rota, **params).status_code == 503
+
+
+# --- /revisao e e-mails em paralelo (#775) -----------------------------------------------
+
+
+class QualidadeQueConta(QualidadeEmMemoria):
+    def __init__(self, encontro: threading.Barrier | None = None) -> None:
+        super().__init__([], [])
+        self.encontro = encontro
+        self.taxas = 0
+
+    def taxa_de_correcao(self, *a: Any, **k: Any) -> Any:
+        self.taxas += 1
+        if self.encontro:
+            self.encontro.wait()
+        return super().taxa_de_correcao(*a, **k)
+
+    def tempo_de_revisao(self, *a: Any, **k: Any) -> Any:
+        if self.encontro:
+            self.encontro.wait()
+        return super().tempo_de_revisao(*a, **k)
+
+
+class ResumosComEncontro(ResumosEmMemoria):
+    def __init__(self, encontro: threading.Barrier) -> None:
+        super().__init__(LINHAS, ["Hoje"], USO)
+        self.encontro = encontro
+
+    def correcoes(self, *a: Any, **k: Any) -> Any:
+        self.encontro.wait()
+        return super().correcoes(*a, **k)
+
+
+def test_revisao_le_correcoes_taxa_tempo_e_emails_ao_mesmo_tempo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    encontro = threading.Barrier(4, timeout=5)  # em série, a primeira esperaria em vão
+    mundo = Mundo(
+        ["diretoria"],
+        resumos=ResumosComEncontro(encontro),
+        qualidade=QualidadeQueConta(encontro),
+    )
+    listar = mundo.contas.listar
+
+    def listar_no_encontro() -> Any:
+        encontro.wait()
+        return listar()
+
+    monkeypatch.setattr(mundo.contas, "listar", listar_no_encontro)
+
+    assert mundo.get("/revisao").status_code == 200
+
+
+def test_revisao_com_filtro_de_usuario_nao_le_a_taxa() -> None:
+    qualidade = QualidadeQueConta()
+    mundo = Mundo(["diretoria"], qualidade=qualidade)
+
+    assert mundo.get("/revisao", usuario="bia").status_code == 200
+    assert qualidade.taxas == 0
+
+
+@pytest.mark.parametrize(
+    ("rota", "leitura"),
+    [("/acessos", "acessos"), ("/buscas", "uso_por_quem"), ("/custo", "custos")],
+)
+def test_a_leitura_e_os_emails_frios_andam_ao_mesmo_tempo(
+    rota: str, leitura: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    encontro = threading.Barrier(2, timeout=5)  # em série, o primeiro esperaria em vão
+    faturamento = CustoEmMemoria([], [])
+    mundo = Mundo(["diretoria"], faturamento=faturamento)
+
+    def com_encontro(original: Callable[..., Any]) -> Callable[..., Any]:
+        def chamar(*a: Any, **k: Any) -> Any:
+            encontro.wait()
+            return original(*a, **k)
+
+        return chamar
+
+    monkeypatch.setattr(mundo.contas, "listar", com_encontro(mundo.contas.listar))
+    fonte = faturamento if rota == "/custo" else mundo.resumos
+    monkeypatch.setattr(fonte, leitura, com_encontro(getattr(fonte, leitura)))
+
+    assert mundo.get(rota).status_code == 200
+
+
+@pytest.mark.parametrize("rota", ["/buscas", "/videos"])
+def test_programa_e_usuario_juntos_dao_422_sem_listar_as_contas(
+    rota: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mundo = Mundo(["diretoria"])
+    listagens = 0
+    listar = mundo.contas.listar
+
+    def contando() -> Any:
+        nonlocal listagens
+        listagens += 1
+        return listar()
+
+    monkeypatch.setattr(mundo.contas, "listar", contando)
+
+    assert mundo.get(rota, programa="Hoje", usuario="bia").status_code == 422
+    assert listagens == 0

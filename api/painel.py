@@ -797,6 +797,11 @@ def _chave(filtro: FiltroDoPainel) -> tuple[object, ...]:
     return (filtro.desde, filtro.ate, filtro.programa, filtro.usuario)
 
 
+def _confere_programa_ou_usuario(filtro: FiltroDoPainel) -> None:
+    if filtro.programa is not None and filtro.usuario is not None:
+        raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
+
+
 def _base_de_uso(
     fonte: ResumosDeUso,
     filtro: FiltroDoPainel,
@@ -805,8 +810,7 @@ def _base_de_uso(
     """As linhas do filtro: da tabela por programa se pediu programa, senão da por pessoa.
     As duas não se cruzam: pedir os dois é erro, em vez de devolver números que um dos
     filtros não aplicou."""
-    if filtro.programa is not None and filtro.usuario is not None:
-        raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
+    _confere_programa_ou_usuario(filtro)
     if filtro.programa is not None:
         return ou_503(
             lambda: lido(
@@ -1311,15 +1315,17 @@ def criar_rotas_do_painel(
         if filtro.programa is not None:
             raise HTTPException(422, "Os acessos não têm programa")
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        linhas = _com_acesso(
-            ou_503(
-                lambda: lido(
-                    ("acessos", *_chave(filtro)),
-                    lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario),
+        linhas, emails = em_paralelo(
+            lambda: _com_acesso(
+                ou_503(
+                    lambda: lido(
+                        ("acessos", *_chave(filtro)),
+                        lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario),
+                    )
                 )
-            )
+            ),
+            emails_das_contas,
         )
-        emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "acessos", filtro)
             return resposta_em_csv(
@@ -1359,6 +1365,7 @@ def criar_rotas_do_painel(
         """Vídeos enviados, concluídos e com falha, horas e tempo de processamento, por dia,
         programa e usuário (ou sistema). Programa e usuário não se combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        _confere_programa_ou_usuario(filtro)  # antes de pedir os e-mails
         # Com `programa` a tabela por programa é a própria base.
         com_tabela_por_programa = filtro.programa is None and filtro.usuario is None
         base, por_programa, emails = em_paralelo(
@@ -1427,8 +1434,10 @@ def criar_rotas_do_painel(
         busca só tem programa quando foi filtrada por ele. Programa e usuário não se
         combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        base = _base_de_uso(fonte, filtro, lido)
-        emails = emails_das_contas()
+        _confere_programa_ou_usuario(filtro)  # antes de pedir os e-mails
+        base, emails = em_paralelo(
+            lambda: _base_de_uso(fonte, filtro, lido), emails_das_contas
+        )
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "buscas", filtro)
             return resposta_em_csv(
@@ -1462,35 +1471,37 @@ def criar_rotas_do_painel(
         (#265); os minutos de revisão por hora de vídeo por pessoa e por programa (#251).
         Os filtros se cruzam; a taxa não tem pessoa e vem vazia com filtro de usuário."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        correcoes = ou_503(
-            lambda: lido(
-                ("correcoes", *_chave(filtro)),
-                lambda: fonte.correcoes(
-                    filtro.desde, filtro.ate, filtro.programa, filtro.usuario
-                ),
-            )
-        )
-        taxa = (
-            []
-            if filtro.usuario is not None
-            else ou_503(
+        correcoes, taxa, tempo, emails = em_paralelo(
+            lambda: ou_503(
                 lambda: lido(
-                    ("taxa", filtro.desde, filtro.ate, filtro.programa),
-                    lambda: qualidade.taxa_de_correcao(
-                        filtro.desde, filtro.ate, filtro.programa
+                    ("correcoes", *_chave(filtro)),
+                    lambda: fonte.correcoes(
+                        filtro.desde, filtro.ate, filtro.programa, filtro.usuario
                     ),
                 )
-            )
+            ),
+            lambda: (
+                []
+                if filtro.usuario is not None
+                else ou_503(
+                    lambda: lido(
+                        ("taxa", filtro.desde, filtro.ate, filtro.programa),
+                        lambda: qualidade.taxa_de_correcao(
+                            filtro.desde, filtro.ate, filtro.programa
+                        ),
+                    )
+                )
+            ),
+            lambda: ou_503(
+                lambda: lido(
+                    ("tempo_de_revisao", *_chave(filtro)),
+                    lambda: qualidade.tempo_de_revisao(
+                        filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+                    ),
+                )
+            ),
+            emails_das_contas,
         )
-        tempo = ou_503(
-            lambda: lido(
-                ("tempo_de_revisao", *_chave(filtro)),
-                lambda: qualidade.tempo_de_revisao(
-                    filtro.desde, filtro.ate, filtro.programa, filtro.usuario
-                ),
-            )
-        )
-        emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "revisao", filtro)
             return resposta_em_csv(
@@ -1602,19 +1613,24 @@ def criar_rotas_do_painel(
         faturamento cruzado com os Jobs (#285). O custo sem dono (fixo ou sem rótulo) só
         entra sem filtro de programa ou de usuário."""
         fonte = confere_o_pedido(faturamento, filtro.desde, filtro.ate)
-        base = ou_503(
-            lambda: lido(
-                ("custo", *_chave(filtro)),
-                lambda: confere_a_moeda(
-                    fonte.custos(
-                        FiltroDeCusto(
-                            filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+        base, emails = em_paralelo(
+            lambda: ou_503(
+                lambda: lido(
+                    ("custo", *_chave(filtro)),
+                    lambda: confere_a_moeda(
+                        fonte.custos(
+                            FiltroDeCusto(
+                                filtro.desde,
+                                filtro.ate,
+                                filtro.programa,
+                                filtro.usuario,
+                            )
                         )
-                    )
-                ),
-            )
+                    ),
+                )
+            ),
+            emails_das_contas,
         )
-        emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "custo", filtro)
             return resposta_em_csv(
