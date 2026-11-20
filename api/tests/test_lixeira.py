@@ -73,7 +73,7 @@ def _correcao(id: str, job_id: str = "j1") -> Correcao:
 
 
 class Mundo:
-    def __init__(self, *jobs: Job) -> None:
+    def __init__(self, *jobs: Job, indice: IndiceEmMemoria | None = None) -> None:
         self.jobs = RepositorioEmMemoria()
         for job in jobs or (_job(),):
             self.jobs.salvar(job)
@@ -81,7 +81,8 @@ class Mundo:
         self.auditoria = RepositorioDeAuditoriaEmMemoria()
         self.correcoes = RepositorioDeCorrecoesEmMemoria()
         self.arquivos = ArquivosEmMemoria()
-        self.indice = IndiceEmMemoria()
+        self.indice = indice or IndiceEmMemoria()
+        self.armazenamento = ArmazenamentoFalso()
         papeis = RepositorioDePapeisEmMemoria()
         papeis.salvar("adm", ["administrador"])
         papeis.salvar("ed", ["editor"])
@@ -100,7 +101,7 @@ class Mundo:
                     }
                 ),
                 self.jobs,
-                ArmazenamentoFalso(),
+                self.armazenamento,
                 chaves=VerificadorDeChaveDeApi(chaves, MAC),
                 papeis=papeis,
                 correcoes=self.correcoes,
