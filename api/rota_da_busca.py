@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TempoEsgotado
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from starlette.datastructures import UploadFile
@@ -177,6 +177,54 @@ def criar_rotas_da_busca(
             ],
         )
 
+    def consultar(
+        resposta: Response,
+        chamador: Chamador,
+        *,
+        desde: date | None,
+        ate: date | None,
+        cursor: str | None,
+        limite_de_videos: int,
+        prazo_s: float,
+        da_carga_do_pedido: bool,
+        preparar: Callable[[], dict[str, Any]],
+        registrar_o_uso: Callable[[ResultadoDaBusca], None],
+    ) -> ResultadoDaBusca:
+        """A sequência das duas rotas: período, limite, busca com prazo, evento e cursor.
+
+        `preparar` roda depois do limite (a foto só é recodificada para quem ainda tem
+        cota) e devolve o `texto`, o `imagem`, o `ordem` e os `ajustes` da `busca.buscar`.
+        """
+        if desde and ate and desde > ate:
+            raise HTTPException(422, "O início do período passa do fim")
+        sistema, quem = _quem_e(chamador)
+        if not limite.consumir(quem):
+            raise HTTPException(429, "Consultas demais; tente em um minuto")
+        entrada = preparar()
+        cancelado = threading.Event()
+        futuro = _executor.submit(
+            busca.buscar,
+            limite=limite_de_videos,
+            filtros_do_servidor=filtros_do_servidor(),
+            sistema=sistema,
+            cancelado=cancelado,
+            cursor=cursor,
+            dono=quem,
+            **entrada,
+        )
+        try:
+            resultado = futuro.result(timeout=prazo_s)
+        except TempoEsgotado:
+            futuro.cancel()
+            cancelado.set()
+            log.warning("busca passou de %.1f s", prazo_s)
+            raise HTTPException(504, "A busca demorou demais") from None
+        except CursorInvalido:
+            raise HTTPException(422, "Cursor inválido") from None
+        if cursor is None and not da_carga_do_pedido:  # a 2ª página não é busca nova
+            registrar_o_uso(resultado)
+        return _com_cursor(resposta, resultado)
+
     @rotas.get("/busca", description=f"Busca por texto. {NOTA_DO_QUADRO}")
     def buscar(
         resposta: Response,
@@ -196,45 +244,29 @@ def criar_rotas_da_busca(
         cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
         teste_de_carga: TesteDeCarga = None,
     ) -> ResultadoDaBusca:
-        if desde and ate and desde > ate:
-            raise HTTPException(422, "O início do período passa do fim")
-        sistema, quem = _quem_e(chamador)
-        if not limite.consumir(quem):
-            raise HTTPException(429, "Consultas demais; tente em um minuto")
-        cancelado = threading.Event()
-        futuro = _executor.submit(
-            busca.buscar,
-            q,
-            ordem=ordem,
-            limite=limite_de_videos,
-            filtros_do_servidor=filtros_do_servidor(),
-            sistema=sistema,
-            cancelado=cancelado,
+        return consultar(
+            resposta,
+            chamador,
+            desde=desde,
+            ate=ate,
             cursor=cursor,
-            dono=quem,
-            ajustes=Ajustes(
-                evidencias=tuple(dict.fromkeys(evidencias or ())),
-                programa=programa,
-                desde=desde,
-                ate=ate,
-                pessoa=pessoa,
-                marca=marca,
-                tipo=tipo,
-            ),
-        )
-        try:
-            resultado = futuro.result(timeout=tempo_maximo_s)
-        except TempoEsgotado:
-            futuro.cancel()
-            cancelado.set()
-            log.warning("busca passou de %.1f s", tempo_maximo_s)
-            raise HTTPException(504, "A busca demorou demais") from None
-        except CursorInvalido:
-            raise HTTPException(422, "Cursor inválido") from None
-        if cursor is None and not da_carga(
-            teste_de_carga
-        ):  # a 2ª página não é busca nova
-            registrar_busca(
+            limite_de_videos=limite_de_videos,
+            prazo_s=tempo_maximo_s,
+            da_carga_do_pedido=da_carga(teste_de_carga),
+            preparar=lambda: {
+                "texto": q,
+                "ordem": ordem,
+                "ajustes": Ajustes(
+                    evidencias=tuple(dict.fromkeys(evidencias or ())),
+                    programa=programa,
+                    desde=desde,
+                    ate=ate,
+                    pessoa=pessoa,
+                    marca=marca,
+                    tipo=tipo,
+                ),
+            },
+            registrar_o_uso=lambda resultado: registrar_busca(
                 chamador,
                 len(q),
                 programa,
@@ -247,8 +279,8 @@ def criar_rotas_da_busca(
                 pessoa=pessoa,
                 marca=marca,
                 tipo=tipo,
-            )
-        return _com_cursor(resposta, resultado)
+            ),
+        )
 
     teto_do_corpo = limites_da_imagem.max_bytes + FOLGA_DO_MULTIPART
 
@@ -302,66 +334,54 @@ def criar_rotas_da_busca(
         cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
         teste_de_carga: TesteDeCarga = None,
     ) -> ResultadoDaBusca:
-        if desde and ate and desde > ate:
-            raise HTTPException(422, "O início do período passa do fim")
-        sistema, quem = _quem_e(chamador)
-        if not limite.consumir(quem):
-            raise HTTPException(429, "Consultas demais; tente em um minuto")
-        # A foto fica só em memória: nunca no disco, no Storage, no Firestore nem nos logs.
+
+        def preparar() -> dict[str, Any]:
+            # A foto fica só em memória: nunca no disco, no Storage, no Firestore nem nos logs.
+            try:
+                jpeg = recodificar(
+                    dados,
+                    max_bytes=limites_da_imagem.max_bytes,
+                    max_pixels=limites_da_imagem.max_pixels,
+                    formatos=FORMATOS_DA_BUSCA_POR_IMAGEM,
+                )
+            except AcimaDoLimiteDeBytes:
+                raise HTTPException(422, _GRANDE_DEMAIS) from None
+            except AcimaDoLimiteDePixels:
+                raise HTTPException(422, _PIXELS_DEMAIS) from None
+            except ImagemRecusada:
+                raise HTTPException(422, _RECUSA) from None
+            return {
+                "texto": "",
+                "imagem": jpeg,
+                "ajustes": Ajustes(programa=programa, desde=desde, ate=ate),
+            }
+
         try:
-            jpeg = recodificar(
-                dados,
-                max_bytes=limites_da_imagem.max_bytes,
-                max_pixels=limites_da_imagem.max_pixels,
-                formatos=FORMATOS_DA_BUSCA_POR_IMAGEM,
+            return consultar(
+                resposta,
+                chamador,
+                desde=desde,
+                ate=ate,
+                cursor=cursor,
+                limite_de_videos=limite_de_videos,
+                # A foto tem uma chamada para a descrição, além do prazo da busca pelo termo.
+                prazo_s=tempo_maximo_s + TEMPO_DA_CONSULTA_S,
+                da_carga_do_pedido=da_carga(teste_de_carga),
+                preparar=preparar,
+                registrar_o_uso=lambda resultado: registrar_busca(
+                    chamador,
+                    len(dados),
+                    programa,
+                    resultado,
+                    modo="imagem",
+                    desde=desde,
+                    ate=ate,
+                ),
             )
-        except AcimaDoLimiteDeBytes:
-            raise HTTPException(422, _GRANDE_DEMAIS) from None
-        except AcimaDoLimiteDePixels:
-            raise HTTPException(422, _PIXELS_DEMAIS) from None
-        except ImagemRecusada:
-            raise HTTPException(422, _RECUSA) from None
-        cancelado = threading.Event()
-        futuro = _executor.submit(
-            busca.buscar,
-            "",
-            imagem=jpeg,
-            limite=limite_de_videos,
-            filtros_do_servidor=filtros_do_servidor(),
-            sistema=sistema,
-            cancelado=cancelado,
-            cursor=cursor,
-            dono=quem,
-            ajustes=Ajustes(programa=programa, desde=desde, ate=ate),
-        )
-        # A foto tem uma chamada para a descrição, além do prazo da busca pelo termo.
-        prazo_s = tempo_maximo_s + TEMPO_DA_CONSULTA_S
-        try:
-            resultado = futuro.result(timeout=prazo_s)
-        except TempoEsgotado:
-            futuro.cancel()
-            cancelado.set()
-            log.warning("busca por imagem passou de %.1f s", prazo_s)
-            raise HTTPException(504, "A busca demorou demais") from None
-        except CursorInvalido:
-            raise HTTPException(422, "Cursor inválido") from None
         except BuscaPorImagemIndisponivel:
             raise HTTPException(
                 503, "A busca por imagem não está disponível agora"
             ) from None
-        if cursor is None and not da_carga(
-            teste_de_carga
-        ):  # a 2ª página não é busca nova
-            registrar_busca(
-                chamador,
-                len(dados),
-                programa,
-                resultado,
-                modo="imagem",
-                desde=desde,
-                ate=ate,
-            )
-        return _com_cursor(resposta, resultado)
 
     return rotas
 
