@@ -29,8 +29,8 @@ from urllib.parse import urlsplit
 import requests
 
 from api.busca import RRF_K, TETO_DE_CONSULTAS_AO_INDICE, _intercalar
-from api.cache_curto import CacheCurto
 from api.busca_na_nuvem import com_pool, tocar_o_host
+from api.cache_curto import CacheCurto
 from api.clientes_de_nuvem import sessao_autenticada
 from api.indice_da_busca import Consulta, Filtros, Registro
 from api.operacao_do_google import terminou
