@@ -399,10 +399,12 @@ class SoComQuemConta:
         programas: Sequence[str],
         desde: date | None,
         ate: date | None,
+        so_o_destino: str | None = None,
     ) -> tuple[list[PessoaNoVideo], dict[str, str]]:
         """Passa cada soma ao destino da cadeia de fusão (#784) e tira quem não conta. Num
         vídeo com duas ou mais pessoas do mesmo destino a soma de baixo já unida não se
-        reúne em Python: os intervalos vêm da consulta, só dessas pessoas."""
+        reúne em Python: os intervalos vêm da consulta, só dessas pessoas. Com `so_o_destino`,
+        só os pares desse destino entram (os vídeos de uma pessoa não pagam a fusão alheia)."""
         destinos = QuemConta(self._catalogo).pessoas({s.pessoa_id for s in somas})
         alvo = {i: d.pessoa.id for i, d in destinos.items() if d.pessoa and d.conta}
         nomes = {
@@ -412,7 +414,7 @@ class SoComQuemConta:
         }
         por_par: dict[tuple[str, str], list[PessoaNoVideo]] = defaultdict(list)
         for s in somas:
-            if s.pessoa_id in alvo:
+            if s.pessoa_id in alvo and so_o_destino in (None, alvo[s.pessoa_id]):
                 por_par[(s.job_id, alvo[s.pessoa_id])].append(s)
         juntas = {k: v for k, v in por_par.items() if len(v) > 1}
         intervalos: dict[tuple[str, str], list[tuple[int, int]]] = defaultdict(list)
@@ -445,7 +447,7 @@ class SoComQuemConta:
         limite: int,
     ) -> "list[VideoDaPessoa]":
         somas = self._somas_dos_videos_fora_da_lixeira(programas, desde, ate)
-        no_destino, _ = self._no_destino(somas, programas, desde, ate)
+        no_destino, _ = self._no_destino(somas, programas, desde, ate, pessoa_id)
         return videos_em_python(no_destino, pessoa_id, depois, limite)
 
 

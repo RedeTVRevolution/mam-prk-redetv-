@@ -1206,3 +1206,15 @@ def test_bigquery_pede_os_intervalos_so_das_pessoas_com_os_filtros_da_soma() -> 
     por_nome = {p["name"]: p["parameterValue"] for p in corpo["queryParameters"]}
     assert [v["value"] for v in por_nome["pessoas"]["arrayValues"]] == ["p3", "p4"]
     assert set(por_nome) == {"pessoas", "programas", "desde", "ate"}
+
+
+def test_videos_de_quem_nao_esta_em_fusao_nao_consultam_intervalos() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    resposta = cliente.get(
+        f"{ROTA}/videos", params={"pessoa_id": "p1"}, headers=AUTORIZACAO
+    )
+
+    assert [v["job_id"] for v in resposta.json()] == ["j3"]
+    assert fonte.pedidos == []  # a fusão p3 -> p4 não é da p1
