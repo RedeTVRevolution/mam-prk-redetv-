@@ -11,7 +11,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Hashable
-from typing import Any
+from typing import Any, cast
 
 VALIDADE_DO_CACHE_S = 120.0  # 2 min, dentro do 1 a 5 min do #453
 MAXIMO_DE_CHAVES = 64
@@ -56,13 +56,13 @@ class CacheCurto:
         junto) e guarda."""
         valido, valor = self._valido(chave)
         if valido:
-            return self._entregar(valor)
+            return cast(T, self._entregar(valor))
         with self._trava:
             trava = self._travas_das_chaves.setdefault(chave, threading.Lock())
         with trava:
             valido, valor = self._valido(chave)
             if valido:
-                return self._entregar(valor)
+                return cast(T, self._entregar(valor))
             try:
                 try:
                     valor = calcular()
@@ -84,4 +84,4 @@ class CacheCurto:
             finally:
                 with self._trava:
                     self._travas_das_chaves.pop(chave, None)
-            return self._entregar(valor)
+            return cast(T, self._entregar(valor))
