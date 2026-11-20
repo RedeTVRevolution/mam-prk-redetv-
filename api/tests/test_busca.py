@@ -1663,6 +1663,21 @@ def test_cursor_invalido_ou_de_outra_consulta_responde_422() -> None:
         assert r.json()["detail"] == "Cursor inválido"
 
 
+def test_cursor_da_relevancia_usado_com_data_responde_422() -> None:
+    c = cliente_com_videos(3, consultas=2)
+    _, cursor = pagina_da_busca(c, limite=1)
+    assert cursor is not None
+
+    r = c.get(
+        "/v1/busca",
+        params={"q": "vestido", "ordem": "data", "cursor": cursor},
+        headers=AUTORIZACAO,
+    )
+
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Cursor inválido"
+
+
 class RankingQueCaiDepois:
     """Reordena (invertendo) na 1ª chamada e cai em todas as outras."""
 
