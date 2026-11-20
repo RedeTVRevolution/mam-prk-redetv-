@@ -51,10 +51,10 @@ import { type Borda, duracaoDaLinha, faixasDoVisualizador, type Intervalo, relog
 import { ESTADOS_QUE_VAO_PARA_A_LIXEIRA } from '../../lixeira.ts'
 import { NomesDoCatalogo } from '../../nomesDoCatalogo.ts'
 import { type ItemDoPainel, itensDoPainel, nomeNormalizado } from '../../painel.ts'
-import { consultaNova } from '../../busca.ts'
+import { consultaParaEndereco, type ConsultaDaBusca } from '../../busca.ts'
 import { criarCacheDeQuadros, urlDoQuadroDaBusca } from '../../quadros.ts'
 import { guardado, guardarResultado, lerResultado, passoNoResultado, rotuloDaBusca } from '../../resultadoDaBusca.ts'
-import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, navegar, seguir } from '../../rotas.ts'
+import { ACERVO, enderecoDaAuditoria, enderecoDoVideo, lerRota, navegar, seguir } from '../../rotas.ts'
 import { timecodeNoInstante } from '../../timecode.ts'
 import { useSessaoDeRevisao } from '../../useSessaoDeRevisao.ts'
 import { urlSegura } from '../../urlSegura.ts'
@@ -130,7 +130,7 @@ const alcanceDoInventario = ({ ocorrencias, planos }: AlvoDoInventario): string 
 export function Video({
   job,
   t,
-  busca,
+  consulta,
   pode,
   reprocessou,
   aoReprocessar,
@@ -138,8 +138,8 @@ export function Video({
 }: {
   job: Job
   t: number | null
-  /** O texto da busca de onde a pessoa chegou: ele liga a faixa "Busca" e o N. */
-  busca: string | null
+  /** A consulta de onde a pessoa chegou: ela liga a faixa "Busca" e o N. */
+  consulta: ConsultaDaBusca | null
   pode: Permissoes
   reprocessou: boolean
   aoReprocessar: (job: Job, etapa: string) => void
@@ -229,15 +229,15 @@ export function Video({
   // O resultado da busca de onde a pessoa veio: o da sessão, ou a busca refeita. Sem busca no
   // endereço, a faixa e o N somem. Fora do cache ao sair do vídeo: o próximo vídeo lê a sessão de novo.
   const resultadoDaBusca = useQuery({
-    queryKey: ['busca-de-origem', busca],
+    queryKey: ['busca-de-origem', consulta && consultaParaEndereco(consulta)],
     queryFn: async () => {
-      const guardada = busca ? lerResultado(busca) : null
-      if (guardada || !busca) return guardada
-      const videos = guardado((await api.buscar(consultaNova(busca), VIDEOS_DO_RESULTADO)).videos)
-      guardarResultado(busca, videos)
+      const guardada = consulta ? lerResultado(consulta) : null
+      if (guardada || !consulta) return guardada
+      const videos = guardado((await api.buscar(consulta, VIDEOS_DO_RESULTADO)).videos)
+      guardarResultado(consulta, videos)
       return videos
     },
-    enabled: !!busca,
+    enabled: !!consulta,
     retry: false,
     staleTime: Infinity,
     gcTime: 0,
@@ -327,7 +327,7 @@ export function Video({
   /** O endereço copiado da barra é sempre o do momento atual, sem entrada nova no histórico. */
   function gravarNoEndereco() {
     if (!player.current) return
-    history.replaceState(history.state, '', enderecoDoVideo(job.id, Math.floor(player.current.currentTime), busca))
+    history.replaceState(history.state, '', enderecoDoVideo(job.id, Math.floor(player.current.currentTime), consulta))
   }
 
   function saltarPara(segundos: number) {
@@ -342,7 +342,7 @@ export function Video({
 
   /** N e Shift+N: o momento seguinte ou anterior do resultado, também entre vídeos. */
   function passarDeMomento(passo: 1 | -1) {
-    if (!busca) return
+    if (!consulta) return
     const videos = resultadoDaBusca.data
     if (!videos) {
       mostrarAviso(
@@ -362,7 +362,7 @@ export function Video({
       return
     }
     if (destino.job_id === job.id) saltarPara(destino.inicio_ms / 1000)
-    else navegar(enderecoDoVideo(destino.job_id, destino.inicio_ms / 1000, busca))
+    else navegar(enderecoDoVideo(destino.job_id, destino.inicio_ms / 1000, consulta))
   }
 
   function fecharBusca() {
@@ -903,7 +903,7 @@ export function Video({
     { tecla: 'F', acao: 'Tela cheia', grupo: GRUPO, casa: (e) => tecla(e, 'f'), executar: telaCheia },
     { tecla: '← →', acao: 'Numa faixa: passar de ocorrência (o player não anda)', grupo: GRUPO_DA_LINHA },
     { tecla: 'Enter', acao: 'Numa faixa: saltar à ocorrência', grupo: GRUPO_DA_LINHA },
-    ...(busca
+    ...(consulta
       ? [
           {
             tecla: 'N',
@@ -1166,7 +1166,7 @@ export function Video({
                 selecionada={selecionada}
                 alcas={alcas}
                 trecho={trechoNaLinha}
-                busca={busca && momentosDaBusca.length > 0 ? { rotulo: rotuloDaBusca(busca, momentosDaBusca.length), momentos: momentosDaBusca, aoFechar: fecharBusca } : null}
+                busca={consulta && momentosDaBusca.length > 0 ? { rotulo: rotuloDaBusca(consulta.q, momentosDaBusca.length), momentos: momentosDaBusca, aoFechar: fecharBusca } : null}
                 aoSaltar={saltarParaMs}
                 aoSelecionar={(chave) => abrirItem(chave, true)}
               />
@@ -1610,8 +1610,8 @@ function Transporte({
   }
 
   const link = () => {
-    const busca = new URLSearchParams(location.search).get('busca')
-    return location.origin + enderecoDoVideo(job.id, Math.floor(instante.ms() / 1000), busca)
+    const rota = lerRota(location.pathname, location.search.slice(1))
+    return location.origin + enderecoDoVideo(job.id, Math.floor(instante.ms() / 1000), rota.tipo === 'video' ? rota.consulta : null)
   }
 
   return (

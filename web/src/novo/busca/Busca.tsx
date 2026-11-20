@@ -98,7 +98,7 @@ function Alternar({ ligado, cor, aoAlternar, children }: { ligado: boolean; cor:
  */
 function GradeDaBusca({
   pedido,
-  termo,
+  consulta,
   cabecalho,
   avisos,
   semPedido,
@@ -106,8 +106,8 @@ function GradeDaBusca({
   contagem,
 }: {
   pedido: PedidoDaBusca | null
-  /** O termo que o vídeo aberto daqui percorre com N e Shift+N, ou ''. */
-  termo: string
+  /** A consulta que o vídeo aberto daqui percorre com N e Shift+N; `null` na foto. */
+  consulta: ConsultaDaBusca | null
   cabecalho: (busca: ReturnType<typeof useBusca>) => ReactNode
   avisos?: (busca: ReturnType<typeof useBusca>) => ReactNode
   semPedido?: ReactNode
@@ -120,8 +120,8 @@ function GradeDaBusca({
 
   // O vídeo aberto daqui percorre este resultado com N e Shift+N.
   useEffect(() => {
-    if (pedido?.tipo === 'texto' && busca.paginas && !busca.atualizando) guardarResultado(termo, guardado(busca.paginas.flatMap((p) => p.videos)))
-  }, [pedido?.tipo, termo, busca.paginas, busca.atualizando])
+    if (pedido?.tipo === 'texto' && consulta && busca.paginas && !busca.atualizando) guardarResultado(consulta, guardado(busca.paginas.flatMap((p) => p.videos)))
+  }, [pedido?.tipo, consulta, busca.paginas, busca.atualizando])
 
   // O ↓ de fora da grade leva à primeira cena; dentro dela, as setas são da grade.
   useAtalhos([
@@ -153,7 +153,7 @@ function GradeDaBusca({
       alturaDoTexto={TEXTO_DA_CENA}
       desenhar={(i) => {
         const cena = busca.item(i)
-        return cena ? <Cena key={cena.chave} cena={cena} indice={i} busca={termo} /> : <EsqueletoDaCena key={`e${i}`} />
+        return cena ? <Cena key={cena.chave} cena={cena} indice={i} consulta={busca.consultaExibida} /> : <EsqueletoDaCena key={`e${i}`} />
       }}
       esqueleto={<EsqueletoDaCena />}
       carregando={pedido && busca.carregando ? CARREGANDO[tipo] : null}
@@ -252,7 +252,7 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
     >
       <GradeDaBusca
         pedido={pedido}
-        termo={foto ? '' : consulta.q}
+        consulta={foto ? null : consulta}
         semPedido={<p className="p-8 text-center text-muted-foreground">Escreva acima o que procurar no acervo, ou arraste a foto de um objeto (JPEG ou PNG) para achar onde ele aparece.</p>}
         cabecalho={(busca) => {
           const pagina = busca.paginas?.[0]

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { codigoDoErro, NaoEncontrado, SessaoExpirada } from '../../api.ts'
+import type { ConsultaDaBusca } from '../../busca.ts'
 import { finalizando, type Job } from '../../jobs.ts'
 import { ACERVO, seguir } from '../../rotas.ts'
 import { useApi } from '../consultas.ts'
@@ -24,14 +25,14 @@ const INTERVALOS: Intervalos = { acompanhamentoMs: 5000, indexacaoMs: 2000 }
 export function TelaDoVideo({
   id,
   t,
-  busca = null,
+  consulta: origem = null,
   permissoes,
   intervalos = INTERVALOS,
 }: {
   id: string
   t: number | null
-  /** O texto da busca de onde a pessoa chegou (`?busca=`). */
-  busca?: string | null
+  /** A consulta de onde a pessoa chegou (`?consulta=`). */
+  consulta?: ConsultaDaBusca | null
   permissoes: readonly string[]
   intervalos?: Intervalos
 }) {
@@ -95,7 +96,7 @@ export function TelaDoVideo({
     <Video
       job={consulta.data}
       t={t}
-      busca={busca}
+      consulta={origem}
       pode={permissoesDoVideo(permissoes)}
       reprocessou={reprocessou}
       aoReprocessar={aoReprocessar}

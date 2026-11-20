@@ -2,7 +2,7 @@ import { IconBadgeTm, IconBox, IconMessage, IconMovie, IconTextCaption, type Ico
 import { useQuery } from '@tanstack/react-query'
 import { cn } from 'cn'
 import { useId, useState, type MouseEvent } from 'react'
-import { trechosDoMotivo, type Momento, type TipoDeMomento } from '../../busca.ts'
+import { trechosDoMotivo, type ConsultaDaBusca, type Momento, type TipoDeMomento } from '../../busca.ts'
 import { dataDeExibicao } from '../../jobs.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import { urlDoQuadroDaBusca } from '../../quadros.ts'
@@ -75,9 +75,9 @@ function Motivo({ momento, id, encurtado }: { momento: Momento; id: string; encu
  * Um momento do resultado na grade (#400): o quadro (ou o tipo), o vídeo, o instante e o motivo.
  * O clique em qualquer lugar abre o vídeo no instante, menos no "ver mais".
  */
-export function Cena({ cena, indice, busca }: { cena: DadosDaCena; indice: number; busca: string }) {
+export function Cena({ cena, indice, consulta }: { cena: DadosDaCena; indice: number; consulta: ConsultaDaBusca | null }) {
   const { video, momento } = cena
-  const endereco = enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, busca)
+  const endereco = enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, consulta)
   const [aberto, setAberto] = useState(false)
   const idDoMotivo = useId()
   const longo = momento.motivo.length > MOTIVO_LONGO
