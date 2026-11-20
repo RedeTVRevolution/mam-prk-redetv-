@@ -693,4 +693,3 @@ moved {
 output "indices_da_mescla" {
   value = module.mam.indices_da_mescla
 }
-
