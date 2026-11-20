@@ -707,3 +707,35 @@ def test_o_marcador_da_purga_nao_vira_linha_nem_deixa_o_dono_ativo() -> None:
     _resumir(banco)
 
     assert _tabela(banco, "uso_por_dia_e_usuario", "dia") == []
+
+
+def test_o_filtro_de_sistemas_da_api_lista_o_sistema_real_e_nao_a_purga() -> None:
+    from api.resumos_de_uso import ConfigDosResumos, ResumosBigQuery
+
+    banco = _banco()
+    _evento(
+        banco, "s1", "busca", "2026-11-03T12:00:00+00:00", "ingest",
+        quem_tipo="sistema",
+    )  # fmt: skip
+    _evento(
+        banco, "p1", "purga", "2026-11-03T13:00:00+00:00", "purga",
+        quem_tipo="sistema", job_id="j1",
+    )  # fmt: skip
+    _evento(
+        banco, "p2", "purga", "2026-11-04T13:00:00+00:00", "zeca",
+        job_id="j2", programa="Jornal", estado="concluido", duracao_do_video_ms=HORA_MS,
+    )  # fmt: skip
+    _resumir(banco)
+
+    class NoSqlite(ResumosBigQuery):
+        def _consultar(self, sql: str, parametros: Any = ()) -> list[list[Any]]:
+            sql = re.sub(r"`p\.d\.(\w+)`", r"\1", sql).replace(
+                "UNION DISTINCT", "UNION"
+            )
+            return [list(linha) for linha in banco.execute(sql).fetchall()]
+
+    config = ConfigDosResumos(
+        "p", "d", "r", "uso_por_dia_e_usuario", "uso_por_dia_e_programa",
+        "correcoes_por_dia", "chamadas_de_api_por_dia",
+    )  # fmt: skip
+    assert NoSqlite(config, lambda _corpo: {}).sistemas() == ["ingest"]

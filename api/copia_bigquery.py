@@ -381,6 +381,8 @@ def executar_dml(
             raise RuntimeError(
                 mensagem_do_prazo or f"{descricao} não terminou no prazo"
             )
+        if not cancelamento_tentado and agora >= prazo.cancelar_s:
+            continue  # o relógio cruzou o marco depois da checagem do topo
         falta = prazo.desistir_s - agora
         if not cancelamento_pedido and agora < prazo.cancelar_s:
             # A consulta não pode empurrar o cancelamento para depois do marco.

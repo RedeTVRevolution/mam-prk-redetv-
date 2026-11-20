@@ -859,6 +859,39 @@ def test_merge_pede_cancelamento_mesmo_sem_conseguir_consultar_o_estado(
     assert cancelamentos == [300]
 
 
+def test_dml_cancela_antes_de_consultar_se_o_relogio_cruza_o_marco_no_meio_do_laco(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import api.copia_bigquery as modulo
+    from api.copia_bigquery import PRAZO_CURTO, executar_dml
+
+    # inicio, topo do laço (119,999 s), releitura antes da consulta (120,001 s), depois fixo.
+    leituras = iter([0.0, 119.999, 120.001])
+    ultimo = 120.001
+
+    def relogio() -> float:
+        nonlocal ultimo
+        ultimo = next(leituras, ultimo)
+        return ultimo
+
+    chamadas: list[dict[str, Any]] = []
+
+    def transporte(corpo: dict[str, Any]) -> dict[str, Any]:
+        chamadas.append(corpo)
+        if "query" in corpo:
+            return {"jobComplete": False, "jobReference": {"jobId": "m"}}
+        if corpo.get("cancelar"):
+            return {}
+        return {"status": {"state": "DONE"}}
+
+    monkeypatch.setattr(modulo, "monotonic", relogio)
+    monkeypatch.setattr(modulo, "sleep", lambda _t: None)
+    executar_dml(transporte, "r", "DML", [], PRAZO_CURTO, descricao="teste")
+
+    # O cancelamento vem antes de qualquer consulta de estado.
+    assert [("cancelar" in c) for c in chamadas[1:]] == [True, False]
+
+
 @pytest.mark.parametrize("falha", ["nenhuma", "consulta", "cancelamento", "ambos"])
 def test_merge_desiste_em_quinze_minutos_e_a_copia_fica_falhou(
     falha: str, monkeypatch: pytest.MonkeyPatch
