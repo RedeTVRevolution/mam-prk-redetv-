@@ -8,6 +8,7 @@ from api.tests.test_infra_eventos_de_uso import MAIN, MODULO, _bloco
 def test_web_e_purga_recebem_as_tabelas_pela_configuracao() -> None:
     web = _bloco(MAIN, 'resource "google_cloud_run_v2_service" "web"')
     purga = (MODULO / "purga.tf").read_text()
+    assert '"BIGQUERY_TABELA_DA_TAXA"' in purga
     for bloco in (web, purga):
         for nome in (
             "BIGQUERY_DATASET",
