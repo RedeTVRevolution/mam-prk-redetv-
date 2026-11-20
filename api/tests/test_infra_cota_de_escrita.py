@@ -28,6 +28,19 @@ def test_a_cota_chega_ao_web_ao_purga_e_a_indexacao_pela_mesma_variavel() -> Non
         assert "for_each = local.env_da_busca" in bloco, nome
 
 
+def test_todo_dynamic_env_repassa_o_nome_e_o_valor_da_lista() -> None:
+    blocos = [
+        bloco
+        for arquivo in MODULO.glob("*.tf")
+        for bloco in arquivo.read_text().split('dynamic "env" {')[1:]
+    ]
+    assert len(blocos) == 16
+    for bloco in blocos:
+        conteudo = bloco[: bloco.index("}")]
+        assert re.search(r"name\s*=\s*env\.value\.name\n", conteudo), conteudo
+        assert re.search(r"value\s*=\s*env\.value\.value\n", conteudo), conteudo
+
+
 def test_colecao_de_texto_chega_aos_tres_escritores_e_aos_outputs() -> None:
     for texto, cabecalho in (
         (MAIN, 'resource "google_cloud_run_v2_service" "web"'),
