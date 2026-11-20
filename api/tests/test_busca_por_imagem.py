@@ -16,6 +16,7 @@ from PIL import Image
 from api.auth import Usuario
 from api.busca import Ajustes, BuscaPorImagemIndisponivel
 from api.entendimento_da_consulta import MODELO_DA_CONSULTA
+from api.eventos_de_uso import EventosEmMemoria
 from api.gemini import ErroHttp
 from api.main import criar_app
 from api.rota_da_busca import LimitesDaImagem
@@ -174,7 +175,7 @@ def test_imagem_acima_do_limite_de_pixels_e_recusada() -> None:
 def test_os_filtros_de_programa_e_periodo_valem() -> None:
     c, m = com_vestido(*VESTIDO * 3)
 
-    r = enviar(c, foto(), programa="Leo Dias", sem_periodo="true")
+    r = enviar(c, foto(), programa="Leo Dias")
     assert r.status_code == 200 and r.json()["videos"] == []
     assert {x.filtros.programa for x in m.indice.consultas} == {"Leo Dias"}
 
@@ -185,6 +186,19 @@ def test_os_filtros_de_programa_e_periodo_valem() -> None:
 
     r = enviar(c, foto(), desde="2025-02-01", ate="2025-01-02")
     assert r.status_code == 422
+
+
+def test_sem_periodo_e_ignorado_e_nao_vira_filtro_do_evento() -> None:
+    eventos = EventosEmMemoria()
+    c, _ = com_vestido(*VESTIDO * 2, eventos=eventos)
+    base = enviar(c, foto(), programa="Leo Dias")
+    com = enviar(c, foto(), programa="Leo Dias", sem_periodo="true")
+
+    def corpo(r: Any) -> dict[str, Any]:
+        return {k: v for k, v in r.json().items() if k != "quadros_expiram_em"}
+
+    assert com.status_code == 200 and corpo(com) == corpo(base)
+    assert all(f.nome != "sem_periodo" for e in eventos.publicados for f in e.filtros)
 
 
 def test_sem_decupagem_ver_responde_403_e_sem_login_401() -> None:

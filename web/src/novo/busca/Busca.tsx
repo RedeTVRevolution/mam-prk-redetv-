@@ -262,8 +262,8 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
           const alternar = (id: Evidencia) => mudar({ evidencias: ligadas.includes(id) ? ligadas.filter((e) => e !== id) : [...ligadas, id] })
           const programaNaTela = consulta.programa ?? ''
           const anoNaTela = consulta.ano
-          const valorDoAno = typeof anoNaTela === 'number' ? String(anoNaTela) : null
-          const anos = typeof anoNaTela === 'number' && !ANOS.includes(String(anoNaTela)) ? [String(anoNaTela), ...ANOS] : ANOS
+          const valorDoAno = anoNaTela === null ? null : String(anoNaTela)
+          const anos = anoNaTela !== null && !ANOS.includes(String(anoNaTela)) ? [String(anoNaTela), ...ANOS] : ANOS
           const comFacetas = facetas?.programa ?? []
           const opcoesDePrograma = [...opcoesDa(comFacetas), ...programas.filter((p) => !comFacetas.some((f) => f.valor === p)).map((p) => ({ valor: p, rotulo: p }))]
           const ligado: Record<Exclude<NomeDaFaceta, 'programa'>, string | null> = { mes: consulta.mes, pessoa: consulta.pessoa, marca: consulta.marca, tipo: consulta.tipo }
@@ -358,7 +358,7 @@ export function Busca({ consulta }: { consulta: ConsultaDaBusca }) {
                     unico
                     opcoes={anos.map((a) => ({ valor: a, rotulo: a }))}
                     valor={valorDoAno ? [valorDoAno] : []}
-                    aoMudar={([v]) => mudar({ ano: v ? Number(v) : 'todos', mes: null })}
+                    aoMudar={([v]) => mudar({ ano: v ? Number(v) : null, mes: null })}
                   />
                   {!foto &&
                     FACETAS.filter((f) => (facetas?.[f.nome].length ?? 0) > 0 || ligado[f.nome] !== null).map((f) => (

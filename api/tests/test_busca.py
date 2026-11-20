@@ -1543,22 +1543,25 @@ def test_a_rota_aceita_ev_programa_e_periodo() -> None:
     )
 
 
-def test_sem_periodo_nao_deduz_datas_do_texto() -> None:
-    m = Mundo(
-        pedido(
-            texto_livre="vestido",
-            exibido_desde="2024-01-01",
-            exibido_ate="2024-12-31",
-        )
+def test_sem_periodo_e_ignorado_e_nao_vira_filtro_do_evento() -> None:
+    eventos = EventosEmMemoria()
+    c, _ = cliente(
+        ["consulta"],
+        *[pedido(texto_livre="vestido")] * 2,
+        eventos=eventos,
     )
-    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
+    base = c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
+    com = c.get(
+        "/v1/busca",
+        params={"q": "vestido", "sem_periodo": "true"},
+        headers=AUTORIZACAO,
+    )
 
-    resultado = buscar(m, "vestido em 2024", ajustes=Ajustes(sem_periodo=True))
+    def corpo(r: Any) -> dict[str, Any]:
+        return {k: v for k, v in r.json().items() if k != "quadros_expiram_em"}
 
-    (consulta,) = m.indice.consultas
-    assert consulta.filtros.exibido_desde is None
-    assert consulta.filtros.exibido_ate is None
-    assert resultado.entendida.desde is None
+    assert com.status_code == 200 and corpo(com) == corpo(base)
+    assert all(f.nome != "sem_periodo" for e in eventos.publicados for f in e.filtros)
 
 
 def test_consulta_de_ate_300_caracteres_passa_e_de_301_responde_422() -> None:

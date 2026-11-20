@@ -187,7 +187,6 @@ def criar_rotas_da_busca(
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
-        sem_periodo: bool = False,
         pessoa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         marca: Annotated[str | None, LinhaDaConsulta(100)] = None,
         tipo: TipoDeRegistro | None = None,
@@ -218,7 +217,6 @@ def criar_rotas_da_busca(
                 programa=programa,
                 desde=desde,
                 ate=ate,
-                sem_periodo=sem_periodo,
                 pessoa=pessoa,
                 marca=marca,
                 tipo=tipo,
@@ -246,7 +244,6 @@ def criar_rotas_da_busca(
                 evidencias=",".join(dict.fromkeys(evidencias or ())),
                 desde=desde,
                 ate=ate,
-                sem_periodo=sem_periodo,
                 pessoa=pessoa,
                 marca=marca,
                 tipo=tipo,
@@ -299,7 +296,6 @@ def criar_rotas_da_busca(
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
-        sem_periodo: bool = False,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
@@ -336,9 +332,7 @@ def criar_rotas_da_busca(
             cancelado=cancelado,
             cursor=cursor,
             dono=quem,
-            ajustes=Ajustes(
-                programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
-            ),
+            ajustes=Ajustes(programa=programa, desde=desde, ate=ate),
         )
         # A foto tem uma chamada para a descrição, além do prazo da busca pelo termo.
         prazo_s = tempo_maximo_s + TEMPO_DA_CONSULTA_S
@@ -366,7 +360,6 @@ def criar_rotas_da_busca(
                 modo="imagem",
                 desde=desde,
                 ate=ate,
-                sem_periodo=sem_periodo,
             )
         return _com_cursor(resposta, resultado)
 

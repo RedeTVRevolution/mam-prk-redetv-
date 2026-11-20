@@ -19,8 +19,8 @@ export interface ConsultaDaBusca {
   evidencias: Evidencia[] | null
   /** `null`: nenhum programa; `''`: nenhum programa. */
   programa: string | null
-  /** `null`: nenhum período; `'todos'`: nenhum período. */
-  ano: number | 'todos' | null
+  /** `null`: nenhum período. */
+  ano: number | null
   /** Faceta de mês (`2024-05`): vale sobre o ano. */
   mes: string | null
   /** Facetas de pessoa (id do catálogo), marca e tipo de momento: `null`, sem filtro. */
@@ -119,12 +119,12 @@ export function consultaNova(q: string): ConsultaDaBusca {
 export function consultaDaBusca(busca: string): ConsultaDaBusca {
   const p = new URLSearchParams(busca)
   const ev = [...new Set(p.getAll('ev'))].filter((e): e is Evidencia => IDS_DE_EVIDENCIA.includes(e))
-  const ano = p.get('ano') === 'todos' ? 'todos' : Number(p.get('ano'))
+  const ano = Number(p.get('ano'))
   return {
     q: p.get('q')?.trim() ?? '',
     evidencias: ev.length ? ev : null,
     programa: p.get('programa'),
-    ano: ano === 'todos' || (Number.isInteger(ano) && ano >= 1900 && ano <= 2999) ? ano : null,
+    ano: Number.isInteger(ano) && ano >= 1900 && ano <= 2999 ? ano : null,
     mes: MES.test(p.get('mes') ?? '') ? p.get('mes') : null,
     pessoa: p.get('pessoa') || null,
     marca: p.get('marca') || null,
@@ -158,8 +158,7 @@ function filtrosParaApi(p: URLSearchParams, c: ConsultaDaBusca) {
     const ultimo = new Date(Date.UTC(Number(mes[1]), Number(mes[2]), 0)).getUTCDate()
     p.set('desde', `${c.mes}-01`)
     p.set('ate', `${c.mes}-${String(ultimo).padStart(2, '0')}`)
-  } else if (c.ano === 'todos') p.set('sem_periodo', 'true')
-  else if (c.ano !== null) {
+  } else if (c.ano !== null) {
     p.set('desde', `${c.ano}-01-01`)
     p.set('ate', `${c.ano}-12-31`)
   }
