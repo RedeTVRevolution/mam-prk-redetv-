@@ -22,11 +22,18 @@ export const formataData = (iso: string): string => DATA.format(new Date(iso))
 /** Data e hora curtas (`dd/mm/aaaa HH:mm`), em São Paulo. */
 export const formataDataEHora = (iso: string): string => DATA_E_HORA.format(new Date(iso))
 
+/** `AAAA-MM-DD` que existe no calendário (2026-02-30 não). */
+export const diaValido = (dia: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(dia) && new Date(`${dia}T00:00:00Z`).toISOString().startsWith(dia)
+
 /** O primeiro instante do dia de São Paulo (`AAAA-MM-DD`), em ISO: o que a regra de fuso diz, com ou sem horário de verão. */
 export function inicioDoDia(dia: string): string {
+  if (!diaValido(dia)) throw new Error(`Dia inválido: ${dia}`)
   // O fuso nunca passa de 4 h de UTC e muda em horas cheias: a primeira hora cheia que já é o dia é o começo.
   let t = Date.parse(`${dia}T00:00:00Z`)
-  while (diaDeSaoPaulo(new Date(t)) !== dia) t += 3_600_000
+  for (let volta = 0; diaDeSaoPaulo(new Date(t)) !== dia; volta++) {
+    if (volta >= 6) throw new Error(`Sem início do dia para ${dia}`)
+    t += 3_600_000
+  }
   return new Date(t).toISOString()
 }
 

@@ -25,3 +25,10 @@ test('no horário de verão de 2018 o dia é o da regra de fuso', () => {
   // 4/11/2018: a meia-noite não existiu, o dia começou à 1h (-02:00)
   expect(inicioDoDia('2018-11-04')).toBe('2018-11-04T03:00:00.000Z')
 })
+
+test('dia que não existe no calendário é recusado, sem travar', () => {
+  for (const dia of ['2026-02-30', '2026-11-31']) {
+    expect(() => inicioDoDia(dia)).toThrow()
+    expect(() => fimDoDia(dia)).toThrow()
+  }
+})

@@ -218,6 +218,8 @@ test('o período vai à API como dia inteiro de São Paulo', async () => {
   await abrir('/admin/auditoria?de=2026-10-27&ate=2026-10-28')
   await linhaDe('TV Fama')
   const q = consultas[0]!
+  expect(q.get('de')).toMatch(/(Z|[+-]\d\d:\d\d)$/)
+  expect(q.get('ate')).toMatch(/(Z|[+-]\d\d:\d\d)$/)
   expect(Date.parse(q.get('de')!)).toBe(Date.parse('2026-10-27T00:00:00-03:00'))
   expect(Date.parse(q.get('ate')!)).toBe(Date.parse('2026-10-28T23:59:59.999-03:00'))
   expect((screen.getByLabelText('De') as HTMLInputElement).value).toBe('2026-10-27')
@@ -314,6 +316,8 @@ test('ao abrir sem filtro, o período é os últimos 7 dias; o histórico inteir
     expect(((await screen.findByLabelText('De')) as HTMLInputElement).value).toBe('2026-11-01')
     expect((screen.getByLabelText('Até') as HTMLInputElement).value).toBe('2026-11-07')
     await waitFor(() => expect(consultas.length).toBeGreaterThan(0))
+    expect(consultas[0]!.get('de')).toMatch(/(Z|[+-]\d\d:\d\d)$/)
+    expect(consultas[0]!.get('ate')).toMatch(/(Z|[+-]\d\d:\d\d)$/)
     expect(Date.parse(consultas[0]!.get('de')!)).toBe(Date.parse('2026-11-01T00:00:00-03:00'))
     expect(Date.parse(consultas[0]!.get('ate')!)).toBe(Date.parse('2026-11-07T23:59:59.999-03:00'))
 

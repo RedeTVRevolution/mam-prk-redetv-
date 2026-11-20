@@ -19,6 +19,8 @@ test('as ações do cadastro de marcas têm frase e detalhes legíveis', () => {
 
 test('a consulta da auditoria corta o dia de São Paulo, com horário de verão (2018) e o fim inclusivo', () => {
   const p = new URLSearchParams(consultaDaAuditoria({ pessoa: '', alvo: '', acao: '', de: '2018-11-10', ate: '2018-11-10' }, 50, null))
+  expect(p.get('de')).toMatch(/Z$/)
+  expect(p.get('ate')).toMatch(/Z$/)
   expect(new Date(p.get('de')!).getTime()).toBe(Date.parse('2018-11-10T00:00:00-02:00'))
   expect(new Date(p.get('ate')!).getTime()).toBe(Date.parse('2018-11-10T23:59:59.999-02:00'))
 })

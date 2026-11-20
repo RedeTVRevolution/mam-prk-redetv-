@@ -14,3 +14,7 @@ test('sem de nem ate o endereço vale o padrão; com algum, mesmo vazio, vale o 
   expect(periodoDoEndereco(new URLSearchParams('de=2026-10-01'), agora)).toEqual({ de: '2026-10-01', ate: '' })
   expect(periodoDoEndereco(new URLSearchParams('de=ontem&ate=2026-10-02'), agora)).toEqual({ de: '', ate: '2026-10-02' })
 })
+
+test('data que não existe no endereço vale como vazia, não outro dia', () => {
+  expect(periodoDoEndereco(new URLSearchParams('de=2026-02-30&ate=2026-11-31'))).toEqual({ de: '', ate: '' })
+})
