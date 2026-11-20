@@ -24,6 +24,7 @@ from api.busca import (
     EvidenciaDaBusca,
     Ordem,
     ResultadoDaBusca,
+    TokenDaFotoInvalido,
     filtros_do_servidor,
 )
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S
@@ -100,6 +101,14 @@ class LimitesDaImagem:
 
 
 LIMITES_DA_IMAGEM = LimitesDaImagem()
+
+
+@dataclass(frozen=True)
+class FotoEnviada:
+    """O que o multipart trouxe: os bytes do `arquivo` ou o `token` de uma foto já descrita."""
+
+    dados: bytes | None = None
+    token: str | None = None
 
 
 class LimiteDeConsultas:
@@ -284,8 +293,8 @@ def criar_rotas_da_busca(
 
     teto_do_corpo = limites_da_imagem.max_bytes + FOLGA_DO_MULTIPART
 
-    async def foto_enviada(request: Request) -> bytes:
-        """O arquivo do multipart, lido com teto e só em memória.
+    async def foto_enviada(request: Request) -> FotoEnviada:
+        """O `arquivo` do multipart, ou o `token` no lugar dele, lido com teto e só em memória.
 
         O `File()` do FastAPI leria o corpo inteiro antes da rota, sem limite, e passaria
         de 1 MB para um arquivo temporário em disco: aqui o `Content-Length` é conferido
@@ -306,7 +315,7 @@ def criar_rotas_da_busca(
                     raise HTTPException(422, _GRANDE_DEMAIS)
                 yield pedaco
 
-        parser = MultiPartParser(request.headers, corpo(), max_files=1, max_fields=0)
+        parser = MultiPartParser(request.headers, corpo(), max_files=1, max_fields=1)
         parser.spool_max_size = teto_do_corpo
         try:
             formulario = await parser.parse()
@@ -314,17 +323,38 @@ def criar_rotas_da_busca(
             raise HTTPException(422, _RECUSA) from None
         try:
             arquivo = formulario.get("arquivo")
+            token = formulario.get("token")
+            if (arquivo is None) == (token is None):
+                raise HTTPException(422, _UM_DOS_DOIS)
+            if isinstance(token, str):
+                return FotoEnviada(token=token)
             if not isinstance(arquivo, UploadFile):
-                raise HTTPException(422, "Envie a imagem no campo arquivo")
-            return await arquivo.read(limites_da_imagem.max_bytes + 1)
+                raise HTTPException(422, _UM_DOS_DOIS)
+            return FotoEnviada(
+                dados=await arquivo.read(limites_da_imagem.max_bytes + 1)
+            )
         finally:
             await formulario.close()
 
-    @rotas.post("/busca/imagem", description=f"Busca por imagem. {NOTA_DO_QUADRO}")
+    @rotas.post(
+        "/busca/imagem",
+        description=f"Busca por imagem. {NOTA_DO_QUADRO}",
+        responses={
+            200: {
+                "headers": {
+                    "X-Token-Da-Foto": {
+                        "description": "O token da foto, na busca com o `arquivo` e sem "
+                        "`cursor`.",
+                        "schema": {"type": "string"},
+                    }
+                }
+            }
+        },
+    )
     def buscar_por_imagem(
         resposta: Response,
         chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
-        dados: Annotated[bytes, Depends(foto_enviada)],
+        foto: Annotated[FotoEnviada, Depends(foto_enviada)],
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
@@ -336,10 +366,17 @@ def criar_rotas_da_busca(
     ) -> ResultadoDaBusca:
 
         def preparar() -> dict[str, Any]:
+            # Com o token, a foto não sobe nem é decodificada: o termo vem do Firestore.
+            if foto.dados is None:
+                return {
+                    "texto": "",
+                    "token": foto.token,
+                    "ajustes": Ajustes(programa=programa, desde=desde, ate=ate),
+                }
             # A foto fica só em memória: nunca no disco, no Storage, no Firestore nem nos logs.
             try:
                 jpeg = recodificar(
-                    dados,
+                    foto.dados,
                     max_bytes=limites_da_imagem.max_bytes,
                     max_pixels=limites_da_imagem.max_pixels,
                     formatos=FORMATOS_DA_BUSCA_POR_IMAGEM,
@@ -357,7 +394,7 @@ def criar_rotas_da_busca(
             }
 
         try:
-            return consultar(
+            resultado = consultar(
                 resposta,
                 chamador,
                 desde=desde,
@@ -370,7 +407,7 @@ def criar_rotas_da_busca(
                 preparar=preparar,
                 registrar_o_uso=lambda resultado: registrar_busca(
                     chamador,
-                    len(dados),
+                    len(foto.dados) if foto.dados is not None else None,
                     programa,
                     resultado,
                     modo="imagem",
@@ -378,10 +415,15 @@ def criar_rotas_da_busca(
                     ate=ate,
                 ),
             )
+        except TokenDaFotoInvalido:
+            raise HTTPException(422, TOKEN_INVALIDO) from None
         except BuscaPorImagemIndisponivel:
             raise HTTPException(
                 503, "A busca por imagem não está disponível agora"
             ) from None
+        if resultado._token_da_foto:
+            resposta.headers["X-Token-Da-Foto"] = resultado._token_da_foto
+        return resultado
 
     return rotas
 
@@ -393,6 +435,9 @@ def _com_cursor(resposta: Response, resultado: ResultadoDaBusca) -> ResultadoDaB
     return resultado
 
 
+# O texto que a tela compara para reenviar a foto (#802): não muda sem mudar a tela.
+TOKEN_INVALIDO = "Token da foto inválido"
+_UM_DOS_DOIS = "Envie a imagem no campo arquivo ou o token no campo token, só um deles"
 _RECUSA = "Envie uma imagem JPEG ou PNG válida"
 _GRANDE_DEMAIS = "A imagem passa do tamanho máximo"
 _PIXELS_DEMAIS = "A imagem passa do tamanho máximo em pixels"
