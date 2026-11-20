@@ -875,6 +875,22 @@ def test_sem_catalogo_o_ranking_usa_o_nome_mais_frequente_das_somas() -> None:
     assert [(p.pessoa_id, p.nome) for p in com_mapa] == [("p1", "Ana"), ("p2", "Zeca")]
 
 
+def test_video_so_de_mencoes_nao_entra_no_total_de_videos() -> None:
+    somas = somar(
+        [
+            MomentoDaPessoa("j1", "p1", "Ana", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j2", "p1", "Ana", "mencao_na_fala", 0, 500),
+            MomentoDaPessoa("j2", "p2", "Bia", "mencao_no_texto", 0, 500),
+        ]
+    )
+
+    pagina, total = ranking_em_python(somas, 0, 10, {"p1": "Ana", "p2": "Bia"})
+
+    assert total.videos == 1  # j2 só tem menções
+    assert total.mencoes_na_fala == 1 and total.mencoes_no_texto == 1
+    assert [(p.pessoa_id, p.videos) for p in pagina] == [("p1", 1), ("p2", 0)]
+
+
 class SoSomas:
     """Uma fonte nova das somas: implementa só `somas`, como o Protocol exige."""
 
