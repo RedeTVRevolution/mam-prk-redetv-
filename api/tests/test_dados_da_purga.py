@@ -196,10 +196,14 @@ def test_o_marcador_leva_o_dono_e_os_dados_da_linha_do_job(
 @pytest.mark.parametrize(
     "linha",
     [
-        "UPDATE `projeto-teste.dados.jobs` SET quem_tipo = 'usuario', programa = 'X' "
-        "WHERE id = 'j1'",
-        "UPDATE `projeto-teste.dados.jobs` SET quem_id = 'u1', programa = 'X' "
-        "WHERE id = 'j1'",
+        (
+            "UPDATE `projeto-teste.dados.jobs` SET quem_tipo = 'usuario', "
+            "programa = 'X' WHERE id = 'j1'"
+        ),
+        (
+            "UPDATE `projeto-teste.dados.jobs` SET quem_id = 'u1', "
+            "programa = 'X' WHERE id = 'j1'"
+        ),
         "DELETE FROM `projeto-teste.dados.jobs` WHERE id = 'j1'",
     ],
 )
