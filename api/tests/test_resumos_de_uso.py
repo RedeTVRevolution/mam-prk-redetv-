@@ -67,19 +67,13 @@ def _resumir(banco: sqlite3.Connection, inicio: str = TODA_A_HISTORIA) -> None:
         "OR name LIKE 'novas\\_%' ESCAPE '\\'"
     ).fetchall():
         banco.execute(f"DROP TABLE {nome}")
-    # O SQLite não tem CREATE OR REPLACE TABLE: troca por apagar e criar.
-    sql = re.sub(
-        r"CREATE OR REPLACE TABLE `(\w+)`",
-        r"DROP TABLE IF EXISTS `\1`;\nCREATE TABLE `\1`",
-        sql,
-    )
     banco.executescript(sql)
 
 
 def _tabelas_do_sql() -> list[str]:
     """As tabelas do painel, na ordem do SQL (a de fins já contados é só estado interno)."""
     nomes = re.findall(
-        r"CREATE (?:OR REPLACE )?TABLE (?:IF NOT EXISTS )?`\$\{prefixo\}(\w+)`", SQL
+        r"CREATE TABLE (?:IF NOT EXISTS )?`\$\{prefixo\}(\w+)`", SQL
     )
     return [n for n in dict.fromkeys(nomes) if n != "fins_de_processamento_contados"]
 
