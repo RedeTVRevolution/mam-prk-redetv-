@@ -31,6 +31,7 @@ from api.busca import (
     ListaDaBusca,
     ListasDaBusca,
     MomentoGuardado,
+    Ordem,
     Ranking,
     RankingEmOrdem,
     VideoGuardado,
@@ -1063,6 +1064,498 @@ def test_video_sem_job_visivel_no_meio_nao_fura_a_1a_pagina() -> None:
     assert len(primeira.videos) == 2
     assert "j2" not in [v.job_id for v in (*primeira.videos, *segunda.videos)]
     assert len(segunda.videos) == 1
+
+
+class _InverteOsIds:
+    """A relevância contra a data: o vídeo de id maior vem primeiro."""
+
+    def reordenar(self, consulta: str, registros: list[Registro]) -> list[Registro]:
+        return sorted(registros, key=lambda r: r.id, reverse=True)
+
+
+# (data de exibição, quantos momentos): 7 vídeos, empate de data (j2, j3) e um sem data.
+_VIDEOS_DAS_ORDENS = [
+    (date(2024, 3, 1), 3),
+    (date(2024, 5, 1), 1),
+    (date(2024, 5, 1), 2),
+    (None, 4),
+    (date(2023, 1, 1), 1),
+    (date(2024, 9, 9), 2),
+    (date(2022, 2, 2), 3),
+]
+
+
+def _mundo_das_ordens() -> Mundo:
+    m = Mundo(*[pedido(texto_livre="vestido")] * 4)
+    for i, (dia, momentos) in enumerate(_VIDEOS_DAS_ORDENS, start=1):
+        registros = []
+        for k in range(momentos):
+            r = objeto(f"o{i}-{k}", f"j{i}", k * 60_000, k * 60_000 + 1_000 + i)
+            if k % 2:
+                r = replace(r, tipo="fala", texto=f"vestido vermelho do vídeo {i}")
+            if i % 2:
+                r = replace(r, quadro=f"quadros/o{i}-{k}.jpg")
+            registros.append(r)
+        m.com(job(f"j{i}", data_exibicao=dia), *registros)
+    return m
+
+
+def _videos_da_pagina(pagina: Any) -> list[Any]:
+    return [
+        (
+            v.job_id,
+            v.n_momentos,
+            [
+                (
+                    mo.tipo,
+                    mo.inicio_ms,
+                    mo.fim_ms,
+                    mo.motivo,
+                    [(d.inicio, d.fim) for d in mo.destaques],
+                    mo.quadro,
+                )
+                for mo in v.momentos
+            ],
+        )
+        for v in pagina.videos
+    ]
+
+
+def _paginas_e_lista_guardada(ordem: Ordem) -> dict[str, Any]:
+    busca = _mundo_das_ordens().busca(ranking=_InverteOsIds())
+    p1 = busca.buscar("vestido", limite=3, dono="u1", ordem=ordem)
+    p2 = busca.buscar(
+        "vestido", limite=3, dono="u1", ordem=ordem, cursor=p1._proximo_cursor
+    )
+    [documento] = busca._listas.documentos.values()  # type: ignore[attr-defined]
+    guardada = ListaDaBusca.do_documento(documento)
+    return {
+        "pagina_1": _videos_da_pagina(p1),
+        "pagina_2": _videos_da_pagina(p2),
+        "guardada": [
+            (v.job_id, [tuple(mo.model_dump().values()) for mo in v.momentos])
+            for v in guardada.videos
+        ],
+    }
+
+
+# O que a busca devolvia na main 4b1b00f2 (#801): páginas 1 e 2 e a lista guardada.
+_DE_ANTES: dict[str, Any] = {
+    "relevancia": {
+        "pagina_1": [
+            (
+                "j7",
+                3,
+                [
+                    (
+                        "objeto",
+                        120000,
+                        121007,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o7-2.jpg",
+                    ),
+                    (
+                        "fala",
+                        60000,
+                        61007,
+                        "Fala: 'vestido vermelho do vídeo 7'",
+                        [(7, 14)],
+                        "quadros/o7-1.jpg",
+                    ),
+                    (
+                        "objeto",
+                        0,
+                        1007,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o7-0.jpg",
+                    ),
+                ],
+            ),
+            (
+                "j6",
+                2,
+                [
+                    (
+                        "fala",
+                        60000,
+                        61006,
+                        "Fala: 'vestido vermelho do vídeo 6'",
+                        [(7, 14)],
+                        None,
+                    ),
+                    ("objeto", 0, 1006, "Objeto: vestido vermelho", [(8, 15)], None),
+                ],
+            ),
+            (
+                "j5",
+                1,
+                [
+                    (
+                        "objeto",
+                        0,
+                        1005,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o5-0.jpg",
+                    )
+                ],
+            ),
+        ],
+        "pagina_2": [
+            (
+                "j4",
+                4,
+                [
+                    (
+                        "fala",
+                        180000,
+                        181004,
+                        "Fala: 'vestido vermelho do vídeo 4'",
+                        [(7, 14)],
+                        None,
+                    ),
+                    (
+                        "objeto",
+                        120000,
+                        121004,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        None,
+                    ),
+                    (
+                        "fala",
+                        60000,
+                        61004,
+                        "Fala: 'vestido vermelho do vídeo 4'",
+                        [(7, 14)],
+                        None,
+                    ),
+                    ("objeto", 0, 1004, "Objeto: vestido vermelho", [(8, 15)], None),
+                ],
+            ),
+            (
+                "j3",
+                2,
+                [
+                    (
+                        "fala",
+                        60000,
+                        61003,
+                        "Fala: 'vestido vermelho do vídeo 3'",
+                        [(7, 14)],
+                        "quadros/o3-1.jpg",
+                    ),
+                    (
+                        "objeto",
+                        0,
+                        1003,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o3-0.jpg",
+                    ),
+                ],
+            ),
+            (
+                "j2",
+                1,
+                [("objeto", 0, 1002, "Objeto: vestido vermelho", [(8, 15)], None)],
+            ),
+        ],
+        "guardada": [
+            (
+                "j7",
+                [
+                    (
+                        "objeto",
+                        120000,
+                        121007,
+                        "Objeto: vestido vermelho",
+                        "quadros/o7-2.jpg",
+                    ),
+                    (
+                        "fala",
+                        60000,
+                        61007,
+                        "Fala: 'vestido vermelho do vídeo 7'",
+                        "quadros/o7-1.jpg",
+                    ),
+                    ("objeto", 0, 1007, "Objeto: vestido vermelho", "quadros/o7-0.jpg"),
+                ],
+            ),
+            (
+                "j6",
+                [
+                    ("fala", 60000, 61006, "Fala: 'vestido vermelho do vídeo 6'", None),
+                    ("objeto", 0, 1006, "Objeto: vestido vermelho", None),
+                ],
+            ),
+            (
+                "j5",
+                [("objeto", 0, 1005, "Objeto: vestido vermelho", "quadros/o5-0.jpg")],
+            ),
+            (
+                "j4",
+                [
+                    (
+                        "fala",
+                        180000,
+                        181004,
+                        "Fala: 'vestido vermelho do vídeo 4'",
+                        None,
+                    ),
+                    ("objeto", 120000, 121004, "Objeto: vestido vermelho", None),
+                    ("fala", 60000, 61004, "Fala: 'vestido vermelho do vídeo 4'", None),
+                    ("objeto", 0, 1004, "Objeto: vestido vermelho", None),
+                ],
+            ),
+            (
+                "j3",
+                [
+                    (
+                        "fala",
+                        60000,
+                        61003,
+                        "Fala: 'vestido vermelho do vídeo 3'",
+                        "quadros/o3-1.jpg",
+                    ),
+                    ("objeto", 0, 1003, "Objeto: vestido vermelho", "quadros/o3-0.jpg"),
+                ],
+            ),
+            ("j2", [("objeto", 0, 1002, "Objeto: vestido vermelho", None)]),
+            (
+                "j1",
+                [
+                    (
+                        "objeto",
+                        120000,
+                        121001,
+                        "Objeto: vestido vermelho",
+                        "quadros/o1-2.jpg",
+                    ),
+                    (
+                        "fala",
+                        60000,
+                        61001,
+                        "Fala: 'vestido vermelho do vídeo 1'",
+                        "quadros/o1-1.jpg",
+                    ),
+                    ("objeto", 0, 1001, "Objeto: vestido vermelho", "quadros/o1-0.jpg"),
+                ],
+            ),
+        ],
+    },
+    "data": {
+        "pagina_1": [
+            (
+                "j6",
+                2,
+                [
+                    (
+                        "fala",
+                        60000,
+                        61006,
+                        "Fala: 'vestido vermelho do vídeo 6'",
+                        [(7, 14)],
+                        None,
+                    ),
+                    ("objeto", 0, 1006, "Objeto: vestido vermelho", [(8, 15)], None),
+                ],
+            ),
+            (
+                "j3",
+                2,
+                [
+                    (
+                        "fala",
+                        60000,
+                        61003,
+                        "Fala: 'vestido vermelho do vídeo 3'",
+                        [(7, 14)],
+                        "quadros/o3-1.jpg",
+                    ),
+                    (
+                        "objeto",
+                        0,
+                        1003,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o3-0.jpg",
+                    ),
+                ],
+            ),
+            (
+                "j2",
+                1,
+                [("objeto", 0, 1002, "Objeto: vestido vermelho", [(8, 15)], None)],
+            ),
+        ],
+        "pagina_2": [
+            (
+                "j1",
+                3,
+                [
+                    (
+                        "objeto",
+                        120000,
+                        121001,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o1-2.jpg",
+                    ),
+                    (
+                        "fala",
+                        60000,
+                        61001,
+                        "Fala: 'vestido vermelho do vídeo 1'",
+                        [(7, 14)],
+                        "quadros/o1-1.jpg",
+                    ),
+                    (
+                        "objeto",
+                        0,
+                        1001,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o1-0.jpg",
+                    ),
+                ],
+            ),
+            (
+                "j5",
+                1,
+                [
+                    (
+                        "objeto",
+                        0,
+                        1005,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o5-0.jpg",
+                    )
+                ],
+            ),
+            (
+                "j7",
+                3,
+                [
+                    (
+                        "objeto",
+                        120000,
+                        121007,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o7-2.jpg",
+                    ),
+                    (
+                        "fala",
+                        60000,
+                        61007,
+                        "Fala: 'vestido vermelho do vídeo 7'",
+                        [(7, 14)],
+                        "quadros/o7-1.jpg",
+                    ),
+                    (
+                        "objeto",
+                        0,
+                        1007,
+                        "Objeto: vestido vermelho",
+                        [(8, 15)],
+                        "quadros/o7-0.jpg",
+                    ),
+                ],
+            ),
+        ],
+        "guardada": [
+            (
+                "j6",
+                [
+                    ("fala", 60000, 61006, "Fala: 'vestido vermelho do vídeo 6'", None),
+                    ("objeto", 0, 1006, "Objeto: vestido vermelho", None),
+                ],
+            ),
+            (
+                "j3",
+                [
+                    (
+                        "fala",
+                        60000,
+                        61003,
+                        "Fala: 'vestido vermelho do vídeo 3'",
+                        "quadros/o3-1.jpg",
+                    ),
+                    ("objeto", 0, 1003, "Objeto: vestido vermelho", "quadros/o3-0.jpg"),
+                ],
+            ),
+            ("j2", [("objeto", 0, 1002, "Objeto: vestido vermelho", None)]),
+            (
+                "j1",
+                [
+                    (
+                        "objeto",
+                        120000,
+                        121001,
+                        "Objeto: vestido vermelho",
+                        "quadros/o1-2.jpg",
+                    ),
+                    (
+                        "fala",
+                        60000,
+                        61001,
+                        "Fala: 'vestido vermelho do vídeo 1'",
+                        "quadros/o1-1.jpg",
+                    ),
+                    ("objeto", 0, 1001, "Objeto: vestido vermelho", "quadros/o1-0.jpg"),
+                ],
+            ),
+            (
+                "j5",
+                [("objeto", 0, 1005, "Objeto: vestido vermelho", "quadros/o5-0.jpg")],
+            ),
+            (
+                "j7",
+                [
+                    (
+                        "objeto",
+                        120000,
+                        121007,
+                        "Objeto: vestido vermelho",
+                        "quadros/o7-2.jpg",
+                    ),
+                    (
+                        "fala",
+                        60000,
+                        61007,
+                        "Fala: 'vestido vermelho do vídeo 7'",
+                        "quadros/o7-1.jpg",
+                    ),
+                    ("objeto", 0, 1007, "Objeto: vestido vermelho", "quadros/o7-0.jpg"),
+                ],
+            ),
+            (
+                "j4",
+                [
+                    (
+                        "fala",
+                        180000,
+                        181004,
+                        "Fala: 'vestido vermelho do vídeo 4'",
+                        None,
+                    ),
+                    ("objeto", 120000, 121004, "Objeto: vestido vermelho", None),
+                    ("fala", 60000, 61004, "Fala: 'vestido vermelho do vídeo 4'", None),
+                    ("objeto", 0, 1004, "Objeto: vestido vermelho", None),
+                ],
+            ),
+        ],
+    },
+}
+
+
+def test_as_paginas_e_a_lista_guardada_de_cada_ordem_seguem_as_de_antes() -> None:
+    assert _paginas_e_lista_guardada("relevancia") == _DE_ANTES["relevancia"]
+    assert _paginas_e_lista_guardada("data") == _DE_ANTES["data"]
 
 
 # --- a rota ---------------------------------------------------------------------------
