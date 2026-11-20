@@ -262,7 +262,7 @@ def test_por_dia_conta_usuarios_ativos_sem_os_sistemas(
 ) -> None:
     _resumir(banco)
 
-    def ativos(dia: str) -> int:
+    def ativos(dia: str) -> Any:
         return banco.execute(
             "SELECT COUNT(*) FROM uso_por_dia_e_usuario "
             "WHERE dia = ? AND quem_tipo = 'usuario' AND ativo",
@@ -315,7 +315,7 @@ def test_por_usuario_traz_dias_ativos_e_ultimo_acesso(
 ) -> None:
     _resumir(banco)
 
-    def por_usuario(quem: str) -> tuple[Any, ...]:
+    def por_usuario(quem: str) -> Any:
         return banco.execute(
             "SELECT COUNT(CASE WHEN ativo THEN 1 END), MAX(ultimo_acesso) "
             "FROM uso_por_dia_e_usuario WHERE quem_id = ?",
