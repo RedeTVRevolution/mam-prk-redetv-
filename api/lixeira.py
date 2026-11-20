@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, EnvioParaLixeira
-from api.ciclo_de_vida import PRAZO_DA_RODADA
+from api.ciclo_de_vida import proxima_versao, rodada_aberta
 from api.correcoes import RepositorioDeCorrecoes
 from api.indice_da_busca import IndiceDaBusca
 from api.marcas import CatalogoDeMarcas
@@ -252,11 +252,8 @@ def criar_rotas_da_lixeira(
         """A lixeira nova do Job e, com a indexação em andamento, uma versão a mais: a
         rodada repete com o Job relido e o índice não fica com o estado velho (#806)."""
         mudancas: dict[str, object] = {"lixeira": envio}
-        r = atual.rodada_da_indexacao
-        if r is not None and relogio() - r.em < PRAZO_DA_RODADA:
-            mudancas["versao_pedida"] = (
-                max(atual.versao_pedida, atual.versao_indexada) + 1
-            )
+        if rodada_aberta(atual, relogio()):
+            mudancas["versao_pedida"] = proxima_versao(atual)
         return mudancas
 
     def marcar_no_indice(job_id: str, na_lixeira: bool) -> None:

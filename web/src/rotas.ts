@@ -86,7 +86,10 @@ export function enderecoDoVideo(id: string, t?: number | null, consulta?: Consul
 function consultaDeOrigem(busca: string): ConsultaDaBusca | null {
   const p = new URLSearchParams(busca)
   const inteira = p.get('consulta')
-  if (inteira !== null) return consultaDaBusca(inteira).q ? consultaDaBusca(inteira) : null
+  if (inteira !== null) {
+    const consulta = consultaDaBusca(inteira)
+    return consulta.q ? consulta : null
+  }
   const texto = p.get('busca')?.trim()
   return texto ? consultaNova(texto) : null
 }

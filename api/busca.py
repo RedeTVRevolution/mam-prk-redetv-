@@ -498,13 +498,14 @@ class Busca:
             impostos = replace(impostos, sistema=sistema)
         termo_da_foto = None
         da_foto = self._ler_token(token, dono) if token is not None else None
+        sha: str | None = None
+        if da_foto:
+            sha = da_foto["hash"]
+        elif imagem is not None:
+            sha = hashlib.sha256(imagem).hexdigest()
         partes = {
             "texto": texto,
-            "imagem": da_foto["hash"]
-            if da_foto
-            else hashlib.sha256(imagem).hexdigest()
-            if imagem is not None
-            else None,
+            "imagem": sha,
             "sistema": sistema,
             "ajustes": asdict(ajustes or Ajustes()),
             "filtros": asdict(impostos),
@@ -870,15 +871,13 @@ class Busca:
             resultado._proximo_cursor = self._guardar(
                 resultado, todos, termos, dono, impressao, limite, versao
             )
-        if imagem is not None and termo_da_foto:
+        if sha is not None and imagem is not None and termo_da_foto:
             resultado._token_da_foto = self._guardar_token(
-                dono, termo_da_foto, partes["imagem"], agora
+                dono, termo_da_foto, sha, agora
             )
         return resultado
 
-    def _guardar_token(
-        self, dono: str, termo: str, sha: object, agora: datetime
-    ) -> str:
+    def _guardar_token(self, dono: str, termo: str, sha: str, agora: datetime) -> str:
         """Só dono, termo, hash e prazo: a foto nunca vai ao documento."""
         return self._listas.gravar(
             {

@@ -113,14 +113,6 @@ class LimitesDaImagem:
 LIMITES_DA_IMAGEM = LimitesDaImagem()
 
 
-@dataclass(frozen=True)
-class FotoEnviada:
-    """O que o multipart trouxe: os bytes do `arquivo` ou o `token` de uma foto já descrita."""
-
-    dados: bytes | None = None
-    token: str | None = None
-
-
 class LimiteDeConsultas:
     """Consultas por minuto de cada usuário (ou sistema), contadas nesta instância."""
 
@@ -306,8 +298,9 @@ def criar_rotas_da_busca(
 
     teto_do_corpo = limites_da_imagem.max_bytes + FOLGA_DO_MULTIPART
 
-    async def foto_enviada(request: Request) -> FotoEnviada:
-        """O `arquivo` do multipart, ou o `token` no lugar dele, lido com teto e só em memória.
+    async def foto_enviada(request: Request) -> bytes | str:
+        """Os bytes do `arquivo` do multipart, ou o `token` (str) no lugar dele, lidos com
+        teto e só em memória.
 
         O `File()` do FastAPI leria o corpo inteiro antes da rota, sem limite, e passaria
         de 1 MB para um arquivo temporário em disco: aqui o `Content-Length` é conferido
@@ -340,12 +333,10 @@ def criar_rotas_da_busca(
             if (arquivo is None) == (token is None):
                 raise HTTPException(422, _UM_DOS_DOIS)
             if isinstance(token, str):
-                return FotoEnviada(token=token)
+                return token
             if not isinstance(arquivo, UploadFile):
                 raise HTTPException(422, _UM_DOS_DOIS)
-            return FotoEnviada(
-                dados=await arquivo.read(limites_da_imagem.max_bytes + 1)
-            )
+            return await arquivo.read(limites_da_imagem.max_bytes + 1)
         finally:
             await formulario.close()
 
@@ -367,7 +358,7 @@ def criar_rotas_da_busca(
     def buscar_por_imagem(
         resposta: Response,
         chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
-        foto: Annotated[FotoEnviada, Depends(foto_enviada)],
+        foto: Annotated[bytes | str, Depends(foto_enviada)],
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
@@ -379,17 +370,17 @@ def criar_rotas_da_busca(
     ) -> ResultadoDaBusca:
 
         def preparar() -> dict[str, Any]:
+            entrada: dict[str, Any] = {
+                "texto": "",
+                "ajustes": Ajustes(programa=programa, desde=desde, ate=ate),
+            }
             # Com o token, a foto não sobe nem é decodificada: o termo vem do Firestore.
-            if foto.dados is None:
-                return {
-                    "texto": "",
-                    "token": foto.token,
-                    "ajustes": Ajustes(programa=programa, desde=desde, ate=ate),
-                }
+            if isinstance(foto, str):
+                return entrada | {"token": foto}
             # A foto fica só em memória: nunca no disco, no Storage, no Firestore nem nos logs.
             try:
                 jpeg = recodificar(
-                    foto.dados,
+                    foto,
                     max_bytes=limites_da_imagem.max_bytes,
                     max_pixels=limites_da_imagem.max_pixels,
                     formatos=FORMATOS_DA_BUSCA_POR_IMAGEM,
@@ -400,11 +391,7 @@ def criar_rotas_da_busca(
                 raise HTTPException(422, _PIXELS_DEMAIS) from None
             except ImagemRecusada:
                 raise HTTPException(422, _RECUSA) from None
-            return {
-                "texto": "",
-                "imagem": jpeg,
-                "ajustes": Ajustes(programa=programa, desde=desde, ate=ate),
-            }
+            return entrada | {"imagem": jpeg}
 
         try:
             resultado = consultar(
@@ -420,7 +407,7 @@ def criar_rotas_da_busca(
                 preparar=preparar,
                 registrar_o_uso=lambda resultado: registrar_busca(
                     chamador,
-                    len(foto.dados) if foto.dados is not None else None,
+                    len(foto) if isinstance(foto, bytes) else None,
                     programa,
                     resultado,
                     modo="imagem",
