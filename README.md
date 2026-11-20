@@ -57,7 +57,7 @@ Ele impersona a `mam-terraform` (ADR 0002), sem chave em arquivo, e:
 4. aplica o resto pelos digests que o Cloud Build enviou, sem recompilar, então cada deploy gera uma revisão nova;
 5. confere que `/v1/health` responde 200 e mostra a URL.
 
-À mão, cada `terraform apply` mostra o plano e pede confirmação.
+Os dois applies passam pelo `scripts/aplicar-sem-destruir.sh`: ele mostra o plano e o aplica sem pedir confirmação, a não ser que destrua ou recrie algo; aí para, sem aplicar, salvo `PERMITIR_DESTRUICAO=sim`.
 
 ### Publicação automática (CD)
 

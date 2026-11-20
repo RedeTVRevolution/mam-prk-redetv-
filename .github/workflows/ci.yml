@@ -173,7 +173,8 @@ jobs:
       IPS_DA_REDETV: ${{ vars.IPS_DA_REDETV }}
       CLOUDSDK_ACTIVE_CONFIG_NAME: default
       TF_IN_AUTOMATION: "1"
-      # À mão, cada apply pede confirmação; aqui o CI verde é a aprovação.
+      # O deploy aplica o plano gravado (scripts/aplicar-sem-destruir.sh), que não pede
+      # confirmação nem à mão; o -auto-approve só vale para um apply sem plano gravado.
       TF_CLI_ARGS_apply: -auto-approve
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
