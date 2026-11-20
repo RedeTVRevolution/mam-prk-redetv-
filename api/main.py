@@ -277,7 +277,9 @@ class _GZipQueRespeitaQZero(GZipMiddleware):
                 return
             mutavel = cabecalhos.mutablecopy()
             mutavel["accept-encoding"] = "gzip"
-            scope = {**scope, "headers": mutavel.raw}
+            # No próprio scope (não numa cópia): o roteador grava nele a rota que os
+            # eventos de uso leem de volta.
+            scope["headers"] = mutavel.raw
         await super().__call__(scope, receive, send)
 
 
