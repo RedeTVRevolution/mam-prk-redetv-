@@ -36,7 +36,6 @@ from api.modelo_do_job import Job, agora_utc
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
     COLUNAS_DO_CSV,
-    NOMES_EM_JSON,
     SOMA_EM_SQL,
     UNIAO_EM_SQL,
     ConsultaBigQuery,
@@ -60,13 +59,20 @@ BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 ROTA = "/v1/relatorios/tempo-de-tela"
 
 
-def relatorio(momentos: list[MomentoDaPessoa]) -> list[PessoaNoRelatorio]:
-    """O relatório de hoje: a soma (que o BigQuery faz) e a montagem."""
-    return relatorio_das_somas(somar(momentos))
+def _nomes(momentos: list[MomentoDaPessoa]) -> dict[str, str]:
+    return {m.pessoa_id: m.pessoa_id.upper() for m in momentos}
+
+
+def relatorio(
+    momentos: list[MomentoDaPessoa], nomes: dict[str, str] | None = None
+) -> list[PessoaNoRelatorio]:
+    """O relatório de hoje: a soma (que o BigQuery faz) e a montagem, com os nomes do
+    catálogo (por padrão, o id em maiúsculas)."""
+    return relatorio_das_somas(somar(momentos), nomes or _nomes(momentos))
 
 
 def _m(job: str, tipo: str, ini: int, fim: int, pessoa: str = "c1") -> MomentoDaPessoa:
-    return MomentoDaPessoa(job, pessoa, pessoa.upper(), tipo, ini, fim)
+    return MomentoDaPessoa(job, pessoa, tipo, ini, fim)
 
 
 def test_so_aparicoes_somam_tempo_e_mencoes_so_contam() -> None:
@@ -85,13 +91,14 @@ def test_so_aparicoes_somam_tempo_e_mencoes_so_contam() -> None:
     assert (c1.mencoes_na_fala, c1.mencoes_no_texto) == (2, 1)
 
 
-def test_a_mesma_pessoa_com_grafias_diferentes_e_uma_linha_so() -> None:
+def test_a_pessoa_em_varios_videos_e_uma_linha_so_com_o_nome_do_catalogo() -> None:
     linhas = relatorio(
         [
-            MomentoDaPessoa("j1", "c1", "Sílvio Santos", "aparicao", 0, 1_000),
-            MomentoDaPessoa("j2", "c1", "Silvio Santos", "aparicao", 0, 2_000),
-            MomentoDaPessoa("j3", "c1", "Silvio Santos", "aparicao", 0, 3_000),
-        ]
+            MomentoDaPessoa("j1", "c1", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j2", "c1", "aparicao", 0, 2_000),
+            MomentoDaPessoa("j3", "c1", "aparicao", 0, 3_000),
+        ],
+        {"c1": "Silvio Santos"},
     )
 
     (c1,) = linhas
@@ -216,18 +223,8 @@ def test_bigquery_pede_a_soma_so_dos_tipos_do_relatorio_com_os_filtros_como_para
         {
             "jobComplete": True,
             "rows": [
-                _linha_do_bq(
-                    "j1",
-                    "c1",
-                    "5000",
-                    "1",
-                    "2",
-                    "0",
-                    '[{"nome":"Sabrina","linhas":2},{"nome":"Sabri","linhas":1}]',
-                ),
-                _linha_do_bq(
-                    "j2", "c1", "0", "0", "0", "1", '[{"nome":"Sabrina","linhas":1}]'
-                ),
+                _linha_do_bq("j1", "c1", "5000", "1", "2", "0"),
+                _linha_do_bq("j2", "c1", "0", "0", "0", "1"),
             ],
         }
     )
@@ -237,8 +234,8 @@ def test_bigquery_pede_a_soma_so_dos_tipos_do_relatorio_com_os_filtros_como_para
     )
 
     assert somas == [
-        PessoaNoVideo("j1", "c1", {"Sabrina": 2, "Sabri": 1}, 5000, 1, 2, 0),
-        PessoaNoVideo("j2", "c1", {"Sabrina": 1}, 0, 0, 0, 1),
+        PessoaNoVideo("j1", "c1", 5000, 1, 2, 0),
+        PessoaNoVideo("j2", "c1", 0, 0, 0, 1),
     ]
     (corpo,) = transporte.corpos
     consulta = corpo["query"]
@@ -278,12 +275,12 @@ def test_bigquery_resposta_incompleta_falha_alto() -> None:
 def _sqlite_com(momentos: list[MomentoDaPessoa]) -> sqlite3.Connection:
     banco = sqlite3.connect(":memory:")
     banco.execute(
-        "CREATE TABLE base (job_id, pessoa_id, nome, tipo, inicio_ms, fim_ms)"
+        "CREATE TABLE base (job_id, pessoa_id, tipo, inicio_ms, fim_ms)"
     )
     banco.executemany(
-        "INSERT INTO base VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO base VALUES (?, ?, ?, ?, ?)",
         [
-            (m.job_id, m.pessoa_id, m.nome, m.tipo, m.inicio_ms, m.fim_ms)
+            (m.job_id, m.pessoa_id, m.tipo, m.inicio_ms, m.fim_ms)
             for m in momentos
         ],
     )
@@ -299,7 +296,6 @@ def test_a_uniao_em_sql_da_os_mesmos_numeros_que_a_de_python() -> None:
             MomentoDaPessoa(
                 job_id=sorteio.choice(["j1", "j2"]),
                 pessoa_id=sorteio.choice(["c1", "c2"]),
-                nome="X",
                 tipo=sorteio.choice(["aparicao", "aparicao", "mencao_na_fala"]),
                 inicio_ms=(inicio := sorteio.randrange(0, 50)),
                 fim_ms=inicio
@@ -327,20 +323,15 @@ def test_a_uniao_em_sql_da_os_mesmos_numeros_que_a_de_python() -> None:
 
 
 def test_a_soma_em_sql_inteira_da_os_mesmos_numeros_que_a_de_python() -> None:
-    # O SOMA_EM_SQL que vai ao BigQuery roda num SQLite, com o JSON dos nomes (o único
-    # trecho só do BigQuery) trocado pelo do SQLite, e cada linha passa pela mesma leitura
-    # da consulta real: confere a união, as contagens, os nomes e a ordem das colunas.
-    sql = "WITH base AS (SELECT * FROM linhas)\n" + SOMA_EM_SQL.replace(
-        NOMES_EM_JSON, "json_group_array(json_object('nome', nome, 'linhas', linhas))"
-    )
-    assert NOMES_EM_JSON in SOMA_EM_SQL
+    # O SOMA_EM_SQL que vai ao BigQuery roda num SQLite, e cada linha passa pela mesma
+    # leitura da consulta real: confere a união, as contagens e a ordem das colunas.
+    sql = "WITH base AS (SELECT * FROM linhas)\n" + SOMA_EM_SQL
     sorteio = random.Random(363)
     for _ in range(200):
         momentos = [
             MomentoDaPessoa(
                 job_id=sorteio.choice(["j1", "j2"]),
                 pessoa_id=sorteio.choice(["c1", "c2"]),
-                nome=sorteio.choice(["Sabrina", "Sabri", ""]),
                 tipo=sorteio.choice(
                     ["aparicao", "aparicao", "mencao_na_fala", "mencao_no_texto"]
                 ),
@@ -355,7 +346,7 @@ def test_a_soma_em_sql_inteira_da_os_mesmos_numeros_que_a_de_python() -> None:
         do_sql = [pessoa_no_video(v) for v in banco.execute(sql)]
 
         assert sorted(do_sql, key=repr) == sorted(somar(momentos), key=repr)
-        assert relatorio_das_somas(do_sql) == relatorio(momentos)
+        assert relatorio_das_somas(do_sql, _nomes(momentos)) == relatorio(momentos)
 
 
 def test_a_uniao_em_sql_cola_o_que_se_toca_e_une_o_que_se_sobrepoe() -> None:
@@ -387,7 +378,7 @@ def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
 
     por_par = {(s.job_id, s.pessoa_id): s for s in somas}
     assert por_par[("j1", "c1")] == PessoaNoVideo(
-        "j1", "c1", {"Sabrina": 1}, 1_000, 1, 0, 0
+        "j1", "c1", 1_000, 1, 0, 0
     )
     assert por_par[("j3", "c1")].mencoes_na_fala == 1
     assert len(somas) == 4
@@ -867,27 +858,25 @@ def test_o_catalogo_e_lido_uma_vez_por_pedido() -> None:
         assert catalogo.leituras == 1
 
 
-def test_sem_catalogo_o_ranking_usa_o_nome_mais_frequente_das_somas() -> None:
+def test_o_ranking_usa_o_nome_do_catalogo_no_empate() -> None:
     somas = somar(
         [
-            MomentoDaPessoa("j1", "p1", "Zed", "aparicao", 0, 1_000),
-            MomentoDaPessoa("j1", "p2", "Abe", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j1", "p1", 0, 1_000),
+            MomentoDaPessoa("j1", "p2", 0, 1_000),
         ]
     )
 
-    sem_mapa, _ = ranking_em_python(somas, 0, 10)
-    com_mapa, _ = ranking_em_python(somas, 0, 10, {"p1": "Ana", "p2": "Zeca"})
+    pagina, _ = ranking_em_python(somas, 0, 10, {"p1": "Zeca", "p2": "Ana"})
 
-    assert [(p.pessoa_id, p.nome) for p in sem_mapa] == [("p2", "Abe"), ("p1", "Zed")]
-    assert [(p.pessoa_id, p.nome) for p in com_mapa] == [("p1", "Ana"), ("p2", "Zeca")]
+    assert [(p.pessoa_id, p.nome) for p in pagina] == [("p2", "Ana"), ("p1", "Zeca")]
 
 
 def test_video_so_de_mencoes_nao_entra_no_total_de_videos() -> None:
     somas = somar(
         [
-            MomentoDaPessoa("j1", "p1", "Ana", "aparicao", 0, 1_000),
-            MomentoDaPessoa("j2", "p1", "Ana", "mencao_na_fala", 0, 500),
-            MomentoDaPessoa("j2", "p2", "Bia", "mencao_no_texto", 0, 500),
+            MomentoDaPessoa("j1", "p1", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j2", "p1", "mencao_na_fala", 0, 500),
+            MomentoDaPessoa("j2", "p2", "mencao_no_texto", 0, 500),
         ]
     )
 
