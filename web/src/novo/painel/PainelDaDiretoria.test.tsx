@@ -491,9 +491,24 @@ test("Baixar CSV pede o formato csv com os mesmos filtros", async () => {
   const csv = pedidos.find((p) => p.get("formato") === "csv");
   expect(csv?.get("usuario")).toBe("u1");
   expect(csv?.has("programa")).toBe(false);
-  // O CSV nunca é agrupado: traz os dias.
-  expect(csv?.has("agrupar")).toBe(false);
+  // O CSV vem agrupado como a tela: sem escolha na tela, o `auto` da consulta.
+  expect(csv?.get("agrupar")).toBe("auto");
   expect(criar).toHaveBeenCalled();
+  clique.mockRestore();
+});
+
+test("Baixar CSV em Acessos não manda o programa que está no endereço", async () => {
+  const usuario = userEvent.setup();
+  const { clique } = simularDownload();
+  await abrir("/painel/acessos?programa=TV+Fama&agrupar=semana");
+  await tabela("Acessos por dia");
+
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+
+  await waitFor(() => expect(clique).toHaveBeenCalled());
+  const csv = pedidos.find((p) => p.get("formato") === "csv");
+  expect(csv?.has("programa")).toBe(false);
+  expect(csv?.get("agrupar")).toBe("semana");
   clique.mockRestore();
 });
 
@@ -962,6 +977,26 @@ test("a aba API mostra o total, o dia, o sistema e a rota, e nunca manda program
   ).toBe(true);
 });
 
+test.each([
+  ["videos", "Vídeos por dia"],
+  ["buscas", "Buscas por dia"],
+  ["revisao", "Correções por dia"],
+  ["api", "API por dia"],
+])("Baixar CSV em %s manda o agrupamento escolhido", async (aba, titulo) => {
+  const usuario = userEvent.setup();
+  const { clique } = simularDownload();
+  await abrir(`/painel/${aba}?agrupar=mes`);
+  await tabela(titulo);
+
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+
+  await waitFor(() => expect(clique).toHaveBeenCalled());
+  expect(pedidos.find((p) => p.get("formato") === "csv")?.get("agrupar")).toBe(
+    "mes",
+  );
+  clique.mockRestore();
+});
+
 test("Baixar CSV na aba API pede o formato csv sem programa", async () => {
   const usuario = userEvent.setup();
   const { clique } = simularDownload();
@@ -1074,7 +1109,10 @@ test("Baixar CSV na aba Custo pede o formato csv", async () => {
   await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
 
   await waitFor(() => expect(clique).toHaveBeenCalled());
-  expect(pedidos.some((p) => p.get("formato") === "csv")).toBe(true);
+  const csv = pedidos.find((p) => p.get("formato") === "csv");
+  expect(csv).toBeDefined();
+  // O custo é sempre por mês: não agrupa.
+  expect(csv?.has("agrupar")).toBe(false);
   clique.mockRestore();
 });
 

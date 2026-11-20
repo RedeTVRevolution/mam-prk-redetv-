@@ -1001,8 +1001,9 @@ def test_agrupamento_com_pontos_demais_e_422_e_nao_grava_a_abertura() -> None:
     auto = mundo.get("/acessos", agrupar="auto")
     assert auto.headers["X-Agrupamento"] == "mes"
     assert len(auto.json()["por_dia"]) == 23  # de jan/2025 a nov/2026
-    # O CSV não agrupa: sai inteiro, sem 422.
-    assert mundo.get("/acessos", agrupar="dia", formato="csv").status_code == 200
+    # O CSV agrupado segue a mesma regra do JSON; sem `agrupar` sai por dia, sem 422.
+    assert mundo.get("/acessos", agrupar="dia", formato="csv").status_code == 422
+    assert mundo.get("/acessos", formato="csv").status_code == 200
 
 
 AGORA = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
