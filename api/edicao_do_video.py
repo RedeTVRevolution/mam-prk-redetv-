@@ -16,7 +16,8 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
-from api.jobs import FUSO_DA_EMISSORA, DisparoDaIndexacao, JobPublico
+from api.fuso import SAO_PAULO
+from api.jobs import DisparoDaIndexacao, JobPublico
 from api.modelo_do_job import Indexacao, RepositorioDeJobs, mes_da_data
 from api.permissoes import JobDoPedido, exige
 from api.programas import RepositorioDeProgramas
@@ -72,7 +73,7 @@ def criar_rotas_da_edicao(
         agora = relogio()
         if (
             pedido.data_exibicao is not None
-            and pedido.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date()
+            and pedido.data_exibicao > agora.astimezone(SAO_PAULO).date()
         ):
             raise HTTPException(422, "Data de exibição no futuro")
         if pedido.programa is not None:

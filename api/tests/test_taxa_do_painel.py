@@ -5,9 +5,10 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from api.fuso import periodo_em_utc
 from api.jobs import ArmazenamentoIndisponivel
 from api.painel import taxa_no_painel
-from api.qualidade_do_painel import QualidadeReal, _periodo
+from api.qualidade_do_painel import QualidadeReal
 from api.revisao_do_painel import RevisaoEmMemoria
 from api.taxa_de_correcao import calcular, em_csv
 from api.taxa_diaria import atualizar, dias_recentes
@@ -31,7 +32,7 @@ def _tabela_do_caso_de_hoje() -> tuple[TabelaDaTaxaEmMemoria, tuple[Any, ...]]:
 
 def _antigo(mundo: Any, desde: date | None, ate: date | None) -> list[Any]:
     jobs, decupagens, _, correcoes, revisao = mundo
-    inicio, fim = _periodo(desde, ate)
+    inicio, fim = periodo_em_utc(desde, ate)
     return calcular(jobs, decupagens, correcoes, revisao, inicio, fim)
 
 

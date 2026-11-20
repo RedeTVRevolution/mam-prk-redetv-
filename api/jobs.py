@@ -11,7 +11,7 @@ import zlib
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import PurePath
 from typing import Annotated, Any, Literal, Protocol, Self
 from urllib.parse import quote
@@ -69,6 +69,7 @@ from api.correcoes import (
 from api.decupagem import caminho_do_quadro
 from api.erros import ServicoIndisponivel
 from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
+from api.fuso import SAO_PAULO
 from api.idempotencia import (
     TAMANHO_MAXIMO_DA_CHAVE,
     ChaveReusadaComOutroCorpo,
@@ -130,8 +131,6 @@ VALIDADE_DA_IMAGEM = timedelta(hours=8)
 # uma validade que a URL não tem.
 JANELA_DA_URL_DO_QUADRO = timedelta(hours=1)
 VALIDADE_INFORMADA_DA_IMAGEM = VALIDADE_DA_IMAGEM - JANELA_DA_URL_DO_QUADRO
-# O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
-FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
 # Teto de Jobs criados por hora (#371), contado no Firestore, então vale para todas as
 # instâncias: uma chave vazada ou um sistema em laço não gasta GPU e Gemini sem limite.
@@ -782,7 +781,7 @@ def criar_rotas(
         else:
             criado_por, sistema, email = chamador.uid, None, chamador.email or None
         agora = relogio()
-        if novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date():
+        if novo.data_exibicao > agora.astimezone(SAO_PAULO).date():
             raise HTTPException(422, "Data de exibição no futuro")
         job_id, nova, escopo, job_gravado = uuid.uuid4().hex, True, "", False
         if idempotency_key is not None:

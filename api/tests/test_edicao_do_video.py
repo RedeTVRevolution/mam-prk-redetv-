@@ -61,6 +61,7 @@ class Mundo:
         job: Job | None = None,
         papeis: Sequence[Papel] = ("editor",),
         disparo: DisparoContado | None = None,
+        agora: datetime = AGORA,
     ) -> None:
         self.jobs = RepositorioEmMemoria()
         self.jobs.salvar(job or _job())
@@ -88,7 +89,7 @@ class Mundo:
                     ]
                 ),
                 disparo_da_indexacao=self.disparo,
-                relogio=lambda: AGORA,
+                relogio=lambda: agora,
             ),
             raise_server_exceptions=False,
         )
@@ -235,3 +236,11 @@ def test_mes_da_edicao_e_o_que_o_validador_do_job_deriva(data: str) -> None:
     job = mundo.job()
     assert job.mes_exibicao == _job(data_exibicao=data).mes_exibicao
     assert job.mes_exibicao == _job(data_exibicao=date.fromisoformat(data)).mes_exibicao
+
+
+def test_hoje_da_edicao_segue_o_horario_de_verao_de_sao_paulo() -> None:
+    # 2018-11-15T02:30Z: com horário de verão (-02:00) já é dia 15 em São Paulo.
+    mundo = Mundo(agora=datetime(2018, 11, 15, 2, 30, tzinfo=UTC))
+
+    assert mundo.editar({"data_exibicao": "2018-11-15"}).status_code == 200
+    assert mundo.editar({"data_exibicao": "2018-11-16"}).status_code == 422

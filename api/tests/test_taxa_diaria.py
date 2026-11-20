@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 
 from api.erros import ServicoIndisponivel
+from api.fuso import periodo_em_utc
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
-from api.qualidade_do_painel import _periodo
 from api.taxa_de_correcao import calcular
 from api.taxa_diaria import (
     ItensEmMemoria,
@@ -41,7 +41,7 @@ def _mundo_com_itens() -> Any:
 
 def _dia(d: date) -> tuple[datetime | None, datetime | None]:
     """O período que o painel pede para o dia `d` (dia de São Paulo)."""
-    return _periodo(d, d)
+    return periodo_em_utc(d, d)
 
 
 def _somar(linhas: list[LinhaDiaria]) -> dict[tuple[Any, ...], tuple[int, int]]:

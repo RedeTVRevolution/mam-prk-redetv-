@@ -119,6 +119,7 @@ COPY api/__init__.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
      api/florence.py \
+     api/fuso.py \
      api/http_no_ip.py \
      api/idempotencia.py \
      api/identidade.py \
@@ -214,6 +215,7 @@ COPY api/__init__.py \
      api/eventos_de_uso.py \
      api/eventos_do_job.py \
      api/florence.py \
+     api/fuso.py \
      api/http_no_ip.py \
      api/idempotencia.py \
      api/identidade.py \
@@ -339,6 +341,7 @@ COPY api/__init__.py \
      api/erros.py \
      api/eventos_de_uso.py \
      api/florence.py \
+     api/fuso.py \
      api/idempotencia.py \
      api/identidade.py \
      api/indice_da_busca.py \

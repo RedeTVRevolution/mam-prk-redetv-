@@ -8,10 +8,10 @@ sem ler decupagem nem correção.
 """
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date
 from typing import Protocol
-from zoneinfo import ZoneInfo
 
+from api.fuso import periodo_em_utc
 from api.taxa_do_painel import LeitorDaTaxa
 from api.tipos_da_revisao import (
     RevisaoAgregada,
@@ -20,8 +20,6 @@ from api.tipos_da_revisao import (
     agregar,
 )
 from api.tipos_da_taxa import LinhaDaTaxa
-
-SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 
 class QualidadeDoPainel(Protocol):
@@ -38,17 +36,6 @@ class QualidadeDoPainel(Protocol):
         usuario: str | None,
     ) -> RevisaoAgregada:
         """O tempo dos vídeos cujo último pulso é do período, já agrupado."""
-
-
-def _periodo(
-    desde: date | None, ate: date | None
-) -> tuple[datetime | None, datetime | None]:
-    return (
-        datetime.combine(desde, time.min, SAO_PAULO).astimezone(UTC) if desde else None,
-        datetime.combine(ate + timedelta(days=1), time.min, SAO_PAULO).astimezone(UTC)
-        if ate
-        else None,
-    )
 
 
 class QualidadeReal:
@@ -72,7 +59,7 @@ class QualidadeReal:
         programa: str | None,
         usuario: str | None,
     ) -> RevisaoAgregada:
-        inicio, fim = _periodo(desde, ate)
+        inicio, fim = periodo_em_utc(desde, ate)
         return self._tempo.tempo(inicio, fim, programa, usuario)
 
 
