@@ -121,6 +121,24 @@ class TestRepositorioFirestore:
     ) -> None:
         assert repositorio.obter("nao-existe") is None
 
+    def test_expirar_um_job_grava_a_pendencia_e_o_filtro_a_rele(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        from api.jobs import expirar_uploads
+        from api.tests.test_jobs import ArmazenamentoFalso
+
+        repositorio.salvar(_job("a", BASE))
+
+        assert expirar_uploads(
+            repositorio, ArmazenamentoFalso(), BASE + timedelta(hours=25)
+        ) == ["a"]
+
+        (lido,) = repositorio.consultar(
+            FiltroDeJobs(com_fim_a_avisar=True, na_lixeira=None)
+        ).jobs
+        assert (lido.id, lido.estado) == ("a", "falhou")
+        assert sorted(lido.fim_a_avisar) == ["uso", "webhook"]
+
     def test_consulta_os_jobs_com_o_fim_a_avisar(
         self, repositorio: RepositorioFirestore
     ) -> None:

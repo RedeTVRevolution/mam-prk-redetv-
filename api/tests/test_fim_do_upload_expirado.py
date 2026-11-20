@@ -278,16 +278,18 @@ def test_marca_falhando_depois_do_evento_repete_com_id_novo_e_conta_uma_falha() 
 
     m.jobs.trocar = trocar_que_quebra  # type: ignore[method-assign]
     m.varrer(DIA1)
-    assert [e.estado for e in m.eventos.publicados] == ["falhou"]
-    for evento in m.eventos.publicados:
+    antes = list(m.eventos.publicados)
+    assert m.job().fim_a_avisar == ["uso"]
+    for evento in antes:
         _gravar(banco, evento)
     resumos._resumir(banco)
 
     m.varrer(DIA4)
 
-    publicados = m.eventos.publicados
-    assert len(publicados) == 2 and publicados[0].id != publicados[1].id
-    _gravar(banco, publicados[1])
+    novos = m.eventos.publicados[len(antes) :]
+    assert len(novos) == 1
+    assert novos[0].id not in {e.id for e in antes}
+    _gravar(banco, novos[0])
     resumos._resumir(banco, f"'{(DIA4 - timedelta(days=2)).isoformat()}'")
     (por_usuario,) = resumos._tabela(banco, "uso_por_usuario", "quem_id")
     assert por_usuario["videos_falhos"] == 1
@@ -331,3 +333,72 @@ def test_a_purga_sem_um_dos_topicos_sai_com_erro_antes_de_mexer_em_job(
         del ambiente[falta]
         assert main(ambiente) == 2
         assert falta in capsys.readouterr().err
+
+
+def test_falha_pontual_num_job_nao_deixa_os_seguintes_pendentes() -> None:
+    m = Mundo(_job("j1"), _job("j2"))
+    obter = m.jobs.obter
+
+    def obter_que_quebra(job_id: str) -> Job | None:
+        if job_id == "j2":
+            raise Quebra
+        return obter(job_id)
+
+    m.jobs.obter = obter_que_quebra  # type: ignore[method-assign]
+
+    m.varrer(DIA1)
+
+    assert sorted(str(e.job_id) for e in m.eventos.publicados) == ["j1", "j2"]
+    assert obter("j1").fim_a_avisar == []  # type: ignore[union-attr]
+
+
+def test_a_varredura_avisa_os_antigos_antes_de_expirar_e_os_novos_depois() -> None:
+    antigo = _job("velho").model_copy(
+        update={"estado": "falhou", "fim_a_avisar": ["uso"]}
+    )
+    m = Mundo(antigo, _job("novo"))
+    vistos: list[tuple[str, ...]] = []
+
+    def avisar() -> int:
+        vistos.append(
+            tuple(
+                j.id
+                for j in m.jobs.consultar(
+                    FiltroDeJobs(estados=frozenset({"falhou"}), na_lixeira=None)
+                ).jobs
+            )
+        )
+        return 0
+
+    purga = Purga(
+        m.jobs,
+        RepositorioDeCorrecoesEmMemoria(),
+        ArquivosEmMemoria(),
+        None,
+        RepositorioDeAuditoriaEmMemoria(),
+        lambda: DIA1,
+    )
+    rodar_a_varredura_diaria(
+        m.jobs, purga, ArmazenamentoFalso(), lambda: 0, DIA1, lambda: 0, avisar
+    )
+
+    assert [sorted(v) for v in vistos] == [["velho"], ["novo", "velho"]]
+
+
+def test_a_expiracao_que_falha_nao_impede_o_aviso_do_antigo() -> None:
+    antigo = _job("velho").model_copy(
+        update={"estado": "falhou", "fim_a_avisar": ["uso"]}
+    )
+    m = Mundo(antigo, _job("novo"))
+    consultar = m.jobs.consultar
+
+    def consultar_que_quebra(filtro: FiltroDeJobs) -> Any:
+        if filtro.estados:  # a consulta da expiração
+            raise Quebra
+        return consultar(filtro)
+
+    m.jobs.consultar = consultar_que_quebra  # type: ignore[method-assign]
+
+    m.varrer(DIA1)
+
+    assert [e.job_id for e in m.eventos.publicados] == ["velho"]

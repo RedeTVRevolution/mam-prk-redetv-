@@ -189,16 +189,22 @@ def rodar_a_varredura_diaria(
     """O que o agendador diário faz: expira uploads abandonados (#369) e publica o fim deles,
     e o que ficou por publicar nas varreduras anteriores (#782), retoma fusões de pessoas
     pendentes (#722), purga vídeos e catálogo."""
+
+    def avisar() -> None:
+        try:
+            log.info("varredura diária: %d fim(ns) de upload avisado(s)", avisar_fins())
+        except Exception:
+            log.exception("o aviso do fim dos uploads expirados falhou")
+
+    # Os avisos de antes primeiro: a expiração pode gastar o tempo do Job.
+    avisar()
     try:
         expirados = expirar_uploads(repositorio, armazenamento, agora)
         log.info("varredura diária: %d upload(s) expirado(s)", len(expirados))
     except Exception:
         # Não segura a purga: a varredura de amanhã tenta de novo.
         log.exception("a expiração dos uploads falhou")
-    try:
-        log.info("varredura diária: %d fim(ns) de upload avisado(s)", avisar_fins())
-    except Exception:
-        log.exception("o aviso do fim dos uploads expirados falhou")
+    avisar()  # só os que acabaram de expirar
     try:
         log.info("varredura diária: %d fusão(ões) retomada(s)", retomar_fusoes())
     except Exception:

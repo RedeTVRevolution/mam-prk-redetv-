@@ -122,6 +122,7 @@ def avisar_fins_pendentes(
     for job in repositorio.consultar(
         FiltroDeJobs(com_fim_a_avisar=True, na_lixeira=None)
     ).jobs:
+        sem_falha = True
         try:
             if "webhook" in job.fim_a_avisar:
                 # `False` (sem webhook cadastrado) também encerra a parte.
@@ -136,15 +137,16 @@ def avisar_fins_pendentes(
                 )
                 _tirar(repositorio, job.id, "webhook")
         except Exception:
+            sem_falha = False
             log.exception("não consegui avisar o fim do upload expirado de %s", job.id)
         try:
             if "uso" in job.fim_a_avisar:
                 registrar_o_fim(eventos, job, agora, levantar=True)
                 _tirar(repositorio, job.id, "uso")
         except Exception:
+            sem_falha = False
             log.exception("não consegui avisar o fim do upload expirado de %s", job.id)
-        atual = repositorio.obter(job.id)
-        resolvidos += atual is not None and not atual.fim_a_avisar
+        resolvidos += sem_falha
     return resolvidos
 
 
