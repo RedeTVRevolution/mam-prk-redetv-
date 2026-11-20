@@ -458,7 +458,7 @@ def test_timeout_de_cada_job_vem_do_bloco_de_locals() -> None:
         for job in re.findall(
             r'resource "google_cloud_run_v2_job" "\w+" \{.*?\n\}\n',
             arquivo.read_text(),
-            re.S,
+            re.DOTALL,
         ):
             jobs += 1
             assert re.search(
