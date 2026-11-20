@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import tempfile
+import time
 from dataclasses import replace
 from datetime import date
 from typing import Any
@@ -186,6 +187,7 @@ def test_os_filtros_de_programa_e_periodo_valem() -> None:
 
     r = enviar(c, foto(), desde="2025-02-01", ate="2025-01-02")
     assert r.status_code == 422
+    assert r.json()["detail"] == "O início do período passa do fim"
 
 
 def test_sem_periodo_e_ignorado_e_nao_vira_filtro_do_evento() -> None:
@@ -286,6 +288,39 @@ def test_a_busca_por_imagem_conta_no_limite_de_consultas() -> None:
     c, _ = com_vestido(maximo_por_minuto=1)
     assert enviar(c, foto()).status_code == 200
     assert enviar(c, foto()).status_code == 429
+
+
+def test_com_o_limite_esgotado_bytes_que_nao_sao_imagem_recebem_429_nao_422() -> None:
+    c, _ = com_vestido(maximo_por_minuto=1)
+    assert enviar(c, foto()).status_code == 200
+    r = enviar(c, b"nao sou imagem")
+    assert r.status_code == 429
+    assert r.json()["detail"] == "Consultas demais; tente em um minuto"
+
+
+def test_cursor_invalido_na_foto_responde_422() -> None:
+    c, _ = com_vestido()
+    r = enviar(c, foto(), cursor="nao-existe")
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Cursor inválido"
+
+
+def test_foto_que_passa_do_prazo_responde_504_com_a_mensagem_da_busca(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.rota_da_busca.TEMPO_DA_CONSULTA_S", 0.0)
+    from api.busca import Consulta, Registro
+    from api.tests.test_busca import IndiceEmMemoria
+
+    class Lento(IndiceEmMemoria):
+        def buscar(self, consulta: Consulta) -> list[Registro]:
+            time.sleep(0.5)
+            return []
+
+    c, _ = com_vestido(tempo_maximo_s=0.05, indice=Lento())
+    r = enviar(c, foto())
+    assert r.status_code == 504
+    assert r.json()["detail"] == "A busca demorou demais"
 
 
 def test_jpeg_de_celular_que_abre_como_mpo_e_aceito() -> None:
