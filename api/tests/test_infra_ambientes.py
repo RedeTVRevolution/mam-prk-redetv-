@@ -414,3 +414,149 @@ def test_o_readme_lista_os_papeis_da_terraform_do_wizard_e_os_da_build() -> None
         (MODULO / "main.tf").read_text(),
     ) + ["roles/logging.logWriter"]:
         assert f"`{papel}`" in readme, papel
+
+
+# --- A coleção da busca criada pelo deploy (#757) ---
+
+CRIAR = RAIZ / "scripts" / "criar-colecao-no-deploy.sh"
+SAIDAS_DA_BUSCA = {
+    "busca_regiao": "us-east4",
+    "busca_colecao": "momentos",
+    "busca_colecao_de_texto": "texto",
+    "busca_indice_descricao": "indice",
+    "busca_dimensao": 256,
+    "busca_indices_ligados": False,
+}
+
+
+def test_o_deploy_cria_a_colecao_da_busca_depois_do_apply_direcionado_e_antes_do_build() -> (
+    None
+):
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    apply = deploy.index("scripts/aplicar-sem-destruir.sh -target=module.mam.")
+    criar = deploy.index("scripts/criar-colecao-no-deploy.sh")
+    build = deploy.index("gc builds submit")
+
+    assert apply < criar < build
+    assert (
+        "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=$GOOGLE_IMPERSONATE_SERVICE_ACCOUNT"
+        in deploy[criar - 200 : criar]
+    )
+
+
+def test_o_papel_da_busca_da_mam_terraform_esta_no_modulo_e_no_primeiro_apply() -> None:
+    papel = (MODULO / "papel_vertex.tf").read_text()
+    bloco = papel[
+        papel.index('resource "google_project_iam_member" "terraform_busca"') :
+    ]
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    primeiro = deploy[
+        deploy.index("scripts/aplicar-sem-destruir.sh -target=module.mam.") :
+    ].split("-var imagem=pendente")[0]
+
+    assert "roles/vectorsearch.collectionWriter" in bloco
+    assert "roles/vectorsearch.indexWriter" in bloco
+    assert "local.conta_do_terraform" in bloco
+    assert "-target=module.mam.google_project_iam_member.terraform_busca" in primeiro
+    assert "terraform_predicao_vertex" in primeiro
+
+
+def _criar(
+    tmp_path: Path,
+    saidas: dict[str, object],
+    saida_do_python: str = "Coleções e índice da busca prontos.",
+    codigo: int = 0,
+    **ambiente: str,
+) -> subprocess.CompletedProcess[str]:
+    bin_ = tmp_path / "bin"
+    bin_.mkdir(exist_ok=True)
+    (tmp_path / "saida.json").write_text(
+        json.dumps({k: {"value": v, "type": "x"} for k, v in saidas.items()})
+    )
+    (tmp_path / "saida_do_python").write_text(saida_do_python + "\n")
+    (bin_ / "terraform").write_text(f"#!/bin/sh\ncat {tmp_path}/saida.json\n")
+    (bin_ / "uv").write_text(
+        "#!/bin/sh\n"
+        f"env | grep '^BUSCA_' | sort > {tmp_path}/busca\n"
+        f"cat {tmp_path}/saida_do_python\nexit {codigo}\n"
+    )
+    for f in ("terraform", "uv"):
+        (bin_ / f).chmod(0o755)
+    limpo = {k: v for k, v in os.environ.items() if not k.startswith("BUSCA_")}
+    return subprocess.run(
+        [str(CRIAR)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**limpo, "PATH": f"{bin_}:{os.environ['PATH']}", **ambiente},
+    )
+
+
+def _busca(tmp_path: Path) -> dict[str, str]:
+    linhas = (tmp_path / "busca").read_text().splitlines()
+    return dict(linha.split("=", 1) for linha in linhas)
+
+
+def test_a_criacao_recebe_so_os_seis_valores_do_terraform(tmp_path: Path) -> None:
+    # O ambiente local traz o índice ligado e uma cota inválida; nenhum dos dois chega ao Python.
+    feito = _criar(
+        tmp_path,
+        SAIDAS_DA_BUSCA,
+        BUSCA_INDICES_LIGADOS="true",
+        BUSCA_COTA_DE_ESCRITA="abc",
+        BUSCA_DISTANCIA_MAXIMA="x",
+    )
+
+    assert feito.returncode == 0, feito.stderr
+    assert _busca(tmp_path) == {
+        "BUSCA_REGIAO": "us-east4",
+        "BUSCA_COLECAO": "momentos",
+        "BUSCA_COLECAO_DE_TEXTO": "texto",
+        "BUSCA_INDICE_DESCRICAO": "indice",
+        "BUSCA_DIMENSAO": "256",
+        "BUSCA_INDICES_LIGADOS": "false",
+    }
+
+
+def test_o_indice_ligado_do_terraform_chega_como_true(tmp_path: Path) -> None:
+    feito = _criar(tmp_path, {**SAIDAS_DA_BUSCA, "busca_indices_ligados": True})
+
+    assert feito.returncode == 0, feito.stderr
+    assert _busca(tmp_path)["BUSCA_INDICES_LIGADOS"] == "true"
+
+
+@pytest.mark.parametrize("faltando", list(SAIDAS_DA_BUSCA))
+def test_output_da_busca_ausente_aborta_antes_de_criar(
+    tmp_path: Path, faltando: str
+) -> None:
+    saidas = {k: v for k, v in SAIDAS_DA_BUSCA.items() if k != faltando}
+
+    feito = _criar(tmp_path, saidas)
+
+    assert feito.returncode == 1
+    assert faltando in feito.stderr
+    assert not (tmp_path / "busca").exists()
+
+
+def test_a_falha_da_criacao_para_o_deploy_com_saida_1_e_diz_como_seguir(
+    tmp_path: Path,
+) -> None:
+    feito = _criar(tmp_path, SAIDAS_DA_BUSCA, "403 sem permissão", codigo=3)
+
+    assert feito.returncode == 1
+    assert "403 sem permissão" in feito.stdout
+    assert "rode o deploy de novo" in feito.stderr
+
+
+def test_o_aviso_de_reindexar_e_repassado(tmp_path: Path) -> None:
+    resumo = tmp_path / "resumo"
+    feito = _criar(
+        tmp_path,
+        SAIDAS_DA_BUSCA,
+        "Campos acrescentados: x. Rode `make reindexar`.",
+        GITHUB_STEP_SUMMARY=str(resumo),
+    )
+
+    assert feito.returncode == 0
+    assert "make reindexar" in feito.stderr
+    assert "make reindexar" in resumo.read_text()

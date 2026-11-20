@@ -18,3 +18,14 @@ resource "google_project_iam_member" "terraform_predicao_vertex" {
   role    = google_project_iam_custom_role.vertex_predicao.id
   member  = "serviceAccount:${local.conta_do_terraform}"
 }
+
+# O deploy cria as coleções e o índice da busca como a mam-terraform (#757, api/criar_colecao_da_busca.py).
+# Papéis predefinidos, conferidos no catálogo do IAM: collectionWriter dá criar, ler e atualizar
+# coleção (o PATCH do esquema) e ler operação; indexWriter dá criar e ler índice. Nenhum dá acesso
+# aos dados (dataObjects). Ela nasce no wizard, fora do Terraform; aqui só ganha estes papéis.
+resource "google_project_iam_member" "terraform_busca" {
+  for_each = toset(["roles/vectorsearch.collectionWriter", "roles/vectorsearch.indexWriter"])
+  project  = var.projeto
+  role     = each.value
+  member   = "serviceAccount:${local.conta_do_terraform}"
+}

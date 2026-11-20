@@ -1272,9 +1272,10 @@ def aquecer_o_indice(transporte: Transporte, config: ConfigDaBusca) -> None:
         aquecer(host)
 
 
-def transporte_http() -> Transporte:
-    """O transporte real: REST com as credenciais padrão (ADC) de quem roda."""
-    sessao = com_pool(sessao_autenticada(), CONEXOES_AO_INDICE)
+def transporte_http(personificar: str | None = None) -> Transporte:
+    """O transporte real: REST com as credenciais padrão (ADC) de quem roda, ou da conta
+    de serviço `personificar`, se dada."""
+    sessao = com_pool(sessao_autenticada(personificar=personificar), CONEXOES_AO_INDICE)
 
     def aquecer(host: str) -> None:
         tocar_o_host(sessao, host)

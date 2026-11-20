@@ -11,9 +11,14 @@ from api.agent_retrieval import (
     transporte_http,
 )
 
-if __name__ == "__main__":
+
+def main() -> None:
     config = ConfigDaBusca.do_ambiente(os.environ)
-    transporte = transporte_http()
+    # O deploy e o CD rodam como a mam-terraform: a credencial federada do CD não tem papel
+    # próprio, então a conta vem explícita (exportar a variável do gcloud não basta aqui).
+    transporte = transporte_http(
+        personificar=os.environ.get("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT") or None
+    )
     try:
         acrescentados = criar_colecao(config, transporte)
     except EsquemaIncompativel as erro:
@@ -30,3 +35,7 @@ if __name__ == "__main__":
             f"{', '.join(faltam)}, e o PATCH não os acrescenta. Recrie o índice (apague-o "
             "e rode `make criar-colecao-da-busca` de novo): nada foi apagado aqui."
         )
+
+
+if __name__ == "__main__":
+    main()
