@@ -260,3 +260,13 @@ def test_o_403_na_operacao_aceita_repete_so_a_consulta_e_o_aviso_sai(
     )
     assert len(esperas) == 1
     assert "make reindexar" in capsys.readouterr().out
+
+
+def test_403_de_outra_origem_falha_na_hora(rodar: Any, esperas: list[float]) -> None:
+    class Perimetro(NuvemFalsa):
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            raise RuntimeError("HTTP 403: SECURITY_POLICY_VIOLATED")
+
+    with pytest.raises(RuntimeError, match="SECURITY_POLICY_VIOLATED"):
+        rodar(Perimetro(), "--personificar", CONTA)
+    assert esperas == []
