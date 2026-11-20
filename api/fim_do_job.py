@@ -42,11 +42,12 @@ from api.webhook import RepositorioDeWebhooks
 log = logging.getLogger(__name__)
 
 
-def _id_estavel(job: Job, evento: str) -> str:
+def _id_estavel(job: Job, evento: str, sufixo: str | None = None) -> str:
     """O mesmo em toda tentativa de avisar a mesma falha: o duplicado que a repetição pode
     gerar (marca que falhou depois de publicar) é descartado por quem recebe."""
     return uuid.uuid5(
-        uuid.NAMESPACE_URL, f"mam/{evento}/{job.id}/{job.reprocessamentos}"
+        uuid.NAMESPACE_URL,
+        f"mam/{evento}/{job.id}/{job.reprocessamentos if sufixo is None else sufixo}",
     ).hex
 
 
@@ -131,9 +132,7 @@ def avisar_fins_pendentes(
                     webhooks,
                     publicador,
                     agora,
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL, f"mam/webhook/{job.id}/upload_expirado"
-                    ).hex,
+                    _id_estavel(job, "webhook", "upload_expirado"),
                 )
                 _tirar(repositorio, job.id, "webhook")
         except Exception:
