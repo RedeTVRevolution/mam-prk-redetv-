@@ -836,15 +836,15 @@ VALIDADE_DA_FALHA_S = (
 )
 
 
+def _cache_curto() -> CacheCurto:
+    return CacheCurto(validade_da_falha_s=VALIDADE_DA_FALHA_S)
+
+
 def _com_cache[C, R](
     consulta: C | None, envolver: Callable[[C, CacheCurto], R]
 ) -> R | None:
     """A consulta do BigQuery com o cache curto de uma instância (#453); `None` fica `None`."""
-    return (
-        envolver(consulta, CacheCurto(validade_da_falha_s=VALIDADE_DA_FALHA_S))
-        if consulta
-        else None
-    )
+    return envolver(consulta, _cache_curto()) if consulta else None
 
 
 configurar_o_log()
@@ -953,7 +953,7 @@ if _projeto:
         taxa_de_correcao=taxa_do_ambiente(os.environ),
         nomes_do_acervo=nomes_do_ambiente(os.environ),
         relatorio_de_marcas=_com_cache(marcas_do_ambiente(os.environ), MarcasComCache),
-        cache_do_painel=CacheCurto(validade_da_falha_s=VALIDADE_DA_FALHA_S),
+        cache_do_painel=_cache_curto(),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],
