@@ -39,6 +39,11 @@ class Mundo:
         self.corpos: list[dict[str, Any]] = []
         self.cancelamentos: list[int] = []
         self.falhas_no_cancelamento = 0
+        # Quando ligado, cada chamada de acompanhamento demora o que o transporte deixa
+        # (`limite_s`, ou 150 s), e o cancelamento demora `duracao_do_cancelamento`.
+        self.consome_o_limite = False
+        self.duracao_do_cancelamento = 0
+        self.fins: list[float] = []
         self._estados = estados
         self._passo = passo
         self._primeira = primeira or {
@@ -55,6 +60,13 @@ class Mundo:
         self.corpos.append(corpo)
         if "query" in corpo:
             return self._primeira
+        if self.consome_o_limite:
+            self.segundos += (
+                self.duracao_do_cancelamento
+                if corpo.get("cancelar")
+                else corpo.get("limite_s", 150)
+            )
+            self.fins.append(self.segundos)
         if corpo.get("cancelar"):
             self.cancelamentos.append(self.segundos)
             if self.falhas_no_cancelamento:
@@ -237,3 +249,42 @@ def test_a_purga_com_errors_levanta_e_devolve_as_linhas_afetadas(
         primeira={"jobComplete": True, "numDmlAffectedRows": "7"},
     )
     assert executar_purga(config, bom.transporte, "DELETE x", "j1") == 7
+
+
+def test_a_consulta_antes_do_marco_nao_empurra_o_cancelamento_para_depois_do_teto(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.copia_bigquery import PRAZO_CURTO
+
+    mundo = Mundo(monkeypatch, _sempre("RUNNING"))
+    mundo.consome_o_limite = True
+    with pytest.raises(RuntimeError):
+        _executar(mundo, PRAZO_CURTO)
+
+    assert mundo.cancelamentos[0] == PRAZO_CURTO.cancelar_s
+    assert max(mundo.fins) <= PRAZO_CURTO.desistir_s
+
+
+def test_o_relogio_e_relido_depois_de_um_cancelamento_demorado(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.copia_bigquery import PRAZO_CURTO
+
+    mundo = Mundo(monkeypatch, _sempre("RUNNING"))
+    mundo.consome_o_limite = True
+    mundo.duracao_do_cancelamento = 8
+    with pytest.raises(RuntimeError):
+        _executar(mundo, PRAZO_CURTO)
+
+    assert max(mundo.fins) <= PRAZO_CURTO.desistir_s
+    assert mundo.segundos <= PRAZO_CURTO.desistir_s
+
+
+def test_a_purga_que_nao_termina_diz_nao_confirmada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mundo = Mundo(monkeypatch, _sempre("RUNNING"))
+    with pytest.raises(RuntimeError, match="purga de j1 no BigQuery não confirmada"):
+        executar_purga(
+            ConfigDoBigQuery("p", "d", "t", "r"), mundo.transporte, "DELETE x", "j1"
+        )

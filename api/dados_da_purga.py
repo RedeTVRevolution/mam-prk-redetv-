@@ -28,6 +28,7 @@ def executar(
         [parametro("job_id", job_id)],
         PRAZO_CURTO,
         descricao=f"purga de {job_id} no BigQuery",
+        mensagem_do_prazo=f"purga de {job_id} no BigQuery não confirmada",
     )
     if resposta.get("errors"):
         raise RuntimeError(f"purga de {job_id} no BigQuery não confirmada")

@@ -331,6 +331,7 @@ def executar_dml(
     prazo: PrazoDoDml,
     *,
     descricao: str,
+    mensagem_do_prazo: str | None = None,
 ) -> dict[str, Any]:
     """Roda um DML e só volta com ele terminado sem erro, ou levanta `RuntimeError`.
 
@@ -355,22 +356,37 @@ def executar_dml(
     if not referencia:
         raise RuntimeError(f"{descricao} sem referência do MERGE")
     referencia = {"location": regiao, **referencia}
-    cancelamento_pedido = False
-    while True:
-        decorrido = monotonic() - inicio
-        falta = max(1, prazo.desistir_s - decorrido)
+    cancelamento_pedido = cancelamento_tentado = False
+
+    def decorrido() -> float:
+        return monotonic() - inicio
+
+    def limite(falta: float) -> dict[str, float]:
         # Só a chamada que não cabe nos 150 s do transporte leva `limite_s`.
-        limite = {"limite_s": falta} if falta < 150 else {}
-        if decorrido >= prazo.cancelar_s and not cancelamento_pedido:
+        return {"limite_s": falta} if falta < 150 else {}
+
+    while True:
+        if decorrido() >= prazo.cancelar_s and not cancelamento_pedido:
+            falta = max(1, prazo.desistir_s - decorrido())
+            cancelamento_tentado = True
             try:
-                transporte({"jobReference": referencia, "cancelar": True, **limite})
+                transporte(
+                    {"jobReference": referencia, "cancelar": True, **limite(falta)}
+                )
                 cancelamento_pedido = True
             except Exception:
                 log.exception("cancelamento do MERGE de %s não confirmado", descricao)
-        if decorrido >= prazo.desistir_s:
-            raise RuntimeError(f"{descricao} não terminou no prazo")
+        agora = decorrido()
+        if agora >= prazo.desistir_s:
+            raise RuntimeError(
+                mensagem_do_prazo or f"{descricao} não terminou no prazo"
+            )
+        falta = prazo.desistir_s - agora
+        if not cancelamento_pedido and agora < prazo.cancelar_s:
+            # A consulta não pode empurrar o cancelamento para depois do marco.
+            falta = min(falta, prazo.cancelar_s - agora)
         try:
-            estado = transporte({"jobReference": referencia, **limite})["status"]
+            estado = transporte({"jobReference": referencia, **limite(falta)})["status"]
         except Exception:
             # Uma falha de transporte não prova que o MERGE parou de poder gravar.
             log.exception("estado do MERGE de %s não confirmado", descricao)
@@ -379,7 +395,13 @@ def executar_dml(
                 if estado.get("errorResult"):
                     raise RuntimeError(f"{descricao} falhou: {estado['errorResult']}")
                 return resposta
-        sleep(min(5, falta))
+        agora = decorrido()
+        espera = prazo.desistir_s - agora
+        if not cancelamento_pedido and agora < prazo.cancelar_s:
+            espera = min(espera, prazo.cancelar_s - agora)
+        # Passado o marco com o cancelamento por pedir, ele sai já, sem dormir antes.
+        if espera > 0 and (cancelamento_tentado or agora < prazo.cancelar_s):
+            sleep(min(5, espera))
 
 
 def parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
