@@ -5,7 +5,7 @@ lixeira também) a partir da Decupagem corrigida (a leitura que mantém o víncu
 do catálogo). É uma passada única de linha de comando,
 que lê os Jobs em páginas e só grava o que mudou: repetir não muda nada.
 Também reconcilia o Job que ficou sem o campo porque a gravação do #359 falhou
-(`make recalcular-pessoas-dos-jobs`, #478).
+(`make preencher-catalogo-dos-jobs`, #478).
 """
 
 import logging

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Alvos `ocr` e `ocr-gpu` do Dockerfile: baixa para /modelos o detector pedido (`$1`) e o
+# Alvo `ocr-gpu` do Dockerfile: baixa para /modelos o detector pedido (`$1`) e o
 # reconhecedor, nas revisões fixadas, e confere o SHA-256 de cada arquivo. O Dockerfile
 # escreve o detector na linha; o aceito está aqui, e um nome outro falha. Só o
 # urllib do Python da imagem base: a imagem não tem curl.

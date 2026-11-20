@@ -2,26 +2,15 @@ version = 1
 revision = 3
 requires-python = "==3.12.*"
 resolution-markers = [
-    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')",
-    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu')",
-    "extra == 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu' and extra != 'group-10-mam-redetv-transcricao'",
-    "extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu')",
+    "extra == 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr-gpu' and extra != 'group-10-mam-redetv-transcricao'",
+    "extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr-gpu'",
 ]
 conflicts = [[
-    { package = "mam-redetv", group = "ocr" },
-    { package = "mam-redetv", group = "ocr-gpu" },
-], [
-    { package = "mam-redetv", group = "objetos" },
-    { package = "mam-redetv", group = "ocr" },
-], [
     { package = "mam-redetv", group = "objetos" },
     { package = "mam-redetv", group = "ocr-gpu" },
 ], [
@@ -234,7 +223,7 @@ name = "cffi"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz", hash = "sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be", size = 530807, upload-time = "2026-08-03T21:21:18.939Z" }
 wheels = [
@@ -363,7 +352,7 @@ name = "cryptography"
 version = "50.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "platform_python_implementation != 'PyPy' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "cffi", marker = "platform_python_implementation != 'PyPy' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9d/af/182eb91b0df3fe75c4d9f26fe70684569566745f6ba7e5c9c73a862c5252/cryptography-50.0.2.tar.gz", hash = "sha256:7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5", size = 880623, upload-time = "2026-09-30T15:30:04.884Z" }
 wheels = [
@@ -804,8 +793,8 @@ name = "httpcore2"
 version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "sys_platform != 'emscripten' or extra == 'group-10-mam-redetv-objetos' or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra != 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu')" },
-    { name = "truststore", marker = "sys_platform != 'emscripten' or extra == 'group-10-mam-redetv-objetos' or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra != 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c0/61/afa9d6b7452f9eca73f73d45324eb0bb52f098fd5e6049bf6b8263be9b4e/httpcore2-2.16.0.tar.gz", hash = "sha256:c72cd0413563b17e1cd8354677dff887466f8ec2551679759e93126534428643", size = 69886, upload-time = "2026-10-21T07:09:45.31Z" }
 wheels = [
@@ -832,11 +821,11 @@ name = "httpx2"
 version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio", marker = "sys_platform != 'emscripten' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
-    { name = "httpcore2", marker = "sys_platform != 'emscripten' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
-    { name = "httpx2-jsfetch", marker = "sys_platform == 'emscripten' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "anyio", marker = "sys_platform != 'emscripten' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
+    { name = "httpcore2", marker = "sys_platform != 'emscripten' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
+    { name = "httpx2-jsfetch", marker = "sys_platform == 'emscripten' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
     { name = "idna" },
-    { name = "truststore", marker = "sys_platform != 'emscripten' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "truststore", marker = "sys_platform != 'emscripten' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/43/73/5ca2cedf5e4e50423d1c258877865a6b62793633b561c58499f8aeb33b7e/httpx2-2.16.0.tar.gz", hash = "sha256:0d54c98128e8f2ff7fbbde0fca8c359e5f032edeaaaac443cdb7f31f685bcd7f", size = 103116, upload-time = "2026-10-21T07:09:46.348Z" }
@@ -877,28 +866,23 @@ name = "huggingface-hub"
 version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')",
-    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu')",
-    "extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu')",
+    "extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr-gpu'",
 ]
 dependencies = [
-    { name = "click", marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
-    { name = "filelock", marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
-    { name = "fsspec", marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
-    { name = "hf-xet", marker = "(platform_machine == 'AMD64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'ARM64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'aarch64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'amd64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'arm64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'x86_64' and extra != 'group-10-mam-redetv-objetos') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
-    { name = "httpx2", marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
-    { name = "packaging", marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
-    { name = "pyyaml", marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
-    { name = "tqdm", marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
-    { name = "typing-extensions", marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
+    { name = "click", marker = "extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
+    { name = "filelock", marker = "extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
+    { name = "fsspec", marker = "extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
+    { name = "hf-xet", marker = "(platform_machine == 'AMD64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'ARM64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'aarch64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'amd64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'arm64' and extra != 'group-10-mam-redetv-objetos') or (platform_machine == 'x86_64' and extra != 'group-10-mam-redetv-objetos') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
+    { name = "httpx2", marker = "extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
+    { name = "packaging", marker = "extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
+    { name = "pyyaml", marker = "extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
+    { name = "tqdm", marker = "extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
+    { name = "typing-extensions", marker = "extra == 'group-10-mam-redetv-ocr-gpu' or extra == 'group-10-mam-redetv-transcricao' or extra != 'group-10-mam-redetv-objetos'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b5/3b/2fcef1eabe52aec90fc8cd253cc154da1d02a446d7bbcdec59b4a51d4be7/huggingface_hub-2.4.0.tar.gz", hash = "sha256:13a6158b9e3393d9d3f248ce99074d50c2a0a1449fb9d8e2f710751e2084c188", size = 1066194, upload-time = "2026-10-29T15:30:12.321Z" }
 wheels = [
@@ -1050,11 +1034,14 @@ version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "google-api-core" },
+    { name = "google-auth" },
     { name = "google-cloud-firestore" },
     { name = "google-cloud-storage" },
     { name = "pillow" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "python-multipart" },
+    { name = "requests" },
     { name = "uvicorn" },
     { name = "wordfreq" },
 ]
@@ -1074,10 +1061,6 @@ objetos = [
     { name = "torch" },
     { name = "transformers" },
 ]
-ocr = [
-    { name = "paddleocr" },
-    { name = "paddlepaddle" },
-]
 ocr-gpu = [
     { name = "paddleocr" },
     { name = "paddlepaddle-gpu" },
@@ -1094,11 +1077,14 @@ transcricao-gpu = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi" },
+    { name = "google-api-core" },
+    { name = "google-auth" },
     { name = "google-cloud-firestore", specifier = ">=2.34.1" },
     { name = "google-cloud-storage", specifier = ">=3.17.1" },
     { name = "pillow", specifier = ">=13.0.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
     { name = "python-multipart", specifier = ">=0.0.33" },
+    { name = "requests" },
     { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "wordfreq", specifier = "==3.1.1" },
 ]
@@ -1117,10 +1103,6 @@ dev = [
 objetos = [
     { name = "torch", specifier = "==2.15.0" },
     { name = "transformers", specifier = "==4.57.6" },
-]
-ocr = [
-    { name = "paddleocr", specifier = "==3.7.0" },
-    { name = "paddlepaddle", specifier = "==3.2.2" },
 ]
 ocr-gpu = [
     { name = "paddleocr", specifier = "==3.7.0" },
@@ -1255,7 +1237,7 @@ version = "2.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ast-serialize" },
-    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
     { name = "mypy-extensions" },
     { name = "pathspec" },
     { name = "typing-extensions" },
@@ -1462,7 +1444,7 @@ name = "nvidia-cufft-cu12"
 version = "11.3.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/37/c50d2b2f2c07e146776389e3080f4faf70bcc4fa6e19d65bb54ca174ebc3/nvidia_cufft_cu12-11.3.0.4-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d16079550df460376455cba121db6564089176d9bac9e4f360493ca4741b22a6", size = 200164144, upload-time = "2024-11-20T17:40:58.288Z" },
@@ -1522,9 +1504,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')" },
-    { name = "nvidia-cusparse-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')" },
-    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')" },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cusparse-cu12" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/93/17/dbe1aa865e4fdc7b6d4d0dd308fdd5aaab60f939abfc0ea1954eac4fb113/nvidia_cusolver_cu12-11.7.1.2-py3-none-manylinux2014_aarch64.whl", hash = "sha256:0ce237ef60acde1efc457335a2ddadfd7610b892d94efee7b776c64bb1cac9e0", size = 157833628, upload-time = "2024-10-01T17:05:05.591Z" },
@@ -1552,7 +1534,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32')" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/eb/eb/6681efd0aa7df96b4f8067b3ce7246833dd36830bb4cec8896182773db7d/nvidia_cusparse_cu12-12.5.4.2-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:d25b62fb18751758fe3c93a4a08eff08effedfe4edf1c6bb5afd0890fe88f887", size = 216451147, upload-time = "2024-11-20T17:44:18.055Z" },
@@ -1729,7 +1711,7 @@ version = "3.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
-    { name = "paddlex", extra = ["ocr-core"], marker = "extra == 'group-10-mam-redetv-ocr' or extra == 'group-10-mam-redetv-ocr-gpu' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
+    { name = "paddlex", extra = ["ocr-core"], marker = "extra == 'group-10-mam-redetv-ocr-gpu' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
     { name = "pyyaml" },
     { name = "requests" },
     { name = "typing-extensions" },
@@ -1737,27 +1719,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/97/b1/9454e886afa925067ce51de2e513d146524645888de299d51ddc1caa3100/paddleocr-3.7.0.tar.gz", hash = "sha256:9b81eb62cf37e590d4873e60262ff56f968ff9de6ce1f565749760ceb1c422e2", size = 3082862, upload-time = "2026-06-11T12:09:52.545Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/79/2ade66cf72074a3d2a013e2ba1f256d6116fec797b908fc1b4f9c320d8c4/paddleocr-3.7.0-py3-none-any.whl", hash = "sha256:c0f0a81ad4112727f30c6fcf986ac0ef6a120d31ee0991a01fae0357ee32d338", size = 146750, upload-time = "2026-06-11T12:09:51.204Z" },
-]
-
-[[package]]
-name = "paddlepaddle"
-version = "3.2.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "networkx" },
-    { name = "numpy" },
-    { name = "opt-einsum" },
-    { name = "pillow" },
-    { name = "protobuf" },
-    { name = "safetensors" },
-    { name = "typing-extensions" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/3a/84204351f84bc837c6bc95592f3b4bf71487f4a99e72a5bc7027d2fe1ba8/paddlepaddle-3.2.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c62dab0d4df6de2978960832f0015a145c23cd379418d932ddd8f546629d1fe4", size = 99510113, upload-time = "2025-11-14T13:27:27.71Z" },
-    { url = "https://files.pythonhosted.org/packages/7f/2d/f46a5f5464c7d31e9e067e173a449cff8c0d96f7f7282b9454650901fe3c/paddlepaddle-3.2.2-cp312-cp312-manylinux1_x86_64.whl", hash = "sha256:f6b3b73d47acc82cf545896e6e5c31b55a7f9a26dc0acb28abcc24069d9396dd", size = 189280697, upload-time = "2025-11-19T11:52:09.004Z" },
-    { url = "https://files.pythonhosted.org/packages/e8/e1/2f410bed4271df98ab2a720caa59ff408f8e8ca5daa6089b78b4326b8d10/paddlepaddle-3.2.2-cp312-cp312-manylinux2014_aarch64.whl", hash = "sha256:a59d9020ba160fa7f5aefcb30e4a6329390a635d1a0b511f6458139376c03f99", size = 88147129, upload-time = "2025-11-19T11:18:34.59Z" },
-    { url = "https://files.pythonhosted.org/packages/ec/ff/ed7598e52e3ad2ebd8202076b4d2412e5e605a15b9ba03ab0cec6edf824e/paddlepaddle-3.2.2-cp312-cp312-win_amd64.whl", hash = "sha256:883954ea41fb1cccd022ac351f164b7a9f5cbc94be24223ce8bd981ddee93eb3", size = 101725915, upload-time = "2025-11-14T13:15:13.643Z" },
 ]
 
 [[package]]
@@ -2149,7 +2110,7 @@ name = "pytest"
 version = "9.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
@@ -2434,17 +2395,12 @@ name = "tokenizers"
 version = "0.23.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')",
-    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
-    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu')",
-    "extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr' and extra != 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'darwin' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "sys_platform == 'emscripten' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu'",
+    "(platform_machine != 'aarch64' and sys_platform == 'linux' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32' and extra != 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu')",
+    "extra != 'group-10-mam-redetv-objetos' and extra != 'group-10-mam-redetv-ocr-gpu'",
 ]
 dependencies = [
     { name = "huggingface-hub", version = "2.4.0", source = { registry = "https://pypi.org/simple" } },
@@ -2475,7 +2431,7 @@ version = "2.15.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cuda-bindings", marker = "sys_platform == 'linux'" },
-    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra == 'group-10-mam-redetv-objetos') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra == 'group-10-mam-redetv-objetos') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
     { name = "filelock" },
     { name = "fsspec" },
     { name = "jinja2" },
@@ -2501,7 +2457,7 @@ name = "tqdm"
 version = "4.70.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao') or (extra == 'group-10-mam-redetv-ocr' and extra == 'group-10-mam-redetv-ocr-gpu')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-ocr-gpu') or (extra == 'group-10-mam-redetv-objetos' and extra == 'group-10-mam-redetv-transcricao')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
 wheels = [

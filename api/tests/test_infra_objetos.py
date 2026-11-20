@@ -123,11 +123,10 @@ def test_o_bake_monta_e_envia_a_imagem_com_cache_da_gpu() -> None:
     bake = (RAIZ / "docker-bake.hcl").read_text()
     cloudbuild = (RAIZ / "cloudbuild.yaml").read_text()
     padrao = bake[bake.index('group "default"') :].split("}")[0]
-    gpu = bake[bake.index('group "gpu"') :].split("}")[0]
     bloco = bake[bake.index('target "objetos-gpu"') :].split("\n}")[0]
 
     assert 'variable "OBJETOS_GPU" {}' in bake
-    assert "objetos-gpu" in padrao and "objetos-gpu" in gpu
+    assert "objetos-gpu" in padrao
     assert 'inherits   = ["base"]' in bloco
     assert "tags       = [OBJETOS_GPU]" in bloco
     assert "type=registry,ref=${CACHE_GPU}:objetos-gpu" in bloco
