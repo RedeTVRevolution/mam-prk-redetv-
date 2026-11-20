@@ -842,3 +842,28 @@ def test_tipo_antigo_fica_no_fim_no_ranking_paginado_no_csv_e_nos_totais() -> No
         "merchan_apresentador",
         "tipo_antigo",
     ]
+
+
+def test_rota_em_csv_deixa_os_tipos_antigos_no_fim_em_ordem_alfabetica() -> None:
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            _linha("j1", "Jornal", None, "Ambev", "zeta_antigo"),
+            _linha("j1", "Jornal", None, "Ambev", "intervalo"),
+            _linha("j1", "Jornal", None, "Ambev", "alfa_antigo"),
+            _linha("j1", "Jornal", None, "Ambev", "alfa_antigo"),
+        ],
+    )
+    cliente = _cliente(consulta=ConsultaEmMemoria(copia))
+
+    resposta = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO)
+
+    linhas = list(csv.reader(io.StringIO(resposta.text)))
+    assert linhas == [
+        ["marca", "tipo", "insercoes", "tempo_ms", "videos"],
+        ["Ambev", "todos", "4", "4000", "1"],
+        ["Ambev", "intervalo", "1", "1000", "1"],
+        ["Ambev", "alfa_antigo", "2", "2000", "1"],
+        ["Ambev", "zeta_antigo", "1", "1000", "1"],
+    ]
