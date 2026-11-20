@@ -146,3 +146,15 @@ def test_gzip_com_maiuscula_ou_curinga_pela_app(
 
     assert resposta.headers["content-encoding"] == "gzip"
     assert resposta.text == GRANDE
+
+
+def test_gzip_recusado_em_outra_linha_do_cabecalho_prevalece(
+    cliente: TestClient,
+) -> None:
+    resposta = cliente.get(
+        "/assets/app-abc123.js",
+        headers=[("Accept-Encoding", "*"), ("Accept-Encoding", "gzip;q=0")],
+    )
+
+    assert "content-encoding" not in resposta.headers
+    assert resposta.text == GRANDE

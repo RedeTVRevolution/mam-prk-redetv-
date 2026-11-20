@@ -499,6 +499,25 @@ def test_decupagem_em_gzip_com_maiuscula_ou_curinga(cabecalho: str) -> None:
     assert entregue == documento
 
 
+def test_decupagem_com_gzip_recusado_em_outra_linha_do_cabecalho() -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    texto = json.dumps({"pessoas": ["Ana"] * 200}).encode()
+    ambiente.armazenamento.decupagens[job_id] = [texto]
+
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}/decupagem",
+        headers=[
+            *AUTORIZACAO.items(),
+            ("Accept-Encoding", "*"),
+            ("Accept-Encoding", "gzip;q=0"),
+        ],
+    )
+
+    assert "content-encoding" not in resposta.headers
+    assert len(resposta.json()["pessoas"]) == 200
+
+
 def test_decupagem_sem_gzip_no_pedido_vem_em_texto_puro() -> None:
     ambiente = Ambiente()
     job_id = _job_com_estado(ambiente, "concluido")

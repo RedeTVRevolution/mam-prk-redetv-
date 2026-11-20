@@ -272,7 +272,7 @@ class _GZipQueRespeitaQZero(GZipMiddleware):
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
             cabecalhos = Headers(scope=scope)
-            if not aceita_gzip(cabecalhos.get("accept-encoding", "")):
+            if not aceita_gzip(", ".join(cabecalhos.getlist("accept-encoding"))):
                 await self.app(scope, receive, send)
                 return
             mutavel = cabecalhos.mutablecopy()
