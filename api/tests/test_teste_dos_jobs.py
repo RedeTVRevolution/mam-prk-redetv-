@@ -256,6 +256,6 @@ def test_objetos_usa_a_configuracao_do_mesmo_ambiente(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     criados = _detector(monkeypatch, ["car"])
-    ambiente = {**_amostra(tmp_path), "FLORENCE_MODELO": "base", "FLORENCE_FEIXES": "1"}
+    ambiente = {**_amostra(tmp_path), "FLORENCE_FEIXES": "1"}
     assert _objetos("gpu", ambiente=ambiente) == SAIDA_OK
-    assert criados == [("/modelo", "gpu", Configuracao(modelo="base", feixes=1))]
+    assert criados == [("/modelo", "gpu", Configuracao(feixes=1))]

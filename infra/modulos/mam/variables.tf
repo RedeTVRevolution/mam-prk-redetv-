@@ -1,13 +1,3 @@
-variable "florence_modelo" {
-  description = "Modelo do Florence-2: base ou large (ADR 0008)"
-  type        = string
-  default     = "large"
-  validation {
-    condition     = contains(["base", "large"], var.florence_modelo)
-    error_message = "florence_modelo deve ser base ou large."
-  }
-}
-
 variable "florence_feixes" {
   description = "Feixes da geração do Florence-2"
   type        = number

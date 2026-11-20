@@ -128,7 +128,6 @@ module "mam" {
   imagem_transcricao_gpu       = var.imagem_transcricao_gpu
   imagem_ocr_gpu               = var.imagem_ocr_gpu
   imagem_objetos               = var.imagem_objetos
-  florence_modelo              = var.florence_modelo
   florence_feixes              = var.florence_feixes
   florence_lote                = var.florence_lote
   florence_legendas            = var.florence_legendas

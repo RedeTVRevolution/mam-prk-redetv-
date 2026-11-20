@@ -38,7 +38,6 @@ class ModeloFalso:
 def test_o_nome_do_modelo_traz_a_revisao_fixada() -> None:
     assert MODELOS == {
         "large": "florence-community/Florence-2-large@4271c66b88cdbc05735372ec13b2360108de5317",
-        "base": "florence-community/Florence-2-base@00921df66db728a9ceb750f5eca43e5c203a2051",
     }
 
 
@@ -270,8 +269,8 @@ def test_a_geracao_configurada_chega_ao_generate_e_o_lote_vai_junto(
     assert [r["labels"] for r in saida] == [["a"], ["b"]]
 
 
-@pytest.mark.parametrize("nome", ["base", "large"])
-def test_o_modelo_do_ambiente_escolhe_a_subpasta(nome: str) -> None:
+def test_o_modelo_do_ambiente_escolhe_a_subpasta() -> None:
+    nome = "large"
     configuracao = ler_configuracao({"FLORENCE_MODELO": nome})
     vistos: list[str] = []
     DetectorFlorence.da_pasta(
@@ -287,4 +286,4 @@ def test_modelo_ausente_ou_vazio_continua_large_e_invalido_falha() -> None:
     assert ler_configuracao({}).modelo == "large"
     assert ler_configuracao({"FLORENCE_MODELO": " "}).modelo == "large"
     with pytest.raises(ValueError, match="FLORENCE_MODELO"):
-        ler_configuracao({"FLORENCE_MODELO": "outro"})
+        ler_configuracao({"FLORENCE_MODELO": "base"})

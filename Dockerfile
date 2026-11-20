@@ -273,8 +273,7 @@ ARG AMOSTRA_REVISAO=9dd8e4710f6b2ddf5184d308639e0359bc7b55be
 # novo. O download usa só o urllib, do Python da imagem base.
 RUN mkdir -p /amostras \
     && for dados in \
-        "large florence-community/Florence-2-large 4271c66b88cdbc05735372ec13b2360108de5317 8412483f687f2f71587328a38c6fa70a68d9488f28e90607be3c182641f60f2c 7715423d6549bf1e71188bdd84f4ac960cc0597886af24a5ef7b66f128660685" \
-        "base florence-community/Florence-2-base 00921df66db728a9ceb750f5eca43e5c203a2051 2a4dfe9885d183da121f239ada734bd700ee6908b650a7a25ab32eb104fe1d7a 62f3e696da74f8869a68ddb529a9b3e14eb25b21c592cb3dea6179bf944df6a0"; do \
+        "large florence-community/Florence-2-large 4271c66b88cdbc05735372ec13b2360108de5317 8412483f687f2f71587328a38c6fa70a68d9488f28e90607be3c182641f60f2c 7715423d6549bf1e71188bdd84f4ac960cc0597886af24a5ef7b66f128660685"; do \
         set -- $dados; nome=$1; MODELO=$2; MODELO_REVISAO=$3; \
         mkdir -p "/modelo/$nome" \
         && for arquivo in config.json generation_config.json model.safetensors preprocessor_config.json processor_config.json tokenizer.json tokenizer_config.json added_tokens.json merges.txt special_tokens_map.json vocab.json; do \

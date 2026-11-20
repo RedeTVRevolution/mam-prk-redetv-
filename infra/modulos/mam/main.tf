@@ -1600,10 +1600,6 @@ resource "google_cloud_run_v2_job" "objetos_gpu" {
           value = "gpu"
         }
         env {
-          name  = "FLORENCE_MODELO"
-          value = var.florence_modelo
-        }
-        env {
           name  = "FLORENCE_FEIXES"
           value = tostring(var.florence_feixes)
         }
