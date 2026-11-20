@@ -39,6 +39,7 @@ export function inicioDoDia(dia: string): string {
 
 /** O último milissegundo do dia de São Paulo, em ISO. */
 export function fimDoDia(dia: string): string {
+  if (!diaValido(dia)) throw new Error(`Dia inválido: ${dia}`)
   const seguinte = new Date(Date.parse(`${dia}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
   return new Date(Date.parse(inicioDoDia(seguinte)) - 1).toISOString()
 }
