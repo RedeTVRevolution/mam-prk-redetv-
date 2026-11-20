@@ -1,6 +1,7 @@
 """`api.criar_colecao_da_busca` (#757): a conta que impersona e o que cria, sem nuvem."""
 
 from dataclasses import replace
+from functools import partial
 from typing import Any
 
 import pytest
@@ -161,3 +162,111 @@ def test_o_aviso_de_reindexar_sai_logo_apos_o_patch_mesmo_se_o_indice_falha(
         rodar(IndiceFalha({"col-z": incompleto, "col-texto": texto}))
     saida = capsys.readouterr().out
     assert falta in saida and "make reindexar" in saida
+
+
+class SemPapelAinda(NuvemFalsa):
+    """O papel recém-concedido pelo apply ainda não propagou nas `falhas` primeiras chamadas."""
+
+    def __init__(self, falhas: int) -> None:
+        super().__init__()
+        self.falhas = falhas
+
+    def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        if self.falhas:
+            self.falhas -= 1
+            raise RuntimeError(f"{metodo} {caminho}: HTTP 403: IAM_PERMISSION_DENIED")
+        return super().__call__(metodo, caminho, corpo)
+
+
+@pytest.fixture
+def esperas(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    feitas: list[float] = []
+    monkeypatch.setattr(criar_colecao_da_busca, "sleep", feitas.append)
+    return feitas
+
+
+def test_no_deploy_espera_o_papel_novo_propagar(
+    rodar: Any, esperas: list[float]
+) -> None:
+    nuvem = SemPapelAinda(falhas=2)
+    rodar(nuvem, "--personificar", CONTA)
+    assert set(nuvem.colecoes) == {"col-z", "col-texto"}
+    assert len(esperas) == 2
+
+
+def test_no_deploy_desiste_depois_do_teto_da_propagacao(
+    rodar: Any, esperas: list[float]
+) -> None:
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        rodar(SemPapelAinda(falhas=1000), "--personificar", CONTA)
+    # O IAM leva até 7 min para propagar um papel novo.
+    assert 7 * 60 <= sum(esperas) <= 10 * 60
+
+
+def test_fora_do_deploy_o_403_falha_na_hora(rodar: Any, esperas: list[float]) -> None:
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        rodar(SemPapelAinda(falhas=1))
+    assert esperas == []
+
+
+def test_outro_erro_nao_espera(rodar: Any, esperas: list[float]) -> None:
+    class Quebrada(NuvemFalsa):
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            raise RuntimeError("HTTP 400: esquema recusado")
+
+    with pytest.raises(RuntimeError, match="HTTP 400"):
+        rodar(Quebrada(), "--personificar", CONTA)
+    assert esperas == []
+
+
+def test_o_403_na_operacao_aceita_repete_so_a_consulta_e_o_aviso_sai(
+    rodar: Any,
+    esperas: list[float],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """O PATCH é aceito e a primeira consulta da operação recebe 403: repetir a criação
+    inteira acharia o campo já no esquema e perderia o aviso de reindexação."""
+    completo = esquema_da_colecao(CONFIG)
+    texto = esquema_da_colecao(replace(CONFIG, colecao="col-texto"))
+    propriedades = dict(completo["dataSchema"]["properties"])
+    falta = list(propriedades)[-1]
+    del propriedades[falta]
+    incompleto = {"dataSchema": {"type": "object", "properties": propriedades}}
+
+    class OperacaoSemPapel(NuvemFalsa):
+        negadas = 1
+
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            if caminho == "op-patch":
+                if self.negadas:
+                    self.negadas -= 1
+                    raise RuntimeError("GET op-patch: HTTP 403: IAM_PERMISSION_DENIED")
+                return {"name": "op-patch", "done": True}
+            resposta = super().__call__(metodo, caminho, corpo)
+            return (
+                {"name": "op-patch", "done": False} if metodo == "PATCH" else resposta
+            )
+
+    monkeypatch.setattr(
+        criar_colecao_da_busca,
+        "criar_colecao",
+        partial(agent_retrieval.criar_colecao, dormir=lambda _s: None),
+    )
+    rodar(
+        OperacaoSemPapel({"col-z": incompleto, "col-texto": texto}),
+        "--personificar",
+        CONTA,
+    )
+    assert len(esperas) == 1
+    assert "make reindexar" in capsys.readouterr().out
+
+
+def test_403_de_outra_origem_falha_na_hora(rodar: Any, esperas: list[float]) -> None:
+    class Perimetro(NuvemFalsa):
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            raise RuntimeError("HTTP 403: SECURITY_POLICY_VIOLATED")
+
+    with pytest.raises(RuntimeError, match="SECURITY_POLICY_VIOLATED"):
+        rodar(Perimetro(), "--personificar", CONTA)
+    assert esperas == []

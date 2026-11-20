@@ -3,14 +3,46 @@
 import argparse
 import os
 import sys
+from time import sleep
+from typing import Any
 
 from api.agent_retrieval import (
     ConfigDaBusca,
     EsquemaIncompativel,
+    Transporte,
     criar_colecao,
     indices_com_filtros_diferentes,
     transporte_http,
 )
+
+# O deploy concede o papel da busca à mam-terraform no apply logo antes (papel_vertex.tf), e o
+# IAM leva cerca de 7 min para propagar um papel novo: até lá cada chamada recebe 403 com o
+# motivo IAM_PERMISSION_DENIED. Outro 403 (perímetro, por exemplo) falha na hora.
+ESPERA_DO_IAM_S = 30
+ESPERAS_DO_IAM = 16
+
+
+def _esperando_o_iam(transporte: Transporte) -> Transporte:
+    """Repete a própria chamada que recebeu 403, e não a criação inteira: uma operação já aceita
+    (PATCH do esquema, índice) segue acompanhada e o aviso de reindexação não se perde."""
+
+    def chamar(
+        metodo: str, caminho: str, corpo: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        for _ in range(ESPERAS_DO_IAM):
+            try:
+                return transporte(metodo, caminho, corpo)
+            except RuntimeError as erro:
+                if "IAM_PERMISSION_DENIED" not in str(erro):
+                    raise
+                print(
+                    f"403 da busca: o papel novo ainda propaga; nova tentativa em {ESPERA_DO_IAM_S} s.",
+                    flush=True,
+                )
+                sleep(ESPERA_DO_IAM_S)
+        return transporte(metodo, caminho, corpo)
+
+    return chamar
 
 
 def _avisar_reindexacao(campos: list[str]) -> None:
@@ -33,6 +65,9 @@ def main(argv: list[str] | None = None) -> None:
         if args.personificar
         else transporte_http()
     )
+    if args.personificar:
+        # Só o deploy espera: o alvo manual roda com um papel que já existe.
+        transporte = _esperando_o_iam(transporte)
     try:
         criar_colecao(config, transporte, ao_acrescentar=_avisar_reindexacao)
     except EsquemaIncompativel as erro:
