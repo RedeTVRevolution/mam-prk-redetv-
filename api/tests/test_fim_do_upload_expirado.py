@@ -291,8 +291,9 @@ def test_marca_falhando_depois_do_evento_repete_com_id_novo_e_conta_uma_falha() 
     assert novos[0].id not in {e.id for e in antes}
     _gravar(banco, novos[0])
     resumos._resumir(banco, f"'{(DIA4 - timedelta(days=2)).isoformat()}'")
-    (por_usuario,) = resumos._tabela(banco, "uso_por_usuario", "quem_id")
-    assert por_usuario["videos_falhos"] == 1
+    assert banco.execute(
+        "SELECT SUM(videos_falhos) FROM uso_por_dia_e_usuario"
+    ).fetchone() == (1,)
     assert banco.execute(
         "SELECT SUM(videos_falhos) FROM uso_por_dia_e_programa"
     ).fetchone() == (1,)
