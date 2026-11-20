@@ -57,15 +57,27 @@ class DadosDaPurga:
             f"DELETE FROM `{prefixo}.{tabela}` WHERE job_id = @job_id;"
             for tabela in tabelas
         )
-        # A trava antecede o marcador e conflita com a consulta agendada. O INSERT direto
-        # dispensa a entrega pelo Pub/Sub e não perde a falha no log.
+        # O marcador copia a linha do Job antes do DELETE (a transação enxerga o próprio
+        # apagamento). Sem linha, ou sem dono completo, vale `sistema`/`purga` e os demais
+        # campos vão vazios: ele só barra a reinserção. O INSERT direto dispensa a entrega
+        # pelo Pub/Sub e não perde a falha no log; o DELETE do Job conflita com a consulta
+        # agendada.
+        dono = "j.quem_tipo IS NOT NULL AND j.quem_id IS NOT NULL"
         self._consulta = f"""
 BEGIN TRANSACTION;
-DELETE FROM {jobs} WHERE id = @job_id;
-INSERT INTO {eventos} (id, tipo, quando, quem_tipo, quem_id, job_id)
-SELECT CONCAT('purga:', @job_id), 'purga', CURRENT_TIMESTAMP(), 'sistema', 'purga', @job_id
-FROM (SELECT 1)
+INSERT INTO {eventos} (id, tipo, quando, quem_tipo, quem_id, job_id, programa, estado,
+  duracao_do_video_ms, criado_em)
+SELECT CONCAT('purga:', @job_id), 'purga', CURRENT_TIMESTAMP(),
+  CASE WHEN {dono} THEN j.quem_tipo ELSE 'sistema' END,
+  CASE WHEN {dono} THEN j.quem_id ELSE 'purga' END,
+  @job_id,
+  CASE WHEN {dono} THEN j.programa END,
+  CASE WHEN {dono} THEN j.estado END,
+  CASE WHEN {dono} THEN j.duracao_ms END,
+  CASE WHEN {dono} THEN j.criado_em END
+FROM (SELECT 1) AS x LEFT JOIN {jobs} AS j ON j.id = @job_id
 WHERE NOT EXISTS (SELECT 1 FROM {eventos} WHERE tipo = 'purga' AND job_id = @job_id);
+DELETE FROM {jobs} WHERE id = @job_id;
 {apagamentos}
 COMMIT TRANSACTION;
 """
