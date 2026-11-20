@@ -1200,3 +1200,30 @@ def test_videos_de_quem_nao_esta_em_fusao_nao_consultam_intervalos() -> None:
 
     assert [v["job_id"] for v in resposta.json()] == ["j3"]
     assert fonte.pedidos == []  # a fusão p3 -> p4 não é da p1
+
+
+def test_aparicoes_unidas_iguais_vao_uma_vez_so_a_consulta() -> None:
+    class Consulta(ConsultaEmMemoria):
+        chamadas = 0
+
+        def aparicoes_unidas(
+            self,
+            programas: Sequence[str],
+            desde: date | None,
+            ate: date | None,
+            pessoas: Sequence[str],
+        ) -> list[tuple[str, str, int, int]]:
+            self.chamadas += 1
+            return [("j1", "p1", 0, 1_000)]
+
+    consulta = Consulta(CopiaEmMemoria())
+    cache = ComCache(consulta, CacheCurto())
+
+    primeira = cache.aparicoes_unidas((), None, None, ["p2", "p1"])
+    segunda = cache.aparicoes_unidas(
+        (), None, None, ["p1", "p2"]
+    )  # outra ordem, mesmo pedido
+    cache.aparicoes_unidas((), None, None, ["p1"])  # outras pessoas: consulta de novo
+
+    assert primeira == segunda == [("j1", "p1", 0, 1_000)]
+    assert consulta.chamadas == 2
