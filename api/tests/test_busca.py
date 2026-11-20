@@ -2566,6 +2566,27 @@ def test_dono_diferente_recebe_cursor_proprio_da_busca_em_cache() -> None:
     assert busca.buscar("vestido", limite=2, dono="ub", cursor=b._proximo_cursor).videos
 
 
+def test_trocar_a_ordem_reaproveita_indice_e_ranking_mas_nao_o_cursor() -> None:
+    m = _mundo_com_cache(4)
+    ranking = RankingContado()
+    busca = m.busca(ranking=ranking)
+    relevancia = busca.buscar("vestido", limite=2, dono="u1", ordem="relevancia")
+    consultas = len(m.indice.consultas)
+
+    busca.buscar("vestido", limite=2, dono="u1", ordem="data")
+
+    assert len(m.indice.consultas) == consultas and ranking.chamadas == 1
+    assert relevancia._proximo_cursor
+    with pytest.raises(CursorInvalido):
+        busca.buscar(
+            "vestido",
+            limite=2,
+            dono="u1",
+            ordem="data",
+            cursor=relevancia._proximo_cursor,
+        )
+
+
 def test_o_limite_nao_vai_na_chave_do_cache() -> None:
     m = _mundo_com_cache(4)
     busca = m.busca()

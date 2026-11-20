@@ -472,14 +472,18 @@ class Busca:
             # O filtro do índice só tira inelegíveis do teto; `_visivel_de` decide.
             impostos = replace(impostos, sistema=sistema)
         termo_da_foto = None
-        impressao = _impressao(
-            texto=texto,
-            ordem=ordem,
-            imagem=hashlib.sha256(imagem).hexdigest() if imagem is not None else None,
-            sistema=sistema,
-            ajustes=asdict(ajustes or Ajustes()),
-            filtros=asdict(impostos),
-        )
+        partes = {
+            "texto": texto,
+            "imagem": hashlib.sha256(imagem).hexdigest()
+            if imagem is not None
+            else None,
+            "sistema": sistema,
+            "ajustes": asdict(ajustes or Ajustes()),
+            "filtros": asdict(impostos),
+        }
+        impressao = _impressao(**partes, ordem=ordem)
+        # A ordem só age no fim (`_videos`): sem ela na chave, trocá-la reaproveita os caches.
+        do_cache = _impressao(**partes)
         if cursor is not None:
             return self._pagina_seguinte(
                 cursor, limite, dono, impressao, sistema, cancelado
@@ -528,7 +532,7 @@ class Busca:
             return [
                 replace(r, pessoas=list(r.pessoas), cor_base=list(r.cor_base))
                 for r in self._candidatos.obter(
-                    ("indice", impressao, c), lambda: self._indice.buscar(c)
+                    ("indice", do_cache, c), lambda: self._indice.buscar(c)
                 )
             ]
 
@@ -711,7 +715,7 @@ class Busca:
             try:
                 achados = [
                     *self._reordenar(
-                        impressao,
+                        do_cache,
                         com_acento(_texto_da_busca(entendida), intocadas),
                         achados[:TETO_DO_RANKING],
                     ),
