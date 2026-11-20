@@ -809,3 +809,36 @@ def test_a_lista_da_marca_traz_as_insercoes_de_todas_as_grafias_pelo_rotulo() ->
     assert [(i.job_id, i.inicio_ms) for i in paginada] == [("j1", 10_000), ("j2", 0)]
     assert [i.job_id for i in sem_catalogo] == ["j4", "j5"]
     assert pelo_apelido == da_unifael
+
+
+def test_tipo_antigo_fica_no_fim_no_ranking_paginado_no_csv_e_nos_totais() -> None:
+    so = _so_que_conta(
+        [
+            _soma("j1", "Ambev", 1, "tipo_antigo"),
+            _soma("j2", "Ambev", 1, "tipo_antigo"),
+            _soma("j1", "Ambev", 2, "merchan_apresentador"),
+            _soma("j3", "Ambev", 1, "intervalo"),
+        ]
+    )
+
+    [ambev], total = _ranking(so)
+
+    assert [t.tipo for t in ambev.por_tipo] == [
+        "intervalo",
+        "merchan_apresentador",
+        "tipo_antigo",
+    ]
+    assert (total.marcas, total.insercoes, total.tempo_ms, total.videos) == (
+        1,
+        5,
+        5_000,
+        3,
+    )
+    assert (ambev.insercoes, ambev.videos, ambev.por_tipo[-1].videos) == (5, 3, 2)
+    linhas_csv = em_csv(relatorio_das_somas(so.somas((), None, None, ()))).splitlines()
+    assert [linha.split(",")[1] for linha in linhas_csv[1:]] == [
+        "todos",
+        "intervalo",
+        "merchan_apresentador",
+        "tipo_antigo",
+    ]
