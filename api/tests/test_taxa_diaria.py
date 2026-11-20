@@ -158,7 +158,10 @@ def test_as_linhas_trazem_o_dia_o_programa_a_versao_e_so_jobs_concluidos() -> No
 
 def _tabela_com_uma_linha() -> TabelaDaTaxaEmMemoria:
     tabela = TabelaDaTaxaEmMemoria()
-    tabela.linhas.append(LinhaDiaria(DIA, "j1", "Velho", None, "pessoa.renomear", 9, 9))
+    for dia in (DIA - timedelta(days=1), DIA):  # o primeiro dia também tem linha antiga
+        tabela.linhas.append(
+            LinhaDiaria(dia, "j1", "Velho", None, "pessoa.renomear", 9, 9)
+        )
     return tabela
 
 
