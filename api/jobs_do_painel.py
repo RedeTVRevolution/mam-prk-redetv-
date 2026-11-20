@@ -9,13 +9,20 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from itertools import batched
 from typing import Any, Protocol
 
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, parametro, transporte_http
+from api.copia_bigquery import (
+    PRAZO_CURTO,
+    Transporte,
+    executar_dml,
+    parametro,
+    transporte_http,
+)
 from api.modelo_do_job import FIM_OU_CANCELADO, Job, RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
 
@@ -57,7 +64,7 @@ def linha_do_job(job: Job) -> LinhaDoJob:
 
 
 class TabelaDeJobs(Protocol):
-    def gravar(self, linhas: list[LinhaDoJob]) -> None:
+    def gravar(self, linhas: Sequence[LinhaDoJob]) -> None:
         """Insere as linhas; as que já havia dos mesmos Jobs são trocadas."""
 
 
@@ -67,7 +74,7 @@ class TabelaEmMemoria:
     def __init__(self) -> None:
         self.por_id: dict[str, LinhaDoJob] = {}
 
-    def gravar(self, linhas: list[LinhaDoJob]) -> None:
+    def gravar(self, linhas: Sequence[LinhaDoJob]) -> None:
         for linha in linhas:
             self.por_id[linha.id] = linha
 
@@ -104,7 +111,7 @@ class TabelaBigQuery:
         self._config = config
         self._transporte = transporte
 
-    def gravar(self, linhas: list[LinhaDoJob]) -> None:
+    def gravar(self, linhas: Sequence[LinhaDoJob]) -> None:
         c = self._config
         tabela = f"`{c.projeto}.{c.dataset}.{c.tabela}`"
         consulta = f"""
@@ -134,35 +141,19 @@ VALUES
   (s.id, s.programa, s.duracao_ms, s.quem_tipo, s.quem_id, s.estado, s.criado_em,
    s.concluido_em, s.atualizado_em)
 """
-        resposta = self._transporte(
-            {
-                "query": consulta,
-                "useLegacySql": False,
-                "location": c.regiao,
-                "timeoutMs": 120_000,
-                "queryParameters": [
-                    parametro(
-                        "linhas",
-                        json.dumps(
-                            [_json_da_linha(x) for x in linhas], ensure_ascii=False
-                        ),
-                    )
-                ],
-            }
+        executar_dml(
+            self._transporte,
+            c.regiao,
+            consulta,
+            [
+                parametro(
+                    "linhas",
+                    json.dumps([_json_da_linha(x) for x in linhas], ensure_ascii=False),
+                )
+            ],
+            PRAZO_CURTO,
+            descricao=f"carga de {len(linhas)} Jobs",
         )
-        if not resposta.get("jobComplete", False):
-            raise RuntimeError(f"carga de {len(linhas)} Jobs não terminou no prazo")
-
-
-def _em_lotes(linhas: Iterable[LinhaDoJob], tamanho: int) -> Iterator[list[LinhaDoJob]]:
-    lote: list[LinhaDoJob] = []
-    for linha in linhas:
-        lote.append(linha)
-        if len(lote) == tamanho:
-            yield lote
-            lote = []
-    if lote:
-        yield lote
 
 
 def preencher(
@@ -171,7 +162,7 @@ def preencher(
     """Grava uma linha por Job do repositório e devolve quantas. Passada única de linha de
     comando: lê o acervo inteiro; o MERGE pelo `id` faz repetir dar o mesmo resultado."""
     total = 0
-    for lote in _em_lotes((linha_do_job(j) for j in repositorio.listar()), por_lote):
+    for lote in batched((linha_do_job(j) for j in repositorio.listar()), por_lote):
         tabela.gravar(lote)
         total += len(lote)
     return total

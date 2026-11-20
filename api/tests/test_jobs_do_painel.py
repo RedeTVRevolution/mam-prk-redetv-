@@ -3,6 +3,7 @@ uso montados à mão; a carga dos Jobs antigos e o Terraform da tabela."""
 
 import re
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -330,7 +331,7 @@ class _TabelaQueContaLotes(TabelaEmMemoria):
         super().__init__()
         self.lotes: list[int] = []
 
-    def gravar(self, linhas: list[LinhaDoJob]) -> None:
+    def gravar(self, linhas: Sequence[LinhaDoJob]) -> None:
         self.lotes.append(len(linhas))
         super().gravar(linhas)
 
