@@ -309,8 +309,7 @@ def test_foto_que_passa_do_prazo_responde_504_com_a_mensagem_da_busca(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("api.rota_da_busca.TEMPO_DA_CONSULTA_S", 0.0)
-    from api.busca import Consulta, Registro
-    from api.tests.test_busca import IndiceEmMemoria
+    from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
 
     class Lento(IndiceEmMemoria):
         def buscar(self, consulta: Consulta) -> list[Registro]:
