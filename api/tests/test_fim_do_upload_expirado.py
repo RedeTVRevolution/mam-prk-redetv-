@@ -9,8 +9,7 @@ import pytest
 
 from api.auditoria import RepositorioDeAuditoriaEmMemoria
 from api.correcoes import RepositorioDeCorrecoesEmMemoria
-from api.eventos_de_uso import EventoDeUso, EventosEmMemoria
-from api.eventos_do_job import MensagemDeEvento, PublicadorEmMemoria
+from api.eventos_de_uso import EventoDeUso
 from api.fim_do_job import avisar_fins_pendentes
 from api.jobs import RepositorioEmMemoria, expirar_uploads
 from api.lixeira import ArquivosEmMemoria
@@ -18,6 +17,7 @@ from api.modelo_do_job import FiltroDeJobs, Job
 from api.purga import Purga, rodar_a_varredura_diaria
 from api.tests import test_jobs_do_painel as painel
 from api.tests import test_resumos_de_uso as resumos
+from api.tests.test_fim_do_job import EventosQueFalham, PublicadorQueFalha
 from api.tests.test_jobs import ArmazenamentoFalso
 from api.webhook import (
     CofreEmMemoria,
@@ -32,30 +32,6 @@ DIA4 = DIA1 + timedelta(days=3)
 
 class Quebra(Exception):
     pass
-
-
-class PublicadorQuePodeFalhar(PublicadorEmMemoria):
-    def __init__(self) -> None:
-        super().__init__()
-        self.falhas = 0  # as próximas publicações que falham
-
-    def publicar(self, mensagem: MensagemDeEvento) -> None:
-        if self.falhas:
-            self.falhas -= 1
-            raise Quebra
-        super().publicar(mensagem)
-
-
-class EventosQuePodemFalhar(EventosEmMemoria):
-    def __init__(self) -> None:
-        super().__init__()
-        self.falhas = 0
-
-    def publicar(self, evento: EventoDeUso) -> None:
-        if self.falhas:
-            self.falhas -= 1
-            raise Quebra
-        super().publicar(evento)
 
 
 def _job(id: str = "j1", sistema: str | None = "Playout") -> Job:
@@ -86,8 +62,8 @@ class Mundo:
                 self.webhooks,
                 lambda host: ["93.184.216.34"],
             )
-        self.publicador = PublicadorQuePodeFalhar()
-        self.eventos = EventosQuePodemFalhar()
+        self.publicador = PublicadorQueFalha(0)
+        self.eventos = EventosQueFalham(0)
 
     def varrer(self, agora: datetime) -> None:
         purga = Purga(
