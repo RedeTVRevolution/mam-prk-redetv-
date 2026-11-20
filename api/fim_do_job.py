@@ -42,11 +42,12 @@ from api.webhook import RepositorioDeWebhooks
 log = logging.getLogger(__name__)
 
 
-def _id_estavel(job: Job, evento: str) -> str:
+def _id_estavel(job: Job, evento: str, sufixo: str | None = None) -> str:
     """O mesmo em toda tentativa de avisar a mesma falha: o duplicado que a repetição pode
     gerar (marca que falhou depois de publicar) é descartado por quem recebe."""
     return uuid.uuid5(
-        uuid.NAMESPACE_URL, f"mam/{evento}/{job.id}/{job.reprocessamentos}"
+        uuid.NAMESPACE_URL,
+        f"mam/{evento}/{job.id}/{job.reprocessamentos if sufixo is None else sufixo}",
     ).hex
 
 
@@ -131,9 +132,7 @@ def avisar_fins_pendentes(
                     webhooks,
                     publicador,
                     agora,
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL, f"mam/webhook/{job.id}/upload_expirado"
-                    ).hex,
+                    _id_estavel(job, "webhook", "upload_expirado"),
                 )
                 _tirar(repositorio, job.id, "webhook")
         except Exception:
@@ -150,7 +149,7 @@ def avisar_fins_pendentes(
     return resolvidos
 
 
-def _dependencias(
+def dependencias_do_aviso(
     cliente: Any, ambiente: Mapping[str, str]
 ) -> tuple[RepositorioDeJobs, RepositorioDeWebhooks, PublicadorDeEventos, Eventos]:
     from api.nuvem import RepositorioDeWebhooksFirestore, RepositorioFirestore
@@ -166,19 +165,23 @@ def _dependencias(
     )
 
 
+def exigir_os_topicos_do_aviso(ambiente: Mapping[str, str]) -> None:
+    exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_EVENTOS")
+    # Sem o tópico de uso, `eventos_do_ambiente` descartaria o evento em silêncio.
+    exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_USO")
+
+
 def main(ambiente: Mapping[str, str] = os.environ) -> int:
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
         job_id = exigir_do_ambiente(ambiente, "JOB_ID")
-        exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_EVENTOS")
-        # Sem o tópico de uso, `eventos_do_ambiente` descartaria o evento em silêncio.
-        exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_USO")
+        exigir_os_topicos_do_aviso(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
     cliente = cliente_do_firestore(projeto, ambiente)
     try:
-        avisar_o_fim(job_id, *_dependencias(cliente, ambiente))
+        avisar_o_fim(job_id, *dependencias_do_aviso(cliente, ambiente))
     except Exception:
         # Saída com erro: o Cloud Run repete o Job (`max_retries`) e a repetição envia
         # só o que ainda não saiu.

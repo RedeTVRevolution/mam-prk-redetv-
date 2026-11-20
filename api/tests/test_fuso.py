@@ -83,3 +83,12 @@ def test_so_o_modulo_de_fuso_escreve_o_nome_do_fuso() -> None:
     ]
 
     assert escrevem == [], "o nome do fuso só se escreve em api/fuso.py"
+
+
+def test_dia_em_sao_paulo_acompanha_a_virada() -> None:
+    assert fuso.dia_em_sao_paulo(datetime(2026, 11, 15, 2, 59, tzinfo=UTC)) == date(
+        2026, 11, 14
+    )
+    assert fuso.dia_em_sao_paulo(datetime(2026, 11, 15, 3, 0, tzinfo=UTC)) == date(
+        2026, 11, 15
+    )

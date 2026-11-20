@@ -139,7 +139,7 @@ test('o histórico lista quem, quando, antes, depois, motivo e estado', async ()
 
   const g = gaveta()
   expect(g.getByText('bia@redetv.com.br')).toBeTruthy()
-  expect(g.getByText(/30\/10\/2026/)).toBeTruthy()
+  expect(g.getByText('30/10/2026, 12:00:00')).toBeTruthy()
   expect(g.getByText('Ana Souza')).toBeTruthy()
   expect(g.getByText('Ana Souza Lima')).toBeTruthy()
   expect(g.getByText('sobrenome completo')).toBeTruthy()

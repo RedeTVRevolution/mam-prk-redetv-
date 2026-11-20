@@ -337,8 +337,10 @@ class ConsultaComCache:
         ate: date | None,
         pessoas: Sequence[str],
     ) -> list[tuple[str, str, int, int]]:
-        """Só repassa: as pessoas pedidas mudam com o catálogo, não há o que guardar."""
-        return self._consulta.aparicoes_unidas(programas, desde, ate, pessoas)
+        return self._cache.obter(
+            ("tempo-de-tela-unidas", programas, desde, ate, tuple(sorted(pessoas))),
+            lambda: self._consulta.aparicoes_unidas(programas, desde, ate, pessoas),
+        )
 
 
 class SoComQuemConta:

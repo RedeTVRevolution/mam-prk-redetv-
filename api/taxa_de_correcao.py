@@ -138,6 +138,13 @@ def calcular(
     ]
 
 
+def _fora_da_taxa(estrito: bool, o_que: str, job_id: str, causa: Exception) -> None:
+    """O Job sai da taxa com aviso; no modo estrito, levanta no lugar."""
+    if estrito:
+        raise ContagemNaoLida(f"{o_que} de {job_id} não lida") from causa
+    log.warning("decupagem de %s não lida: fora da taxa", job_id)
+
+
 def calcular_com_itens(
     repositorio: RepositorioDeJobs,
     itens_do_job: Callable[[str], ItensDaDecupagem],
@@ -176,9 +183,7 @@ def calcular_com_itens(
         try:
             contagem = itens_do_job(job.id)
         except (ServicoIndisponivel, ValueError, KeyError, TypeError) as e:
-            if estrito:
-                raise ContagemNaoLida(f"contagem de {job.id} não lida") from e
-            log.warning("decupagem de %s não lida: fora da taxa", job.id)
+            _fora_da_taxa(estrito, "contagem", job.id, e)
             continue
         try:
             # `ServicoIndisponivel` da leitura do JSON escapa: a tabela não troca o dado
@@ -204,9 +209,7 @@ def calcular_com_itens(
             if sem_contagem:
                 log.warning("contagem de %s sem %s: fora da taxa", job.id, sem_contagem)
         except (ValueError, KeyError, TypeError) as e:
-            if estrito:
-                raise ContagemNaoLida(f"decupagem de {job.id} não lida") from e
-            log.warning("decupagem de %s não lida: fora da taxa", job.id)
+            _fora_da_taxa(estrito, "decupagem", job.id, e)
             continue
         for tipo, (n, itens) in do_job.items():
             linhas.append(
