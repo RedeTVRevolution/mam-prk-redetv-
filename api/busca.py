@@ -207,7 +207,6 @@ class Ajustes:
     programa: str | None = None  # "": sem programa
     desde: date | None = None
     ate: date | None = None
-    sem_periodo: bool = False  # o "Todos os anos" da tela
     # Facetas da tela: filtram os candidatos (os de programa e mês são o programa e o período).
     pessoa: str | None = None  # id do catálogo: na imagem ou dona do objeto
     marca: str | None = None
@@ -1330,8 +1329,6 @@ def _ajustada(e: ConsultaEntendida, a: Ajustes) -> ConsultaEntendida:
     e = replace(e, evidencias=a.evidencias)
     if a.programa is not None:
         e = replace(e, programa=a.programa or None)
-    if a.sem_periodo:
-        e = replace(e, exibido_desde=None, exibido_ate=None)
     if a.desde is not None:
         e = replace(e, exibido_desde=a.desde)
     if a.ate is not None:

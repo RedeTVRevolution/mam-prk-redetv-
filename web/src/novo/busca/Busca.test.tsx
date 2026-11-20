@@ -398,7 +398,7 @@ test('a busca abre pela data de exibição; trocar a ordem mantém a lista e mos
   expect(buscas.at(-1)?.get('ordem')).toBe('relevancia')
 })
 
-test('limpar o ano escolhido pede todos os períodos', async () => {
+test('limpar o ano escolhido volta à busca sem período e tira o ano do endereço', async () => {
   const usuario = userEvent.setup()
   resposta = () => HttpResponse.json(resultado({ entendida: { evidencias: ['objeto'], programa: null, desde: '2020-03-01', ate: '2024-12-31' } }))
   await abrir('/busca?q=vestido&ano=2024')
@@ -407,8 +407,17 @@ test('limpar o ano escolhido pede todos os períodos', async () => {
 
   await usuario.click(screen.getByRole('button', { name: 'Limpar ano' }))
 
-  expect(location.search).toBe('?q=vestido&ano=todos')
-  await waitFor(() => expect(buscas.at(-1)?.get('sem_periodo')).toBe('true'))
+  expect(location.search).toBe('?q=vestido')
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Ano: 2024' })).toBeNull())
+  const ultima = buscas.at(-1)
+  for (const k of ['desde', 'ate', 'sem_periodo']) expect(ultima?.has(k)).toBe(false)
+})
+
+test('o link antigo ?ano=todos abre a busca sem período', async () => {
+  await abrir('/busca?q=vestido&ano=todos')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const primeira = buscas.at(0)
+  for (const k of ['desde', 'ate', 'sem_periodo']) expect(primeira?.has(k)).toBe(false)
 })
 
 test('ignora programa e ano entendidos; escolher ano zera o mês', async () => {

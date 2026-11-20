@@ -319,7 +319,7 @@ _BUSCA = {
 }
 _PARAMETROS_DO_PERIODO = (
     "Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) "
-    "restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição."
+    "restringem os vídeos."
 )
 _BUSCA_DO_SISTEMA = (
     "A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o "
