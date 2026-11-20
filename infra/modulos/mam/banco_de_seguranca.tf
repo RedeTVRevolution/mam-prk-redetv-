@@ -14,8 +14,7 @@ resource "google_firestore_database" "seguranca" {
   depends_on                        = [google_project_service.apis]
 }
 
-# Os mesmos índices no banco de segurança. Os do `(default)` (main.tf) ficam até a migração da
-# auditoria (#368, parte 3): trocar o banco do recurso antigo o destruiria.
+# Os índices da auditoria, só no banco de segurança (#368).
 resource "google_firestore_index" "auditoria_na_seguranca" {
   for_each   = local.indices_da_auditoria_da_mescla
   database   = google_firestore_database.seguranca.name

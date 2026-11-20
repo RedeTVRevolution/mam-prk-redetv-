@@ -96,12 +96,11 @@ def test_os_jobs_do_processamento_tem_datastore_user_e_ficam_com_a_condicao() ->
     assert not (set(CONTAS_DO_PROCESSAMENTO) & _recursos_com_a_variavel())
 
 
-def test_o_indice_da_auditoria_nasce_no_banco_novo_e_o_antigo_fica() -> None:
+def test_o_indice_da_auditoria_so_existe_no_banco_de_seguranca() -> None:
     novo = _bloco('resource "google_firestore_index" "auditoria_na_seguranca"')
-    antigo = _bloco('resource "google_firestore_index" "auditoria"')
 
     assert "database   = google_firestore_database.seguranca.name" in novo
-    assert "database   = google_firestore_database.mam.name" in antigo
+    assert 'resource "google_firestore_index" "auditoria" ' not in TF
 
 
 def test_o_banco_de_seguranca_tem_as_mesmas_agendas_de_backup() -> None:

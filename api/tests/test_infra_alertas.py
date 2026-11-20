@@ -33,11 +33,10 @@ def test_cada_percentual_extraido_e_um_campo_que_o_log_do_video_concluido_traz()
         )
     )
     metrica = _bloco('resource "google_logging_metric" "sinal_percentual"')
-    assert "EXTRACT(jsonPayload.${each.value.campo})" in metrica
-    campos = re.findall(r'campo\s+= "(\w+)"', TF)
+    assert "for_each" not in metrica
+    campos = re.findall(r"EXTRACT\(jsonPayload\.(\w+)\)", metrica)
     assert campos == ["pct_nao_identificadas"]
-    for campo in campos:
-        assert isinstance(linha[campo], float)
+    assert isinstance(linha[campos[0]], float)
 
 
 def test_respostas_fora_do_esquema_sao_contadas_por_linha_sem_extrator() -> None:
@@ -146,3 +145,5 @@ def test_o_alerta_do_percentual_nao_usa_align_mean_na_distribuicao() -> None:
     alerta = _bloco('resource "google_monitoring_alert_policy" "sinal_percentual"')
     assert not re.search(r'per_series_aligner\s+= "ALIGN_MEAN"', alerta)
     assert 'cross_series_reducer = "REDUCE_MEAN"' in alerta
+    assert "for_each" not in alerta
+    assert "google_logging_metric.sinal_percentual.name" in alerta

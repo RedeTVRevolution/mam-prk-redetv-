@@ -60,6 +60,15 @@ ENDERECOS=$(tf state list)
 { grep -vE '^(module|data)\.|^$' <<<"$ENDERECOS" || true; } | sed -E 's/\[.*\]$//' | sort -u | while read -r recurso; do
   tf state mv "$recurso" "module.mam.$recurso"
 done
+# O mapa de uma entrada dos sinais percentuais virou recurso único (#751): os `moved` do módulo
+# também travariam o -target, então o endereço com chave vai para o sem chave no estado, só
+# se o antigo ainda existir.
+ENDERECOS=$(tf state list)
+for recurso in google_logging_metric.sinal_percentual google_monitoring_alert_policy.sinal_percentual; do
+  if grep -qxF "module.mam.$recurso[\"nao_identificadas\"]" <<<"$ENDERECOS"; then
+    tf state mv "module.mam.$recurso[\"nao_identificadas\"]" "module.mam.$recurso"
+  fi
+done
 scripts/aplicar-sem-destruir.sh -target=module.mam.google_artifact_registry_repository.mam \
   -target=module.mam.google_identity_platform_config.mam -target=module.mam.google_project_iam_member.mam \
   -target=module.mam.google_storage_bucket_iam_member.build_le_fontes \
