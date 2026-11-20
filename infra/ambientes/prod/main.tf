@@ -64,6 +64,10 @@ variable "janelas_em_paralelo" {
   description = "Quantas janelas de análise o Job de análise decupa ao mesmo tempo"
   type        = number
   default     = 4
+  validation {
+    condition     = floor(var.janelas_em_paralelo) == var.janelas_em_paralelo && var.janelas_em_paralelo >= 1
+    error_message = "janelas_em_paralelo é um inteiro a partir de 1."
+  }
 }
 
 variable "vagas_de_gpu" {

@@ -11,7 +11,7 @@ resource "google_cloud_run_v2_job" "purga" {
       service_account = google_service_account.mam["purga"].email
       max_retries     = 0
       # Quem falha fica na lixeira e o dia seguinte tenta de novo.
-      timeout = "1800s"
+      timeout = "${local.timeout_dos_jobs_s.purga}s"
       containers {
         image   = var.imagem
         command = ["python"]

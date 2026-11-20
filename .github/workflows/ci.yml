@@ -87,6 +87,8 @@ jobs:
       - run: echo '{"resource_changes":[]}' >"$RUNNER_TEMP/plano.json" && python3 -m api.pre_voo "$RUNNER_TEMP/plano.json"
       - run: terraform -chdir=infra/ambientes/prod init -backend=false -input=false
       - run: terraform -chdir=infra/ambientes/prod validate
+      # Os casos de infra/ambientes/prod/*.tftest.hcl (a validação de janelas_em_paralelo).
+      - run: terraform -chdir=infra/ambientes/prod test
 
   loop-afk:
     runs-on: ubuntu-26.04

@@ -48,7 +48,7 @@ resource "google_cloud_run_v2_job" "taxa_diaria" {
       service_account = google_service_account.mam["taxa"].email
       max_retries     = 0
       # Quem falha é refeito na hora seguinte, junto com o resto.
-      timeout = "900s"
+      timeout = "${local.timeout_dos_jobs_s.taxa_diaria}s"
       containers {
         image   = var.imagem
         command = ["python"]

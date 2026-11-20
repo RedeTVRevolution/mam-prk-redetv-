@@ -15,6 +15,9 @@
 # entre os quadros-chave e a indexação),
 # ${job_de_analise}, ${job_de_identificacao},
 # ${job_de_quadros}, ${job_de_indexacao}, ${job_de_fim} (o aviso do `falhou` que o Workflows grava, #379).
+# prazo_do_conector_s, mapa lido como `$${prazo_do_conector_s.chave}` (o timeout do Job + 300 s, do `locals` do módulo; chaves: validacao,
+# transcricao_gpu, ocr_gpu, objetos_gpu, analise, inventario, quadros, identificacao e indexacao).
+# O `avisa_o_fim` fica sem prazo: usa o padrão de 1800 s do Workflows.
 # Toda a execução roda num try: um erro que nenhum passo trata (do próprio Workflows,
 # de um conector, de uma permissão) não deixa o Job preso em `analisando`, que a tela
 # mostra como "Decupando" para sempre e o reprocessar recusa (`marca_interrompido`).
@@ -127,7 +130,7 @@ processa:
                         value: $${job_id}
             # O conector desiste em 1800 s por padrão; o Job de validação tem até 10800 s.
             connector_params:
-              timeout: 11100
+              timeout: ${prazo_do_conector_s.validacao}
         except:
           as: e
           # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
@@ -239,7 +242,7 @@ processa:
                                     job_gpu: ${job_de_transcricao_gpu}
                                     # O conector desiste em 1800 s por padrão; o Job de transcrição
                                     # com GPU tem até 10800 s.
-                                    timeout_gpu: 11100
+                                    timeout_gpu: ${prazo_do_conector_s.transcricao_gpu}
                                     codigo_da_falha: transcricao_falhou
                                     mostra_a_etapa: true
               - ramo_da_leitura_da_tela:
@@ -251,7 +254,7 @@ processa:
                           etapa: leitura_da_tela
                           job_gpu: ${job_de_ocr_gpu}
                           # O Job de OCR com GPU tem até 21600 s.
-                          timeout_gpu: 21900
+                          timeout_gpu: ${prazo_do_conector_s.ocr_gpu}
                           codigo_da_falha: ocr_falhou
                           mostra_a_etapa: $${not roda_a_transcricao}
         except:
@@ -280,9 +283,10 @@ processa:
                       - name: JOB_ID
                         value: $${job_id}
             # O conector desiste em 1800 s por padrão; o Job de análise tem até 21600 s
-            # (as janelas de um programa de até 4 h, a Flex com 600 s por chamada).
+            # (as janelas de um programa de até 4 h). Os 600 s por chamada são o timeout do servidor
+            # por tentativa da Flex, não o `PRAZO_DA_ANALISE_S` (1500 s) com que o Python desiste da janela.
             connector_params:
-              timeout: 21900
+              timeout: ${prazo_do_conector_s.analise}
         except:
           as: e
           steps:
@@ -357,7 +361,7 @@ processa:
           job_id: $${job_id}
           etapa: identificacao
           job: ${job_de_identificacao}
-          prazo: 3900
+          prazo: ${prazo_do_conector_s.identificacao}
     - inicia_quadros_chave:
         call: marca_inicio
         args:
@@ -369,7 +373,7 @@ processa:
           job_id: $${job_id}
           etapa: quadros_chave
           job: ${job_de_quadros}
-          prazo: 3900
+          prazo: ${prazo_do_conector_s.quadros}
         result: quadros_falharam
     # O Job já está concluído; sem os JPEGs a Decupagem segue valendo. O salto evita o
     # `encerra_quadros_chave`, que gravaria a etapa por cima como `concluida`.
@@ -398,7 +402,7 @@ processa:
             etapa: inventario_de_objetos
             job_gpu: ${job_de_objetos_gpu}
             # O conector desiste em 1800 s por padrão; o Job de objetos tem até 10800 s.
-            timeout_gpu: 11100
+            timeout_gpu: ${prazo_do_conector_s.objetos_gpu}
         except:
           as: e
           steps:
@@ -423,7 +427,7 @@ processa:
           job_id: $${job_id}
           etapa: inventario_de_objetos
           job: ${job_de_inventario}
-          prazo: 3900
+          prazo: ${prazo_do_conector_s.inventario}
         result: inventario_falhou
     - confere_o_inventario:
         switch:
@@ -446,7 +450,7 @@ processa:
           job_id: $${job_id}
           etapa: indexacao
           job: ${job_de_indexacao}
-          prazo: 2100
+          prazo: ${prazo_do_conector_s.indexacao}
         result: indexacao_falhou
     # A falha fica no estado da indexação, na etapa e no log; o salto evita o
     # `encerra_indexacao`, que a gravaria como `concluida`.

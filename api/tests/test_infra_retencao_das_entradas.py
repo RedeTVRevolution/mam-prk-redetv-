@@ -34,10 +34,9 @@ def test_rodada_da_indexacao_passa_do_timeout_do_job() -> None:
     texto = (
         Path(__file__).resolve().parents[2] / "infra/modulos/mam/main.tf"
     ).read_text()
-    job = texto.split('resource "google_cloud_run_v2_job" "indexacao" {')[1].split(
-        "\n}\n"
-    )[0]
-    timeout = re.search(r'timeout\s*=\s*"(\d+)s"', job)
+    timeout = re.search(
+        r"\bindexacao\s*=\s*(\d+)", texto[texto.index("timeout_dos_jobs_s = {") :]
+    )
 
     assert timeout
     assert PRAZO_DA_RODADA.total_seconds() > int(timeout.group(1))
