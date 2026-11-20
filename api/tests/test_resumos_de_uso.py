@@ -667,3 +667,21 @@ def test_o_fim_repetido_depois_da_janela_nao_conta_de_novo(
         "2026-11-02",
     ]
     assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["videos_concluidos"] == 1
+
+
+def test_o_marcador_da_purga_nao_vira_linha_nem_deixa_o_dono_ativo() -> None:
+    banco = _banco()
+    # Marcador novo (com o dono do vídeo) e antigo (sistema/purga), em dias sem outro uso.
+    _evento(
+        banco, "p1", "purga", "2026-11-03T12:00:00+00:00", "zeca",
+        job_id="j1", programa="Jornal", estado="concluido", duracao_do_video_ms=HORA_MS,
+    )  # fmt: skip
+    _evento(
+        banco, "p2", "purga", "2026-11-04T12:00:00+00:00", "purga",
+        quem_tipo="sistema", job_id="j2",
+    )  # fmt: skip
+
+    _resumir(banco)
+
+    assert _tabela(banco, "uso_por_dia_e_usuario", "dia") == []
+    assert _tabela(banco, "uso_por_dia", "dia") == []

@@ -49,7 +49,10 @@ def test_as_colunas_da_tabela_sao_os_campos_do_evento() -> None:
     )
     nomes = {a or b for a, b in colunas}
 
-    assert nomes == set(EventoDeUso.model_fields)
+    # `criado_em` só existe no marcador da purga, que a API insere direto na tabela, sem
+    # passar pelo tópico: fica fora do modelo e do esquema do Pub/Sub.
+    assert nomes - {"criado_em"} == set(EventoDeUso.model_fields)
+    assert "criado_em" in nomes
 
 
 def test_o_topico_usa_o_esquema_em_json_e_a_assinatura_grava_no_bigquery() -> None:

@@ -81,18 +81,20 @@ class BigQueryFalso:
         for tabela, campo in [
             ("momentos_atuais", "job_id"),
             ("taxa", "job_id"),
-            ("jobs", "id"),
+            ("jobs", "id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em"),
             ("revisao", "job_id"),
         ]:
             self.banco.execute(f"CREATE TABLE `projeto-teste.dados.{tabela}` ({campo})")
             self.banco.executemany(
-                f"INSERT INTO `projeto-teste.dados.{tabela}` VALUES (?)",
+                f"INSERT INTO `projeto-teste.dados.{tabela}` ({campo.split(',')[0]})"
+                " VALUES (?)",
                 [("j1",), ("j2",)],
             )
         self.banco.execute("INSERT INTO `projeto-teste.dados.taxa` VALUES (NULL)")
         self.banco.execute(
             "CREATE TABLE `projeto-teste.dados.eventos` "
-            "(id, tipo, quando, quem_tipo, quem_id, job_id)"
+            "(id, tipo, quando, quem_tipo, quem_id, job_id, programa, estado, "
+            "duracao_do_video_ms, criado_em)"
         )
         self.banco.commit()
 
@@ -146,7 +148,8 @@ def test_apaga_dados_so_do_video_e_repetir_nao_subtrai_duas_vezes(
     assert set(banco.dados[COLECAO_DA_REVISAO]) == {"j2:a"}
     for tabela in ("momentos_atuais", "jobs", "revisao"):
         assert bq.banco.execute(
-            f"SELECT * FROM `projeto-teste.dados.{tabela}`"
+            f"SELECT {'id' if tabela == 'jobs' else 'job_id'} "
+            f"FROM `projeto-teste.dados.{tabela}`"
         ).fetchall() == [("j2",)]
     # A linha antiga, sem job_id, não se apaga por vídeo.
     assert bq.banco.execute(
@@ -155,6 +158,87 @@ def test_apaga_dados_so_do_video_e_repetir_nao_subtrai_duas_vezes(
     assert bq.banco.execute(
         "SELECT tipo, job_id FROM `projeto-teste.dados.eventos`"
     ).fetchall() == [("purga", "j1")]
+
+
+def _marcador(bq: BigQueryFalso) -> Any:
+    return bq.banco.execute(
+        "SELECT quem_tipo, quem_id, programa, estado, duracao_do_video_ms, criado_em "
+        "FROM `projeto-teste.dados.eventos` WHERE tipo = 'purga'"
+    ).fetchone()
+
+
+def test_o_marcador_leva_o_dono_e_os_dados_da_linha_do_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.dados_da_purga import DadosDaPurga
+
+    bq = BigQueryFalso()
+    bq.banco.execute(
+        "UPDATE `projeto-teste.dados.jobs` SET programa = 'Jornal', duracao_ms = 5000, "
+        "quem_tipo = 'usuario', quem_id = 'u1', estado = 'concluido', "
+        "criado_em = '2026-11-01 10:00:00' WHERE id = 'j1'"
+    )
+    bq.banco.commit()
+    DadosDaPurga(FirestoreFalso(monkeypatch), AMBIENTE, bq).apagar("j1")  # type: ignore[arg-type]
+    assert _marcador(bq) == (
+        "usuario",
+        "u1",
+        "Jornal",
+        "concluido",
+        5000,
+        "2026-11-01 10:00:00",
+    )
+    assert bq.banco.execute("SELECT * FROM `projeto-teste.dados.jobs`").fetchall() == [
+        ("j2", None, None, None, None, None, None)
+    ]
+
+
+@pytest.mark.parametrize(
+    "linha",
+    [
+        (
+            "UPDATE `projeto-teste.dados.jobs` SET quem_tipo = 'usuario', "
+            "programa = 'X' WHERE id = 'j1'"
+        ),
+        (
+            "UPDATE `projeto-teste.dados.jobs` SET quem_id = 'u1', "
+            "programa = 'X' WHERE id = 'j1'"
+        ),
+        "DELETE FROM `projeto-teste.dados.jobs` WHERE id = 'j1'",
+    ],
+)
+def test_sem_linha_ou_sem_dono_completo_o_marcador_e_do_sistema_purga_e_barra_de_novo(
+    monkeypatch: pytest.MonkeyPatch, linha: str
+) -> None:
+    from api.dados_da_purga import DadosDaPurga
+
+    bq = BigQueryFalso()
+    bq.banco.execute(linha)
+    bq.banco.commit()
+    dados = DadosDaPurga(FirestoreFalso(monkeypatch), AMBIENTE, bq)  # type: ignore[arg-type]
+    dados.apagar("j1")
+    dados.apagar("j1")
+    assert _marcador(bq) == ("sistema", "purga", None, None, None, None)
+    assert bq.banco.execute(
+        "SELECT COUNT(*) FROM `projeto-teste.dados.eventos` WHERE job_id = 'j1'"
+    ).fetchone() == (1,)
+
+
+def test_o_marcador_antigo_continua_barrando_a_reinsercao(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from api.dados_da_purga import DadosDaPurga
+
+    bq = BigQueryFalso()
+    bq.banco.execute(
+        "INSERT INTO `projeto-teste.dados.eventos` (id, tipo, quando, quem_tipo, "
+        "quem_id, job_id) VALUES ('purga:j1', 'purga', 'x', 'sistema', 'purga', 'j1')"
+    )
+    bq.banco.commit()
+    DadosDaPurga(FirestoreFalso(monkeypatch), AMBIENTE, bq).apagar("j1")  # type: ignore[arg-type]
+    assert bq.banco.execute(
+        "SELECT COUNT(*) FROM `projeto-teste.dados.eventos` WHERE job_id = 'j1'"
+    ).fetchone() == (1,)
 
 
 @pytest.mark.parametrize(
@@ -200,7 +284,7 @@ def test_purga_manual_usa_a_mesma_limpeza_dos_dados(
     mundo = Mundo(apagar_dados=dados.apagar)
     assert mundo.purgar().status_code == 200
     assert mundo.jobs.obter("j1") is None
-    assert bq.banco.execute("SELECT * FROM `projeto-teste.dados.jobs`").fetchall() == [
+    assert bq.banco.execute("SELECT id FROM `projeto-teste.dados.jobs`").fetchall() == [
         ("j2",)
     ]
 
@@ -225,7 +309,8 @@ def test_sem_a_tabela_da_taxa_a_purga_falha_no_meio_e_desfaz_o_bigquery(
     assert set(banco.dados[COLECAO_DA_REVISAO]) == {"j1:a"}
     for tabela in ("momentos_atuais", "jobs", "revisao"):
         assert bq.banco.execute(
-            f"SELECT * FROM `projeto-teste.dados.{tabela}`"
+            f"SELECT {'id' if tabela == 'jobs' else 'job_id'} "
+            f"FROM `projeto-teste.dados.{tabela}`"
         ).fetchall() == [("j1",), ("j2",)]
     assert (
         bq.banco.execute("SELECT * FROM `projeto-teste.dados.eventos`").fetchall() == []

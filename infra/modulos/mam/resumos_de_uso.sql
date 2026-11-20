@@ -12,6 +12,8 @@
 -- está. `uso_por_dia` e `uso_por_usuario` saem da tabela por dia e usuário, que é pequena.
 -- Nenhuma leitura toca os momentos: a duração do vídeo vem no evento de fim.
 --
+-- O marcador `purga` (e o dono que ele guarda) não é uso: fica fora da janela.
+--
 -- Eventos repetidos (o mesmo `id`) valem uma vez. O Job reprocessado que chega de novo ao
 -- mesmo estado final também conta uma vez só (vale o primeiro, guardado em
 -- `fins_de_processamento_contados`, que dispensa ler os fins antigos); o que falhou e depois
@@ -32,6 +34,7 @@ FROM (
     ROW_NUMBER() OVER (PARTITION BY id ORDER BY quando) AS ordem
   FROM `${tabela_de_eventos}` AS u
   WHERE u.quando >= ${inicio_da_janela}
+    AND u.tipo <> 'purga'
 )
 WHERE ordem = 1;
 
