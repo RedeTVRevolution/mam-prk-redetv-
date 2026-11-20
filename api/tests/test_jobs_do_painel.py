@@ -33,6 +33,8 @@ COLUNAS_DA_TABELA = [
     "quem_id",
     "estado",
     "criado_em",
+    "concluido_em",
+    "atualizado_em",
 ]
 
 
@@ -98,6 +100,8 @@ def test_o_job_criado_chega_com_programa_dono_e_data() -> None:
         "quem_id": "ana",
         "estado": "em_andamento",
         "criado_em": "2026-11-01T12:00:00+00:00",
+        "concluido_em": None,
+        "atualizado_em": None,
     }
 
 
@@ -220,7 +224,7 @@ def test_job_que_nao_teve_evento_na_janela_fica_como_esta() -> None:
     b = _banco()
     b.execute(
         "INSERT INTO jobs_do_painel VALUES "
-        "('antigo', 'Hoje', 10, 'usuario', 'bia', 'concluido', 'a')"
+        "('antigo', 'Hoje', 10, 'usuario', 'bia', 'concluido', 'a', NULL, NULL)"
     )
     _evento(b, "e1", "envio", "2026-11-01T12:00:00+00:00", job_id="v1")
     _rodar(b)
@@ -243,6 +247,15 @@ def test_as_colunas_da_tabela_do_terraform_sao_as_do_sql() -> None:
     nomes = re.findall(r'^    \{ name = "(\w+)"', TF, re.MULTILINE)
 
     assert nomes == COLUNAS_DA_TABELA
+    # Sem leitor nem escritor, à espera da remoção num deploy seguinte: nenhuma é exigida.
+    assert re.search(r'"atualizado_em", type = "TIMESTAMP", mode = "NULLABLE"', TF)
+
+
+def test_nenhum_escritor_cita_as_colunas_sem_leitor() -> None:
+    codigo = (Path(__file__).parents[1] / "jobs_do_painel.py").read_text()
+    for texto in (SQL, codigo):
+        assert "concluido_em" not in texto
+        assert "atualizado_em" not in texto
 
 
 def test_a_tabela_e_particionada_por_dia_e_agrupada_por_programa() -> None:
