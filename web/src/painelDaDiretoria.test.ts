@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { abaDoPainel, filtrosDoPainel, filtrosParaEnderecoDoPainel, parametrosDoPainel, programaEUsuarioJuntos, rotuloDoGrupo } from './painelDaDiretoria.ts'
+import { abaDoPainel, filtrosDoPainel, horasDeVideo, filtrosParaEnderecoDoPainel, parametrosDoPainel, programaEUsuarioJuntos, rotuloDoGrupo } from './painelDaDiretoria.ts'
 
 test('abaDoPainel: vazio é Acessos, aba conhecida passa e desconhecida é null', () => {
   expect(abaDoPainel(undefined)).toBe('acessos')
@@ -38,4 +38,11 @@ test('rotuloDoGrupo nomeia o grupo pelo primeiro dia, na tabela e no eixo', () =
   expect(rotuloDoGrupo('2026-11-01', 'mes', true)).toBe('11/26')
   expect(rotuloDoGrupo('2026-10-01', 'trimestre')).toBe('4º tri. 2026')
   expect(rotuloDoGrupo('2026-01-01', 'trimestre', true)).toBe('1º tri. 26')
+})
+
+test('horasDeVideo nunca escreve "-0": zero sai sem sinal e o negativo de verdade fica', () => {
+  expect(horasDeVideo(-0.04)).toBe('0')
+  expect(horasDeVideo(-0)).toBe('0')
+  expect(horasDeVideo(3.5)).toBe('3,5')
+  expect(horasDeVideo(-0.06)).toBe('-0,1')
 })

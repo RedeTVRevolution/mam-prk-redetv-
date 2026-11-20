@@ -209,7 +209,9 @@ export interface RelatorioDeBuscas {
 
 /** As horas de vídeo com uma casa e vírgula: "3,5". */
 export function horasDeVideo(horas: number): string {
-  return horas.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })
+  const texto = horas.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })
+  // O -0,04 arredonda a "-0": zero não leva sinal.
+  return texto === '-0' ? '0' : texto
 }
 
 export interface DiaDeCorrecoes {

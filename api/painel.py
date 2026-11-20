@@ -556,6 +556,15 @@ class RelatorioDeBuscas(BaseModel):
     por_usuario: list[QuemDeBuscas]
 
 
+def _em_ms(horas: float) -> int:
+    return round(horas * 3_600_000)
+
+
+def _horas_de_ms(ms: int) -> float:
+    # `+ 0.0` tira o sinal do zero: poucos ms negativos arredondam a `-0.0`.
+    return round(ms / 3_600_000, 2) + 0.0
+
+
 @dataclass
 class _SomaDeUso:
     enviados: int = 0
@@ -571,7 +580,7 @@ class _SomaDeUso:
         self.enviados += u.videos_enviados
         self.concluidos += u.videos_concluidos
         self.falhos += u.videos_falhos
-        self.ms += round(u.horas_concluidas * 3_600_000)
+        self.ms += _em_ms(u.horas_concluidas)
         self.segundos += u.segundos_de_processamento
         self.com_tempo += u.videos_concluidos_com_tempo
         self.buscas += u.buscas
@@ -579,8 +588,7 @@ class _SomaDeUso:
 
     @property
     def horas(self) -> float:
-        # `+ 0.0` tira o sinal do zero: uma diferença de poucos ms negativos arredonda a `-0.0`.
-        return round(self.ms / 3_600_000, 2) + 0.0
+        return _horas_de_ms(self.ms)
 
     def videos(self) -> dict[str, Any]:
         return NumerosDeVideos(
@@ -1394,7 +1402,7 @@ def criar_rotas_do_painel(
                                 u.videos_enviados,
                                 u.videos_concluidos,
                                 u.videos_falhos,
-                                round(u.horas_concluidas, 2),
+                                _horas_de_ms(_em_ms(u.horas_concluidas)),
                                 u.segundos_de_processamento,
                             ],
                         )

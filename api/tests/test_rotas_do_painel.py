@@ -629,6 +629,18 @@ def test_o_sem_programa_nunca_sai_com_menos_zero_horas(
     assert csv_sem_programa[9] == "0.0"
 
 
+def test_as_horas_do_json_e_do_csv_arredondam_igual_no_limite() -> None:
+    # 522.000 ms = 0,145 h, no limite entre 0,14 e 0,15 (ruído de float).
+    uso = [_uso(1, quem=BIA, concluidos=1, horas=360_000 / 3_600_000 + 0.045)]
+    mundo = Mundo(["diretoria"], ResumosEmMemoria(uso=uso))
+
+    json_horas = mundo.get("/videos").json()["total"]["horas_concluidas"]
+    linhas = list(csv.reader(io.StringIO(mundo.get("/videos", formato="csv").text)))
+    por_usuario = [l for l in linhas[1:] if l[0] == "usuario"]
+
+    assert [float(l[9]) for l in por_usuario] == [json_horas]
+
+
 def test_o_concluido_sem_tempo_fica_fora_do_tempo_medio() -> None:
     # O fim gravado antes de o evento trazer o tempo: 2 concluídos, só 1 com tempo.
     resumos = ResumosEmMemoria(
@@ -746,7 +758,7 @@ def test_csv_de_videos_e_de_buscas_e_a_base_do_filtro() -> None:
         "2",
         "1",
         "1",
-        "2",
+        "2.0",
         "600",
     ]
     assert linhas[2][2:4] == ["sistema", "cms"]
