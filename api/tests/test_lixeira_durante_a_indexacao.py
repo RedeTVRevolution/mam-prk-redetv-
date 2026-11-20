@@ -1,13 +1,12 @@
 """Restaurar ou mandar para a lixeira durante a indexação deixa o índice certo no fim (#806)."""
 
+import contextlib
 import json
 import threading
-from datetime import timedelta
 from typing import Any
 
 import pytest
 
-from api.catalogo import EnvioParaLixeira
 from api.ciclo_de_vida import PRAZO_DA_RODADA, tomar_a_rodada
 from api.copia_bigquery import CopiaEmMemoria
 from api.copiar_para_bigquery import copiar
@@ -126,10 +125,8 @@ class _Pausa:
 def _rota_em_thread(mundo: Mundo, rota: Any) -> threading.Thread:
     # A resposta de erro não importa aqui; só o que a rota deixa no Job e no índice.
     def correr() -> None:
-        try:
+        with contextlib.suppress(Exception):
             rota()
-        except Exception:
-            pass
 
     t = threading.Thread(target=correr)
     t.start()
@@ -148,7 +145,7 @@ def test_envio_que_falha_no_registro_durante_a_indexacao_termina_com_o_indice_ig
             pausa.parar()
             raise RuntimeError("auditoria fora do ar")
 
-        mundo.auditoria.acrescentar = falha_ao_registrar  # type: ignore[method-assign]
+        mundo.auditoria.acrescentar = falha_ao_registrar  # type: ignore[method-assign,assignment]
         threads.append(_rota_em_thread(mundo, mundo.enviar))
         assert pausa.dentro.wait(ESPERA_S)  # o Job já está na lixeira, temporariamente
 
