@@ -31,7 +31,7 @@ def test_uv_e_python_do_dockerfile_e_do_afk_sao_os_mesmos() -> None:
 
 
 def test_emuladores_do_afk_e_da_acao_do_ci_sao_os_mesmos() -> None:
-    imagens = r"(fsouza/fake-gcs-server:[\w.]+|google/cloud-sdk:[\w.-]+)"
+    imagens = r"(fsouza/fake-gcs-server:[^\s"']+|google/cloud-sdk:[^\s"']+)"
     afk = set(re.findall(imagens, _ler("scripts/afk/rodar.sh")))
     ci = set(re.findall(imagens, _ler(".github/actions/emuladores/action.yml")))
     assert len(afk) == 2 and afk == ci
@@ -45,9 +45,11 @@ def test_gitleaks_do_afk_e_do_ci_sao_os_mesmos() -> None:
     assert _um(r"\*\) gl=x64; gl_sha=(\w{64})", AFK) == _um(
         r'echo "(\w{64})  gitleaks.tar.gz"', CI
     )
-    assert _um(r"gitleaks/releases/download/v(\S+)/gitleaks_", CI) == _um(
-        r"^ARG GITLEAKS_VERSION=(\S+)$", AFK
-    )
+    # A versão no diretório da release e no nome do artefato, nas duas pontas.
+    versao = _um(r"^ARG GITLEAKS_VERSION=(\S+)$", AFK)
+    assert _um(r"download/v(\S+)/gitleaks_\S+_linux_x64\.tar\.gz", CI) == versao
+    assert _um(r"download/v\S+/gitleaks_(\S+)_linux_x64\.tar\.gz", CI) == versao
+    assert "download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_" in AFK
 
 
 def test_alvo_validacao_sai_com_bytecode_pronto() -> None:
