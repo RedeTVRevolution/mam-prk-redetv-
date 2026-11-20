@@ -267,14 +267,18 @@ class _FrontComEnderecos(StaticFiles):
 
 
 class _GZipQueRespeitaQZero(GZipMiddleware):
-    """O do Starlette só procura "gzip" no texto: `gzip;q=0` ainda comprimiria."""
+    """O do Starlette só procura "gzip" no texto: `gzip;q=0` ainda comprimiria, e `GZip`
+    ou `*` não. A decisão é a de `aceita_gzip`, entregue ao Starlette como `gzip`."""
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and not aceita_gzip(
-            Headers(scope=scope).get("accept-encoding", "")
-        ):
-            await self.app(scope, receive, send)
-            return
+        if scope["type"] == "http":
+            cabecalhos = Headers(scope=scope)
+            if not aceita_gzip(cabecalhos.get("accept-encoding", "")):
+                await self.app(scope, receive, send)
+                return
+            mutavel = cabecalhos.mutablecopy()
+            mutavel["accept-encoding"] = "gzip"
+            scope = {**scope, "headers": mutavel.raw}
         await super().__call__(scope, receive, send)
 
 

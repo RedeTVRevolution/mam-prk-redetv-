@@ -479,6 +479,26 @@ def test_decupagem_chega_em_gzip_e_inteira() -> None:
     assert entregue == documento
 
 
+@pytest.mark.parametrize("cabecalho", ["GZip", "*"])
+def test_decupagem_em_gzip_com_maiuscula_ou_curinga(cabecalho: str) -> None:
+    ambiente = Ambiente()
+    job_id = _job_com_estado(ambiente, "concluido")
+    documento = {"versao_esquema": "1.2", "pessoas": ["Ana"] * 200}
+    texto = json.dumps(documento).encode()
+    ambiente.armazenamento.decupagens[job_id] = [texto[:50], texto[50:]]
+
+    resposta = ambiente.cliente.get(
+        f"/v1/jobs/{job_id}/decupagem",
+        headers={**AUTORIZACAO, "Accept-Encoding": cabecalho},
+    )
+
+    assert resposta.headers["content-encoding"] == "gzip"
+    assert "Accept-Encoding" in resposta.headers["vary"]
+    entregue = resposta.json()
+    assert entregue.pop("versao_decupagem") == versao_do_modelo(texto)
+    assert entregue == documento
+
+
 def test_decupagem_sem_gzip_no_pedido_vem_em_texto_puro() -> None:
     ambiente = Ambiente()
     job_id = _job_com_estado(ambiente, "concluido")
@@ -490,6 +510,7 @@ def test_decupagem_sem_gzip_no_pedido_vem_em_texto_puro() -> None:
     )
 
     assert "content-encoding" not in resposta.headers
+    assert "Accept-Encoding" in resposta.headers["vary"]
     assert resposta.json() == {
         "a": 1,
         "versao_decupagem": versao_do_modelo(b'{"a": 1}'),
@@ -514,6 +535,7 @@ def test_decupagem_com_gzip_recusado_vem_em_texto_puro() -> None:
     )
 
     assert "content-encoding" not in resposta.headers
+    assert "Accept-Encoding" in resposta.headers["vary"]
     assert resposta.json() == {
         "a": 1,
         "versao_decupagem": versao_do_modelo(b'{"a": 1}'),

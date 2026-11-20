@@ -134,3 +134,15 @@ def test_sem_gzip_em_resposta_parcial(cliente: TestClient) -> None:
 
     assert resposta.status_code == 206
     assert "content-encoding" not in resposta.headers
+
+
+@pytest.mark.parametrize("cabecalho", ["GZip", "*", "identity, *;q=0.5"])
+def test_gzip_com_maiuscula_ou_curinga_pela_app(
+    cliente: TestClient, cabecalho: str
+) -> None:
+    resposta = cliente.get(
+        "/assets/app-abc123.js", headers={"Accept-Encoding": cabecalho}
+    )
+
+    assert resposta.headers["content-encoding"] == "gzip"
+    assert resposta.text == GRANDE
