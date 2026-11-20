@@ -478,6 +478,7 @@ def _criar(
     (bin_ / "uv").write_text(
         "#!/bin/sh\n"
         f"env | grep '^BUSCA_' | sort > {tmp_path}/busca\n"
+        f'echo "$@" > {tmp_path}/argumentos\n'
         f"cat {tmp_path}/saida_do_python\nexit {codigo}\n"
     )
     for f in ("terraform", "uv"):
@@ -488,8 +489,55 @@ def _criar(
         check=False,
         capture_output=True,
         text=True,
-        env={**limpo, "PATH": f"{bin_}:{os.environ['PATH']}", **ambiente},
+        env={
+            **limpo,
+            "PATH": f"{bin_}:{os.environ['PATH']}",
+            "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT": CONTA_DO_DEPLOY,
+            **ambiente,
+        },
     )
+
+
+CONTA_DO_DEPLOY = "mam-terraform@proj-x.iam.gserviceaccount.com"
+
+
+def test_o_deploy_pede_a_impersonacao_de_forma_explicita(tmp_path: Path) -> None:
+    feito = _criar(tmp_path, SAIDAS_DA_BUSCA)
+
+    assert feito.returncode == 0, feito.stderr
+    argumentos = (tmp_path / "argumentos").read_text()
+    assert "api.criar_colecao_da_busca" in argumentos
+    assert f"--personificar {CONTA_DO_DEPLOY}" in argumentos
+
+
+def test_o_aviso_de_reindexar_sai_mesmo_se_a_criacao_falha_depois_do_patch(
+    tmp_path: Path,
+) -> None:
+    resumo = tmp_path / "resumo"
+    feito = _criar(
+        tmp_path,
+        SAIDAS_DA_BUSCA,
+        "Campos acrescentados: x. Rode `make reindexar`.\n429 cota",
+        codigo=1,
+        GITHUB_STEP_SUMMARY=str(resumo),
+    )
+
+    assert feito.returncode == 1
+    assert "make reindexar" in resumo.read_text()
+    assert "rode o deploy de novo" in feito.stderr
+
+
+def test_a_chamada_no_deploy_nao_engole_a_falha() -> None:
+    # O `set -e` do deploy faz o resto: a linha não pode ter `||`, `!` nem `if`.
+    linhas = (RAIZ / "scripts" / "deploy-dev.sh").read_text().splitlines()
+    i = next(
+        n
+        for n, l in enumerate(linhas)
+        if "scripts/criar-colecao-no-deploy.sh" in l and not l.lstrip().startswith("#")
+    )
+    chamada = " ".join(linhas[i - 1 : i + 1])
+    assert "||" not in chamada and "!" not in chamada and "if " not in chamada
+    assert not linhas[i].rstrip().endswith("\\")
 
 
 def _busca(tmp_path: Path) -> dict[str, str]:

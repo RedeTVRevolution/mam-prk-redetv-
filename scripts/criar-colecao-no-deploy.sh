@@ -17,10 +17,15 @@ export BUSCA_REGIAO BUSCA_COLECAO BUSCA_COLECAO_DE_TEXTO BUSCA_INDICE_DESCRICAO 
 
 saida=$(mktemp)
 trap 'rm -f "$saida"' EXIT
-if ! uv run --locked python -m api.criar_colecao_da_busca 2>&1 | tee "$saida"; then
-  echo "A criação das coleções da busca falhou (a causa está acima): corrija e rode o deploy de novo." >&2
-  exit 1
-fi
+falhou=0
+# A conta vem explícita: só o deploy impersona (o alvo manual do Makefile não).
+uv run --locked python -m api.criar_colecao_da_busca \
+  --personificar "${GOOGLE_IMPERSONATE_SERVICE_ACCOUNT:?}" 2>&1 | tee "$saida" || falhou=1
+# O aviso sai mesmo se a criação falhou depois do PATCH: na nova tentativa o campo já existe.
 if grep -q 'make reindexar' "$saida"; then
   echo "Aviso: o esquema da busca ganhou campos; rode \`make reindexar\`." | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}" >&2
+fi
+if [[ $falhou == 1 ]]; then
+  echo "A criação das coleções da busca falhou (a causa está acima): corrija e rode o deploy de novo." >&2
+  exit 1
 fi

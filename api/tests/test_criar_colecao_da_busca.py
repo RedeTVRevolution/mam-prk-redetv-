@@ -57,7 +57,7 @@ class NuvemFalsa:
 
 @pytest.fixture
 def rodar(monkeypatch: pytest.MonkeyPatch) -> Any:
-    def _rodar(nuvem: NuvemFalsa, **extra: str) -> list[dict[str, Any]]:
+    def _rodar(nuvem: NuvemFalsa, *argv: str, **extra: str) -> list[dict[str, Any]]:
         pedidos: list[dict[str, Any]] = []
 
         def transporte(**kwargs: Any) -> NuvemFalsa:
@@ -65,22 +65,25 @@ def rodar(monkeypatch: pytest.MonkeyPatch) -> Any:
             return nuvem
 
         monkeypatch.setattr(criar_colecao_da_busca, "transporte_http", transporte)
-        monkeypatch.delenv("GOOGLE_IMPERSONATE_SERVICE_ACCOUNT", raising=False)
         for nome, valor in {**AMBIENTE, **extra}.items():
             monkeypatch.setenv(nome, valor)
-        criar_colecao_da_busca.main()
+        criar_colecao_da_busca.main(list(argv))
         return pedidos
 
     return _rodar
 
 
 def test_impersona_a_conta_pedida(rodar: Any) -> None:
-    pedidos = rodar(NuvemFalsa(), GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=CONTA)
+    pedidos = rodar(NuvemFalsa(), "--personificar", CONTA)
     assert pedidos == [{"personificar": CONTA}]
 
 
-def test_sem_a_variavel_usa_as_credenciais_de_quem_roda(rodar: Any) -> None:
-    assert rodar(NuvemFalsa()) == [{"personificar": None}]
+def test_sem_o_argumento_ignora_a_variavel_do_arquivo_de_ambiente(
+    rodar: Any,
+) -> None:
+    # O alvo manual do Makefile carrega o .env, que traz a conta do dev: segue como hoje.
+    pedidos = rodar(NuvemFalsa(), GOOGLE_IMPERSONATE_SERVICE_ACCOUNT="dev@x")
+    assert pedidos == [{}]
 
 
 def test_o_transporte_entrega_a_conta_a_sessao_autenticada(
@@ -136,3 +139,25 @@ def test_esquema_incompativel_para_com_a_causa(rodar: Any) -> None:
     with pytest.raises(SystemExit) as erro:
         rodar(NuvemFalsa({"col-z": sobra}))
     assert "campo_velho" in str(erro.value)
+
+
+def test_o_aviso_de_reindexar_sai_logo_apos_o_patch_mesmo_se_o_indice_falha(
+    rodar: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    completo = esquema_da_colecao(CONFIG)
+    texto = esquema_da_colecao(replace(CONFIG, colecao="col-texto"))
+    propriedades = dict(completo["dataSchema"]["properties"])
+    falta = list(propriedades)[-1]
+    del propriedades[falta]
+    incompleto = {"dataSchema": {"type": "object", "properties": propriedades}}
+
+    class IndiceFalha(NuvemFalsa):
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            if metodo == "POST" and "/indexes" in caminho:
+                raise RuntimeError("429 cota")
+            return super().__call__(metodo, caminho, corpo)
+
+    with pytest.raises(RuntimeError):
+        rodar(IndiceFalha({"col-z": incompleto, "col-texto": texto}))
+    saida = capsys.readouterr().out
+    assert falta in saida and "make reindexar" in saida

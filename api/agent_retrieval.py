@@ -514,6 +514,7 @@ def _acrescentar_campos(
     config: ConfigDaBusca,
     transporte: Transporte,
     dormir: Callable[[float], None],
+    ao_acrescentar: Callable[[list[str]], None] | None = None,
 ) -> list[str]:
     no_ar = transporte("GET", config.caminho_da_colecao, None)
     faltam = comparar_esquema(config, no_ar)
@@ -528,6 +529,9 @@ def _acrescentar_campos(
         {"dataSchema": esquema},
     )
     esperar(operacao, transporte, dormir)
+    # Avisa já, antes do índice: se um passo seguinte falhar, a nova tentativa não vê mais o campo faltando.
+    if ao_acrescentar:
+        ao_acrescentar(list(faltam))
     return list(faltam)
 
 
@@ -554,12 +558,16 @@ def criar_colecao(
     config: ConfigDaBusca,
     transporte: Transporte,
     dormir: Callable[[float], None] = sleep,
+    ao_acrescentar: Callable[[list[str]], None] | None = None,
 ) -> list[str]:
-    """Cria as coleções configuradas, com índice ANN só na dos planos."""
+    """Cria as coleções configuradas, com índice ANN só na dos planos. `ao_acrescentar` recebe
+    os campos que o PATCH acabou de acrescentar a uma coleção, antes dos passos seguintes."""
     acrescentados = []
     for nome in config.colecoes:
         acrescentados.extend(
-            _criar_colecao(replace(config, colecao=nome), transporte, dormir)
+            _criar_colecao(
+                replace(config, colecao=nome), transporte, dormir, ao_acrescentar
+            )
         )
     return acrescentados
 
@@ -568,6 +576,7 @@ def _criar_colecao(
     config: ConfigDaBusca,
     transporte: Transporte,
     dormir: Callable[[float], None] = sleep,
+    ao_acrescentar: Callable[[list[str]], None] | None = None,
 ) -> list[str]:
     """Cria a coleção e os índices ANN dela, um depois do outro, esperando cada um
     ficar pronto. Na coleção que já existe, acrescenta por PATCH as propriedades que
@@ -582,7 +591,7 @@ def _criar_colecao(
             esquema_da_colecao(config),
         )
     except JaExiste:
-        acrescentados = _acrescentar_campos(config, transporte, dormir)
+        acrescentados = _acrescentar_campos(config, transporte, dormir, ao_acrescentar)
     else:
         esperar(operacao, transporte, dormir)
     for indice, corpo in indices_da_colecao(config).items():
