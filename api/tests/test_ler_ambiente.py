@@ -486,6 +486,7 @@ def test_os_testes_de_escala_recusam_a_prod(tmp_path: Path, alvo: str) -> None:
     (tmp_path / "Makefile").write_text(MAKEFILE)
     feito = subprocess.run(
         ["make", "-s", alvo, "N=1"],
+        check=False,
         cwd=tmp_path,
         env={**os.environ, "PASTA_DO_AMBIENTE": "infra/ambientes/prod"},
         capture_output=True,
