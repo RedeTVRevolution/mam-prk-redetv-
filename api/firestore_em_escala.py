@@ -39,7 +39,6 @@ from api.modelo_do_job import CodigoDeFalha, FiltroDeJobs, Job, palavras_do_nome
 from api.nuvem import (
     COLECAO_DE_JOBS,
     RepositorioFirestore,
-    listagem_por_mes_do_ambiente,
 )
 
 PREFIXO = "teste_"
@@ -417,10 +416,8 @@ def main(argv: list[str]) -> int:
             )
             saida = 1
     else:
-        por_mes = listagem_por_mes_do_ambiente(os.environ)
-        print(f"LISTAGEM_POR_MES={por_mes}")
         medir(
-            RepositorioFirestore(cliente, listagem_por_mes=por_mes),
+            RepositorioFirestore(cliente),
             args.repeticoes,
             datetime.now(UTC).date(),
         )
