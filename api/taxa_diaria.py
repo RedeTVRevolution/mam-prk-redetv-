@@ -57,7 +57,7 @@ from api.nuvem import (
     RepositorioDeRevisaoFirestore,
     RepositorioFirestore,
 )
-from api.revisao import RepositorioDeRevisao
+from api.revisao import Medida, RepositorioDeRevisao
 from api.taxa_de_correcao import calcular_com_itens, modelo_da_decupagem
 from api.tipos_da_taxa import ConfigDaTaxa, LinhaDiaria
 
@@ -137,7 +137,7 @@ def linhas_do_dia(
     repositorio: RepositorioDeJobs,
     itens: LeitorDeItens,
     correcoes: RepositorioDeCorrecoes,
-    revisao: RepositorioDeRevisao,
+    medidas: Sequence[Medida],
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[LinhaDiaria]:
     inicio, fim = periodo_em_utc(dia, dia)
@@ -155,7 +155,7 @@ def linhas_do_dia(
             repositorio,
             itens.ler_itens,
             correcoes,
-            revisao,
+            medidas,
             inicio,
             fim,
             modelo_do_job=modelo_do_job,
@@ -172,12 +172,14 @@ def atualizar(
     tabela: TabelaDaTaxa,
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> int:
-    """Refaz os `dias` na tabela e devolve quantas linhas gravou."""
+    """Refaz os `dias` na tabela e devolve quantas linhas gravou. Lê as medidas de revisão
+    uma vez, do menor dia pedido (a ordem dos `dias` não importa); sem dias, não lê."""
+    medidas = revisao.todas(periodo_em_utc(min(dias), min(dias))[0]) if dias else []
     linhas = [
         linha
         for dia in dias
         for linha in linhas_do_dia(
-            dia, repositorio, itens, correcoes, revisao, modelo_do_job
+            dia, repositorio, itens, correcoes, medidas, modelo_do_job
         )
     ]
     tabela.substituir(dias, linhas)

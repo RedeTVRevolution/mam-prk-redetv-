@@ -58,7 +58,11 @@ interface DefinicaoDaAba<T> {
     f: FiltrosDoPainel,
     agrupar: PedidoDeAgrupamento,
   ) => Promise<T>;
-  csv: (api: ClienteDaApi, f: FiltrosDoPainel) => Promise<Blob>;
+  csv: (
+    api: ClienteDaApi,
+    f: FiltrosDoPainel,
+    agrupar: PedidoDeAgrupamento,
+  ) => Promise<Blob>;
   vazio: (r: T) => boolean;
   nota: string;
   mostrar: (r: T) => ReactNode;
@@ -72,7 +76,7 @@ const definir = <T,>(d: DefinicaoDaAba<T>) => d as DefinicaoDaAba<unknown>;
 const ABAS: Record<AbaDoPainel, DefinicaoDaAba<unknown>> = {
   acessos: definir<Awaited<ReturnType<ClienteDaApi["acessosDoPainel"]>>>({
     buscar: (api, f, agrupar) => api.acessosDoPainel(f, agrupar),
-    csv: (api, f) => api.acessosDoPainelEmCsv(f),
+    csv: (api, f, agrupar) => api.acessosDoPainelEmCsv(f, agrupar),
     vazio: (r: RelatorioDeAcessos) => r.por_dia.length === 0,
     nota: `Logins não têm programa: o filtro de programa vale para as outras abas. ${NOTA_DO_DIA} A primeira e a última semana ou mês contam só os dias do período.`,
     mostrar: (r) => <Acessos relatorio={r} />,
@@ -80,7 +84,7 @@ const ABAS: Record<AbaDoPainel, DefinicaoDaAba<unknown>> = {
   }),
   videos: definir<Awaited<ReturnType<ClienteDaApi["videosDoPainel"]>>>({
     buscar: (api, f, agrupar) => api.videosDoPainel(f, agrupar),
-    csv: (api, f) => api.videosDoPainelEmCsv(f),
+    csv: (api, f, agrupar) => api.videosDoPainelEmCsv(f, agrupar),
     vazio: (r: RelatorioDeVideos) => r.por_dia.length === 0,
     nota: `Os vídeos de sistemas entram junto com os das pessoas. O tempo de processamento é o dos concluídos, do registro ao fim. Com um programa escolhido não há quebra por usuário, e com um usuário não há por programa. ${NOTA_DO_DIA}`,
     mostrar: (r) => <Videos relatorio={r} />,
@@ -88,7 +92,7 @@ const ABAS: Record<AbaDoPainel, DefinicaoDaAba<unknown>> = {
   }),
   buscas: definir<Awaited<ReturnType<ClienteDaApi["buscasDoPainel"]>>>({
     buscar: (api, f, agrupar) => api.buscasDoPainel(f, agrupar),
-    csv: (api, f) => api.buscasDoPainelEmCsv(f),
+    csv: (api, f, agrupar) => api.buscasDoPainelEmCsv(f, agrupar),
     vazio: (r: RelatorioDeBuscas) => r.por_dia.length === 0,
     nota: `Busca sem resultado é a que não trouxe nenhum vídeo; as feitas antes de o sistema contar isso não entram nela. A busca só tem programa quando foi filtrada por ele, e então não se sabe quem buscou. ${NOTA_DO_DIA}`,
     mostrar: (r) => <Buscas relatorio={r} />,
@@ -96,14 +100,14 @@ const ABAS: Record<AbaDoPainel, DefinicaoDaAba<unknown>> = {
   }),
   revisao: definir<Awaited<ReturnType<ClienteDaApi["revisaoDoPainel"]>>>({
     buscar: (api, f, agrupar) => api.revisaoDoPainel(f, agrupar),
-    csv: (api, f) => api.revisaoDoPainelEmCsv(f),
+    csv: (api, f, agrupar) => api.revisaoDoPainelEmCsv(f, agrupar),
     vazio: (r: RelatorioDeRevisao) => revisaoVazia(r),
     nota: `A taxa de correção não tem pessoa: com um usuário escolhido ela some. Os minutos de revisão são o acumulado das medidas cujo último pulso cai no período. ${NOTA_DO_DIA}`,
     mostrar: (r) => <Revisao relatorio={r} />,
   }),
   api: definir<Awaited<ReturnType<ClienteDaApi["apiDoPainel"]>>>({
     buscar: (api, f, agrupar) => api.apiDoPainel(f, agrupar),
-    csv: (api, f) => api.apiDoPainelEmCsv(f),
+    csv: (api, f, agrupar) => api.apiDoPainelEmCsv(f, agrupar),
     vazio: (r: RelatorioDeApi) =>
       r.por_dia.length === 0 && r.por_sistema.length === 0,
     nota: `A chamada não tem programa: o filtro de programa vale para as outras abas. O filtro de usuário escolhe o sistema. Vídeos enviados pela API são só os de sistemas. ${NOTA_DO_DIA}`,
@@ -397,7 +401,7 @@ export default function PainelDaDiretoria({
           <BaixarCsv
             key={aba}
             arquivo={`${aba}.csv`}
-            pedir={() => definicao.csv(api, filtros)}
+            pedir={() => definicao.csv(api, filtros, agrupar)}
             desligado={
               bloqueio !== null ||
               !relatorio.data ||

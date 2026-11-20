@@ -380,24 +380,24 @@ export interface ClienteDaApi {
   filaDoPainel(): Promise<FilaAgora>
   /** `GET /v1/painel/acessos`: logins por dia, usuários ativos, por usuário e no total. Sem programa. */
   acessosDoPainel(filtros: FiltrosDoPainel, agrupar?: PedidoDeAgrupamento): Promise<Agrupado<RelatorioDeAcessos>>
-  /** Os mesmos acessos em CSV, uma linha por dia e pessoa. */
-  acessosDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  /** Os mesmos acessos em CSV, agrupados como a tela: uma linha por grupo e pessoa. */
+  acessosDoPainelEmCsv(filtros: FiltrosDoPainel, agrupar: PedidoDeAgrupamento): Promise<Blob>
   /** `GET /v1/painel/videos`: enviados, concluídos, falhas, horas e tempo de processamento. Programa e usuário não se combinam. */
   videosDoPainel(filtros: FiltrosDoPainel, agrupar?: PedidoDeAgrupamento): Promise<Agrupado<RelatorioDeVideos>>
   /** A base dos vídeos em CSV, uma linha por dia e pessoa (ou por dia e programa, com o filtro de programa). */
-  videosDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  videosDoPainelEmCsv(filtros: FiltrosDoPainel, agrupar: PedidoDeAgrupamento): Promise<Blob>
   /** `GET /v1/painel/buscas`: buscas, quem busca e buscas sem resultado. Programa e usuário não se combinam. */
   buscasDoPainel(filtros: FiltrosDoPainel, agrupar?: PedidoDeAgrupamento): Promise<Agrupado<RelatorioDeBuscas>>
   /** A base das buscas em CSV. */
-  buscasDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  buscasDoPainelEmCsv(filtros: FiltrosDoPainel, agrupar: PedidoDeAgrupamento): Promise<Blob>
   /** `GET /v1/painel/revisao`: correções, taxa de correção e minutos de revisão. Os filtros se cruzam. */
   revisaoDoPainel(filtros: FiltrosDoPainel, agrupar?: PedidoDeAgrupamento): Promise<Agrupado<RelatorioDeRevisao>>
   /** A base da revisão em CSV, uma tabela com a coluna `indicador`. */
-  revisaoDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  revisaoDoPainelEmCsv(filtros: FiltrosDoPainel, agrupar: PedidoDeAgrupamento): Promise<Blob>
   /** `GET /v1/painel/api`: chamadas por sistema e rota, erros e vídeos enviados. Sem programa. */
   apiDoPainel(filtros: FiltrosDoPainel, agrupar?: PedidoDeAgrupamento): Promise<Agrupado<RelatorioDeApi>>
   /** A base da API em CSV. */
-  apiDoPainelEmCsv(filtros: FiltrosDoPainel): Promise<Blob>
+  apiDoPainelEmCsv(filtros: FiltrosDoPainel, agrupar: PedidoDeAgrupamento): Promise<Blob>
   /** `GET /v1/painel/custo`: custo por hora de vídeo e por mês, por usuário (ou sistema) e no total. */
   custoDoPainel(filtros: FiltrosDoPainel): Promise<RelatorioDeCusto>
   /** A base do custo em CSV. */
@@ -583,18 +583,18 @@ export function criarClienteDaApi(
     opcoesDoPainel: () => chamar('/v1/painel/filtros'),
     filaDoPainel: () => chamar('/v1/painel/fila'),
     acessosDoPainel: (filtros, agrupar) => doPainel('acessos', filtros, { semPrograma: true, agrupar }),
-    acessosDoPainelEmCsv: async (filtros) =>
-      (await pedir(`/v1/painel/acessos?${parametrosDoPainel(filtros, { csv: true, semPrograma: true })}`)).blob(),
+    acessosDoPainelEmCsv: async (filtros, agrupar) =>
+      (await pedir(`/v1/painel/acessos?${parametrosDoPainel(filtros, { csv: true, semPrograma: true, agrupar })}`)).blob(),
     videosDoPainel: (filtros, agrupar) => doPainel('videos', filtros, { agrupar }),
-    videosDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/videos?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
+    videosDoPainelEmCsv: async (filtros, agrupar) => (await pedir(`/v1/painel/videos?${parametrosDoPainel(filtros, { csv: true, agrupar })}`)).blob(),
     buscasDoPainel: (filtros, agrupar) => doPainel('buscas', filtros, { agrupar }),
     revisaoDoPainel: (filtros, agrupar) => doPainel('revisao', filtros, { agrupar }),
-    revisaoDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/revisao?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
+    revisaoDoPainelEmCsv: async (filtros, agrupar) => (await pedir(`/v1/painel/revisao?${parametrosDoPainel(filtros, { csv: true, agrupar })}`)).blob(),
     apiDoPainel: (filtros, agrupar) => doPainel('api', filtros, { semPrograma: true, agrupar }),
-    apiDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/api?${parametrosDoPainel(filtros, { csv: true, semPrograma: true })}`)).blob(),
+    apiDoPainelEmCsv: async (filtros, agrupar) => (await pedir(`/v1/painel/api?${parametrosDoPainel(filtros, { csv: true, semPrograma: true, agrupar })}`)).blob(),
     custoDoPainel: (filtros) => chamar(`/v1/painel/custo?${parametrosDoPainel(filtros)}`),
     custoDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/custo?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
-    buscasDoPainelEmCsv: async (filtros) => (await pedir(`/v1/painel/buscas?${parametrosDoPainel(filtros, { csv: true })}`)).blob(),
+    buscasDoPainelEmCsv: async (filtros, agrupar) => (await pedir(`/v1/painel/buscas?${parametrosDoPainel(filtros, { csv: true, agrupar })}`)).blob(),
     marcas: (filtros) => chamar(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, undefined, { tipo: filtros.tipos })}`),
     marcasEmCsv: async (filtros) =>
       (await pedir(`/v1/relatorios/marcas?${parametrosDoRelatorio(filtros, 'csv', { tipo: filtros.tipos })}`)).blob(),

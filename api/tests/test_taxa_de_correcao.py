@@ -481,7 +481,9 @@ def _taxa_com_contagem_sem(*tipos: str) -> list[Any]:
         versao_pipeline=pronta.versao_pipeline,
         itens={t: n for t, n in pronta.itens.items() if t not in tipos},
     )
-    por_job = taxa.calcular_com_itens(jobs, lambda _job_id: gravada, correcoes, revisao)
+    por_job = taxa.calcular_com_itens(
+        jobs, lambda _job_id: gravada, correcoes, revisao.todas()
+    )
     return [linha for job_id, linha in por_job if job_id == "j1"]
 
 
@@ -563,7 +565,7 @@ def _calcular_regravada(
         jobs,
         lambda _: itens,
         correcoes,
-        revisao,
+        revisao.todas(),
         modelo_do_job=modelo_do_job,
         **periodo,
     )
