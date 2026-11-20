@@ -394,33 +394,59 @@ def test_com_a_janela_da_falha_quem_esperava_recebe_o_mesmo_erro_sem_calcular_de
     None
 ):
     n = 4
-    cache = CacheCurto(validade_da_falha_s=10)
+    cache = CacheCurto(validade_da_falha_s=10, relogio=lambda: 0.0)
     chamadas = 0
-    todos_na_trava = threading.Barrier(n, timeout=5)
+    dentro = threading.Event()
+    solta = threading.Event()
     erros: list[BaseException] = []
 
     def calcular() -> int:
         nonlocal chamadas
         chamadas += 1
-        time.sleep(0.2)  # dá tempo de os outros chegarem na trava
+        dentro.set()
+        solta.wait(5)
         raise RuntimeError("BigQuery fora")
 
     def pedir() -> None:
-        todos_na_trava.wait()
         try:
             cache.obter("k", calcular)
         except RuntimeError as e:
             erros.append(e)
 
     threads = [threading.Thread(target=pedir) for _ in range(n)]
-    for t in threads:
+    threads[0].start()
+    assert dentro.wait(5)  # a primeira está dentro de `calcular`, com a trava
+    for t in threads[1:]:
         t.start()
+    time.sleep(0.1)  # ponytail: sem gancho na trava, só dá para dar tempo às outras
+    solta.set()
     for t in threads:
         t.join()
 
     assert chamadas == 1
     assert len(erros) == n
-    assert {id(e) for e in erros} == {id(erros[0])}
+    assert {(type(e), str(e)) for e in erros} == {(RuntimeError, "BigQuery fora")}
+
+
+def test_o_traceback_da_falha_guardada_nao_cresce_entre_entregas() -> None:
+    cache = CacheCurto(validade_da_falha_s=10, relogio=lambda: 0.0)
+
+    def falha() -> None:
+        raise RuntimeError("fora")
+
+    def tamanho() -> int:
+        try:
+            cache.obter("k", falha)
+        except RuntimeError as e:
+            n, tb = 0, e.__traceback__
+            while tb:
+                n, tb = n + 1, tb.tb_next
+            return n
+        raise AssertionError
+
+    primeiro = tamanho()
+    for _ in range(20):
+        assert tamanho() <= primeiro
 
 
 def test_a_falha_guardada_vence_na_janela_e_a_proxima_chamada_refaz() -> None:

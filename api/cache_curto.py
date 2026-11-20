@@ -7,6 +7,7 @@ tempo (mais o das cópias e resumos que a consulta lê). Quem chega junto na mes
 uma só consulta; o erro não fica guardado, salvo com `validade_da_falha_s` (#775).
 """
 
+import copy
 import threading
 import time
 from collections import OrderedDict
@@ -48,7 +49,13 @@ class CacheCurto:
     @staticmethod
     def _entregar(valor: Any) -> Any:
         if isinstance(valor, _Falha):
-            raise valor.erro
+            # Uma cópia sem o traceback guardado: a mesma instância relançada por várias
+            # threads acumularia frames compartilhados.
+            try:
+                copia = copy.copy(valor.erro)
+            except Exception:  # noqa: BLE001 - tipo que não copia: relança o original
+                copia = valor.erro
+            raise copia.with_traceback(None)
         return valor
 
     def obter[T](self, chave: Hashable, calcular: Callable[[], T]) -> T:

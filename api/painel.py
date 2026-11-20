@@ -796,6 +796,11 @@ def _chave(filtro: FiltroDoPainel) -> tuple[object, ...]:
     return (filtro.desde, filtro.ate, filtro.programa, filtro.usuario)
 
 
+def _confere_programa_ou_usuario(filtro: FiltroDoPainel) -> None:
+    if filtro.programa is not None and filtro.usuario is not None:
+        raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
+
+
 def _base_de_uso(
     fonte: ResumosDeUso,
     filtro: FiltroDoPainel,
@@ -804,8 +809,7 @@ def _base_de_uso(
     """As linhas do filtro: da tabela por programa se pediu programa, senão da por pessoa.
     As duas não se cruzam: pedir os dois é erro, em vez de devolver números que um dos
     filtros não aplicou."""
-    if filtro.programa is not None and filtro.usuario is not None:
-        raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
+    _confere_programa_ou_usuario(filtro)
     if filtro.programa is not None:
         return ou_503(
             lambda: lido(
@@ -1360,6 +1364,7 @@ def criar_rotas_do_painel(
         """Vídeos enviados, concluídos e com falha, horas e tempo de processamento, por dia,
         programa e usuário (ou sistema). Programa e usuário não se combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        _confere_programa_ou_usuario(filtro)  # antes de pedir os e-mails
         # Com `programa` a tabela por programa é a própria base.
         com_tabela_por_programa = filtro.programa is None and filtro.usuario is None
         base, por_programa, emails = em_paralelo(
@@ -1428,6 +1433,7 @@ def criar_rotas_do_painel(
         busca só tem programa quando foi filtrada por ele. Programa e usuário não se
         combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        _confere_programa_ou_usuario(filtro)  # antes de pedir os e-mails
         base, emails = em_paralelo(
             lambda: _base_de_uso(fonte, filtro, lido), emails_das_contas
         )
