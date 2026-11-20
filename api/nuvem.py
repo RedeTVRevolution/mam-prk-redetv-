@@ -372,6 +372,11 @@ class RepositorioFirestore:
         # Só depois de `make gravar-mes-nos-jobs`: Job sem `mes_exibicao` some do filtro.
         self._listagem_por_mes = listagem_por_mes
 
+    def referencia(self, job_id: str) -> Any:
+        """A referência do documento do Job, para quem lê e grava junto com outro documento
+        (a transação do nome do programa)."""
+        return _documento(self._colecao, job_id)
+
     def salvar(self, job: Job) -> None:
         _documento(self._colecao, job.id).set(job.model_dump())
 
@@ -1160,7 +1165,7 @@ class ProgramasFirestore:
         if not isinstance(jobs, RepositorioFirestore):
             raise TypeError("os Jobs precisam estar no Firestore")
         programa_ref = _documento(self._colecao, programa_id)
-        job_ref = _documento(self._cliente.collection(jobs._colecao.id), job_id)
+        job_ref = jobs.referencia(job_id)
 
         @firestore.transactional
         def levar(transacao: Any) -> Job | None:
