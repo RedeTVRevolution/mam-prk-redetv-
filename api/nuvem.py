@@ -1903,7 +1903,6 @@ class ArquivosNoStorage:
             [
                 *self._cliente.list_blobs(self._decupagens, prefix=f"{job_id}/"),
                 bucket.blob(objeto_da_decupagem(job_id)),
-                bucket.blob(f"{job_id}.comparacao.json"),
             ],
         )
 

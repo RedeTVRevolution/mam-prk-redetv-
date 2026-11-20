@@ -128,7 +128,6 @@ def test_arquivos_no_storage_apaga_tudo_do_job_e_nada_de_outro() -> None:
             "aceitos": {"j1/proxy.mp4", "j1/janelas/0000.json", "j10/proxy.mp4"},
             "decupagens": {
                 "j1.json",
-                "j1.comparacao.json",
                 "j1/quadros/p-0.jpg",
                 "j10.json",
                 "j2.json",
