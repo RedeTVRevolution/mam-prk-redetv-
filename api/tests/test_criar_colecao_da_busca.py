@@ -1,6 +1,7 @@
 """`api.criar_colecao_da_busca` (#757): a conta que impersona e o que cria, sem nuvem."""
 
 from dataclasses import replace
+from functools import partial
 from typing import Any
 
 import pytest
@@ -216,3 +217,46 @@ def test_outro_erro_nao_espera(rodar: Any, esperas: list[float]) -> None:
     with pytest.raises(RuntimeError, match="HTTP 400"):
         rodar(Quebrada(), "--personificar", CONTA)
     assert esperas == []
+
+
+def test_o_403_na_operacao_aceita_repete_so_a_consulta_e_o_aviso_sai(
+    rodar: Any,
+    esperas: list[float],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """O PATCH é aceito e a primeira consulta da operação recebe 403: repetir a criação
+    inteira acharia o campo já no esquema e perderia o aviso de reindexação."""
+    completo = esquema_da_colecao(CONFIG)
+    texto = esquema_da_colecao(replace(CONFIG, colecao="col-texto"))
+    propriedades = dict(completo["dataSchema"]["properties"])
+    falta = list(propriedades)[-1]
+    del propriedades[falta]
+    incompleto = {"dataSchema": {"type": "object", "properties": propriedades}}
+
+    class OperacaoSemPapel(NuvemFalsa):
+        negadas = 1
+
+        def __call__(self, metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+            if caminho == "op-patch":
+                if self.negadas:
+                    self.negadas -= 1
+                    raise RuntimeError("GET op-patch: HTTP 403: IAM_PERMISSION_DENIED")
+                return {"name": "op-patch", "done": True}
+            resposta = super().__call__(metodo, caminho, corpo)
+            return (
+                {"name": "op-patch", "done": False} if metodo == "PATCH" else resposta
+            )
+
+    monkeypatch.setattr(
+        criar_colecao_da_busca,
+        "criar_colecao",
+        partial(agent_retrieval.criar_colecao, dormir=lambda _s: None),
+    )
+    rodar(
+        OperacaoSemPapel({"col-z": incompleto, "col-texto": texto}),
+        "--personificar",
+        CONTA,
+    )
+    assert len(esperas) == 1
+    assert "make reindexar" in capsys.readouterr().out
