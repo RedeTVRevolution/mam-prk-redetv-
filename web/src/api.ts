@@ -71,7 +71,11 @@ async function detalhe(resposta: Response): Promise<string> {
 }
 
 /** Uma página da busca: o próximo cursor vem no cabeçalho e some na última (#426). */
-export type PaginaDaBusca = ResultadoDaBusca & { proximo?: string | null }
+export type PaginaDaBusca = ResultadoDaBusca & {
+  proximo?: string | null
+  /** O `X-Token-Da-Foto` da 1ª resposta da busca por foto: manda-se no lugar do arquivo (#805). */
+  tokenDaFoto?: string | null
+}
 
 function comCursor(query: string, cursor: string | null | undefined): string {
   return cursor ? `${query}&${new URLSearchParams({ cursor })}` : query
@@ -79,8 +83,17 @@ function comCursor(query: string, cursor: string | null | undefined): string {
 
 async function paginaDaBusca(pedido: Promise<Response>): Promise<PaginaDaBusca> {
   const resposta = await pedido
-  return { ...((await resposta.json()) as ResultadoDaBusca), proximo: resposta.headers.get('X-Proximo-Cursor') }
+  return {
+    ...((await resposta.json()) as ResultadoDaBusca),
+    proximo: resposta.headers.get('X-Proximo-Cursor'),
+    tokenDaFoto: resposta.headers.get('X-Token-Da-Foto'),
+  }
 }
+
+/** O 422 da API para o token da foto que venceu ou não vale (#802). */
+export const TOKEN_DA_FOTO_INVALIDO = 'Token da foto inválido'
+/** O 422 do cursor que a API não aceita mais. */
+export const CURSOR_INVALIDO = 'Cursor inválido'
 
 /** Uma foto de referência de um nome: o resultado da conferência é em palavras, nunca uma porcentagem. */
 export type EventoDeRevisao = 'inicio' | 'atividade' | 'fim'
@@ -364,8 +377,11 @@ export interface ClienteDaApi {
    * página anterior (vale 15 min, só para a mesma consulta; vencido, a API responde 422).
    */
   buscar(consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
-  /** `POST /v1/busca/imagem`: a foto é a consulta; só programa e período da `consulta` valem. */
-  buscarPorImagem(foto: File, consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
+  /**
+   * `POST /v1/busca/imagem`: a foto é a consulta; só programa e período da `consulta` valem. Com
+   * `{ token }`, o `X-Token-Da-Foto` de uma busca anterior vai no lugar do arquivo (#805).
+   */
+  buscarPorImagem(foto: File | { token: string }, consulta: ConsultaDaBusca, limite: number, cursor?: string | null): Promise<PaginaDaBusca>
   /** `GET /v1/relatorios/tempo-de-tela`: tempo de tela por pessoa, contando só aparições. */
   tempoDeTela(filtros: FiltrosDoRelatorio): Promise<RelatorioDeTempoDeTela>
   /** O mesmo relatório em CSV. */
@@ -564,7 +580,8 @@ export function criarClienteDaApi(
     buscar: (consulta, limite, cursor) => paginaDaBusca(pedir(`/v1/busca?${comCursor(consultaParaApi(consulta, limite), cursor)}`)),
     buscarPorImagem: (foto, consulta, limite, cursor) => {
       const formulario = new FormData()
-      formulario.append('arquivo', foto)
+      if (foto instanceof File) formulario.append('arquivo', foto)
+      else formulario.append('token', foto.token)
       return paginaDaBusca(pedir(`/v1/busca/imagem?${comCursor(consultaDaImagemParaApi(consulta, limite), cursor)}`, { post: true, formulario }))
     },
     tempoDeTela: (filtros) => chamar(`/v1/relatorios/tempo-de-tela?${parametrosDoRelatorio(filtros)}`),
