@@ -1224,3 +1224,116 @@ def test_espera_apos_429_de_cota_mantem_a_vaga_e_tenta_de_novo(
     assert vagas_nas_tentativas == [1, 1]
     assert fila.itens("ocupadas") == []
     assert any(log.get("json", {}).get("evento") == "falta_de_gpu" for log in fila.logs)
+
+
+# As etapas de melhor esforço depois do `concluido` (#752): o `processa` executado a partir
+# da identificação, com dublês só nas bordas (Cloud Run, Florence com GPU e a gravação da
+# etapa, que é o `marca_inicio`/`marca_fim` registrando o que receberam).
+JOBS_DE_ETAPA = {
+    "identificacao": ("job_de_identificacao", 3900),
+    "quadros_chave": ("job_de_quadros", 3900),
+    "inventario_de_objetos": ("job_de_inventario", 3900),
+    "indexacao": ("job_de_indexacao", 2100),
+}
+
+
+class EtapasLocal(FilaLocal):
+    def __init__(
+        self, falham: set[str] | None = None, florence_falha: bool = False
+    ) -> None:
+        super().__init__()
+        self.definicao = _definicao(
+            {"vagas_de_gpu": "1", "job_de_objetos_gpu": "florence"}
+            | {var: etapa for etapa, (var, _) in JOBS_DE_ETAPA.items()}
+        )
+        self.definicao["marca_inicio"] = {
+            "params": ["job_id", "etapa"],
+            "steps": [
+                {"a": {"call": "grava", "args": {"fim": None, "etapa": "${etapa}"}}}
+            ],
+        }
+        self.definicao["marca_fim"] = {
+            "params": ["job_id", "etapa", "falhou_na_execucao"],
+            "steps": [
+                {
+                    "a": {
+                        "call": "grava",
+                        "args": {
+                            "fim": "${falhou_na_execucao}",
+                            "etapa": "${etapa}",
+                        },
+                    }
+                }
+            ],
+        }
+        self.definicao["roda_o_job_com_gpu"] = {
+            "params": ["job_id", "etapa", "job_gpu", "timeout_gpu"],
+            "steps": [{"a": {"call": "florence"}}],
+        }
+        self.falham = falham or set()
+        self.florence_falha = florence_falha
+        self.eventos: list[tuple[Any, ...]] = []
+
+    def chamar(self, nome: str, args: dict[str, Any]) -> Any:
+        if nome == "sys.log":
+            return super().chamar(nome, args)
+        if nome == "grava":
+            self.eventos.append(
+                ("inicio", args["etapa"])
+                if args["fim"] is None
+                else ("fim", args["etapa"], args["fim"])
+            )
+        elif nome == "florence":
+            self.eventos.append(("florence",))
+            if self.florence_falha:
+                raise ErroDaChamada(500)
+        else:
+            assert nome.endswith("jobs.run"), nome  # nenhuma escrita no Job
+            job = args["name"].rsplit("/", 1)[1]
+            self.eventos.append(("job", job, args["connector_params"]["timeout"]))
+            if job in self.falham:
+                raise ErroDaChamada(500)
+        return None
+
+    def rodar(self) -> Any:
+        evento = mapa({"job_id": "j", "etapa_inicial": "identificacao"})
+        return self.executar("processa", evento=evento)
+
+
+def _esperado(falha: str | None, florence_falha: bool = False) -> list[tuple[Any, ...]]:
+    """A ordem de hoje: a etapa que falha grava `falhou` e pula o fechamento de sucesso."""
+    eventos: list[tuple[Any, ...]] = []
+    for etapa, (_, prazo) in JOBS_DE_ETAPA.items():
+        eventos.append(("inicio", etapa))
+        if etapa == "inventario_de_objetos":
+            eventos.append(("florence",))
+            if florence_falha:
+                eventos.append(("fim", etapa, True))
+                continue
+        eventos.append(("job", etapa, prazo))
+        if etapa == falha:
+            eventos.append(("fim", etapa, True))
+        elif etapa != "identificacao":  # a identificação grava o próprio resultado
+            eventos.append(("fim", etapa, False))
+    return eventos
+
+
+@pytest.mark.parametrize("falha", [None, *JOBS_DE_ETAPA])
+def test_a_etapa_que_falha_grava_falhou_e_o_passo_seguinte_roda(
+    falha: str | None,
+) -> None:
+    fila = EtapasLocal({falha} if falha else set())
+
+    assert fila.rodar() == "j"  # chega ao `fim` e o Job segue `concluido`
+    assert fila.eventos == _esperado(falha)
+    avisos = [log for log in fila.logs if log.get("severity") == "WARNING"]
+    assert len(avisos) == (1 if falha else 0)
+
+
+def test_falha_do_florence_pula_o_inventario_em_cpu_e_segue_para_a_indexacao() -> None:
+    fila = EtapasLocal(florence_falha=True)
+
+    assert fila.rodar() == "j"
+    assert fila.eventos == _esperado(None, florence_falha=True)
+    assert not any(e[:2] == ("job", "inventario_de_objetos") for e in fila.eventos)
+    assert ("fim", "inventario_de_objetos", True) in fila.eventos

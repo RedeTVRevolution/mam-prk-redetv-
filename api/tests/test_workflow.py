@@ -2,12 +2,13 @@
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 import yaml
 
 from api.jobs import CONFERENCIA_DA_FILA_GPU_S, FOLGA_DA_FILA_GPU_S
+from api.modelo_do_job import CodigoDeFalha, Etapa, NomeDaEtapa, ResultadoDaEtapa
 
 INFRA = Path(__file__).parents[2] / "infra"
 MODULO = INFRA / "modulos" / "mam"
@@ -240,21 +241,55 @@ def test_jobs_de_analise_e_identificacao_recebem_a_mesma_tolerancia_da_fala() ->
         ), nome
 
 
-def test_quadros_chave_rodam_depois_da_analise_e_a_falha_deles_nao_derruba_o_job() -> (
-    None
-):
+# Os quatro passos de melhor esforço chamam o mesmo subworkflow: o Job e o prazo do conector.
+MELHOR_ESFORCO = {
+    "identifica": ("identificacao", "job_de_identificacao", 3900),
+    "tira_os_quadros": ("quadros_chave", "job_de_quadros", 3900),
+    "roda_o_inventario": ("inventario_de_objetos", "job_de_inventario", 3900),
+    "indexa": ("indexacao", "job_de_indexacao", 2100),
+}
+
+
+def _passo(texto: str, nome: str) -> str:
+    """O corpo de um passo do `processa` (do nome ao próximo passo do mesmo nível)."""
+    corpo = texto[texto.index(f"\n    - {nome}:\n") + 1 :]
+    return corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
+
+
+def test_etapas_de_melhor_esforco_so_chamam_o_subworkflow_com_o_job_e_o_prazo() -> None:
     texto = _texto()
 
-    analisa = texto.index("- analisa:")
-    quadros = texto.index("- tira_os_quadros:")
-    fim = texto.index("- fim:")
-    assert analisa < quadros < fim
-    passo = texto[quadros:fim]
-    assert "googleapis.run.v2.projects.locations.jobs.run" in passo
-    assert "jobs/${job_de_quadros}" in passo
-    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
-    # O Job já está concluído: sem os JPEGs a Decupagem segue valendo.
-    assert "except:" in passo and "sys.log" in passo and "raise" not in passo
+    for nome, (etapa, job, prazo) in MELHOR_ESFORCO.items():
+        passo = _passo(texto, nome)
+        assert "call: roda_o_job_de_etapa" in passo, nome
+        assert f"etapa: {etapa}\n" in passo, nome
+        assert f"job: ${{{job}}}\n" in passo, nome
+        assert f"prazo: {prazo}\n" in passo, nome
+        assert "try:" not in passo and "jobs.run" not in passo, nome
+    # O resto do YAML não repete o `try` do Job: só o subworkflow e o Florence com GPU.
+    assert texto.count("googleapis.run.v2.projects.locations.jobs.run") == 5
+
+
+def test_subworkflow_da_etapa_roda_o_job_e_a_falha_dele_nao_derruba_o_job() -> None:
+    sub = _subworkflow(_texto(), "roda_o_job_de_etapa")
+
+    assert "googleapis.run.v2.projects.locations.jobs.run" in sub
+    assert 'name: $${"projects/${projeto}/locations/${regiao}/jobs/" + job}' in sub
+    assert "name: JOB_ID" in sub and "value: $${job_id}" in sub
+    assert "timeout: $${prazo}" in sub
+    # O Job já está concluído: a falha vai à etapa e ao log, e devolve `true`.
+    excecao = sub[sub.index("except:") :]
+    assert "etapa: $${etapa}" in excecao and "falhou_na_execucao: true" in excecao
+    assert "sys.log" in excecao and "raise" not in excecao
+    assert "return: true" in excecao and "return: false" in sub
+    assert "documents.patch" not in sub
+
+
+def test_quadros_chave_rodam_depois_da_analise() -> None:
+    texto = _texto()
+
+    assert texto.index("- analisa:") < texto.index("- tira_os_quadros:")
+    assert texto.index("- tira_os_quadros:") < texto.index("- fim:")
 
 
 def test_job_de_quadros_no_main_tf_sem_internet_com_a_imagem_da_validacao() -> None:
@@ -274,17 +309,13 @@ def test_job_de_quadros_no_main_tf_sem_internet_com_a_imagem_da_validacao() -> N
     assert 'decupagens = "roles/storage.objectUser"' in main
 
 
-def test_indexacao_roda_depois_dos_quadros_e_a_falha_dela_nao_derruba_o_job() -> None:
+def test_indexacao_roda_depois_dos_quadros() -> None:
     texto = _texto()
 
     quadros = texto.index("- tira_os_quadros:")
     indexa = texto.index("- indexa:")
     fim = texto.index("- fim:")
     assert quadros < indexa < fim
-    passo = texto[indexa:fim]
-    assert "jobs/${job_de_indexacao}" in passo
-    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
-    assert "except:" in passo and "sys.log" in passo and "raise" not in passo
 
 
 def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
@@ -315,15 +346,26 @@ def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
     passos = {
         "valida": ("validacao", "- valida:", "- le_o_job:"),
         "analisa": ("analise", "- analisa:", "- inicia_identificacao:"),
-        "identifica": ("identificacao", "- identifica:", "- inicia_quadros_chave:"),
-        "tira_os_quadros": ("quadros", "- tira_os_quadros:", "- indexa:"),
-        "indexa": ("indexacao", "- indexa:", "- fim:"),
     }
     for nome, (job, de, ate) in passos.items():
         passo = texto[texto.index(de) : texto.index(ate)]
         conector = re.search(r"connector_params:\s+timeout: (\d+)", passo)
         assert conector is not None, nome
         assert int(conector.group(1)) > _timeout_do_job(main, job), nome
+
+    # O prazo que cada etapa de melhor esforço passa ao subworkflow também.
+    recurso = {
+        "job_de_identificacao": "identificacao",
+        "job_de_quadros": "quadros",
+        "job_de_inventario": "inventario",
+        "job_de_indexacao": "indexacao",
+    }
+    for nome, (_, job, prazo) in MELHOR_ESFORCO.items():
+        if job == "job_de_inventario":
+            # Hoje 3900 s contra os 9000 s do Job: fora desta conferência até o ticket
+            # dos prazos decidir (o comportamento não muda aqui).
+            continue
+        assert prazo > _timeout_do_job(main, recurso[job]), nome
 
     # O timeout de cada ramo cobre o Job com GPU.
     for ramo, job in {
@@ -376,7 +418,7 @@ def test_cada_etapa_grava_o_inicio_antes_e_o_fim_depois_de_rodar() -> None:
 def test_falha_da_execucao_de_cada_etapa_grava_o_fim_como_falhou() -> None:
     texto = _texto()
 
-    for passo, etapa in ETAPAS:
+    for passo, etapa in ETAPAS[:2]:
         inicio = texto.index(f"\n    - {passo}:\n")
         corpo = texto[inicio + 1 :]
         corpo = corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
@@ -409,7 +451,7 @@ def test_passos_depois_da_analise_so_comecam_com_o_job_concluido() -> None:
 def test_falha_de_cada_etapa_nao_cai_no_encerra_que_a_gravaria_como_concluida() -> None:
     texto = _texto()
 
-    for passo, etapa in ETAPAS:
+    for passo, etapa in ETAPAS[:2]:
         excecao = texto[
             texto.index(
                 "        except:\n", texto.index(f"\n    - {passo}:\n")
@@ -417,6 +459,19 @@ def test_falha_de_cada_etapa_nao_cai_no_encerra_que_a_gravaria_como_concluida() 
         ]
         ultimo_passo = excecao.rstrip().rsplit("\n            - ", 1)[1]
         assert "raise:" in ultimo_passo or "next:" in ultimo_passo, passo
+    # Nas outras, quem pula o `encerra_` é o passo logo depois da chamada.
+    for passo, etapa, destino in [
+        ("tira_os_quadros", "quadros_chave", "inicia_inventario_de_objetos"),
+        ("roda_o_inventario", "inventario_de_objetos", "inicia_indexacao"),
+        ("indexa", "indexacao", "fim"),
+    ]:
+        chamada = _passo(texto, passo)
+        resultado = re.search(r"result: (\w+)", chamada)
+        assert resultado, passo
+        confere = texto[texto.index(chamada) + len(chamada) :]
+        confere = confere[: confere.index(f"- encerra_{etapa}:")]
+        assert f"condition: $${{{resultado[1]}}}" in confere, passo
+        assert f"next: {destino}\n" in confere, passo
 
 
 def test_fim_de_etapa_sem_inicio_nao_e_gravado() -> None:
@@ -446,7 +501,7 @@ def test_ordem_nova_identificacao_quadros_indexacao() -> None:
         )
         assert inicio, job
         assert (
-            f"jobs/${{job_de_{job}}}"
+            f"job: ${{job_de_{job}}}"
             in texto[inicio.end() :].split("- tira_os_quadros:")[0]
         )
     # O nome de cada Job vem do main.tf pelo templatefile.
@@ -455,25 +510,17 @@ def test_ordem_nova_identificacao_quadros_indexacao() -> None:
         assert f"job_de_{job}" in main
 
 
-@pytest.mark.parametrize(
-    ("passo", "etapa", "seguinte"),
-    [
-        ("identifica", "identificacao", "inicia_quadros_chave"),
-    ],
-)
-def test_falha_dos_passos_novos_vai_ao_log_e_a_etapa_e_os_seguintes_rodam(
-    passo: str, etapa: str, seguinte: str
-) -> None:
+def test_falha_da_identificacao_vai_ao_log_e_a_etapa_e_os_quadros_rodam() -> None:
     texto = _texto()
 
-    corpo = texto[texto.index(f"\n    - {passo}:\n") + 1 :]
-    corpo = corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
-    excecao = corpo[corpo.index("except:") :]
-    assert "falhou_na_execucao: true" in excecao
-    assert "sys.log" in excecao and "raise" not in excecao
-    assert f"next: {seguinte}" in excecao
-    # Nunca mexem no `estado` do Job: o Job continua `concluido`.
-    assert "documents.patch" not in excecao
+    # Sem `result`, sem desvio e sem `encerra_`: com ou sem falha, o passo seguinte é o
+    # início dos quadros-chave, e o Job continua `concluido`.
+    passo = _passo(texto, "identifica")
+    assert "result:" not in passo and "next:" not in passo
+    assert _passo(texto, "inicia_quadros_chave").startswith(
+        "    - inicia_quadros_chave"
+    )
+    assert "documents.patch" not in _subworkflow(texto, "roda_o_job_de_etapa")
 
 
 def test_depois_da_identificacao_nenhum_desvio_pula_os_quadros_nem_a_indexacao() -> (
@@ -554,7 +601,7 @@ def test_partindo_da_indexacao_nada_antes_dela_roda() -> None:
 
     assert destino == "inicia_indexacao"
     daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
-    assert "jobs/${job_de_indexacao}" in daqui
+    assert "job: ${job_de_indexacao}" in daqui
     for antes in (
         "job_de_validacao",
         "job_de_transcricao_gpu",
@@ -947,14 +994,16 @@ def test_o_florence_roda_a_gpu_sem_plano_b_e_depois_o_job_em_cpu() -> None:
     assert "job_gpu: ${job_de_objetos_gpu}" in florence
     assert "timeout_gpu: 11100" in florence
     cpu = passo[passo.index("- roda_o_inventario:") :]
-    assert "jobs/${job_de_inventario}" in cpu
-    assert "timeout: 3900" in cpu
+    assert "call: roda_o_job_de_etapa" in cpu
+    assert "job: ${job_de_inventario}" in cpu
+    assert "prazo: 3900" in cpu
 
 
 def test_a_falha_do_inventario_marca_a_etapa_e_segue_para_a_indexacao() -> None:
     passo = _passo_do_inventario()
 
-    assert passo.count("falhou_na_execucao: true") == 2
+    # O Florence grava a falha ele mesmo; a do Job em CPU vem do subworkflow.
+    assert passo.count("falhou_na_execucao: true") == 1
     assert passo.count("next: inicia_indexacao") == 2
 
 
@@ -1277,3 +1326,57 @@ def test_o_banco_do_firestore_vem_da_configuracao_e_nao_e_default() -> None:
     assert "(default)" not in texto
     assert "databases/${banco_firestore}/documents/" in texto
     assert "banco_firestore" in MAIN.read_text().split("validacao.workflow.yaml")[1]
+
+
+def _codigos_de_falha_do_yaml(texto: str) -> set[str]:
+    """Os códigos literais que o YAML grava em `codigo_falha` ou passa em `codigo_da_falha`."""
+    codigos: set[str] = set()
+
+    def anda(no: object) -> None:
+        if isinstance(no, dict):
+            for chave, valor in no.items():
+                if chave == "codigo_falha":
+                    codigos.add(valor["stringValue"])
+                elif chave == "codigo_da_falha":
+                    codigos.add(valor)
+                anda(valor)
+        elif isinstance(no, list):
+            for item in no:
+                anda(item)
+
+    anda(yaml.safe_load(texto))
+    return {codigo for codigo in codigos if not codigo.startswith("$${")}
+
+
+def test_codigos_de_falha_do_yaml_sao_membros_do_codigo_de_falha() -> None:
+    codigos = _codigos_de_falha_do_yaml(_texto())
+
+    assert {"arquivo_corrompido", "analise_falhou", "transcricao_falhou"} <= codigos
+    assert codigos <= set(get_args(CodigoDeFalha))
+
+
+def test_o_conferidor_dos_codigos_acusa_um_codigo_que_o_modelo_nao_tem() -> None:
+    texto = _texto().replace("stringValue: analise_falhou", "stringValue: analise_x")
+
+    assert not _codigos_de_falha_do_yaml(texto) <= set(get_args(CodigoDeFalha))
+    com_aspas = _texto().replace(
+        "codigo_da_falha: ocr_falhou", 'codigo_da_falha: "ocr_invalido"'
+    )
+    assert "ocr_invalido" in _codigos_de_falha_do_yaml(com_aspas)
+
+
+def test_formato_de_etapas_do_yaml_bate_com_o_modelo_da_etapa() -> None:
+    texto = _texto()
+
+    marcas = texto[texto.index("\nmarca_inicio:") : texto.index("\netapa_com_gpu:")]
+    campos = set(re.findall(r'"etapas\." \+ etapa \+ "\.(\w+)"', marcas))
+    assert campos == {"fim", "resultado"}
+    assert campos | {"inicio"} <= set(Etapa.model_fields)
+    resultados = set(
+        re.findall(r"- resultado: (\w+)\n", _subworkflow(texto, "marca_fim"))
+    )
+    assert resultados == set(get_args(ResultadoDaEtapa))
+    # Todo nome de etapa literal que o YAML grava existe no modelo.
+    nomes = set(re.findall(r"\n\s+etapa: ([a-z_]+)\n", texto))
+    assert {"identificacao", "indexacao"} <= nomes
+    assert nomes <= set(get_args(NomeDaEtapa))
