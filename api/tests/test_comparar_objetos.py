@@ -250,3 +250,18 @@ def test_o_alvo_do_makefile_le_os_nomes_do_terraform_e_passa_o_job() -> None:
     for variavel in ("BUCKET_DECUPAGENS", "REGIAO_GPU", "JOB_DE_OBJETOS_GPU"):
         assert re.search(rf"\$\(call LER_AMBIENTE,[^)]*\b{variavel}\b", alvo)
     assert "python -m api.comparar_objetos" in alvo and '"$(JOB)"' in alvo
+
+
+def test_o_disparador_acompanha_a_operacao_com_nome_e_sem_done() -> None:
+    sessao = SessaoRest(
+        [
+            {"name": "operations/1"},
+            {"name": "operations/1"},
+            {"name": "operations/1", "done": False},
+            {"name": "operations/1", "done": True},
+        ]
+    )
+
+    DisparadorDoCloudRun("p", "r", "j", sessao, lambda _: None).rodar("j1", "d.json")
+
+    assert len(sessao.gets) == 3

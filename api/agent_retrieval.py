@@ -32,6 +32,7 @@ from api.busca import RRF_K, TETO_DE_CONSULTAS_AO_INDICE, _intercalar
 from api.busca_na_nuvem import com_pool, tocar_o_host
 from api.clientes_de_nuvem import sessao_autenticada
 from api.indice_da_busca import Consulta, Filtros, Registro
+from api.operacao_do_google import terminou
 from api.orcamento_de_escrita import Orcamento
 from api.texto import normalizar
 
@@ -456,7 +457,7 @@ def esperar(
     intervalo_s: float = 10.0,
 ) -> None:
     """Espera a operação de longa duração (criar ou apagar coleção e índice) terminar."""
-    while not operacao.get("done", True):
+    while not terminou(operacao):
         dormir(intervalo_s)
         operacao = transporte("GET", operacao["name"], None)
     if "error" in operacao:

@@ -2288,3 +2288,42 @@ def test_com_ann_thread_que_nao_inicia_libera_a_reserva(
     monkeypatch.setattr(threading.Thread, "start", falha)
     indice.buscar(Consulta(significado="paletó", filtros=Filtros(tipo="plano")))
     assert indice._enchendo == set()
+
+
+def test_esperar_acompanha_a_operacao_com_nome_e_sem_done() -> None:
+    transporte = TransporteFalso()
+    respostas = iter([{"name": "op", "done": True}])
+    esperas: list[float] = []
+
+    esperar({"name": "op"}, _Sequencia(transporte, respostas), esperas.append)
+
+    assert [(m, c) for m, c, _ in transporte.chamadas] == [("GET", "op")]
+    assert len(esperas) == 1
+
+
+def test_esperar_continua_enquanto_o_done_for_falso() -> None:
+    transporte = TransporteFalso()
+    respostas = iter([{"name": "op", "done": False}, {"name": "op", "done": True}])
+
+    esperar(
+        {"name": "op", "done": False}, _Sequencia(transporte, respostas), lambda _: None
+    )
+
+    assert len(transporte.chamadas) == 2
+
+
+def test_esperar_nao_consulta_a_resposta_sem_nome() -> None:
+    transporte = TransporteFalso()
+
+    esperar({}, transporte, lambda _: None)
+
+    assert transporte.chamadas == []
+
+
+def test_apagar_colecao_sem_corpo_na_resposta_termina_sem_consultar() -> None:
+    transporte = TransporteFalso()
+    respostas = iter([{}, {}])  # a consulta dos objetos e o DELETE; uma terceira falha
+
+    apagar_colecao(CONFIG, _Sequencia(transporte, respostas), _nao_dorme)
+
+    assert [m for m, _, _ in transporte.chamadas] == ["POST", "DELETE"]

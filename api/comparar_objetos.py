@@ -32,6 +32,7 @@ from api.florence import ObjetosDaDecupagem
 from api.gemini import SessaoHttp, Transporte, TransporteVertex
 from api.inventario import Inventarios, converter_do_florence, olhar_com_gemini
 from api.nuvem import ObjetosStorage
+from api.operacao_do_google import terminou
 from api.precos_dos_modelos import Preco, precos_do_ambiente, tokens_do_transporte
 
 PRECO_DA_GPU_POR_HORA = 1.05
@@ -241,7 +242,7 @@ class DisparadorDoCloudRun:
         resposta = self._sessao.post(f"{self._base}/{self._job}:run", json=corpo)
         resposta.raise_for_status()
         operacao: dict[str, Any] = resposta.json()
-        while not operacao.get("done"):
+        while not terminou(operacao):
             self._dormir(ESPERA_DO_JOB_S)
             resposta = self._sessao.get(f"{self._base}/{operacao['name']}")
             resposta.raise_for_status()
