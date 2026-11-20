@@ -39,6 +39,7 @@ from api.copia_bigquery import (
     Transporte,
     executar_dml,
     parametro,
+    parametro_de_lista,
     transporte_http,
 )
 from api.correcoes import RepositorioDeCorrecoes
@@ -256,30 +257,26 @@ class TabelaDaTaxaBigQuery:
         for linha in linhas:
             por_dia.setdefault(linha.dia, []).append(linha)
         lote: list[date] = []
-        linhas_do_lote: list[LinhaDiaria] = []
+        json_do_lote: list[dict[str, Any]] = []
         bytes_do_lote = 0
         for dia in dict.fromkeys(dias):
-            do_dia = por_dia.get(dia, [])
+            json_do_dia = [_json_da_linha(x) for x in por_dia.get(dia, [])]
             # Inclui os escapes no corpo HTTP; somar os dias superestima os colchetes.
-            bytes_do_dia = len(
-                json.dumps(json.dumps([_json_da_linha(x) for x in do_dia])).encode(
-                    "utf-8"
-                )
-            )
+            bytes_do_dia = len(json.dumps(json.dumps(json_do_dia)).encode("utf-8"))
             if lote and (
                 len(lote) >= self._dias_por_merge
                 or bytes_do_lote + bytes_do_dia > BYTES_POR_MERGE
             ):
-                self._merge(lote, linhas_do_lote)
-                lote, linhas_do_lote, bytes_do_lote = [], [], 0
+                self._merge(lote, json_do_lote)
+                lote, json_do_lote, bytes_do_lote = [], [], 0
             # ponytail: dia acima do teto vai sozinho; se ocorrer, migrar a carga para Storage.
             lote.append(dia)
-            linhas_do_lote.extend(do_dia)
+            json_do_lote.extend(json_do_dia)
             bytes_do_lote += bytes_do_dia
         if lote:
-            self._merge(lote, linhas_do_lote)
+            self._merge(lote, json_do_lote)
 
-    def _merge(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
+    def _merge(self, dias: Sequence[date], linhas: list[dict[str, Any]]) -> None:
         c = self._config
         tabela = f"`{c.projeto}.{c.dataset}.{c.tabela}`"
         eventos = f"`{c.projeto}.{c.dataset}.{self._eventos}`"
@@ -320,15 +317,9 @@ THEN DELETE
             c.regiao,
             consulta,
             [
-                parametro("linhas", json.dumps([_json_da_linha(x) for x in linhas])),
+                parametro("linhas", json.dumps(linhas)),
                 # ARRAY<DATE> e não JSON: o BigQuery recusa subconsulta no ON do MERGE.
-                {
-                    "name": "dias",
-                    "parameterType": {"type": "ARRAY", "arrayType": {"type": "DATE"}},
-                    "parameterValue": {
-                        "arrayValues": [{"value": d.isoformat()} for d in dias]
-                    },
-                },
+                parametro_de_lista("dias", [d.isoformat() for d in dias], "DATE"),
             ],
             PRAZO_CURTO,
             descricao=f"a troca dos dias {dias[0]} a {dias[-1]}",

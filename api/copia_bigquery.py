@@ -412,11 +412,13 @@ def parametro(nome: str, valor: str, tipo: str = "STRING") -> dict[str, Any]:
     }
 
 
-def parametro_de_lista(nome: str, valores: Sequence[str]) -> dict[str, Any]:
-    """Um parâmetro de array de texto, para `IN UNNEST(@nome)`."""
+def parametro_de_lista(
+    nome: str, valores: Sequence[str], tipo: str = "STRING"
+) -> dict[str, Any]:
+    """Um parâmetro de array (de texto, por padrão), para `IN UNNEST(@nome)`."""
     return {
         "name": nome,
-        "parameterType": {"type": "ARRAY", "arrayType": {"type": "STRING"}},
+        "parameterType": {"type": "ARRAY", "arrayType": {"type": tipo}},
         "parameterValue": {"arrayValues": [{"value": v} for v in valores]},
     }
 
