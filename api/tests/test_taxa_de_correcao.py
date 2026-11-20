@@ -348,8 +348,12 @@ ROTA = "/v1/qualidade/taxa-de-correcao"
 OUTRA = {"Authorization": "Bearer token-outra"}
 
 
-def _cliente(papeis: dict[str, list[Papel]]) -> TestClient:
+def _cliente(
+    papeis: dict[str, list[Papel]], extras: tuple[Correcao, ...] = ()
+) -> TestClient:
     jobs, decupagens, correcoes, revisao = _mundo()
+    for extra in extras:
+        correcoes.acrescentar(extra)
     repo_papeis = RepositorioDePapeisEmMemoria()
     for uid, lista in papeis.items():
         repo_papeis.salvar(uid, lista)
@@ -402,6 +406,40 @@ def test_o_dia_de_ate_entra_inteiro() -> None:
     corpo = cliente.get(ROTA, params={"ate": "2026-11-02"}, headers=AUTORIZACAO).json()
 
     assert {x["programa"] for x in corpo["linhas"]} == {"Jornal"}
+
+
+# 22h de 12/11 em São Paulo, já 13/11 em UTC
+_TARDE = datetime(2026, 11, 13, 1, 0, tzinfo=UTC)
+
+
+def _correcao_da_noite() -> Correcao:
+    return _c("z", "j3", _modelo(4, 2), dias=0).model_copy(update={"criada_em": _TARDE})
+
+
+def test_a_rota_corta_o_dia_em_sao_paulo() -> None:
+    cliente = _cliente({"u1": ["curador"]}, (_correcao_da_noite(),))
+
+    def renomear(dia: str) -> list[Any]:
+        corpo = cliente.get(
+            ROTA,
+            params={"desde": dia, "ate": dia, "programa": "Fama"},
+            headers=AUTORIZACAO,
+        ).json()
+        return [
+            x["correcoes"] for x in corpo["linhas"] if x["tipo"] == "pessoa.renomear"
+        ]
+
+    assert renomear("2026-11-12") == [2]
+    assert renomear("2026-11-13") == []
+
+
+def test_a_descricao_da_rota_fala_em_sao_paulo() -> None:
+    cliente = _cliente({"u1": ["curador"]})
+
+    descricao = cliente.get("/openapi.json").json()["paths"][ROTA]["get"]["description"]
+
+    assert "São Paulo" in descricao
+    assert "UTC" not in descricao
 
 
 def test_quem_ve_e_curador_ou_auditor() -> None:
@@ -470,6 +508,33 @@ def test_comando_imprime_o_csv_do_periodo_e_do_programa(
         "itens": "10",
         "taxa_de_correcao": "0.2",
     } in lidas
+
+
+def test_o_comando_corta_o_dia_em_sao_paulo(monkeypatch: pytest.MonkeyPatch) -> None:
+    jobs, decupagens, correcoes, revisao = _mundo()
+    correcoes.acrescentar(_correcao_da_noite())
+    monkeypatch.setattr(taxa, "cliente_do_firestore", lambda projeto: None)
+    monkeypatch.setattr(taxa, "RepositorioFirestore", lambda banco: jobs)
+    monkeypatch.setattr(
+        taxa, "DecupagensStorage", SimpleNamespace(do_ambiente=lambda *_: decupagens)
+    )
+    monkeypatch.setattr(
+        taxa, "RepositorioDeCorrecoesFirestore", lambda banco: correcoes
+    )
+    monkeypatch.setattr(taxa, "RepositorioDeRevisaoFirestore", lambda banco: revisao)
+    ambiente = {"GCP_PROJECT_ID": "p", "BUCKET_ACEITOS": "a", "BUCKET_DECUPAGENS": "d"}
+
+    def renomear(dia: str) -> list[str]:
+        impresso: list[str] = []
+        assert main([dia, dia, "Fama"], ambiente, impresso.append) == 0
+        return [
+            x["correcoes"]
+            for x in csv.DictReader(io.StringIO(impresso[0]))
+            if x["tipo"] == "pessoa.renomear"
+        ]
+
+    assert renomear("2026-11-12") == ["2"]
+    assert renomear("2026-11-13") == []
 
 
 def _taxa_com_contagem_sem(*tipos: str) -> list[Any]:
