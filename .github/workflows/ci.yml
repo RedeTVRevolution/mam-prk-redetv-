@@ -114,11 +114,15 @@ jobs:
 
   # Diz ao `publicar` se o push mudou algo que vai para a nuvem (scripts/vai-para-a-nuvem.sh):
   # um push só de documentação não monta imagem nem roda o apply. Não entra no ruleset da main.
-  # Na dúvida, publica: sem base conhecida (primeiro push do branch, push forçado) ou com o
-  # passo caído, o `pula` fica vazio e o `publicar` roda.
+  # Compara com o último deploy de fato (scripts/ultimo-deploy.sh), não com o push anterior.
+  # Na dúvida, publica: sem deploy anterior conhecido, com o dev incerto ou com o passo caído,
+  # o `pula` fica vazio e o `publicar` roda.
   mudou-o-deploy:
     if: github.event_name == 'push'
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read
     outputs:
       pula: ${{ steps.mudou.outputs.pula }}
     steps:
@@ -128,11 +132,12 @@ jobs:
       - id: mudou
         continue-on-error: true
         env:
-          BASE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            echo "Sem base conhecida; publica."; exit 0
+          if ! BASE=$(scripts/ultimo-deploy.sh) || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "Sem deploy anterior conhecido; publica."; exit 0
           fi
+          echo "Último deploy: $BASE."
           MUDOU=$(git -c core.quotePath=false diff --no-renames --name-only "$BASE" "$GITHUB_SHA")
           if scripts/vai-para-a-nuvem.sh <<<"$MUDOU"; then
             echo "Muda o que vai para a nuvem; publica."
@@ -201,5 +206,7 @@ jobs:
       # O deploy chama o aceite dos esquemas do Gemini (api/aceite_dos_esquemas.py), que roda com uv.
       - if: steps.ponta.outputs.publica
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - if: steps.ponta.outputs.publica
+      # O nome é o que o scripts/ultimo-deploy.sh procura nos runs anteriores.
+      - name: Deploy no dev
+        if: steps.ponta.outputs.publica
         run: make deploy-dev
