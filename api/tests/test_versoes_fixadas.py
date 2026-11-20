@@ -20,7 +20,7 @@ CI = _ler(".github/workflows/ci.yml")
 def _um(padrao: str, texto: str) -> str:
     achados = re.findall(padrao, texto, re.MULTILINE)
     assert len(achados) == 1, (padrao, achados)
-    return achados[0]
+    return str(achados[0])
 
 
 def test_uv_e_python_do_dockerfile_e_do_afk_sao_os_mesmos() -> None:
