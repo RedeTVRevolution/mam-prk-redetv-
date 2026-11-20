@@ -276,9 +276,8 @@ class ListaDaBusca(BaseModel):
     facetas: Facetas
     termos: list[str]
     videos: list[VideoGuardado]
-    # A versão da lixeira do catálogo lida antes da 1ª decisão (#598); `None` é o formato
-    # antigo, de antes dela: a página seguinte o recusa.
-    versao_da_lixeira: int | None = None
+    # A versão da lixeira do catálogo lida antes da 1ª decisão (#598).
+    versao_da_lixeira: int
 
     def para_documento(self) -> dict[str, Any]:
         """A lista num campo de bytes: o Firestore não indexa item por item, e o
@@ -933,8 +932,7 @@ class Busca:
             or lista.dono != dono
             or lista.impressao != impressao
             or not 0 < inicio < len(lista.videos)
-            # A lixeira do catálogo mudou (ou a lista é do formato sem versão): a lista
-            # guarda quem contava então (#598).
+            # A lixeira do catálogo mudou: a lista guarda quem contava então (#598).
             or lista.versao_da_lixeira != self._versao.atual()
         ):
             raise CursorInvalido
@@ -982,12 +980,9 @@ class Busca:
             resultado._proximo_cursor = f"{id}.{fim}"
         return resultado
 
-    def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
-        """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
-        return self._visivel_de(self._repositorio.obter(job_id), sistema)
-
     @staticmethod
     def _visivel_de(achado: Job | None, sistema: str | None) -> Job | None:
+        """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
         if achado is None or achado.estado != "concluido" or achado.lixeira:
             return None
         if sistema is not None and achado.sistema != sistema:

@@ -1,6 +1,7 @@
 """Pré-voo do apply (api/pre_voo.py) com uma API falsa: o que vai a cada API e o que falha."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -461,7 +462,7 @@ def test_metrica_que_o_plano_nao_toca_vai_ao_time_series_e_nao_a_tabela() -> Non
 
 
 def test_esperar_acompanha_a_operacao_com_nome_e_sem_done() -> None:
-    respostas = iter(
+    respostas: Iterator[dict[str, Any]] = iter(
         [{"name": "o"}, {"name": "o", "done": False}, {"name": "o", "done": True}]
     )
     consultas: list[str] = []

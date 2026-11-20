@@ -1,5 +1,5 @@
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
@@ -17,6 +17,7 @@ from api.agent_retrieval import (
     CotaEsgotada,
     EsquemaIncompativel,
     JaExiste,
+    PlanoDeReindexacao,
     _criacao,
     _fundir_por_rrf,
     _registro,
@@ -1511,8 +1512,8 @@ def test_plano_id_novo_cria_e_id_que_sumiu_apaga() -> None:
     assert plano.atualizar == []
 
 
-def _vazio(plano: Any) -> bool:
-    return plano.criar == plano.apagar == plano.atualizar == []
+def _vazio(plano: PlanoDeReindexacao) -> bool:
+    return not (plano.criar or plano.apagar or plano.atualizar)
 
 
 def test_plano_igual_nao_faz_nada() -> None:
@@ -2270,7 +2271,9 @@ def test_esperar_nao_consulta_a_resposta_sem_nome() -> None:
 
 def test_apagar_colecao_sem_corpo_na_resposta_termina_sem_consultar() -> None:
     transporte = TransporteFalso()
-    respostas = iter([{}, {}])  # a consulta dos objetos e o DELETE; uma terceira falha
+    respostas: Iterator[dict[str, Any]] = iter(
+        [{}, {}]
+    )  # a consulta dos objetos e o DELETE; uma terceira falha
 
     apagar_colecao(CONFIG, _Sequencia(transporte, respostas), _nao_dorme)
 

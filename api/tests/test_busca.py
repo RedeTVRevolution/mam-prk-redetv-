@@ -1319,6 +1319,7 @@ def test_a_lista_de_500_momentos_com_o_texto_maximo_cabe_no_documento() -> None:
         impressao="0" * 64,
         criado_em=BASE,
         expira_em=BASE,
+        versao_da_lixeira=0,
         entendida=Entendida(evidencias=[], programa=None, desde=None, ate=None),
         sem_aparicoes=[],
         plano_b=False,

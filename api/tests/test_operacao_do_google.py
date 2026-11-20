@@ -25,12 +25,10 @@ def test_resposta_sem_nome_terminou_porque_nao_ha_operacao_a_acompanhar() -> Non
 def test_so_importa_a_biblioteca_padrao() -> None:
     # o pre_voo roda no CD sem instalar nada
     arvore = ast.parse(Path(operacao_do_google.__file__).read_text())
-    raizes = {
-        (n.module or "").split(".")[0]
-        if isinstance(n, ast.ImportFrom)
-        else a.name.split(".")[0]
-        for n in ast.walk(arvore)
-        if isinstance(n, ast.Import | ast.ImportFrom)
-        for a in (n.names if isinstance(n, ast.Import) else [None])
-    }
+    raizes: set[str] = set()
+    for no in ast.walk(arvore):
+        if isinstance(no, ast.Import):
+            raizes |= {a.name.split(".")[0] for a in no.names}
+        elif isinstance(no, ast.ImportFrom):
+            raizes.add((no.module or "").split(".")[0])
     assert raizes <= set(sys.stdlib_module_names)
