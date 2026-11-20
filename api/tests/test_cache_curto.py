@@ -501,3 +501,10 @@ def test_so_o_painel_e_os_relatorios_ligam_a_janela_da_falha() -> None:
     assert cache is not None
     assert cache._validade_da_falha == VALIDADE_DA_FALHA_S == 10
     assert CacheCurto()._validade_da_falha == 0
+
+
+def test_lido_devolve_o_guardado_sem_calcular() -> None:
+    cache = CacheCurto()
+    assert cache.lido("a") is None
+    cache.obter("a", lambda: "x")
+    assert cache.lido("a") == "x"

@@ -39,6 +39,11 @@ class CacheCurto:
         self._guardado: OrderedDict[Hashable, tuple[float, Any]] = OrderedDict()
         self._travas_das_chaves: dict[Hashable, threading.Lock] = {}
 
+    def lido(self, chave: Hashable) -> Any | None:
+        """O valor guardado e ainda válido, sem calcular; `None` se falta."""
+        valido, valor = self._valido(chave)
+        return None if not valido or isinstance(valor, _Falha) else valor
+
     def _valido(self, chave: Hashable) -> tuple[bool, Any]:
         with self._trava:
             achado = self._guardado.get(chave)
