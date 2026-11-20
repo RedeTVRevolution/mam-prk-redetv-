@@ -33,7 +33,17 @@ function MostrarMais({ total, mostrados, aoMostrar }: { total: number; mostrados
   )
 }
 
-const quando = (iso: string) => new Date(iso).toLocaleString('pt-BR', { timeZone: FUSO })
+// Os mesmos campos que `toLocaleString` usa sem opções (data e hora completas), com o formatador criado uma vez.
+const FORMATO_DE_DATA_E_HORA = new Intl.DateTimeFormat('pt-BR', {
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric',
+  timeZone: FUSO,
+})
+const quando = (iso: string) => FORMATO_DE_DATA_E_HORA.format(new Date(iso))
 
 const COR_DO_ESTADO: Record<ItemDoHistorico['estado'], string> = {
   ativa: 'bg-ok/12 text-ok',
