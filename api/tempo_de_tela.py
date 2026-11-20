@@ -10,8 +10,7 @@ resposta. Sem teto de linhas brutas; o que resta é o resultado somado caber na 
 instância.
 """
 
-import json
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
@@ -69,7 +68,6 @@ COLUNAS_DO_CSV = (
 class MomentoDaPessoa:
     job_id: str
     pessoa_id: str
-    nome: str
     tipo: str
     inicio_ms: int
     fim_ms: int
@@ -81,7 +79,6 @@ class PessoaNoVideo:
 
     job_id: str
     pessoa_id: str
-    nomes: dict[str, int]  # o nome e em quantas linhas da cópia ele aparece
     tempo_de_tela_ms: int
     aparicoes: int  # depois de unir as sobrepostas
     mencoes_na_fala: int
@@ -129,7 +126,6 @@ def somar(momentos: list[MomentoDaPessoa]) -> list[PessoaNoVideo]:
             PessoaNoVideo(
                 job_id=job_id,
                 pessoa_id=pessoa_id,
-                nomes=dict(Counter(m.nome for m in do_video)),
                 tempo_de_tela_ms=sum(fim - ini for ini, fim in aparicoes),
                 aparicoes=len(aparicoes),
                 mencoes_na_fala=sum(m.tipo == "mencao_na_fala" for m in do_video),
@@ -149,7 +145,7 @@ class ConsultaEmMemoria:
         self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[MomentoDaPessoa]:
         return [
-            MomentoDaPessoa(x.job_id, p.id, p.nome, x.tipo, x.inicio_ms, x.fim_ms)
+            MomentoDaPessoa(x.job_id, p.id, x.tipo, x.inicio_ms, x.fim_ms)
             for x in linhas_da_copia(
                 self._copia, TIPOS_DO_RELATORIO, programas, desde, ate
             )
@@ -179,7 +175,7 @@ def ranking_em_python(
     somas: list[PessoaNoVideo],
     depois: int,
     limite: int,
-    nomes: Mapping[str, str] | None = None,
+    nomes: Mapping[str, str],
 ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
     """O ranking e os totais do período, a partir das somas, na ordem de `relatorio`; a
     página vai de `depois` a `limite + 1` itens (o que passa do limite diz que há mais)."""
@@ -202,7 +198,8 @@ def videos_em_python(
     """Os vídeos de uma pessoa, na ordem do relatório, a partir das somas; a página vai
     de `depois` a `limite + 1` itens."""
     dela = [s for s in somas if s.pessoa_id == pessoa_id]
-    por_video = relatorio(dela)[0].por_video if dela else []
+    # o nome não entra nos vídeos: o mapa só satisfaz `relatorio`
+    por_video = relatorio(dela, {pessoa_id: ""})[0].por_video if dela else []
     return por_video[depois : depois + limite + 1]
 
 
@@ -233,34 +230,24 @@ unidas AS (
   GROUP BY job_id, pessoa_id, ilha
 )"""
 
-# Os nomes da pessoa no vídeo, com quantas linhas cada um tem, num texto JSON. É o único
-# trecho só do BigQuery: o teste troca por `json_group_array` e roda o resto num SQLite.
-NOMES_EM_JSON = "TO_JSON_STRING(ARRAY_AGG(STRUCT(nome, linhas)))"
-
 # O que vem depois de `WITH base AS (...)`: uma linha por pessoa e vídeo, com o tempo
-# das aparições unidas, as contagens e os nomes. As contagens e os nomes saem de uma
-# passada só pela `base` (cada CTE que a lê é mais uma leitura da tabela).
+# das aparições unidas e as contagens de menções. As contagens saem de uma passada só
+# pela `base` (cada CTE que a lê é mais uma leitura da tabela).
 _CTES_DA_SOMA = f""", {UNIAO_EM_SQL},
 tempo AS (
   SELECT job_id, pessoa_id, SUM(fim_ms - inicio_ms) AS tempo_ms, COUNT(*) AS aparicoes
   FROM unidas
   GROUP BY job_id, pessoa_id
 ),
-por_nome AS (
-  SELECT job_id, pessoa_id, nome, COUNT(*) AS linhas,
+contagens AS (
+  SELECT job_id, pessoa_id,
     SUM(CASE WHEN tipo = 'mencao_na_fala' THEN 1 ELSE 0 END) AS na_fala,
     SUM(CASE WHEN tipo = 'mencao_no_texto' THEN 1 ELSE 0 END) AS no_texto
   FROM base
-  GROUP BY job_id, pessoa_id, nome
-),
-contagens AS (
-  SELECT job_id, pessoa_id, SUM(na_fala) AS na_fala, SUM(no_texto) AS no_texto,
-    {NOMES_EM_JSON} AS nomes
-  FROM por_nome
   GROUP BY job_id, pessoa_id
 )"""
 _SELECT_POR_VIDEO = """SELECT c.job_id, c.pessoa_id, IFNULL(t.tempo_ms, 0) AS tempo_ms,
-  IFNULL(t.aparicoes, 0) AS aparicoes, c.na_fala, c.no_texto, c.nomes
+  IFNULL(t.aparicoes, 0) AS aparicoes, c.na_fala, c.no_texto
 FROM contagens AS c
 LEFT JOIN tempo AS t ON t.job_id = c.job_id AND t.pessoa_id = c.pessoa_id"""
 SOMA_EM_SQL = f"{_CTES_DA_SOMA}\n{_SELECT_POR_VIDEO}"
@@ -271,7 +258,6 @@ def pessoa_no_video(v: Sequence[Any]) -> PessoaNoVideo:
     return PessoaNoVideo(
         job_id=v[0],
         pessoa_id=v[1],
-        nomes={n["nome"]: int(n["linhas"]) for n in json.loads(v[6])},
         tempo_de_tela_ms=int(v[2]),
         aparicoes=int(v[3]),
         mencoes_na_fala=int(v[4]),
@@ -292,10 +278,7 @@ class ConsultaBigQuery:
         linhas = consultar_no_bigquery(
             self._config,
             self._transporte,
-            colunas=(
-                "t.job_id, p.id AS pessoa_id, COALESCE(p.nome, '') AS nome, "
-                "t.tipo, t.inicio_ms, t.fim_ms"
-            ),
+            colunas=("t.job_id, p.id AS pessoa_id, t.tipo, t.inicio_ms, t.fim_ms"),
             tipos=TIPOS_DO_RELATORIO,
             programas=programas,
             desde=desde,
@@ -316,10 +299,7 @@ class ConsultaBigQuery:
         linhas = consultar_no_bigquery(
             self._config,
             self._transporte,
-            colunas=(
-                "t.job_id, p.id AS pessoa_id, COALESCE(p.nome, '') AS nome, "
-                "t.tipo, t.inicio_ms, t.fim_ms"
-            ),
+            colunas=("t.job_id, p.id AS pessoa_id, t.tipo, t.inicio_ms, t.fim_ms"),
             tipos=TIPOS_DO_RELATORIO,
             programas=programas,
             desde=desde,
@@ -461,13 +441,9 @@ def _no_destino(
     if len(somas) == 1:
         return replace(somas[0], pessoa_id=destino)
     unidos = _uniao([i for s in somas for i in intervalos[(job_id, s.pessoa_id)]])
-    nomes: Counter[str] = Counter()
-    for s in somas:
-        nomes.update(s.nomes)
     return PessoaNoVideo(
         job_id=job_id,
         pessoa_id=destino,
-        nomes=dict(nomes),
         tempo_de_tela_ms=sum(fim - ini for ini, fim in unidos),
         aparicoes=len(unidos),
         mencoes_na_fala=sum(s.mencoes_na_fala for s in somas),
@@ -545,19 +521,15 @@ class _Linha(NamedTuple):
     mencoes_no_texto: int
 
 
-def _linhas(
-    somas: list[PessoaNoVideo], nomes: Mapping[str, str] | None = None
-) -> list[_Linha]:
+def _linhas(somas: list[PessoaNoVideo], nomes: Mapping[str, str]) -> list[_Linha]:
     """Uma linha por pessoa, do maior tempo de tela para o menor e, no empate, pelo nome
     e pelo id. Só tuplas e números: sem um objeto por par pessoa e vídeo.
 
     A pessoa é o id do catálogo. O nome vem de `nomes` (o atual do catálogo, #417 e #613,
-    que tem de trazer toda pessoa das somas); sem o mapa, é o que mais aparece nas linhas
-    dela (um vídeo copiado antes de uma correção de grafia não parte a pessoa em duas).
+    que tem de trazer toda pessoa das somas).
     """
     # por pessoa: tempo, vídeos com aparição, aparições, menções na fala e no texto
     somados: dict[str, list[int]] = {}
-    contagens: dict[str, Counter[str]] = {}
     for s in somas:
         c = somados.get(s.pessoa_id)
         if c is None:
@@ -567,24 +539,15 @@ def _linhas(
         c[2] += s.aparicoes
         c[3] += s.mencoes_na_fala
         c[4] += s.mencoes_no_texto
-        if nomes is None:
-            contagens.setdefault(s.pessoa_id, Counter()).update(s.nomes)
     linhas = [
-        _Linha(
-            pessoa_id,
-            nomes[pessoa_id]
-            if nomes is not None
-            else min(contagens[pessoa_id], key=lambda n: (-contagens[pessoa_id][n], n)),
-            *c,
-        )
-        for pessoa_id, c in somados.items()
+        _Linha(pessoa_id, nomes[pessoa_id], *c) for pessoa_id, c in somados.items()
     ]
     linhas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.nome, p.pessoa_id))
     return linhas
 
 
 def relatorio(
-    somas: list[PessoaNoVideo], nomes: Mapping[str, str] | None = None
+    somas: list[PessoaNoVideo], nomes: Mapping[str, str]
 ) -> list[PessoaNoRelatorio]:
     """O ranking de `_linhas`, cada pessoa com seus vídeos (do maior tempo para o menor);
     os objetos por vídeo só nascem aqui, no JSON completo e nos vídeos de uma pessoa."""
