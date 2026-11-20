@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
@@ -29,6 +30,7 @@ from api.main import criar_app
 from api.modelo_do_job import Job, agora_utc
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
+    COLUNAS_DO_CSV,
     NOMES_EM_JSON,
     SOMA_EM_SQL,
     UNIAO_EM_SQL,
@@ -889,6 +891,39 @@ def test_video_so_de_mencoes_nao_entra_no_total_de_videos() -> None:
     assert total.videos == 1  # j2 só tem menções
     assert total.mencoes_na_fala == 1 and total.mencoes_no_texto == 1
     assert [(p.pessoa_id, p.videos) for p in pagina] == [("p1", 1), ("p2", 0)]
+
+
+class ConsultaQueEstoura(ConsultaEmMemoria):
+    def __init__(self) -> None:
+        super().__init__(CopiaEmMemoria())
+
+    def somas(
+        self, programas: Sequence[str], desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        raise RuntimeError("a consulta do BigQuery não terminou a tempo")
+
+
+@pytest.mark.parametrize("params", [{}, {"formato": "csv"}])
+def test_consulta_que_nao_termina_vira_503_em_json_e_em_csv(
+    params: dict[str, str],
+) -> None:
+    cliente = _cliente(consulta=ConsultaQueEstoura())
+
+    resposta = cliente.get(ROTA, params=params, headers=AUTORIZACAO)
+
+    assert resposta.status_code == 503
+    assert "não terminou" in resposta.json()["detail"]
+
+
+def test_sem_resultados_o_json_vem_vazio_e_o_csv_so_com_o_cabecalho() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(CopiaEmMemoria()))
+
+    json_ = cliente.get(ROTA, headers=AUTORIZACAO)
+    csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO)
+
+    assert json_.status_code == 200 and json_.json()["pessoas"] == []
+    assert csv_.status_code == 200
+    assert csv_.text.splitlines() == [",".join(COLUNAS_DO_CSV)]
 
 
 class SoSomas:
