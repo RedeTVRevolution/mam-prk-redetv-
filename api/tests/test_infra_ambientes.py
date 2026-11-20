@@ -311,8 +311,15 @@ def test_o_readme_lista_os_papeis_da_terraform_do_wizard_e_os_da_build() -> None
     papeis = re.findall(r"^\s*(roles/[\w.]+)", bloco.group(1), re.MULTILINE)
 
     assert papeis
-    for papel in papeis:
-        assert f"- `{papel}`" in readme, papel
+    lista_do_readme = re.search(
+        r"^A `mam-terraform` recebe do wizard.*?\n\n((?:- `roles/[\w.]+`\n)+)",
+        readme,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert lista_do_readme
+    assert set(re.findall(r"`(roles/[\w.]+)`", lista_do_readme.group(1))) == set(
+        papeis
+    )
     for papel in re.findall(
         r'role\s*= "(roles/[\w.]+)"\n\s*member\s*= google_service_account\.mam\["build"\]',
         (MODULO / "main.tf").read_text(),

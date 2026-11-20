@@ -28,10 +28,8 @@ PAPEIS_NOVOS = [
     "cloudkms.admin",
     "pubsub.admin",
     "compute.loadBalancerAdmin",
-    "certificatemanager.owner",
     "compute.securityAdmin",
     "iam.roleAdmin",
-    "modelarmor.admin",
     "dns.admin",
 ]
 
@@ -43,13 +41,13 @@ def _linhas_dos_papeis() -> list[str]:
     return texto[inicio:fim].splitlines()[1:]
 
 
-def test_wizard_da_os_27_papeis_a_mam_terraform() -> None:
+def test_wizard_da_os_25_papeis_a_mam_terraform() -> None:
     papeis = [
         m.group(1)
         for linha in _linhas_dos_papeis()
         if (m := re.match(r"\s*roles/(\S+)", linha))
     ]
-    assert len(papeis) == len(set(papeis)) == 27
+    assert len(papeis) == len(set(papeis)) == 25
     assert set(papeis) == set(PAPEIS_DE_ANTES + PAPEIS_NOVOS)
 
 

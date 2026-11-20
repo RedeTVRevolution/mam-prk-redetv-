@@ -178,3 +178,12 @@ def test_os_nomes_padrao_dos_bancos_passam_na_regra_do_firestore() -> None:
             arquivo.read_text(),
         )
         assert padrao and regra.match(padrao.group(1)), arquivo
+
+
+def test_o_model_armor_nao_existe_mais_na_infra_nem_no_wizard() -> None:
+    arquivos = [*MODULO.glob("*.tf"), RAIZ / "infra" / "main.tf"]
+    arquivos.append(RAIZ / "scripts" / "wizard-gcp-dev.sh")
+    for arquivo in arquivos:
+        assert not re.search(r"model_?armor", arquivo.read_text(), re.IGNORECASE), (
+            arquivo
+        )
