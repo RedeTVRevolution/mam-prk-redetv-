@@ -402,31 +402,36 @@ class _RevisaoQueConta:
         return self._revisao.todas(desde)
 
 
-def test_atualizar_le_as_medidas_uma_vez_e_grava_as_linhas_de_cada_dia() -> None:
-    jobs, _, itens, correcoes, revisao = _caso_de_hoje()
-    # pulsos nas viradas do dia de São Paulo (03h UTC): 02h59 e 03h00
+def test_atualizar_grava_cada_job_no_dia_de_sao_paulo_do_pulso_com_uma_leitura() -> (
+    None
+):
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+    # j4 e j3 só têm pulso (j3 tem correção, mas só em 12/11). A virada do dia de São
+    # Paulo é 03h UTC: 02h59 de 03/11 ainda é 02/11; 03h00 já é 03/11.
     for job, quando in (
-        ("j1", datetime(2026, 11, 3, 2, 59, tzinfo=UTC)),
-        ("j2", datetime(2026, 11, 3, 3, 0, tzinfo=UTC)),
+        ("j4", datetime(2026, 11, 3, 2, 59, tzinfo=UTC)),
+        ("j3", datetime(2026, 11, 3, 3, 0, tzinfo=UTC)),
     ):
         revisao.aplicar(
             Pulso(job_id=job, uid="u9", email="u9@x", quando=quando, evento="inicio"),
             300,
         )
-    dias = [DIA + timedelta(days=d) for d in (5, -3, 0, 20, -12, 2)]
+    dias = [date(2026, 11, 3), date(2026, 11, 2)]
     contando = _RevisaoQueConta(revisao)
     tabela = TabelaDaTaxaEmMemoria()
 
     gravadas = atualizar(dias, jobs, itens, correcoes, contando, tabela)  # type: ignore[arg-type]
 
-    esperadas = [
-        linha
-        for dia in dias
-        for linha in linhas_do_dia(dia, jobs, itens, correcoes, revisao.todas())
+    assert {(x.dia, x.job_id) for x in tabela.linhas} == {
+        (date(2026, 11, 2), "j1"),
+        (date(2026, 11, 2), "j2"),
+        (date(2026, 11, 2), "j4"),
+        (date(2026, 11, 3), "j3"),
+    }
+    assert gravadas == len(tabela.linhas)
+    assert contando.leituras == [
+        periodo_em_utc(date(2026, 11, 2), date(2026, 11, 2))[0]
     ]
-    assert tabela.linhas == esperadas
-    assert gravadas == len(esperadas) > 0
-    assert contando.leituras == [periodo_em_utc(min(dias), min(dias))[0]]
 
 
 def test_uma_rodada_de_365_dias_le_as_medidas_uma_vez() -> None:
