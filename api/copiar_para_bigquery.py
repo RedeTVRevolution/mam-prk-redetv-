@@ -24,9 +24,9 @@ from api.copia_bigquery import (
 from api.correcoes import RepositorioDeCorrecoes
 from api.indexacao import (
     decupagem_do_job,
-    duas_tentativas,
     registrar,
     reindexar,
+    tentar_duas_vezes,
 )
 from api.indice_da_busca import IndiceDaBusca
 from api.leitura_da_decupagem import AbreDecupagem
@@ -125,7 +125,7 @@ def copiar(
         )
         return estado
     finally:
-        fechado = duas_tentativas(
+        _, fechado = tentar_duas_vezes(
             partial(
                 fechar_a_rodada,
                 repositorio,

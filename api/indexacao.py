@@ -286,7 +286,7 @@ def reindexar(
     """
     rodada_id = uuid.uuid4().hex
     # Erro ao tomar a vez é falha (#563); `None` ("sem vez") não se tenta de novo.
-    tomou, atual = _tentar_duas_vezes(
+    tomou, atual = tentar_duas_vezes(
         lambda: tomar_a_rodada(
             repositorio, job.id, relogio(), rodada_id, so_se_pedida=so_se_pedida
         ),
@@ -313,7 +313,7 @@ def reindexar(
             pessoas,
         )
         # Sem fechar, a vez fica presa até `PRAZO_DA_RODADA` e a tela em "Finalizando".
-        fechou, fechado = _tentar_duas_vezes(
+        fechou, fechado = tentar_duas_vezes(
             partial(
                 fechar_a_rodada,
                 repositorio,
@@ -335,7 +335,7 @@ def reindexar(
     if programas is not None:
         # Sem a segunda tentativa, uma queda passageira deixaria o vídeo pendente (a tela
         # só o resolve com o `retomar`).
-        duas_tentativas(
+        tentar_duas_vezes(
             lambda: terminar_o_pendente(
                 programas, job.id, atual.programa, resultado.completo
             ),
@@ -344,7 +344,7 @@ def reindexar(
     return fechado.indexacao if fechado else None
 
 
-def _tentar_duas_vezes[T](acao: Callable[[], T], falha: str) -> tuple[bool, T | None]:
+def tentar_duas_vezes[T](acao: Callable[[], T], falha: str) -> tuple[bool, T | None]:
     """`(True, acao())`, tentada de novo uma vez se levanta; `(False, None)` (e o log) se as duas falham."""
     for tentativa in (1, 2):
         try:
@@ -352,11 +352,6 @@ def _tentar_duas_vezes[T](acao: Callable[[], T], falha: str) -> tuple[bool, T | 
         except Exception:
             log.exception("%s (tentativa %d)", falha, tentativa)
     return False, None
-
-
-def duas_tentativas[T](acao: Callable[[], T], falha: str) -> T | None:
-    """`acao()` com duas tentativas; `None` se as duas falham."""
-    return _tentar_duas_vezes(acao, falha)[1]
 
 
 ORIGEM_API = "api"
