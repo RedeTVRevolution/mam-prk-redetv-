@@ -324,4 +324,3 @@ def test_nenhuma_raiz_nem_o_job_escolhem_o_modelo_do_florence(raiz: str) -> None
     for pasta in (RAIZ / raiz, RAIZ / "infra/modulos/mam"):
         for arquivo in pasta.glob("*.tf"):
             assert "florence_modelo" not in arquivo.read_text()
-

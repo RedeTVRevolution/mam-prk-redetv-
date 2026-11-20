@@ -36,7 +36,7 @@ A decisão é geração gulosa (`num_beams=1`), lote 16, mantendo `<OD>` e `<DEN
 
 O padrão do Terraform passou a ser o **Florence-2-base** (revisão `00921df66db728a9ceb750f5eca43e5c203a2051`) e voltou ao large em 09/11 (ver abaixo); o base saiu da imagem, do código e do Terraform em 19/11 (#746). Sem `FLORENCE_MODELO`, o padrão do código é o large; cada resultado grava o repositório e a revisão que rodaram. A conferência da construção roda só o large em CPU, e a publicação o testa na GPU, procurando o carro da amostra.
 
-O base tem 0,23 bilhão de parâmetros, contra 0,77 do large, e mAP zero-shot no COCO de 34,7 contra 37,5. Ainda não foi medido no nosso conteúdo: depois da publicação, Bruno compara `large+guloso+lote16` e `base+guloso+lote16` no FAMA contra a referência `hoje` já gravada (863 s, large, 3 feixes, lote 1). A medição reaproveita `hoje/inventario.json` e `hoje/medida.json` sem disparar nem regravar a referência; sem os dois arquivos, roda `hoje` com o ambiente atual do Job. Se o base perder bem mais objetos de destaque 3, volta-se ao large pela variável.
+O base tem 0,23 bilhão de parâmetros, contra 0,77 do large, e mAP zero-shot no COCO de 34,7 contra 37,5. O plano de então (histórico, abandonado com a retirada do base em 19/11) era comparar `large+guloso+lote16` e `base+guloso+lote16` no FAMA contra a referência `hoje` já gravada (863 s, large, 3 feixes, lote 1), e voltar ao large pela variável se o base perdesse bem mais objetos de destaque 3. A variação `base+guloso+lote16` já não existe no `make medir-florence`.
 
 Em 09/11/2026 o padrão voltou ao **large**, mantendo guloso e lote 16: no ar, o base achou visivelmente menos objetos que antes. A medição base × large no FAMA nunca foi feita.
 
