@@ -40,14 +40,12 @@ class LinhaDoJob:
     quem_id: str
     estado: str
     criado_em: datetime
-    concluido_em: datetime | None
-    atualizado_em: datetime
 
 
 def linha_do_job(job: Job) -> LinhaDoJob:
     """Os campos que a Revisão e o Custo usam. O dono é o sistema, ou quem criou o Job
-    (o mesmo `quem` do evento de uso); `concluido_em` só existe depois do fim. O estado
-    segue o vocabulário da consulta agendada: antes do fim, `em_andamento`."""
+    (o mesmo `quem` do evento de uso). O estado segue o vocabulário da consulta
+    agendada: antes do fim, `em_andamento`."""
     sistema = job.sistema is not None
     fim = job.estado in FIM_OU_CANCELADO
     return LinhaDoJob(
@@ -58,8 +56,6 @@ def linha_do_job(job: Job) -> LinhaDoJob:
         quem_id=job.sistema if job.sistema is not None else job.criado_por,
         estado=job.estado if fim else "em_andamento",
         criado_em=job.criado_em,
-        concluido_em=job.atualizado_em if fim else None,
-        atualizado_em=job.atualizado_em,
     )
 
 
@@ -98,9 +94,7 @@ class ConfigDaTabelaDeJobs:
 
 def _json_da_linha(linha: LinhaDoJob) -> dict[str, Any]:
     dados = asdict(linha)
-    for campo in ("criado_em", "concluido_em", "atualizado_em"):
-        valor = getattr(linha, campo)
-        dados[campo] = valor.isoformat() if valor else None
+    dados["criado_em"] = linha.criado_em.isoformat()
     return dados
 
 
@@ -124,22 +118,17 @@ USING (
     JSON_VALUE(l, '$.quem_tipo') AS quem_tipo,
     JSON_VALUE(l, '$.quem_id') AS quem_id,
     JSON_VALUE(l, '$.estado') AS estado,
-    TIMESTAMP(JSON_VALUE(l, '$.criado_em')) AS criado_em,
-    TIMESTAMP(JSON_VALUE(l, '$.concluido_em')) AS concluido_em,
-    TIMESTAMP(JSON_VALUE(l, '$.atualizado_em')) AS atualizado_em
+    TIMESTAMP(JSON_VALUE(l, '$.criado_em')) AS criado_em
   FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
 ) AS s
 ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET
   programa = s.programa, duracao_ms = s.duracao_ms, quem_tipo = s.quem_tipo,
-  quem_id = s.quem_id, estado = s.estado, criado_em = s.criado_em,
-  concluido_em = s.concluido_em, atualizado_em = s.atualizado_em
+  quem_id = s.quem_id, estado = s.estado, criado_em = s.criado_em
 WHEN NOT MATCHED THEN INSERT
-  (id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em, concluido_em,
-   atualizado_em)
+  (id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em)
 VALUES
-  (s.id, s.programa, s.duracao_ms, s.quem_tipo, s.quem_id, s.estado, s.criado_em,
-   s.concluido_em, s.atualizado_em)
+  (s.id, s.programa, s.duracao_ms, s.quem_tipo, s.quem_id, s.estado, s.criado_em)
 """
         executar_dml(
             self._transporte,
