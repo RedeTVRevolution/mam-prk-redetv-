@@ -7,7 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.eventos_de_uso import EventosEmMemoria
-from api.rota_da_busca import consultas_por_minuto_do_ambiente, paginas_por_minuto_do_ambiente
+from api.rota_da_busca import (
+    consultas_por_minuto_do_ambiente,
+    paginas_por_minuto_do_ambiente,
+)
 from api.teste_de_carga import (
     CABECALHO_DE_TESTE,
     aceita_teste_de_carga_do_ambiente,
@@ -171,16 +174,23 @@ def test_chave_do_ambiente(env: dict[str, str], esperado: bool) -> None:
 # --- a página seguinte gasta o contador de páginas, não o de consultas (#803) -------
 
 
-def _com_videos(consultas: int = 1, **limites: int) -> TestClient:
+def _com_videos(
+    consultas: int = 1, maximo_por_minuto: int = 30, paginas_por_minuto: int = 120
+) -> TestClient:
     """3 vídeos com um vestido cada, para paginar de 1 em 1."""
-    c, m = cliente(["consulta"], *[pedido(texto_livre="vestido")] * consultas, **limites)
+    c, m = cliente(
+        ["consulta"],
+        *[pedido(texto_livre="vestido")] * consultas,
+        maximo_por_minuto=maximo_por_minuto,
+        paginas_por_minuto=paginas_por_minuto,
+    )
     for i in (2, 3):
         m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000))
     return c
 
 
 def _pagina(c: TestClient, cursor: str | None = None) -> Any:
-    params = {"q": "vestido", "limite": 1}
+    params: dict[str, Any] = {"q": "vestido", "limite": 1}
     if cursor is not None:
         params["cursor"] = cursor
     return c.get("/v1/busca", params=params, headers=AUTORIZACAO)
@@ -237,7 +247,11 @@ def test_foto_com_cursor_e_sem_saldo_de_paginas_nao_e_recodificada(
 
 @pytest.mark.parametrize(
     ("env", "esperado"),
-    [({}, 120), ({"BUSCA_PAGINAS_POR_MINUTO": ""}, 120), ({"BUSCA_PAGINAS_POR_MINUTO": "7"}, 7)],
+    [
+        ({}, 120),
+        ({"BUSCA_PAGINAS_POR_MINUTO": ""}, 120),
+        ({"BUSCA_PAGINAS_POR_MINUTO": "7"}, 7),
+    ],
 )
 def test_ambiente_das_paginas(env: dict[str, str], esperado: int) -> None:
     assert paginas_por_minuto_do_ambiente(env) == esperado
