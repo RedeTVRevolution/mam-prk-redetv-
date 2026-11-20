@@ -1401,10 +1401,9 @@ def test_consulta_que_passa_do_tempo_maximo_responde_504() -> None:
     c, _ = cliente(
         ["consulta"], pedido(texto_livre="vestido"), tempo_maximo_s=0.05, indice=Lento()
     )
-    assert (
-        c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO).status_code
-        == 504
-    )
+    r = c.get("/v1/busca", params={"q": "vestido"}, headers=AUTORIZACAO)
+    assert r.status_code == 504
+    assert r.json()["detail"] == "A busca demorou demais"
 
 
 def test_sem_modelo_a_busca_por_texto_funciona() -> None:
@@ -1580,6 +1579,7 @@ def test_periodo_com_inicio_depois_do_fim_responde_422() -> None:
         headers=AUTORIZACAO,
     )
     assert r.status_code == 422
+    assert r.json()["detail"] == "O início do período passa do fim"
 
 
 def test_dentro_do_video_os_momentos_seguem_a_relevancia() -> None:
