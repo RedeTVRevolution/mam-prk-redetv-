@@ -1511,9 +1511,13 @@ def test_plano_id_novo_cria_e_id_que_sumiu_apaga() -> None:
     assert plano.atualizar == []
 
 
+def _vazio(plano: Any) -> bool:
+    return plano.criar == plano.apagar == plano.atualizar == []
+
+
 def test_plano_igual_nao_faz_nada() -> None:
     r = _reg("j:fala:fal000", texto="a", pessoas=["x", "y"], programa="p")
-    assert montar_plano([r], [_lido(r)]).vazio
+    assert _vazio(montar_plano([r], [_lido(r)]))
 
 
 def test_plano_mudar_o_texto_da_fala_so_atualiza() -> None:
@@ -1553,68 +1557,12 @@ def test_plano_compara_float_none_dias_e_listas_fora_de_ordem() -> None:
     sem_listas = _reg("j:fala:fal000", texto="a")
     lido_sem_listas = _lido(sem_listas)
     del lido_sem_listas["pessoas"], lido_sem_listas["cor_base"]  # o índice omite []
-    assert montar_plano([sem_listas], [lido_sem_listas]).vazio
+    assert _vazio(montar_plano([sem_listas], [lido_sem_listas]))
     assert lido["data_de_exibicao"] == 20260102
-    assert montar_plano([r], [lido]).vazio
+    assert _vazio(montar_plano([r], [lido]))
     # Um dia diferente é mudança de verdade.
     outro = replace(r, data_de_exibicao=date(2026, 1, 3))
     assert montar_plano([outro], [lido]).atualizar == [outro]
-
-
-def test_plano_diz_quais_planos_precisam_do_vetor_do_quadro() -> None:
-    def plano(id: str, quadro: str, descricao: str = "d") -> Registro:
-        return _reg(id, "plano", descricao=descricao, quadro=quadro)
-
-    igual, novo = plano("j:plano:p0", "q0"), plano("j:plano:p1", "q1")
-    quadro = plano("j:plano:p2", "q2")
-    texto = plano("j:plano:p3", "q3")
-    pessoas = replace(plano("j:plano:p4", "q4"), pessoas=["x"])
-    # Sem descrição o `significado` cai no tipo, igual ao da descrição "plano" de antes.
-    sem_descricao = replace(plano("j:plano:p5", "q5"), descricao=None)
-    lidos = [
-        _lido(igual),
-        _lido(plano("j:plano:p2", "velho")),
-        _lido(plano("j:plano:p3", "q3", "outra descrição")),
-        _lido(plano("j:plano:p4", "q4")),
-        _lido(plano("j:plano:p5", "q5", "plano")),
-    ]
-    resultado = montar_plano(
-        [igual, novo, quadro, texto, pessoas, sem_descricao], lidos
-    )
-    assert resultado.planos_com_quadro_novo == [
-        "j:plano:p1",
-        "j:plano:p2",
-        "j:plano:p3",
-        "j:plano:p5",
-    ]
-
-
-def test_ler_indice_pede_so_os_campos_do_esquema_e_pagina() -> None:
-    r1, r2 = _reg("j:fala:fal000", texto="a"), _reg("j:fala:fal001", texto="b")
-    respostas = iter(
-        [
-            {
-                "dataObjects": [{"name": "c/dataObjects/a", "data": _lido(r1)}],
-                "nextPageToken": "p2",
-            },
-            {"dataObjects": [{"name": "c/dataObjects/b", "data": _lido(r2)}]},
-            {},
-        ]
-    )
-    transporte = TransporteFalso()
-    lidos = AgentRetrieval(CONFIG, _Sequencia(transporte, respostas)).ler_indice("j")
-    assert [d["id"] for d in lidos] == [r1.id, r2.id]
-    [(_, caminho, corpo1), (_, _, corpo2), (_, texto, corpo3)] = transporte.chamadas
-    assert caminho.endswith("/dataObjects:query")
-    assert corpo1 is not None and corpo2 is not None
-    assert corpo1["filter"] == {"job_id": {"$eq": "j"}}
-    campos = corpo1["outputFields"]["dataFields"]
-    assert campos == list(esquema_da_colecao(CONFIG)["dataSchema"]["properties"])
-    assert corpo2["pageToken"] == "p2"
-    assert "/col-texto/" in texto
-    assert (
-        corpo3 is not None and "significado" not in corpo3["outputFields"]["dataFields"]
-    )
 
 
 class _ColecaoEmMemoria:

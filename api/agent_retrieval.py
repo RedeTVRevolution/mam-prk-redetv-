@@ -719,17 +719,11 @@ def _criacao(r: Registro) -> dict[str, Any]:
 @dataclass(frozen=True)
 class PlanoDeReindexacao:
     """O que muda no índice de um vídeo (#418): ids dos registros a apagar, registros a
-    criar (inclui os de `significado` novo), registros a atualizar só em `data`, e ids
-    dos planos que precisam do vetor do quadro novo."""
+    criar (inclui os de `significado` novo) e registros a atualizar só em `data`."""
 
     criar: list[Registro]
     apagar: list[str]
     atualizar: list[Registro]
-    planos_com_quadro_novo: list[str]
-
-    @property
-    def vazio(self) -> bool:
-        return not (self.criar or self.apagar or self.atualizar)
 
 
 def _canonico(dados: dict[str, Any]) -> dict[str, Any]:
@@ -769,7 +763,6 @@ def montar_plano(
     antes = {d["id"]: _canonico(d) for d in lidos}
     criar: list[Registro] = []
     atualizar: list[Registro] = []
-    quadro_novo: list[str] = []
     vistos: set[str] = set()
     for r in novos:
         vistos.add(r.id)
@@ -781,16 +774,10 @@ def montar_plano(
             criar.append(r)
         elif velho != agora:
             atualizar.append(r)
-        if r.tipo == "plano" and (
-            velho is None
-            or velho.get("quadro") != agora.get("quadro")
-            or velho.get("descricao") != agora.get("descricao")
-        ):
-            quadro_novo.append(r.id)
     # `criar` com id já lido (significado novo) também apaga o velho antes.
     apagar = [i for i in antes if i not in vistos]
     apagar += [r.id for r in criar if r.id in antes]
-    return PlanoDeReindexacao(criar, apagar, atualizar, quadro_novo)
+    return PlanoDeReindexacao(criar, apagar, atualizar)
 
 
 class AgentRetrieval:
@@ -935,14 +922,6 @@ class AgentRetrieval:
         return [
             (o["name"], o["data"])
             for o in self._objetos_do_video(job_id, campos, colecao=colecao)
-        ]
-
-    def ler_indice(self, job_id: str) -> list[dict[str, Any]]:
-        """Os dados de todos os objetos do vídeo (ver `_ler_com_nomes`)."""
-        return [
-            dados
-            for colecao in self._config.colecoes
-            for _, dados in self._ler_com_nomes(job_id, colecao)
         ]
 
     def _escrever(
