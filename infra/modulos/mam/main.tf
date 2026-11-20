@@ -22,15 +22,9 @@ variable "projeto" {
 }
 
 # us-east4 (ADR 0019): a região de todo recurso regional e de todo dado. Só o que já estava lá
-# antes da troca mantém variável própria: a busca (ADR 0006) e a GPU (ADR 0007).
+# antes da troca mantém nome próprio: a busca e a GPU (locals abaixo).
 variable "regiao" {
   type = string
-}
-
-# O Agent Retrieval não existe em todas as regiões: o índice da busca fica nos EUA (ADR 0006).
-variable "regiao_da_busca" {
-  type    = string
-  default = "us-east4"
 }
 
 # Nome do banco do Firestore (#536). Em us-east4 o banco é nomeado (o `(default)` de São Paulo é
@@ -45,13 +39,6 @@ variable "banco_firestore" {
     condition     = can(regex("^[a-z][a-z0-9-]{2,61}[a-z0-9]$", var.banco_firestore))
     error_message = "O ID do banco do Firestore tem de 4 a 63 caracteres: minúsculas, dígitos e hífen, começando por letra."
   }
-}
-
-# Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Com a troca para us-east4
-# (ADR 0019) é a mesma região do resto, mas a variável fica: os recursos da GPU não mudam.
-variable "regiao_gpu" {
-  type    = string
-  default = "us-east4"
 }
 
 variable "vagas_de_gpu" {
@@ -97,64 +84,6 @@ variable "espera_gpu_minutos" {
   }
 }
 
-# Leitura da tela só quando a imagem muda (#233, api/mudanca_da_tela.py): diferença média
-# (0 a 255) de um dos blocos (seis faixas horizontais de oito blocos) do quadro, contra o último quadro lido, acima
-# da qual o OCR lê de novo. 0 lê todo quadro, como antes. O padrão é um palpite; a medição no
-# ar (#240, `make comparar-leituras`) acerta o valor sem nova imagem.
-variable "limiar_de_mudanca_do_ocr" {
-  description = "Limiar de mudança da imagem para o OCR ler de novo (0 = lê todo quadro)"
-  type        = number
-  default     = 3
-  validation {
-    condition     = var.limiar_de_mudanca_do_ocr >= 0
-    error_message = "limiar_de_mudanca_do_ocr é zero ou mais."
-  }
-}
-
-variable "gpu_espera_s" {
-  type    = number
-  default = 60
-  validation {
-    condition     = floor(var.gpu_espera_s) == var.gpu_espera_s && var.gpu_espera_s >= 1
-    error_message = "gpu_espera_s é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
-  }
-}
-
-variable "gpu_fator_da_espera" {
-  type    = number
-  default = 2
-  validation {
-    condition     = floor(var.gpu_fator_da_espera) == var.gpu_fator_da_espera && var.gpu_fator_da_espera >= 1
-    error_message = "gpu_fator_da_espera é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
-  }
-}
-
-variable "gpu_espera_maxima_s" {
-  type    = number
-  default = 240
-  validation {
-    condition     = floor(var.gpu_espera_maxima_s) == var.gpu_espera_maxima_s && var.gpu_espera_maxima_s >= 1
-    error_message = "gpu_espera_maxima_s é um inteiro a partir de 1 (o script do teste faz a conta em bash)."
-  }
-}
-
-variable "dimensao_dos_vetores" {
-  description = "Dimensão dos vetores da busca; fixa na criação da coleção"
-  type        = number
-  default     = 256
-}
-
-# A cota `vectorsearch.googleapis.com/data_object_writes` de cada coleção da busca (planos e
-# texto, as duas em 6.000 no dev desde 14/11, antes 3.000; #630). Vale para a coleção
-# inteira; a indexação grava abaixo dela
-# (BUSCA_COTA_DE_ESCRITA, também no mam-web e no mam-purga) e, no 429 de dois vídeos
-# juntos, espera e tenta de novo.
-variable "cota_de_escrita_da_busca" {
-  description = "Objetos por minuto que a coleção da busca aceita gravar"
-  type        = number
-  default     = 6000
-}
-
 # O índice ANN da descrição (réplica dedicada, cobrada por hora). Em false a busca vai
 # pelo KNN, sem índice, que aceita no máximo 100 mil registros (ADR 0006). O índice não é
 # recurso do Terraform: desligar só para de usá-lo, e apagá-lo é à mão (README); ligar é
@@ -169,18 +98,6 @@ variable "indices_da_busca_ligados" {
 variable "listagem_por_mes" {
   type    = bool
   default = false
-}
-
-# O corte do que a busca acha só pelo significado (vetor): a distância de cosseno máxima
-# e o mínimo de palavras do registro. Calibrados em 3 vídeos do dev; mudar aqui e aplicar.
-variable "busca_distancia_maxima" {
-  type    = number
-  default = 0.25
-}
-
-variable "busca_palavras_minimas" {
-  type    = number
-  default = 3
 }
 
 variable "admins_emergencia" {
@@ -247,108 +164,10 @@ variable "janelas_em_paralelo" {
   default = 4
 }
 
-variable "tolerancia_da_fala_ms" {
-  description = "Folga, em ms, entre o nome dito no Whisper e a pessoa na imagem para a fala provar o nome"
-  type        = number
-  default     = 2000
-}
-
-variable "limite_de_pessoas_do_modelo_forte" {
-  description = "Quantas pessoas sem nome por vídeo o modelo forte olha (as de mais tempo na imagem primeiro)"
-  type        = number
-  default     = 8
-}
-
-variable "fuso_da_agenda" {
-  description = "Fuso da agenda da purga diária da lixeira"
-  type        = string
-  default     = "America/Sao_Paulo"
-}
-
-variable "limiar_de_nao_identificadas_pct" {
-  description = "Média, na janela do alerta, do percentual de pessoas na imagem sem nome por vídeo (antes do modelo forte), acima da qual o alerta dispara. Sem medida do piloto ainda: 50% é um chute largo, a ajustar com os dados reais (#286)"
-  type        = number
-  default     = 50
-}
-
-variable "limiar_de_fora_do_esquema" {
-  description = "Respostas do modelo recusadas pelo esquema (e refeitas) na janela do alerta, acima das quais o alerta dispara. Cada vídeo longo faz dezenas de chamadas: 10 por dia é raro o bastante para indicar mudança do modelo ou do prompt"
-  type        = number
-  default     = 10
-}
-
 variable "limite_de_falhas_por_etapa" {
   description = "Falhas de uma mesma etapa na janela do alerta acima das quais o alerta dispara; vale para cada etapa, somadas as duas origens (as falhas tratadas pelos Jobs e as execuções que caíram no Workflows)"
   type        = number
   default     = 3
-}
-
-variable "janela_dos_alertas_horas" {
-  description = "Horas de log que cada alerta de sinal de qualidade soma ou calcula a média; o volume é de poucos vídeos por dia, então a janela é de um dia"
-  type        = number
-  default     = 24
-  validation {
-    # O período de alinhamento de um alerta vai até um dia.
-    condition     = var.janela_dos_alertas_horas >= 1 && var.janela_dos_alertas_horas <= 24 && floor(var.janela_dos_alertas_horas) == var.janela_dos_alertas_horas
-    error_message = "janela_dos_alertas_horas: horas inteiras de 1 a 24."
-  }
-}
-
-variable "janela_dos_paineis_horas" {
-  description = "Horas de log que cada gráfico dos painéis de observabilidade (#288) soma ou resume; o volume é de poucos vídeos por dia, então a janela é de um dia"
-  type        = number
-  default     = 24
-  validation {
-    condition     = var.janela_dos_paineis_horas >= 1 && floor(var.janela_dos_paineis_horas) == var.janela_dos_paineis_horas
-    error_message = "janela_dos_paineis_horas: horas inteiras, no mínimo 1."
-  }
-}
-
-variable "precos_por_milhao_de_tokens" {
-  description = "US$ por milhão de tokens de cada modelo (chave: o ID do modelo, como ele sai no log), para o custo por etapa do painel (#288); vazio: o painel mostra só os tokens (preço não confirmado)"
-  type = map(object({
-    entrada = number
-    saida   = number
-  }))
-  default = {}
-}
-
-variable "dias_do_original_na_quarentena" {
-  description = "Depois de quantos dias o original some da quarentena (#369); a sessão retomável vale até 7 dias, então o objeto de uma sessão aberta tarde ainda é apagado"
-  type        = number
-  default     = 7
-}
-
-variable "agenda_da_purga" {
-  description = "Cron (formato do Cloud Scheduler) da purga automática da lixeira (#145); uma vez por dia, de madrugada"
-  type        = string
-  default     = "0 3 * * *"
-}
-
-variable "minutos_do_login_recente" {
-  description = "Há quantos minutos, no máximo, foi o login com MFA que a purga manual exige (#145)"
-  type        = number
-  default     = 5
-}
-
-variable "videos_do_sinal_por_programa" {
-  description = "N do sinal por programa (#287): quantos vídeos anteriores do mesmo programa formam a média e o desvio, e o mínimo para alertar (programa com menos vídeos não alerta)"
-  type        = number
-  default     = 10
-  validation {
-    condition     = var.videos_do_sinal_por_programa >= 2 && floor(var.videos_do_sinal_por_programa) == var.videos_do_sinal_por_programa
-    error_message = "videos_do_sinal_por_programa: inteiro a partir de 2 (o desvio pede dois vídeos)."
-  }
-}
-
-variable "desvios_do_sinal_por_programa" {
-  description = "K do sinal por programa (#287): quantos desvios-padrão de distância da média do programa, em eventos por hora de vídeo, viram alerta. 3 é o convencional; sem dados do piloto, ajuste depois"
-  type        = number
-  default     = 3
-  validation {
-    condition     = var.desvios_do_sinal_por_programa > 0
-    error_message = "desvios_do_sinal_por_programa: maior que zero."
-  }
 }
 
 variable "imagem_validacao" {
@@ -371,12 +190,109 @@ variable "imagem_objetos" {
   type        = string
 }
 
-# O modelo do Gemini do inventário de objetos (#244): converte o texto do Florence-2 para o
-# português. O mesmo Flash-Lite do restante (`api/gemini.py`, ADR 0004).
-variable "modelo_objetos" {
-  description = "Modelo do Gemini do inventário de objetos"
-  type        = string
-  default     = "gemini-3.5-flash-lite"
+# Valores que nenhum ambiente configura (#753): eram variáveis sem valor em nenhuma raiz, e a
+# descrição e a validação de cada uma mantinham um botão que não existe. Mudar um é editar aqui
+# e aplicar.
+locals {
+  # O Agent Retrieval não existe em todas as regiões: o índice da busca fica nos EUA (ADR 0006).
+  regiao_da_busca = "us-east4"
+
+  # Os Jobs de transcrição e de OCR com GPU L4 rodam aqui (ADR 0007). Com a troca para us-east4
+  # (ADR 0019) é a mesma região do resto, mas o nome fica: os recursos da GPU não mudam.
+  regiao_gpu = "us-east4"
+
+  # Leitura da tela só quando a imagem muda (#233, api/mudanca_da_tela.py): diferença média
+  # (0 a 255) de um dos blocos (seis faixas horizontais de oito blocos) do quadro, contra o último
+  # quadro lido, acima da qual o OCR lê de novo. 0 lê todo quadro, como antes. O valor é um palpite;
+  # a medição no ar (#240, `make comparar-leituras`) acerta sem nova imagem.
+  limiar_de_mudanca_do_ocr = 3
+
+  # Espera do Job com GPU e do Workflows quando falta GPU ou cota (a conta está no comentário de
+  # `espera_gpu_minutos`). Inteiros a partir de 1: o script do teste (scripts/testar-jobs-gpu.sh)
+  # faz a conta em bash.
+  gpu_espera_s        = 60
+  gpu_fator_da_espera = 2
+  gpu_espera_maxima_s = 240
+
+  # Dimensão dos vetores da busca; fixa na criação da coleção.
+  dimensao_dos_vetores = 256
+
+  # A cota `vectorsearch.googleapis.com/data_object_writes` de cada coleção da busca (planos e
+  # texto, as duas em 6.000 no dev desde 14/11, antes 3.000; #630), em objetos por minuto. Vale
+  # para a coleção inteira; a indexação grava abaixo dela (BUSCA_COTA_DE_ESCRITA, também no
+  # mam-web e no mam-purga) e, no 429 de dois vídeos juntos, espera e tenta de novo.
+  cota_de_escrita_da_busca = 6000
+
+  # O corte do que a busca acha só pelo significado (vetor): a distância de cosseno máxima e o
+  # mínimo de palavras do registro. Calibrados em 3 vídeos do dev.
+  busca_distancia_maxima = 0.25
+  busca_palavras_minimas = 3
+
+  # Folga, em ms, entre o nome dito no Whisper e a pessoa na imagem para a fala provar o nome.
+  tolerancia_da_fala_ms = 2000
+
+  # Quantas pessoas sem nome por vídeo o modelo forte olha (as de mais tempo na imagem primeiro).
+  # Inteiro a partir de 0 (o teste da conta confere).
+  limite_de_pessoas_do_modelo_forte = 8
+
+  # Fuso da agenda da purga diária da lixeira; a taxa de correção por dia (#455) também o usa.
+  fuso_da_agenda = "America/Sao_Paulo"
+
+  # Média, na janela do alerta, do percentual de pessoas na imagem sem nome por vídeo (antes do
+  # modelo forte), acima da qual o alerta dispara. Sem medida do piloto ainda: 50% é um chute
+  # largo, a ajustar com os dados reais (#286).
+  limiar_de_nao_identificadas_pct = 50
+
+  # Respostas do modelo recusadas pelo esquema (e refeitas) na janela do alerta, acima das quais o
+  # alerta dispara. Cada vídeo longo faz dezenas de chamadas: 10 por dia é raro o bastante para
+  # indicar mudança do modelo ou do prompt.
+  limiar_de_fora_do_esquema = 10
+
+  # Horas de log que cada alerta de sinal de qualidade soma ou calcula a média; o volume é de
+  # poucos vídeos por dia, então a janela é de um dia. Horas inteiras de 1 a 24: o período de
+  # alinhamento de um alerta vai até um dia.
+  janela_dos_alertas_horas = 24
+
+  # Horas de log que cada gráfico dos painéis de observabilidade (#288) soma ou resume; um dia,
+  # pelo mesmo motivo. Horas inteiras, no mínimo 1.
+  janela_dos_paineis_horas = 24
+
+  # US$ por milhão de tokens de cada modelo (chave: o ID do modelo, como ele sai no log), para o
+  # custo por etapa do painel (#288); vazio: o painel mostra só os tokens (preço não confirmado).
+  # Cada valor é { entrada = número, saida = número }.
+  precos_por_milhao_de_tokens = {}
+
+  # Depois de quantos dias o original some da quarentena (#369); a sessão retomável vale até 7
+  # dias, então o objeto de uma sessão aberta tarde ainda é apagado.
+  dias_do_original_na_quarentena = 7
+
+  # Cron (formato do Cloud Scheduler) da purga automática da lixeira (#145); uma vez por dia, de
+  # madrugada.
+  agenda_da_purga = "0 3 * * *"
+
+  # Cron que refaz hoje e ontem na tabela da taxa de correção por dia (#455); a cada hora.
+  agenda_da_taxa_diaria = "10 * * * *"
+
+  # Há quantos minutos, no máximo, foi o login com MFA que a purga manual exige (#145).
+  minutos_do_login_recente = 5
+
+  # N do sinal por programa (#287): quantos vídeos anteriores do mesmo programa formam a média e o
+  # desvio, e o mínimo para alertar (programa com menos vídeos não alerta). Inteiro a partir de 2.
+  videos_do_sinal_por_programa = 10
+
+  # K do sinal por programa (#287): quantos desvios-padrão de distância da média do programa, em
+  # eventos por hora de vídeo, viram alerta. 3 é o convencional; sem dados do piloto, ajuste depois.
+  desvios_do_sinal_por_programa = 3
+
+  # O modelo do Gemini do inventário de objetos (#244): converte o texto do Florence-2 para o
+  # português. O mesmo Flash-Lite do restante (`api/gemini.py`, ADR 0004).
+  modelo_objetos = "gemini-3.5-flash-lite"
+
+  # Geração do Florence-2, entregue às variáveis FLORENCE_* do Job de objetos: feixes, quadros por
+  # geração e legendas de região (1 liga, 0 desliga).
+  florence_feixes   = 1
+  florence_lote     = 16
+  florence_legendas = 1
 }
 
 resource "google_project_service" "apis" {
@@ -491,7 +407,7 @@ resource "google_artifact_registry_repository" "mam" {
 # reenvia as camadas que o cache já pôs no mesmo repositório.
 resource "google_artifact_registry_repository" "mam_gpu" {
   repository_id          = "mam-gpu"
-  location               = var.regiao_gpu
+  location               = local.regiao_gpu
   format                 = "DOCKER"
   depends_on             = [google_project_service.apis]
   cleanup_policy_dry_run = local.limpeza_so_ensaia
@@ -539,9 +455,10 @@ resource "google_firestore_database" "mam" {
   depends_on                        = [google_project_service.apis]
 }
 
-# Índices compostos da lista de Jobs (GET /v1/jobs, #141): cada combinação não vazia de
-# programa, sistema, estado (`in`) e uma palavra do nome (`array-contains`), com a ordem
-# por envio (criado_em) ou por exibição (data_exibicao). O intervalo de datas só vai ao
+# Índices da lista de Jobs (GET /v1/jobs, #141): o local lista as combinações de programa,
+# sistema, estado (`in`) e uma palavra do nome (`array-contains`), com a ordem por envio
+# (criado_em) ou por exibição (data_exibicao), mas só as de um campo viram índice; o
+# Firestore cruza os índices nas demais (mescla_de_indices.tf, #542). O intervalo de datas só vai ao
 # Firestore na ordem por exibicao (ele fica no campo da ordem); na ordem por envio a
 # API o confere depois da leitura.
 locals {
@@ -577,8 +494,9 @@ resource "google_firestore_index" "acervo" {
   }
 }
 
-# Índices compostos da auditoria (GET /v1/admin/auditoria, #140): cada combinação não
-# vazia de pessoa (`uid` ou `email`), alvo e ação, com o período e a ordem em `quando`.
+# Índices da auditoria (GET /v1/admin/auditoria, #140): o local lista as combinações de pessoa
+# (`uid` ou `email`), alvo e ação, mas só as de um campo viram índice (mescla_de_indices.tf),
+# com o período e a ordem em `quando`.
 # A coleção só recebe acréscimos.
 locals {
   campos_da_auditoria = ["uid", "email", "alvo_id", "acao"]
@@ -633,7 +551,7 @@ resource "google_storage_bucket" "mam" {
     for_each = each.key == "quarentena" ? [1] : []
     content {
       condition {
-        age = var.dias_do_original_na_quarentena
+        age = local.dias_do_original_na_quarentena
       }
       action {
         type = "Delete"
@@ -736,7 +654,7 @@ locals {
     # O Job da taxa por dia (#455) lê Jobs, correções e revisão no Firestore e roda o MERGE na
     # tabela (`bigquery.jobUser`; o acesso aos dados é só no dataset, mais abaixo).
     taxa = ["roles/datastore.user", "roles/bigquery.jobUser"]
-    # O agendador só dispara o Job da purga (papel no próprio Job, em purga.tf).
+    # O agendador dispara o Job da purga e o da taxa diária (papel no próprio Job, em purga.tf e taxa_diaria.tf).
     agendador = []
     # O logWriter é do `sys.log` do Workflows (falhas, duração da etapa): sem ele o passo cai com 403.
     orquestracao = ["roles/datastore.user", "roles/eventarc.eventReceiver", "roles/workflows.invoker", "roles/run.viewer", "roles/logging.logWriter"]
@@ -1048,7 +966,7 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "PURGA_LOGIN_RECENTE_MIN"
-        value = tostring(var.minutos_do_login_recente)
+        value = tostring(local.minutos_do_login_recente)
       }
       env {
         name  = "BUSCA_CONSULTAS_POR_MINUTO"
@@ -1060,7 +978,7 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "BUSCA_REGIAO"
-        value = var.regiao_da_busca
+        value = local.regiao_da_busca
       }
       env {
         name  = "BUSCA_COLECAO"
@@ -1084,11 +1002,11 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "BUSCA_DIMENSAO"
-        value = tostring(var.dimensao_dos_vetores)
+        value = tostring(local.dimensao_dos_vetores)
       }
       env {
         name  = "BUSCA_COTA_DE_ESCRITA"
-        value = tostring(var.cota_de_escrita_da_busca)
+        value = tostring(local.cota_de_escrita_da_busca)
       }
       env {
         name  = "BIGQUERY_DATASET"
@@ -1155,11 +1073,11 @@ resource "google_cloud_run_v2_service" "web" {
       }
       env {
         name  = "BUSCA_DISTANCIA_MAXIMA"
-        value = tostring(var.busca_distancia_maxima)
+        value = tostring(local.busca_distancia_maxima)
       }
       env {
         name  = "BUSCA_PALAVRAS_MINIMAS"
-        value = tostring(var.busca_palavras_minimas)
+        value = tostring(local.busca_palavras_minimas)
       }
       env {
         name  = "RANKING_CONFIG"
@@ -1221,7 +1139,7 @@ resource "google_compute_subnetwork" "validacao" {
 # e o Firestore pelo acesso privado do Google. Faixa que não se sobrepõe à de cima.
 resource "google_compute_subnetwork" "validacao_gpu" {
   name                     = "mam-validacao-gpu"
-  region                   = var.regiao_gpu
+  region                   = local.regiao_gpu
   network                  = google_compute_network.validacao.id
   ip_cidr_range            = "10.20.0.0/24"
   private_ip_google_access = true
@@ -1336,7 +1254,7 @@ resource "google_cloud_run_v2_job" "validacao" {
 # vivem no volume em memória.
 resource "google_cloud_run_v2_job" "transcricao_gpu" {
   name                = "mam-transcricao-gpu"
-  location            = var.regiao_gpu
+  location            = local.regiao_gpu
   deletion_protection = false
   # Job com GPU e timeout acima de 1 h ("Long running GPU jobs") só existe em BETA: sem
   # isto, a API recusa a criação (deploy de 2026-11-03).
@@ -1425,7 +1343,7 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
 # (mesma região) e grava a leitura lá.
 resource "google_cloud_run_v2_job" "ocr_gpu" {
   name                = "mam-ocr-gpu"
-  location            = var.regiao_gpu
+  location            = local.regiao_gpu
   deletion_protection = false
   # Job com GPU e timeout acima de 1 h ("Long running GPU jobs") só existe em BETA: sem
   # isto, a API recusa a criação (deploy de 2026-11-03).
@@ -1465,7 +1383,7 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
         }
         env {
           name  = "LIMIAR_DE_MUDANCA"
-          value = tostring(var.limiar_de_mudanca_do_ocr)
+          value = tostring(local.limiar_de_mudanca_do_ocr)
         }
         env {
           name  = "GCP_PROJECT_ID"
@@ -1520,7 +1438,7 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
 # passagem na região da GPU: nada fica lá. Não tem plano B em CPU nem escreve no Firestore.
 resource "google_cloud_run_v2_job" "objetos_gpu" {
   name                = "mam-objetos-gpu"
-  location            = var.regiao_gpu
+  location            = local.regiao_gpu
   deletion_protection = false
   # Job com GPU e timeout acima de 1 h ("Long running GPU jobs") só existe em BETA: sem
   # isto, a API recusa a criação (deploy de 2026-11-03).
@@ -1570,15 +1488,15 @@ resource "google_cloud_run_v2_job" "objetos_gpu" {
         }
         env {
           name  = "FLORENCE_FEIXES"
-          value = tostring(var.florence_feixes)
+          value = tostring(local.florence_feixes)
         }
         env {
           name  = "FLORENCE_LOTE"
-          value = tostring(var.florence_lote)
+          value = tostring(local.florence_lote)
         }
         env {
           name  = "FLORENCE_LEGENDAS"
-          value = tostring(var.florence_legendas)
+          value = tostring(local.florence_legendas)
         }
         resources {
           # O mínimo do Cloud Run com GPU: 4 CPUs e 16 GiB. Os quadros são lidos em memória
@@ -1673,7 +1591,7 @@ resource "google_cloud_run_v2_job" "inventario" {
         }
         env {
           name  = "MODELO_OBJETOS"
-          value = var.modelo_objetos
+          value = local.modelo_objetos
         }
         env {
           name  = "TMPDIR"
@@ -1787,7 +1705,7 @@ resource "google_cloud_run_v2_job" "analise" {
         }
         env {
           name  = "TOLERANCIA_DA_FALA_MS"
-          value = tostring(var.tolerancia_da_fala_ms)
+          value = tostring(local.tolerancia_da_fala_ms)
         }
       }
     }
@@ -1933,7 +1851,7 @@ resource "google_cloud_run_v2_job" "indexacao" {
         }
         env {
           name  = "BUSCA_REGIAO"
-          value = var.regiao_da_busca
+          value = local.regiao_da_busca
         }
         env {
           name  = "BUSCA_COLECAO"
@@ -1953,11 +1871,11 @@ resource "google_cloud_run_v2_job" "indexacao" {
         }
         env {
           name  = "BUSCA_DIMENSAO"
-          value = tostring(var.dimensao_dos_vetores)
+          value = tostring(local.dimensao_dos_vetores)
         }
         env {
           name  = "BUSCA_COTA_DE_ESCRITA"
-          value = tostring(var.cota_de_escrita_da_busca)
+          value = tostring(local.cota_de_escrita_da_busca)
         }
         env {
           name  = "BIGQUERY_DATASET"
@@ -1973,11 +1891,11 @@ resource "google_cloud_run_v2_job" "indexacao" {
         }
         env {
           name  = "SINAL_VIDEOS"
-          value = tostring(var.videos_do_sinal_por_programa)
+          value = tostring(local.videos_do_sinal_por_programa)
         }
         env {
           name  = "SINAL_DESVIOS"
-          value = tostring(var.desvios_do_sinal_por_programa)
+          value = tostring(local.desvios_do_sinal_por_programa)
         }
       }
     }
@@ -2049,11 +1967,11 @@ resource "google_cloud_run_v2_job" "identificacao" {
         }
         env {
           name  = "LIMITE_DE_PESSOAS_DO_MODELO_FORTE"
-          value = tostring(var.limite_de_pessoas_do_modelo_forte)
+          value = tostring(local.limite_de_pessoas_do_modelo_forte)
         }
         env {
           name  = "TOLERANCIA_DA_FALA_MS"
-          value = tostring(var.tolerancia_da_fala_ms)
+          value = tostring(local.tolerancia_da_fala_ms)
         }
         env {
           name  = "TMPDIR"
@@ -2107,12 +2025,12 @@ resource "google_workflows_workflow" "validacao" {
     regiao                 = var.regiao
     workflow               = local.workflow_validacao
     job_de_validacao       = google_cloud_run_v2_job.validacao.name
-    regiao_gpu             = var.regiao_gpu
+    regiao_gpu             = local.regiao_gpu
     vagas_de_gpu           = var.vagas_de_gpu
     gpu_espera_total_s     = var.espera_gpu_minutos * 60
-    gpu_espera_s           = var.gpu_espera_s
-    gpu_fator_da_espera    = var.gpu_fator_da_espera
-    gpu_espera_maxima_s    = var.gpu_espera_maxima_s
+    gpu_espera_s           = local.gpu_espera_s
+    gpu_fator_da_espera    = local.gpu_fator_da_espera
+    gpu_espera_maxima_s    = local.gpu_espera_maxima_s
     job_de_transcricao_gpu = google_cloud_run_v2_job.transcricao_gpu.name
     job_de_ocr_gpu         = google_cloud_run_v2_job.ocr_gpu.name
     job_de_objetos_gpu     = google_cloud_run_v2_job.objetos_gpu.name
@@ -2309,7 +2227,7 @@ resource "google_monitoring_alert_policy" "login_admin_emergencia" {
 # aqui (um teste confere). Cada percentual vira uma métrica de distribuição, e o alerta
 # olha a média na janela; as contagens contam linhas.
 locals {
-  janela_dos_alertas_s = "${var.janela_dos_alertas_horas * 3600}s"
+  janela_dos_alertas_s = "${local.janela_dos_alertas_horas * 3600}s"
   canais_de_alerta     = [for canal in google_monitoring_notification_channel.admin_emergencia : canal.id]
   filtro_video_concluido = join(" AND ", [
     "resource.type=\"cloud_run_job\"",
@@ -2428,7 +2346,7 @@ resource "google_monitoring_alert_policy" "sinal_percentual" {
     condition_threshold {
       filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.sinal_percentual.name}\" AND resource.type=\"cloud_run_job\""
       comparison      = "COMPARISON_GT"
-      threshold_value = var.limiar_de_nao_identificadas_pct
+      threshold_value = local.limiar_de_nao_identificadas_pct
       duration        = "0s"
       # Métrica de distribuição: o ALIGN_MEAN não se aplica a ela (a API recusa); o
       # ALIGN_DELTA junta os valores da janela e o REDUCE_MEAN dá a média deles.
@@ -2458,7 +2376,7 @@ resource "google_monitoring_alert_policy" "fora_do_esquema" {
     condition_threshold {
       filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.respostas_fora_do_esquema.name}\" AND resource.type=\"cloud_run_job\""
       comparison      = "COMPARISON_GT"
-      threshold_value = var.limiar_de_fora_do_esquema
+      threshold_value = local.limiar_de_fora_do_esquema
       duration        = "0s"
       aggregations {
         alignment_period     = local.janela_dos_alertas_s
@@ -2547,7 +2465,7 @@ resource "google_monitoring_alert_policy" "desvio_de_programa" {
 # distribuição são lidas em PromQL (`_sum`, `_count`, `_bucket`); o nome é o da métrica com o
 # prefixo `logging_googleapis_com:user_`.
 locals {
-  janela_dos_paineis = "${var.janela_dos_paineis_horas}h"
+  janela_dos_paineis = "${local.janela_dos_paineis_horas}h"
   filtro_dos_jobs    = "resource.type=\"cloud_run_job\""
   filtro_da_api = join(" AND ", [
     "resource.type=\"cloud_run_revision\"",
@@ -2568,7 +2486,7 @@ locals {
   # as séries de modelos diferentes antes do `sum`; a etapa que não usou o modelo some).
   custo_por_etapa = {
     for sentido, metrica in { entrada = local.metrica_de_log["tokens_de_entrada"], saida = local.metrica_de_log["tokens_de_saida"] } :
-    sentido => "sum by (etapa) (${join(" or ", [for modelo, preco in var.precos_por_milhao_de_tokens : "(increase(${metrica}_sum{modelo=\"${modelo}\"}[${local.janela_dos_paineis}]) * ${preco[sentido] / 1000000})"])})"
+    sentido => "sum by (etapa) (${join(" or ", [for modelo, preco in local.precos_por_milhao_de_tokens : "(increase(${metrica}_sum{modelo=\"${modelo}\"}[${local.janela_dos_paineis}]) * ${preco[sentido] / 1000000})"])})"
   }
 
   # Cada painel é uma lista de gráficos; o desenho põe dois por linha.
@@ -2605,7 +2523,7 @@ locals {
         },
       ],
       # Sem preço na configuração o gráfico de custo não existe: os tokens acima são o que há.
-      length(var.precos_por_milhao_de_tokens) == 0 ? [] : [
+      length(local.precos_por_milhao_de_tokens) == 0 ? [] : [
         {
           titulo = "Custo por etapa (US$ na janela, tokens vezes o preço da configuração)"
           series = [
@@ -2917,7 +2835,7 @@ output "repositorio" {
 
 # Para o deploy-dev: o repositório das imagens com GPU, que guarda também o cache delas.
 output "repositorio_gpu" {
-  value = "${var.regiao_gpu}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam_gpu.repository_id}"
+  value = "${local.regiao_gpu}-docker.pkg.dev/${var.projeto}/${google_artifact_registry_repository.mam_gpu.repository_id}"
 }
 
 # As regras da limpeza das imagens, para o deploy-dev (as tags que ele põe) e para o
@@ -2935,7 +2853,7 @@ output "limpeza_de_imagens" {
 
 # Para o Workflows (#239) e para o teste dos Jobs com GPU depois da publicação.
 output "regiao_gpu" {
-  value = var.regiao_gpu
+  value = local.regiao_gpu
 }
 
 output "job_de_transcricao_gpu" {
@@ -2959,15 +2877,15 @@ output "gpu_espera_total_s" {
 }
 
 output "gpu_espera_maxima_s" {
-  value = var.gpu_espera_maxima_s
+  value = local.gpu_espera_maxima_s
 }
 
 output "gpu_espera_s" {
-  value = var.gpu_espera_s
+  value = local.gpu_espera_s
 }
 
 output "gpu_fator_da_espera" {
-  value = var.gpu_fator_da_espera
+  value = local.gpu_fator_da_espera
 }
 
 # Para o make copiar-para-bigquery.
@@ -2985,7 +2903,7 @@ output "bigquery_regiao" {
 
 # Para o make criar-colecao-da-busca, o make medir-busca e o make sondar-busca.
 output "busca_regiao" {
-  value = var.regiao_da_busca
+  value = local.regiao_da_busca
 }
 
 output "busca_colecao" {
@@ -3009,17 +2927,17 @@ output "busca_indices_ligados" {
 }
 
 output "busca_dimensao" {
-  value = var.dimensao_dos_vetores
+  value = local.dimensao_dos_vetores
 }
 
 # O ritmo do `make reindexar`, o mesmo do Job de indexação.
 output "busca_cota_de_escrita" {
-  value = var.cota_de_escrita_da_busca
+  value = local.cota_de_escrita_da_busca
 }
 
 # O corte do serviço, para o make sondar-busca ver o mesmo que o dev.
 output "busca_distancia_maxima" {
-  value = var.busca_distancia_maxima
+  value = local.busca_distancia_maxima
 }
 
 # O valor que o mam-web de fato recebe, para o tftest da raiz conferir o repasse.
@@ -3032,7 +2950,7 @@ output "busca_aceita_teste_de_carga" {
 }
 
 output "busca_palavras_minimas" {
-  value = var.busca_palavras_minimas
+  value = local.busca_palavras_minimas
 }
 
 output "banco_firestore" {

@@ -76,7 +76,7 @@ resource "google_cloud_run_v2_job" "purga" {
         }
         env {
           name  = "BUSCA_REGIAO"
-          value = var.regiao_da_busca
+          value = local.regiao_da_busca
         }
         env {
           name  = "BUSCA_COLECAO"
@@ -96,11 +96,11 @@ resource "google_cloud_run_v2_job" "purga" {
         }
         env {
           name  = "BUSCA_DIMENSAO"
-          value = tostring(var.dimensao_dos_vetores)
+          value = tostring(local.dimensao_dos_vetores)
         }
         env {
           name  = "BUSCA_COTA_DE_ESCRITA"
-          value = tostring(var.cota_de_escrita_da_busca)
+          value = tostring(local.cota_de_escrita_da_busca)
         }
       }
     }
@@ -118,8 +118,8 @@ resource "google_cloud_run_v2_job_iam_member" "agendador_roda_purga" {
 resource "google_cloud_scheduler_job" "purga" {
   name      = "mam-purga-diaria"
   region    = var.regiao
-  schedule  = var.agenda_da_purga
-  time_zone = var.fuso_da_agenda
+  schedule  = local.agenda_da_purga
+  time_zone = local.fuso_da_agenda
   http_target {
     http_method = "POST"
     uri         = "https://run.googleapis.com/v2/projects/${var.projeto}/locations/${google_cloud_run_v2_job.purga.location}/jobs/${google_cloud_run_v2_job.purga.name}:run"

@@ -172,7 +172,7 @@ def test_o_job_de_objetos_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu() -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
 
     assert 'name                = "mam-objetos-gpu"' in job
-    assert "location            = var.regiao_gpu" in job
+    assert "location            = local.regiao_gpu" in job
     assert 'accelerator = "nvidia-l4"' in job
     assert '"nvidia.com/gpu" = "1"' in job
     assert re.search(r'cpu\s+= "4"', job) and re.search(r'memory\s+= "16Gi"', job)
@@ -260,14 +260,17 @@ def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_modelo() -> None:
     assert 'egress = "ALL_TRAFFIC"' in job
     assert "google_compute_subnetwork.validacao.id" in job
     assert 'value = local.buckets["decupagens"]' in job
-    assert "value = var.modelo_objetos" in job
+    assert "value = local.modelo_objetos" in job
     assert "max_retries     = 0" in job
 
 
 def test_o_modelo_do_inventario_e_o_flash_lite_do_gemini() -> None:
     from api.gemini import MODELO
 
-    assert f'default     = "{MODELO}"' in _bloco('variable "modelo_objetos"')
+    assert 'variable "modelo_objetos"' not in MAIN
+    assert re.search(
+        rf'^\s+modelo_objetos\s*= "{re.escape(MODELO)}"$', MAIN, re.MULTILINE
+    )
 
 
 def test_a_orquestracao_roda_o_job_do_inventario_e_o_workflows_o_recebe() -> None:
@@ -285,28 +288,20 @@ def test_a_orquestracao_roda_o_job_do_inventario_e_o_workflows_o_recebe() -> Non
 
 
 @pytest.mark.parametrize("raiz", ["infra", "infra/ambientes/prod"])
-def test_as_tres_variaveis_do_florence_chegam_ao_job_com_os_padroes(
-    raiz: str,
-) -> None:
-    modulo = RAIZ / "infra/modulos/mam"
+def test_os_tres_locals_do_florence_chegam_ao_job_com_os_padroes(raiz: str) -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
     chamada = (
         (RAIZ / raiz / "main.tf").read_text().split('module "mam"')[1].split("\n}")[0]
     )
-    for nome, padrao, expressao in (
-        ("feixes", "1", "tostring(var.florence_feixes)"),
-        ("lote", "16", "tostring(var.florence_lote)"),
-        ("legendas", "1", "tostring(var.florence_legendas)"),
-    ):
-        variavel = f"florence_{nome}"
-        for pasta in (RAIZ / raiz, modulo):
-            texto = (pasta / "variables.tf").read_text()
-            bloco = texto.split(f'variable "{variavel}"')[1].split("\n}")[0]
-            assert re.search(rf"default\s*= {re.escape(padrao)}\n", bloco)
-            assert "validation {" in bloco
-        assert re.search(rf"{variavel}\s*= var\.{variavel}\n", chamada)
+    assert not (RAIZ / raiz / "variables.tf").exists()
+    assert not (RAIZ / "infra/modulos/mam/variables.tf").exists()
+    for nome, padrao in (("feixes", "1"), ("lote", "16"), ("legendas", "1")):
+        local = f"florence_{nome}"
+        assert f'variable "{local}"' not in MAIN
+        assert re.search(rf"^\s+{local}\s*= {padrao}$", MAIN, re.MULTILINE)
+        assert local not in chamada
         assert re.search(
-            rf'name\s*= "FLORENCE_{nome.upper()}"\s+value\s*= {re.escape(expressao)}\n',
+            rf'name\s*= "FLORENCE_{nome.upper()}"\s+value\s*= tostring\(local\.{local}\)\n',
             job,
         )
 

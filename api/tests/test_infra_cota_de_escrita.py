@@ -1,4 +1,4 @@
-"""A cota de escrita da busca (#460, #472) chega a todos os que gravam pela mesma variável."""
+"""A cota de escrita da busca (#460, #472) chega a todos os que gravam pelo mesmo local."""
 
 import re
 from pathlib import Path
@@ -22,7 +22,7 @@ def test_a_cota_chega_ao_web_ao_purga_e_a_indexacao_pela_mesma_variavel() -> Non
     for nome, bloco in blocos.items():
         assert re.search(
             r'name\s*=\s*"BUSCA_COTA_DE_ESCRITA"\s*value\s*=\s*'
-            r"tostring\(var\.cota_de_escrita_da_busca\)",
+            r"tostring\(local\.cota_de_escrita_da_busca\)",
             bloco,
         ), nome
 
@@ -48,7 +48,6 @@ def test_colecao_de_texto_chega_aos_tres_escritores_e_aos_outputs() -> None:
     assert "output -raw busca_colecao_de_texto" in makefile
 
 
-def test_o_padrao_da_cota_acompanha_a_cota_do_dev_em_6000() -> None:
+def test_o_valor_da_cota_acompanha_a_cota_do_dev_em_6000() -> None:
     # As duas cotas `data_object_writes` (planos e texto) estão em 6.000/min no dev (#630).
-    bloco = _bloco(MAIN, 'variable "cota_de_escrita_da_busca"')
-    assert re.search(r"default\s*=\s*6000\b", bloco)
+    assert re.search(r"\bcota_de_escrita_da_busca\s*=\s*6000\b", MAIN)

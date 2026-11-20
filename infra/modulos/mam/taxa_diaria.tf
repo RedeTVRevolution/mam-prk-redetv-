@@ -37,12 +37,6 @@ output "bigquery_tabela_da_taxa" {
   value       = local.tabela_da_taxa_de_correcao
 }
 
-variable "agenda_da_taxa_diaria" {
-  description = "Cron (formato do Cloud Scheduler) que refaz hoje e ontem na tabela da taxa de correção por dia (#455); a cada hora"
-  type        = string
-  default     = "10 * * * *"
-}
-
 resource "google_cloud_run_v2_job" "taxa_diaria" {
   name                = "mam-taxa-diaria"
   location            = var.regiao
@@ -113,8 +107,8 @@ resource "google_cloud_run_v2_job_iam_member" "agendador_roda_taxa_diaria" {
 resource "google_cloud_scheduler_job" "taxa_diaria" {
   name      = "mam-taxa-diaria-horaria"
   region    = var.regiao
-  schedule  = var.agenda_da_taxa_diaria
-  time_zone = var.fuso_da_agenda
+  schedule  = local.agenda_da_taxa_diaria
+  time_zone = local.fuso_da_agenda
   http_target {
     http_method = "POST"
     uri         = "https://run.googleapis.com/v2/projects/${var.projeto}/locations/${google_cloud_run_v2_job.taxa_diaria.location}/jobs/${google_cloud_run_v2_job.taxa_diaria.name}:run"
