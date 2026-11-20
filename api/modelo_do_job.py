@@ -20,7 +20,7 @@ from pydantic import (
 
 from api.catalogo import EnvioParaLixeira
 from api.dispositivo import Dispositivo
-from api.fuso import SAO_PAULO
+from api.fuso import dia_em_sao_paulo
 from api.texto import sem_acento
 
 Estado = Literal[
@@ -349,7 +349,7 @@ def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
         if filtro.exibicao_ate and job.data_exibicao > filtro.exibicao_ate:
             return False
     if filtro.enviado_de is not None or filtro.enviado_ate is not None:
-        dia = job.criado_em.astimezone(SAO_PAULO).date()
+        dia = dia_em_sao_paulo(job.criado_em)
         if filtro.enviado_de and dia < filtro.enviado_de:
             return False
         if filtro.enviado_ate and dia > filtro.enviado_ate:

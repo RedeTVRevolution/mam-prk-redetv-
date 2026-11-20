@@ -10,7 +10,7 @@ from typing import Annotated, NamedTuple
 
 from fastapi import HTTPException
 
-from api.fuso import SAO_PAULO, agora_em_sao_paulo
+from api.fuso import agora_em_sao_paulo, dia_em_sao_paulo
 from api.texto_como_dado import LinhaDaConsulta
 
 DIAS_DO_PERIODO_PADRAO = 7
@@ -22,7 +22,7 @@ class Periodo(NamedTuple):
 
 
 def periodo_padrao(agora: datetime) -> Periodo:
-    hoje = agora.astimezone(SAO_PAULO).date()
+    hoje = dia_em_sao_paulo(agora)
     return Periodo(hoje - timedelta(days=DIAS_DO_PERIODO_PADRAO - 1), hoje)
 
 

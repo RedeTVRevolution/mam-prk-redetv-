@@ -20,3 +20,7 @@ def periodo_em_utc(
         if ate
         else None,
     )
+
+
+def dia_em_sao_paulo(instante: datetime) -> date:
+    return instante.astimezone(SAO_PAULO).date()

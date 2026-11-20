@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.eventos_de_uso import Quem
-from api.fuso import SAO_PAULO
+from api.fuso import SAO_PAULO, dia_em_sao_paulo
 from api.modelo_do_job import Job
 from api.relatorios import linhas_da_consulta
 
@@ -121,7 +121,7 @@ class FonteDeCusto(Protocol):
 
 
 def _dia_do_job(job: Job) -> date:
-    return job.criado_em.astimezone(SAO_PAULO).date()
+    return dia_em_sao_paulo(job.criado_em)
 
 
 def _mes(dia: date) -> str:

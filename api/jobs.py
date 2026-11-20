@@ -68,7 +68,7 @@ from api.correcoes import (
 from api.decupagem import caminho_do_quadro
 from api.erros import ServicoIndisponivel
 from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
-from api.fuso import SAO_PAULO
+from api.fuso import dia_em_sao_paulo
 from api.idempotencia import (
     TAMANHO_MAXIMO_DA_CHAVE,
     ChaveReusadaComOutroCorpo,
@@ -774,7 +774,7 @@ def criar_rotas(
         else:
             criado_por, sistema, email = chamador.uid, None, chamador.email or None
         agora = relogio()
-        if novo.data_exibicao > agora.astimezone(SAO_PAULO).date():
+        if novo.data_exibicao > dia_em_sao_paulo(agora):
             raise HTTPException(422, "Data de exibição no futuro")
         job_id, nova, escopo, job_gravado = uuid.uuid4().hex, True, "", False
         if idempotency_key is not None:

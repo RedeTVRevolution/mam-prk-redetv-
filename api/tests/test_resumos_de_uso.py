@@ -72,9 +72,7 @@ def _resumir(banco: sqlite3.Connection, inicio: str = TODA_A_HISTORIA) -> None:
 
 def _tabelas_do_sql() -> list[str]:
     """As tabelas do painel, na ordem do SQL (a de fins já contados é só estado interno)."""
-    nomes = re.findall(
-        r"CREATE TABLE (?:IF NOT EXISTS )?`\$\{prefixo\}(\w+)`", SQL
-    )
+    nomes = re.findall(r"CREATE TABLE (?:IF NOT EXISTS )?`\$\{prefixo\}(\w+)`", SQL)
     return [n for n in dict.fromkeys(nomes) if n != "fins_de_processamento_contados"]
 
 
