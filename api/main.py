@@ -200,10 +200,12 @@ from api.revisao_do_painel import (
 from api.rota_da_busca import (
     CONSULTAS_POR_MINUTO,
     LIMITES_DA_IMAGEM,
+    PAGINAS_POR_MINUTO,
     TEMPO_MAXIMO_S,
     LimitesDaImagem,
     consultas_por_minuto_do_ambiente,
     criar_rotas_da_busca,
+    paginas_por_minuto_do_ambiente,
 )
 from api.rotas_das_chaves import (
     ChaveIndisponivel,
@@ -374,6 +376,7 @@ def criar_app(
     ranking: Ranking | None = None,
     listas_da_busca: ListasDaBusca | None = None,
     busca_por_minuto: int = CONSULTAS_POR_MINUTO,
+    busca_paginas_por_minuto: int = PAGINAS_POR_MINUTO,
     tempo_maximo_da_busca_s: float = TEMPO_MAXIMO_S,
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     aceita_teste_de_carga: bool = False,
@@ -660,6 +663,7 @@ def criar_app(
             limites_da_imagem,
             publicador,
             aceita_teste_de_carga,
+            busca_paginas_por_minuto,
         )
     )
     v1.include_router(criar_rotas_da_auditoria(repositorio_de_auditoria))
@@ -937,6 +941,7 @@ if _projeto:
         tipos_de_objeto=TiposDeObjetoFirestore(_comum),
         apagar_dados_da_purga=dados_do_ambiente(_comum, os.environ).apagar,
         busca_por_minuto=consultas_por_minuto_do_ambiente(os.environ),
+        busca_paginas_por_minuto=paginas_por_minuto_do_ambiente(os.environ),
         aceita_teste_de_carga=aceita_teste_de_carga_do_ambiente(os.environ),
         limites_da_imagem=LimitesDaImagem(
             max_bytes=int(
