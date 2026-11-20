@@ -401,11 +401,6 @@ moved {
 }
 
 moved {
-  from = google_firestore_index.auditoria
-  to   = module.mam.google_firestore_index.auditoria
-}
-
-moved {
   from = google_storage_bucket.mam
   to   = module.mam.google_storage_bucket.mam
 }
@@ -697,12 +692,4 @@ moved {
 
 output "indices_da_mescla" {
   value = module.mam.indices_da_mescla
-}
-
-output "indices_a_remover" {
-  value = module.mam.indices_a_remover
-}
-
-output "indices_que_ficam" {
-  value = module.mam.indices_que_ficam
 }

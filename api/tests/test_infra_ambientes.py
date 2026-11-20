@@ -137,6 +137,26 @@ def test_o_estado_de_antes_do_modulo_vai_para_ele_antes_do_apply_com_target() ->
     assert "-target=module.mam.google_artifact_registry_repository.mam_gpu" in deploy
 
 
+def test_o_deploy_move_os_sinais_percentuais_no_estado_antes_do_apply_com_target() -> (
+    None
+):
+    deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
+    com_target = deploy.index("scripts/aplicar-sem-destruir.sh -target=module.mam.")
+    antes = deploy[:com_target]
+
+    for recurso in (
+        "google_logging_metric.sinal_percentual",
+        "google_monitoring_alert_policy.sinal_percentual",
+    ):
+        assert recurso in antes
+    # Só move quando o endereço antigo (com chave) existe no estado.
+    assert 'grep -qxF "module.mam.$recurso[\\"nao_identificadas\\"]"' in antes
+    assert (
+        'tf state mv "module.mam.$recurso[\\"nao_identificadas\\"]" "module.mam.$recurso"'
+        in antes
+    )
+
+
 # O terraform falso grava o que recebeu e devolve o plano de `$FALSO/plano.json`.
 TERRAFORM_FALSO = r"""#!/usr/bin/env bash
 echo "$*" >>"$FALSO/chamadas"
@@ -317,9 +337,7 @@ def test_o_readme_lista_os_papeis_da_terraform_do_wizard_e_os_da_build() -> None
         re.DOTALL | re.MULTILINE,
     )
     assert lista_do_readme
-    assert set(re.findall(r"`(roles/[\w.]+)`", lista_do_readme.group(1))) == set(
-        papeis
-    )
+    assert set(re.findall(r"`(roles/[\w.]+)`", lista_do_readme.group(1))) == set(papeis)
     for papel in re.findall(
         r'role\s*= "(roles/[\w.]+)"\n\s*member\s*= google_service_account\.mam\["build"\]',
         (MODULO / "main.tf").read_text(),

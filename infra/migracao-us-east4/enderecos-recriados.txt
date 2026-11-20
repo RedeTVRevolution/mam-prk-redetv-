@@ -64,7 +64,6 @@ module.mam.google_firestore_field.jobs_cortes_ms
 module.mam.google_firestore_field.listas_da_busca_expira_em
 module.mam.google_firestore_index.acervo
 module.mam.google_firestore_index.acervo_por_mes
-module.mam.google_firestore_index.auditoria
 module.mam.google_firestore_index.auditoria_na_seguranca
 module.mam.google_firestore_index.teto_de_criacao
 module.mam.google_kms_crypto_key.chaves_de_api

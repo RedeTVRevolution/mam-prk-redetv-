@@ -605,24 +605,6 @@ locals {
   }
 }
 
-resource "google_firestore_index" "auditoria" {
-  for_each   = local.indices_da_auditoria_da_mescla
-  database   = google_firestore_database.mam.name
-  collection = "auditoria"
-
-  dynamic "fields" {
-    for_each = each.value
-    content {
-      field_path = fields.value
-      order      = "ASCENDING"
-    }
-  }
-  fields {
-    field_path = "quando"
-    order      = "DESCENDING"
-  }
-}
-
 # O único lugar que monta os nomes dos buckets. O código os recebe por variável
 # de ambiente (BUCKET_*), e o `make verificar` recusa sufixo escrito em api/ ou
 # web/src/ (scripts/checar-nomes-da-nuvem.sh lê a lista desta linha).
@@ -2355,22 +2337,23 @@ locals {
     "resource.type=\"cloud_run_job\"",
     "jsonPayload.evento=\"video_concluido\"",
   ])
-  sinais_percentuais = {
-    nao_identificadas = {
-      campo     = "pct_nao_identificadas"
-      limiar    = var.limiar_de_nao_identificadas_pct
-      titulo    = "Pessoas não identificadas acima do limiar"
-      documento = "A média do percentual de pessoas na imagem sem nome passou do limiar. Confira o catálogo do programa, as fotos de referência e a transcrição dos vídeos recentes."
-    }
-  }
+}
+
+moved {
+  from = google_logging_metric.sinal_percentual["nao_identificadas"]
+  to   = google_logging_metric.sinal_percentual
+}
+
+moved {
+  from = google_monitoring_alert_policy.sinal_percentual["nao_identificadas"]
+  to   = google_monitoring_alert_policy.sinal_percentual
 }
 
 resource "google_logging_metric" "sinal_percentual" {
-  for_each        = local.sinais_percentuais
-  name            = "mam_pct_${each.key}"
-  description     = "Percentual ${each.value.campo} por vídeo concluído (log video_concluido)"
+  name            = "mam_pct_nao_identificadas"
+  description     = "Percentual pct_nao_identificadas por vídeo concluído (log video_concluido)"
   filter          = local.filtro_video_concluido
-  value_extractor = "EXTRACT(jsonPayload.${each.value.campo})"
+  value_extractor = "EXTRACT(jsonPayload.pct_nao_identificadas)"
   metric_descriptor {
     metric_kind = "DELTA"
     value_type  = "DISTRIBUTION"
@@ -2460,15 +2443,14 @@ resource "google_logging_metric" "desvio_de_programa" {
 # Os avisos de métrica não têm limite de repetição como os de log: o `auto_close` fecha o
 # incidente quando a janela volta ao normal.
 resource "google_monitoring_alert_policy" "sinal_percentual" {
-  for_each     = local.sinais_percentuais
-  display_name = each.value.titulo
+  display_name = "Pessoas não identificadas acima do limiar"
   combiner     = "OR"
   conditions {
-    display_name = each.value.titulo
+    display_name = "Pessoas não identificadas acima do limiar"
     condition_threshold {
-      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.sinal_percentual[each.key].name}\" AND resource.type=\"cloud_run_job\""
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.sinal_percentual.name}\" AND resource.type=\"cloud_run_job\""
       comparison      = "COMPARISON_GT"
-      threshold_value = each.value.limiar
+      threshold_value = var.limiar_de_nao_identificadas_pct
       duration        = "0s"
       # Métrica de distribuição: o ALIGN_MEAN não se aplica a ela (a API recusa); o
       # ALIGN_DELTA junta os valores da janela e o REDUCE_MEAN dá a média deles.
@@ -2484,7 +2466,7 @@ resource "google_monitoring_alert_policy" "sinal_percentual" {
   }
   notification_channels = local.canais_de_alerta
   documentation {
-    content = each.value.documento
+    content = "A média do percentual de pessoas na imagem sem nome passou do limiar. Confira o catálogo do programa, as fotos de referência e a transcrição dos vídeos recentes."
   }
   # A métrica de log recém-criada demora a aparecer para o Monitoring (espera_das_metricas.tf).
   depends_on = [time_sleep.metricas_dos_alertas]
