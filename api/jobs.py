@@ -7,7 +7,6 @@ import logging
 import re
 import unicodedata
 import uuid
-import zlib
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -693,14 +692,6 @@ def aceita_gzip(accept_encoding: str) -> bool:
     return qs.get("gzip", qs.get("*", 0.0)) > 0
 
 
-def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
-    compressor = zlib.compressobj(wbits=31)
-    for pedaco in pedacos:
-        if dados := compressor.compress(pedaco):
-            yield dados
-    yield compressor.flush()
-
-
 # As exceções do Registro da Correção e da regra, por classe, para HTTP. Mensagem `None`: a do erro.
 _ERROS_DAS_CORRECOES: dict[type[Exception], tuple[int, str | None]] = {
     CorrecaoInexistente: (404, "Correção não encontrada"),
@@ -1133,13 +1124,12 @@ def criar_rotas(
         )
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_INFORMADA_DA_IMAGEM)
 
-    def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
-        cabecalhos = {"Vary": "Accept-Encoding"}
-        if aceita_gzip(request.headers.get("accept-encoding", "")):
-            cabecalhos["Content-Encoding"] = "gzip"
-            corpo = _comprimir(corpo)
+    def _resposta(corpo: Iterator[bytes]) -> StreamingResponse:
+        # O gzip é do middleware (`_GZipQueRespeitaQZero`); o `Vary` vale também para a pura.
         return StreamingResponse(
-            corpo, media_type="application/json", headers=cabecalhos
+            corpo,
+            media_type="application/json",
+            headers={"Vary": "Accept-Encoding"},
         )
 
     def _ler_correcoes(job_id: str) -> list[Correcao]:
@@ -1154,7 +1144,6 @@ def criar_rotas(
     @rotas.get("/{job_id}/decupagem")
     def decupagem(
         job_id: str,
-        request: Request,
         chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
         lido: JobDoPedido,
         versao: Literal["modelo"] | None = None,
@@ -1164,8 +1153,8 @@ def criar_rotas(
             pedacos = iter(armazenamento.abrir_decupagem(job.id))
             # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
             pedacos = itertools.chain([next(pedacos, b"")], pedacos)
-            return _resposta(pedacos, request)
-        return _resposta(iter([json.dumps(_entregue(job)).encode()]), request)
+            return _resposta(pedacos)
+        return _resposta(iter([json.dumps(_entregue(job)).encode()]))
 
     @rotas.get("/{job_id}/decupagem/download")
     def baixar_decupagem(

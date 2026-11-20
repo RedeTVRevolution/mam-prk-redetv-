@@ -414,10 +414,8 @@ def relatorio_de_acessos(
                 _com_os_dias_vazios(acessos_do_grupo, grupo, filtro.desde).items()
             )
         ],
-        por_semana=_ativos_por(
-            ativos_do_dia, lambda d: d - timedelta(days=d.weekday())
-        ),
-        por_mes=_ativos_por(ativos_do_dia, lambda d: d.replace(day=1)),
+        por_semana=_ativos_por(ativos_do_dia, lambda d: inicio_do_grupo(d, "semana")),
+        por_mes=_ativos_por(ativos_do_dia, lambda d: inicio_do_grupo(d, "mes")),
         por_usuario=sorted(
             (
                 UsuarioDeAcessos(

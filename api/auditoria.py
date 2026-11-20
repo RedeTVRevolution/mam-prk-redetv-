@@ -6,7 +6,7 @@ A interface tem acrescentar e consultar; nada altera nem apaga um registro.
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, Literal, Protocol, get_args
+from typing import Annotated, Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -47,8 +47,6 @@ Acao = Literal[
     "marca.juntada",
     "video.editado",
 ]
-ACOES: tuple[Acao, ...] = get_args(Acao)
-
 LIMITE_PADRAO = 50
 LIMITE_MAXIMO = 200
 

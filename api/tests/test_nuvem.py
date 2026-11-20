@@ -962,17 +962,17 @@ class TestRepositorioDePapeisFirestore:
     def test_marca_de_desativada_nao_cria_papeis_e_sobrevive_a_salvar(
         self, papeis: RepositorioDePapeisFirestore
     ) -> None:
-        assert not papeis.desativada("u1")
+        assert not papeis.ler("u1").desativada
 
         papeis.marcar_desativada("u1", True)
 
-        assert papeis.desativada("u1")
+        assert papeis.ler("u1").desativada
         assert papeis.obter("u1") is None
         papeis.salvar("u1", ["editor"])
-        assert papeis.desativada("u1")
+        assert papeis.ler("u1").desativada
         assert papeis.obter("u1") == ["editor"]
         papeis.marcar_desativada("u1", False)
-        assert not papeis.desativada("u1")
+        assert not papeis.ler("u1").desativada
         assert papeis.obter("u1") == ["editor"]
 
 

@@ -344,7 +344,7 @@ def test_sem_auditoria_a_conta_nao_fica_desativada() -> None:
     with pytest.raises(RuntimeError):
         mundo.cliente.post(f"{ROTA}/u2/desativar", headers=ADMIN)
 
-    assert not mundo.papeis.desativada("u2")
+    assert not mundo.papeis.ler("u2").desativada
     assert not mundo.contas.obter("u2").bloqueada  # type: ignore[union-attr]
 
 
@@ -358,7 +358,7 @@ def test_desativar_corta_o_acesso_na_hora_mesmo_com_token_valido() -> None:
     assert resposta.status_code == 200
     assert resposta.json()["situacao"] == "desativada"
     assert mundo.cliente.get("/v1/eu", headers=bia).status_code == 401
-    assert mundo.papeis.desativada("u2")
+    assert mundo.papeis.ler("u2").desativada
     assert mundo.contas.obter("u2").bloqueada  # type: ignore[union-attr]
     assert mundo.contas.sessoes_revogadas == ["u2"]
     (registro,) = mundo.registros()
@@ -395,7 +395,7 @@ def test_ninguem_desativa_a_si_mesmo() -> None:
 
     assert resposta.status_code == 409
     assert "própria conta" in resposta.json()["detail"]
-    assert not mundo.papeis.desativada("adm")
+    assert not mundo.papeis.ler("adm").desativada
     assert mundo.registros() == []
 
 
@@ -441,7 +441,7 @@ def test_sem_usuarios_gerir_devolve_403_em_toda_rota(papeis: list[Papel]) -> Non
         )
         assert resposta.status_code == 403, (metodo, caminho)
     assert mundo.registros() == []
-    assert not mundo.papeis.desativada("u2")
+    assert not mundo.papeis.ler("u2").desativada
 
 
 def test_so_o_administrador_tem_usuarios_gerir() -> None:
@@ -666,7 +666,7 @@ def test_reativar_conta_pendente_responde_409() -> None:
     resposta = mundo.cliente.post(f"{ROTA}/{cris.uid}/reativar", headers=ADMIN)
 
     assert resposta.status_code == 409
-    assert mundo.papeis.desativada(cris.uid)
+    assert mundo.papeis.ler(cris.uid).desativada
 
 
 def test_desativar_conta_pendente_responde_409_e_nao_a_libera() -> None:
@@ -680,4 +680,4 @@ def test_desativar_conta_pendente_responde_409_e_nao_a_libera() -> None:
     resposta = mundo.cliente.post(f"{ROTA}/{cris.uid}/desativar", headers=ADMIN)
 
     assert resposta.status_code == 409
-    assert mundo.papeis.desativada(cris.uid)
+    assert mundo.papeis.ler(cris.uid).desativada
