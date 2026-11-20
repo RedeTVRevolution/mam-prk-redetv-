@@ -663,6 +663,8 @@ def expirar_uploads(
             "falhou",
             agora,
             codigo_falha="upload_expirado",
+            # A pendência vai na mesma escrita: quem publica o fim é a varredura (#782).
+            fim_a_avisar=["webhook", "uso"],
         ):
             expirados.append(job.id)
             try:

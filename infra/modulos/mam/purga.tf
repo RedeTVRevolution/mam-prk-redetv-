@@ -58,6 +58,14 @@ resource "google_cloud_run_v2_job" "purga" {
           value = local.tabela_de_eventos_de_uso
         }
         env {
+          name  = "PUBSUB_TOPICO_EVENTOS"
+          value = google_pubsub_topic.eventos_do_job.id
+        }
+        env {
+          name  = "PUBSUB_TOPICO_USO"
+          value = google_pubsub_topic.eventos_de_uso.id
+        }
+        env {
           name  = "FIRESTORE_BANCO_DE_SEGURANCA"
           value = local.banco_de_seguranca
         }

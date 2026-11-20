@@ -62,6 +62,9 @@ def test_a_varredura_conclui_as_duas_fases_e_a_segunda_nao_faz_nada(
         "BIGQUERY_TABELA_DA_TAXA": "x",
         "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
+        # Nenhum upload expira aqui, então nada é publicado.
+        "PUBSUB_TOPICO_EVENTOS": "te",
+        "PUBSUB_TOPICO_USO": "tu",
         "BUSCA_COLECAO_DE_TEXTO": "ct",
         "BUSCA_INDICE_DESCRICAO": "i",
         "BUSCA_DIMENSAO": "8",
