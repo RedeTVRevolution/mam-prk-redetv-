@@ -148,14 +148,15 @@ def test_a_producao_tambem_exporta_o_output_dos_indices_ann_da_busca() -> None:
     )
 
 
-def test_o_make_para_com_erro_se_o_output_dos_indices_falhar() -> None:
-    # Um output que falha não pode virar "true": o make criaria índices caros por engano.
-    linha = next(
-        l
-        for l in (RAIZ / "Makefile").read_text().splitlines()
-        if "BUSCA_INDICES_LIGADOS=" in l and "terraform" in l
-    )
-    assert "|| echo" in linha
+def test_o_ponto_unico_para_com_erro_se_o_output_dos_indices_falhar() -> None:
+    # Um output que falha não pode virar "true": o make criaria índices caros por engano. A leitura
+    # que falha para o alvo; o output ausente vira texto inválido, e o código para com erro.
+    script = (RAIZ / "scripts" / "ler-ambiente.sh").read_text()
+    makefile = (RAIZ / "Makefile").read_text()
+    ambiente = makefile[makefile.index("AMBIENTE_DA_BUSCA = ") :].split("\n\n")[0]
+
+    assert "BUSCA_INDICES_LIGADOS" in ambiente
+    assert "valor=terraform_output_falhou" in script
 
 
 def test_as_variaveis_sem_padrao_do_modulo_sao_passadas_pela_raiz() -> None:
@@ -193,7 +194,7 @@ def test_o_estado_de_antes_do_modulo_vai_para_ele_antes_do_apply_com_target() ->
     guarda = deploy.index("ENDERECOS=$(tf state list)")
     mv = deploy.index('tf state mv "$recurso" "module.mam.$recurso"', guarda)
     com_target = deploy.index("scripts/aplicar-sem-destruir.sh -target=module.mam.", mv)
-    saida_gpu = deploy.index("tf output -raw repositorio_gpu", com_target)
+    saida_gpu = deploy.index("ler_ambiente REPOSITORIO=repositorio", com_target)
 
     assert guarda < mv < com_target < saida_gpu
     assert "grep -vE '^(module|data)\\.|^$'" in deploy[guarda:mv]

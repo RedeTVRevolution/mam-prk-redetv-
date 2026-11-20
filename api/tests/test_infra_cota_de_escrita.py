@@ -59,8 +59,9 @@ def test_colecao_de_texto_chega_aos_tres_escritores_e_aos_outputs() -> None:
     ):
         assert 'output "busca_colecao_de_texto"' in raiz.read_text()
     makefile = (MODULO.parents[2] / "Makefile").read_text()
-    assert "BUSCA_COLECAO_DE_TEXTO=" in makefile
-    assert "output -raw busca_colecao_de_texto" in makefile
+    assert "terraform output -raw" not in makefile
+    # A entrega ao alvo (usa a macro, que pede a variável ao ponto único) é provada rodando o
+    # fragmento do alvo, em test_ler_ambiente.py.
 
 
 def test_o_valor_da_cota_acompanha_a_cota_do_dev_em_6000() -> None:

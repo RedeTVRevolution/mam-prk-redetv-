@@ -201,7 +201,7 @@ def test_deploy_dev_cria_o_repositorio_novo_no_primeiro_apply_e_publica_pelos_di
 ):
     deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
 
-    primeiro = deploy[: deploy.index("REPOSITORIO=$(")]
+    primeiro = deploy[: deploy.index("\nler_ambiente REPOSITORIO=")]
     assert "-target=module.mam.google_artifact_registry_repository.mam_gpu" in primeiro
     assert (
         "-target=module.mam.google_artifact_registry_repository_iam_member.build_envia_gpu"
@@ -230,10 +230,9 @@ def test_deploy_dev_le_as_imagens_antes_do_apply_e_testa_depois_so_os_jobs_com_g
     teste = deploy.index("scripts/testar-jobs-gpu.sh")
     assert antes < cloudbuild < apply < teste
     assert (
-        "job_de_transcricao_gpu),$TRANSCRICAO_GPU_ANTES,$IMAGEM_TRANSCRICAO_GPU"
-        in deploy
+        "$JOB_TRANSCRICAO_GPU,$TRANSCRICAO_GPU_ANTES,$IMAGEM_TRANSCRICAO_GPU" in deploy
     )
-    assert "job_de_ocr_gpu),$OCR_GPU_ANTES,$IMAGEM_OCR_GPU" in deploy
+    assert "$JOB_OCR_GPU,$OCR_GPU_ANTES,$IMAGEM_OCR_GPU" in deploy
     # As esperas são as do Terraform, as mesmas do Workflows.
     for saida in (
         "gpu_espera_total_s",
@@ -242,8 +241,8 @@ def test_deploy_dev_le_as_imagens_antes_do_apply_e_testa_depois_so_os_jobs_com_g
         "gpu_espera_maxima_s",
         "regiao_gpu",
     ):
-        assert f"tf output -raw {saida}" in deploy[teste - 600 :]
-    assert deploy.index("URL=$(tf output") > teste
+        assert f"={saida}" in deploy[teste - 1200 : teste]
+    assert "URL=url" in deploy[teste - 1200 : teste]
 
 
 def test_o_limiar_de_mudanca_do_ocr_vem_de_um_local_no_job_com_gpu() -> None:
@@ -272,12 +271,11 @@ def _rodar_imagem_do_job(estado: str, describe_falha: bool = False) -> tuple[int
     """Roda a imagem_do_job do deploy-dev.sh com tf e gc simulados."""
     funcao = _funcao_do_deploy("imagem_do_job")
     script = f"""set -euo pipefail
-tf() {{ [[ $* == "output -raw job_de_ocr_gpu" ]] && echo mam-ocr-gpu; }}
 gc() {{ {"echo 'Cannot find job' >&2; return 1" if describe_falha else 'echo "imagem-de-$4"'}; }}
 GPU_REGIAO=us-east4
 ESTADO_DOS_JOBS={shlex.quote(estado)}
 {funcao}
-ANTES=$(imagem_do_job ocr_gpu job_de_ocr_gpu)
+ANTES=$(imagem_do_job ocr_gpu mam-ocr-gpu)
 echo "[$ANTES]"
 """
     feito = subprocess.run(
@@ -291,7 +289,7 @@ def test_job_fora_do_estado_e_primeira_publicacao_mesmo_com_o_output_gravado() -
     assert _rodar_imagem_do_job("module.mam.google_cloud_run_v2_job.ocr") == (0, "[]")
 
 
-def test_job_no_estado_le_a_imagem_pelo_nome_do_output() -> None:
+def test_job_no_estado_le_a_imagem_pelo_nome_ja_lido() -> None:
     estado = "module.mam.google_cloud_run_v2_job.ocr_gpu"
     assert _rodar_imagem_do_job(estado) == (0, "[imagem-de-mam-ocr-gpu]")
 
