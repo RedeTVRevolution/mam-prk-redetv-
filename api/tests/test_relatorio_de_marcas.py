@@ -809,3 +809,61 @@ def test_a_lista_da_marca_traz_as_insercoes_de_todas_as_grafias_pelo_rotulo() ->
     assert [(i.job_id, i.inicio_ms) for i in paginada] == [("j1", 10_000), ("j2", 0)]
     assert [i.job_id for i in sem_catalogo] == ["j4", "j5"]
     assert pelo_apelido == da_unifael
+
+
+def test_tipo_antigo_fica_no_fim_no_ranking_paginado_no_csv_e_nos_totais() -> None:
+    so = _so_que_conta(
+        [
+            _soma("j1", "Ambev", 1, "tipo_antigo"),
+            _soma("j2", "Ambev", 1, "tipo_antigo"),
+            _soma("j1", "Ambev", 2, "merchan_apresentador"),
+            _soma("j3", "Ambev", 1, "intervalo"),
+        ]
+    )
+
+    [ambev], total = _ranking(so)
+
+    assert [t.tipo for t in ambev.por_tipo] == [
+        "intervalo",
+        "merchan_apresentador",
+        "tipo_antigo",
+    ]
+    assert (total.marcas, total.insercoes, total.tempo_ms, total.videos) == (
+        1,
+        5,
+        5_000,
+        3,
+    )
+    assert (ambev.insercoes, ambev.videos, ambev.por_tipo[-1].videos) == (5, 3, 2)
+    linhas_csv = em_csv(relatorio_das_somas(so.somas((), None, None, ()))).splitlines()
+    assert [linha.split(",")[1] for linha in linhas_csv[1:]] == [
+        "todos",
+        "intervalo",
+        "merchan_apresentador",
+        "tipo_antigo",
+    ]
+
+
+def test_rota_em_csv_deixa_os_tipos_antigos_no_fim_em_ordem_alfabetica() -> None:
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            _linha("j1", "Jornal", None, "Ambev", "zeta_antigo"),
+            _linha("j1", "Jornal", None, "Ambev", "intervalo"),
+            _linha("j1", "Jornal", None, "Ambev", "alfa_antigo"),
+            _linha("j1", "Jornal", None, "Ambev", "alfa_antigo"),
+        ],
+    )
+    cliente = _cliente(consulta=ConsultaEmMemoria(copia))
+
+    resposta = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO)
+
+    linhas = list(csv.reader(io.StringIO(resposta.text)))
+    assert linhas == [
+        ["marca", "tipo", "insercoes", "tempo_ms", "videos"],
+        ["Ambev", "todos", "4", "4000", "1"],
+        ["Ambev", "intervalo", "1", "1000", "1"],
+        ["Ambev", "alfa_antigo", "2", "2000", "1"],
+        ["Ambev", "zeta_antigo", "1", "1000", "1"],
+    ]
