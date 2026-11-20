@@ -35,6 +35,11 @@ test('o selo continua com a indexação pendente e some quando ela ganha fim', (
   expect(finalizando(pronto, AGORA + 1000)).toBe(false)
 })
 
+test('o selo continua com o inventário encerrado e a indexação em curso', () => {
+  const emCurso = job({ etapas: [inventario('2026-11-01T12:30:00Z'), indexacao(null)], etapa_atual: 'indexacao' })
+  expect(finalizando(emCurso, AGORA + 1000)).toBe(true)
+})
+
 test('só um Job concluído tem o selo', () => {
   expect(finalizando(job({ estado: 'analisando', etapa_atual: 'analise' }), AGORA)).toBe(false)
 })

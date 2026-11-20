@@ -6,10 +6,16 @@ from pathlib import Path
 from api.cortes import TEMPO_LIMITE_S
 from api.jobs import TAMANHO_MAXIMO_PADRAO_BYTES
 from api.tests.test_workflow import FOLGA_DO_CONECTOR_S, MAIN, _timeout_do_job
-from api.validador import DURACAO_MAXIMA_S, TAXA_DO_AUDIO_HZ
+from api.validador import (
+    DURACAO_MAXIMA_S,
+    FILTRO_DO_PROXY,
+    TAXA_DO_AUDIO_HZ,
+)
 
 JOBS_TS = Path(__file__).parents[2] / "web" / "src" / "jobs.ts"
 GIB = 1024**3
+VALIDADOR = Path(__file__).parents[1] / "validador.py"
+ALTURA_DO_PROXY_MEDIDO = 480
 # Medido (#135) em 120 s de vídeo: o proxy 480p ficou em 51 MB = 5,75 GiB para 4 h.
 PROXY_MEDIDO_GIB_PARA_4H = 5.75
 DURACAO_DA_MEDIDA_S = 4 * 3600
@@ -31,10 +37,18 @@ def _teto_da_tela_s() -> float:
 
 
 def _espera_de_gpu_s() -> int:
-    bloco = MAIN.read_text().split('variable "espera_gpu_minutos" {')[1].split("\n}")[0]
-    achado = re.search(r"default\s*=\s*(\d+)", bloco)
-    assert achado is not None
-    return int(achado.group(1)) * 60
+    """O maior padrão de `espera_gpu_minutos`, no módulo e na raiz da prod."""
+    padroes = []
+    for arquivo in (MAIN, MAIN.parents[2] / "ambientes/prod/main.tf"):
+        bloco = (
+            arquivo.read_text()
+            .split('variable "espera_gpu_minutos" {')[1]
+            .split("\n}")[0]
+        )
+        achado = re.search(r"default\s*=\s*(\d+)", bloco)
+        assert achado is not None, arquivo
+        padroes.append(int(achado.group(1)) * 60)
+    return max(padroes)
 
 
 def test_teto_do_finalizando_cobre_a_etapa_mais_longa_depois_do_concluido() -> None:
@@ -66,6 +80,13 @@ def _volume_e_memoria_do_job_de_validacao() -> tuple[int, int]:
 
 def test_volume_da_validacao_guarda_copia_proxy_e_audio_no_teto() -> None:
     volume_gib, memoria_gib = _volume_e_memoria_do_job_de_validacao()
+    # A medição vale para o proxy de 480p e o áudio PCM s16le mono que o código gera.
+    altura = re.search(r"round\((\d+)\*dar", FILTRO_DO_PROXY)
+    assert altura is not None and int(altura.group(1)) == ALTURA_DO_PROXY_MEDIDO
+    assert f"min({ALTURA_DO_PROXY_MEDIDO}" in FILTRO_DO_PROXY
+    fonte = VALIDADOR.read_text()
+    assert '"-ac", "1", "-ar", str(TAXA_DO_AUDIO_HZ)' in fonte
+    assert '"-c:a", "pcm_s16le"' in fonte
     copia = TAMANHO_MAXIMO_PADRAO_BYTES / GIB
     proxy = PROXY_MEDIDO_GIB_PARA_4H * DURACAO_MAXIMA_S / DURACAO_DA_MEDIDA_S
     audio = TAXA_DO_AUDIO_HZ * BYTES_POR_AMOSTRA_PCM_S16LE_MONO * DURACAO_MAXIMA_S / GIB
