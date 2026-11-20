@@ -17,7 +17,7 @@ No vetor da foto, nenhum corte por distância separa as cenas certas das erradas
 ## Decisão
 
 - O modelo da consulta (`MODELO_DA_CONSULTA`, o 3.5 Flash-Lite, ADR 0013) recebe a foto e devolve o nome do objeto e no máximo uma característica visível (`termo_da_foto` em `api/entendimento_da_consulta.py`). Na medição, com duas características, "gravata listrada vermelha" trouxe outras cenas vermelhas primeiro; o ajuste da instrução para uma característica só não foi medido.
-- A busca segue pelo mesmo caminho do texto digitado: `entender` (saneamento, Model Armor, entendimento pelo modelo), índice, ranking e cursor de página. O termo é saída de modelo e entrada não confiável, como o texto digitado, e o limite de 60 caracteres vale antes do entendimento. A instrução diz que texto escrito na foto é parte da imagem, nunca ordem. A busca visual (`visual`) e o vetor da foto não entram.
+- A busca segue pelo mesmo caminho do texto digitado: `entender` (saneamento e as regras locais, sem modelo nem Model Armor desde o #517, ADR 0018), índice, ranking e cursor de página. O termo é saída de modelo e entrada não confiável, como o texto digitado, e o limite de 60 caracteres vale antes do entendimento. A instrução diz que texto escrito na foto é parte da imagem, nunca ordem. A busca visual (`visual`) e o vetor da foto não entram.
 - O termo que a busca usou volta em `entendida.termo_da_foto`, também nas páginas seguintes (a lista guardada o leva), e a tela mostra "Buscando por: microfone", para a pessoa entender o resultado e refinar digitando.
 - Voltam momentos de todos os tipos, como na busca por texto, e não só planos.
 - O rótulo de custo da chamada que descreve a foto é `descricao_da_foto`, separado do `entendimento_da_consulta`.
@@ -29,11 +29,13 @@ Se o modelo da consulta não está ligado, falha, demora, responde fora do esque
 - manteria o código do vetor da foto (`vetor_da_imagem`) só para esse caso;
 - o 503 já era o padrão da busca por foto quando a imagem não vira busca, e a web já o trata.
 
-O Model Armor acusando o termo segue o texto digitado: o entendimento não roda e a busca cai no plano B (`plano_b` na resposta), com o termo como palavras soltas.
+A busca em si não passa pelo modelo (#517): o termo da foto entra nela como texto digitado, e não há entendimento nem plano B dele.
 
 ## Custo e tempo
 
-Cada busca por foto faz duas chamadas ao Flash-Lite em série: uma com a imagem (descrever) e uma em texto (entender o termo), mais o Model Armor e o ranking de qualquer busca. O embedding da foto sai. O prazo da rota da foto passa a ser o da busca por texto mais o teto de uma chamada (`TEMPO_DA_CONSULTA_S`), para o plano B do entendimento chegar antes do 504. A página seguinte sai da lista guardada e não chama o modelo.
+Cada busca por foto faz uma chamada só ao Flash-Lite, com a imagem (descrever); a busca depois não passa pelo modelo (#517), só pelo índice e pelo ranking de qualquer busca. O embedding da foto sai. O prazo da rota da foto é o da busca por texto mais o teto dessa chamada (`TEMPO_DA_CONSULTA_S`). A página seguinte sai da lista guardada e não chama o modelo.
+
+Trocar o programa ou o período é consulta nova, e antes repetia a chamada ao modelo e o envio da foto (até 5 MB) a cada troca. Desde o #802 a 1ª resposta traz um token (`X-Token-Da-Foto`): o id de um documento curto da coleção `listas_da_busca`, com o dono, o termo que o modelo deu, o SHA-256 do JPEG regravado e o prazo de 15 min. A foto nunca é guardada: o hash não permite refazê-la. Com o token no lugar do arquivo, a rota não chama o modelo nem decodifica a foto, e a impressão do cursor é a da 1ª página, então o cursor vale com o token. Token vencido, de outro dono ou que não é de token responde 422 `Token da foto inválido`, e a tela reenvia a foto.
 
 ## O que continua
 

@@ -29,6 +29,7 @@ from api.busca import (
     EvidenciaDaBusca,
     Facetas,
     ListaDaBusca,
+    ListasDaBusca,
     MomentoGuardado,
     Ranking,
     RankingEmOrdem,
@@ -1076,6 +1077,7 @@ def cliente(
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     eventos: Eventos | None = None,
     aceita_teste_de_carga: bool = False,
+    listas_da_busca: ListasDaBusca | None = None,
 ) -> tuple[TestClient, Mundo]:
     m = Mundo(*respostas)
     m.com(job("j1"), objeto("a", "j1", 0, 1_000))
@@ -1095,6 +1097,7 @@ def cliente(
         limites_da_imagem=limites_da_imagem,
         eventos=eventos,
         aceita_teste_de_carga=aceita_teste_de_carga,
+        listas_da_busca=listas_da_busca,
     )
     return TestClient(app), m
 

@@ -265,3 +265,15 @@ def test_toda_rota_que_aceita_a_chave_esta_documentada_e_so_ela() -> None:
 
     assert not abertas_sem_chave
     assert aceitas == {(o.metodo, o.caminho) for o in OPERACOES}
+
+
+def test_a_busca_por_imagem_documenta_o_token_da_foto() -> None:
+    operacao = esquema_dos_sistemas(criar_app())["paths"]["/v1/busca/imagem"]["post"]
+
+    assert "X-Token-Da-Foto" in operacao["responses"]["200"]["headers"]
+    formulario = operacao["requestBody"]["content"]["multipart/form-data"]["schema"]
+    assert set(formulario["properties"]) == {"arquivo", "token"}
+    # Exatamente um dos dois.
+    assert formulario["oneOf"] == [{"required": ["arquivo"]}, {"required": ["token"]}]
+    assert "required" not in formulario
+    assert "Token da foto inválido" in operacao["responses"]["422"]["description"]

@@ -848,7 +848,11 @@ OPERACOES: tuple[Operacao, ...] = (
         "`entendida.termo_da_foto`. O corpo é "
         "`multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 "
         "milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória "
-        "e pelo modelo: não é guardada. "
+        "e pelo modelo: não é guardada. A resposta da busca com o `arquivo` e sem `cursor` traz "
+        "o cabeçalho `X-Token-Da-Foto`: mande-o no campo `token`, no lugar do `arquivo`, para "
+        "trocar o programa ou o período sem reenviar a foto nem chamar o modelo de novo; vale "
+        "15 min, para a mesma chave. Envie exatamente um dos dois campos. Com `token` o "
+        "`cursor` também vale; sem o `token`, repita a consulta com o `arquivo` e o `cursor`. "
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
@@ -880,8 +884,14 @@ OPERACOES: tuple[Operacao, ...] = (
             ),
             Erro(
                 422,
-                "Envie a imagem no campo arquivo",
-                "O multipart não tem o campo `arquivo`.",
+                "Envie a imagem no campo arquivo ou o token no campo token, só um deles",
+                "O multipart não tem o campo `arquivo` nem o `token`, ou tem os dois.",
+            ),
+            Erro(
+                422,
+                "Token da foto inválido",
+                "O `token` não existe, venceu (vale 15 min), é de outra chave ou não é um "
+                "token da foto: reenvie a foto no campo `arquivo`.",
             ),
             _CURSOR_DA_BUSCA,
             _MUITA_CONSULTA,
@@ -904,9 +914,14 @@ OPERACOES: tuple[Operacao, ...] = (
                                 "type": "string",
                                 "format": "binary",
                                 "description": "A foto: JPEG ou PNG, até 5 MB.",
-                            }
+                            },
+                            "token": {
+                                "type": "string",
+                                "description": "O `X-Token-Da-Foto` da busca anterior, no "
+                                "lugar do `arquivo`.",
+                            },
                         },
-                        "required": ["arquivo"],
+                        "oneOf": [{"required": ["arquivo"]}, {"required": ["token"]}],
                     }
                 }
             },

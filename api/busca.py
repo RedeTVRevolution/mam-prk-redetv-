@@ -240,6 +240,8 @@ class ResultadoDaBusca(BaseModel):
     quadros_expiram_em: datetime
     # A página seguinte (#426): a rota a põe no cabeçalho `X-Proximo-Cursor`, fora do corpo.
     _proximo_cursor: str | None = PrivateAttr(default=None)
+    # O token da foto (#802), na 1ª resposta da busca por foto: a rota o põe em `X-Token-Da-Foto`.
+    _token_da_foto: str | None = PrivateAttr(default=None)
 
 
 class MomentoGuardado(BaseModel):
@@ -302,6 +304,14 @@ class ListasDaBusca(Protocol):
         ...
 
     def ler(self, id: str) -> dict[str, Any] | None: ...
+
+
+class TokenDaFotoInvalido(Exception):
+    """O token não existe, venceu, é de outro dono, não é de token ou está fora do formato."""
+
+
+# O id que o Firestore dá a um documento tem 20 letras e números.
+TAMANHO_DO_TOKEN = 20
 
 
 class ListasDaBuscaEmMemoria:
@@ -461,6 +471,7 @@ class Busca:
         sistema: str | None = None,
         ajustes: Ajustes | None = None,
         imagem: bytes | None = None,
+        token: str | None = None,
         cancelado: threading.Event | None = None,
         cursor: str | None = None,
         dono: str = "",
@@ -474,16 +485,24 @@ class Busca:
         foto (#443) e a busca segue como se a pessoa o tivesse digitado, com o mesmo
         saneamento, índice e ranking; só os filtros de `ajustes` valem. Sem o modelo,
         se ele falhar ou não achar objeto, levanta `BuscaPorImagemIndisponivel`: sem texto
-        digitado não há plano B."""
+        digitado não há plano B.
+
+        `token` (#802) vale a foto: o termo que o modelo deu e o SHA-256 do JPEG ficam num
+        documento curto de `listas_da_busca`, e com ele a busca não chama o modelo
+        (`TokenDaFotoInvalido` se não vale para `dono`); a 1ª busca por `imagem` o devolve
+        em `_token_da_foto`."""
         inicio = _agora()
         impostos = filtros_do_servidor or Filtros()
         if sistema is not None:
             # O filtro do índice só tira inelegíveis do teto; `_visivel_de` decide.
             impostos = replace(impostos, sistema=sistema)
         termo_da_foto = None
+        da_foto = self._ler_token(token, dono) if token is not None else None
         partes = {
             "texto": texto,
-            "imagem": hashlib.sha256(imagem).hexdigest()
+            "imagem": da_foto["hash"]
+            if da_foto
+            else hashlib.sha256(imagem).hexdigest()
             if imagem is not None
             else None,
             "sistema": sistema,
@@ -500,7 +519,9 @@ class Busca:
         # Lida antes de qualquer decisão sobre quem conta e gravada na lista: uma mudança na
         # lixeira do catálogo no meio da busca faz a página seguinte ser recusada (#598).
         versao = self._versao.atual()
-        if imagem is not None:
+        if da_foto:
+            texto = termo_da_foto = da_foto["termo"]
+        elif imagem is not None:
             _conferir(cancelado)
             texto = termo_da_foto = self._termo_da_foto(imagem)
         entendida = _ajustada(
@@ -849,7 +870,40 @@ class Busca:
             resultado._proximo_cursor = self._guardar(
                 resultado, todos, termos, dono, impressao, limite, versao
             )
+        if imagem is not None and termo_da_foto:
+            resultado._token_da_foto = self._guardar_token(
+                dono, termo_da_foto, partes["imagem"], agora
+            )
         return resultado
+
+    def _guardar_token(
+        self, dono: str, termo: str, sha: object, agora: datetime
+    ) -> str:
+        """Só dono, termo, hash e prazo: a foto nunca vai ao documento."""
+        return self._listas.gravar(
+            {
+                "dono": dono,
+                "termo": termo,
+                "hash": sha,
+                "criado_em": agora,
+                "expira_em": agora + VALIDADE_DA_LISTA,
+            }
+        )
+
+    def _ler_token(self, token: str, dono: str) -> dict[str, Any]:
+        if not (_ascii_alnum(token) and len(token) <= TAMANHO_DO_TOKEN):
+            raise TokenDaFotoInvalido
+        documento = self._listas.ler(token)
+        if (
+            not documento
+            or documento.get("dono") != dono
+            or not isinstance(documento.get("termo"), str)
+            or not isinstance(documento.get("hash"), str)
+            # O TTL do Firestore apaga com atraso.
+            or documento["expira_em"] <= self._relogio()
+        ):
+            raise TokenDaFotoInvalido
+        return documento
 
     def _reordenar(
         self, impressao: str, texto: str, registros: list[Registro]
