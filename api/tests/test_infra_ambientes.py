@@ -541,7 +541,9 @@ def test_os_outputs_que_a_criacao_le_existem_depois_do_apply_direcionado() -> No
     modulo = (MODULO / "main.tf").read_text()
     for saida in SAIDAS_DA_BUSCA:
         bloco = modulo[modulo.index(f'output "{saida}" {{') :].split("\n}")[0]
-        assert "depends_on = [google_project_iam_member.terraform_busca]" in bloco, saida
+        assert "depends_on = [google_project_iam_member.terraform_busca]" in bloco, (
+            saida
+        )
 
 
 def test_o_erro_de_esquema_incompativel_nao_vira_aviso_de_reindexar(
