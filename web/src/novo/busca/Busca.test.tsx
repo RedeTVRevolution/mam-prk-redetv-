@@ -723,7 +723,7 @@ test('token inválido ao trocar o programa: reenvia a foto, sem erro (#805)', as
 
 test('cursor inválido com token válido: recomeça do topo sem cursor e sem reenviar a foto (#805)', async () => {
   let recusou = false
-  buscaDeDuasPaginas((p) => {
+  buscaDeDuasPaginas(() => {
     if (recusou) return null
     recusou = true
     return HttpResponse.json({ detail: 'Cursor inválido' }, { status: 422 })

@@ -53,16 +53,16 @@ export function useBusca(pedido: PedidoDaBusca | null) {
   const pedida = pedido?.tipo === 'texto' ? pedido.consulta : null
   const [exibida, setExibida] = useState(pedida)
   // O token da foto (#805): fica fora da chave, para não refazer a busca quando chega. Vale para a
-  // foto `id`; a resposta só o grava se a seleção de filtros que a pediu ainda é a da tela.
+  // foto `id`; a resposta só o grava se a seleção de filtros que a pediu é a do último pedido.
   const token = useRef<{ id: number; valor: string } | null>(null)
-  const daTela = useRef('')
-  daTela.current = hashKey(chave)
-  const minha = daTela.current
+  const ultimo = useRef('')
+  const minha = hashKey(chave)
   const porImagem = async (p: Extract<PedidoDaBusca, { tipo: 'imagem' }>, cursor: string): Promise<PaginaDaBusca> => {
+    ultimo.current = minha
     const dele = token.current?.id === p.id ? token.current.valor : null
     try {
       const pagina = await api.buscarPorImagem(dele ? { token: dele } : p.foto, p.consulta, VIDEOS_POR_PAGINA, cursor)
-      if (pagina.tokenDaFoto && daTela.current === minha) token.current = { id: p.id, valor: pagina.tokenDaFoto }
+      if (pagina.tokenDaFoto && ultimo.current === minha) token.current = { id: p.id, valor: pagina.tokenDaFoto }
       return pagina
     } catch (erro) {
       if (!dele || !(erro instanceof PedidoInvalido) || erro.message !== TOKEN_DA_FOTO_INVALIDO) throw erro
