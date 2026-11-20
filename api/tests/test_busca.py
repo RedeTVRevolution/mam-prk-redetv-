@@ -1556,7 +1556,10 @@ def test_sem_periodo_e_ignorado_e_nao_vira_filtro_do_evento() -> None:
         params={"q": "vestido", "sem_periodo": "true"},
         headers=AUTORIZACAO,
     )
-    corpo = lambda r: {k: v for k, v in r.json().items() if k != "quadros_expiram_em"}
+
+    def corpo(r: Any) -> dict[str, Any]:
+        return {k: v for k, v in r.json().items() if k != "quadros_expiram_em"}
+
     assert com.status_code == 200 and corpo(com) == corpo(base)
     assert all(f.nome != "sem_periodo" for e in eventos.publicados for f in e.filtros)
 
