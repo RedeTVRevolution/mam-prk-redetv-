@@ -13,7 +13,12 @@ from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.cache_curto import CacheCurto
-from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, PessoaDoCatalogo
+from api.catalogo import (
+    CatalogoEmMemoria,
+    EnvioParaLixeira,
+    FusaoDaPessoa,
+    PessoaDoCatalogo,
+)
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -785,7 +790,7 @@ class CatalogoQueConta(CatalogoEmMemoria):
 def _empate_com_nome_atual() -> tuple[CatalogoQueConta, CopiaEmMemoria]:
     """Quatro pessoas empatadas em 2 s, com o id na ordem contrária à dos nomes atuais.
     p1 se chama "Zélia" no catálogo e "Ana" (o mais frequente) na cópia; p3 foi fundida em
-    p4 ("Carla"), e o nome dela mesma ("Zzz Velho") não vale."""
+    p4 ("Carla"), e o nome dela mesma ("Zzz Velho") não vale; as duas somam numa linha (#784)."""
     catalogo = CatalogoQueConta()
     for id_, nome in (
         ("p1", "Zélia"),
@@ -826,7 +831,7 @@ def _empate_com_nome_atual() -> tuple[CatalogoQueConta, CopiaEmMemoria]:
 def test_tela_e_csv_saem_na_mesma_ordem_no_empate_pelo_nome_atual() -> None:
     catalogo, copia = _empate_com_nome_atual()
     cliente = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
-    esperado = [("p2", "Bia"), ("p3", "Carla"), ("p4", "Carla"), ("p1", "Zélia")]
+    esperado = [("p2", "Bia"), ("p4", "Carla"), ("p1", "Zélia")]  # p3 soma em p4
 
     completo = cliente.get(ROTA, headers=AUTORIZACAO).json()["pessoas"]
     csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO).text
@@ -927,7 +932,8 @@ def test_sem_resultados_o_json_vem_vazio_e_o_csv_so_com_o_cabecalho() -> None:
 
 
 class SoSomas:
-    """Uma fonte nova das somas: implementa só `somas`, como o Protocol exige."""
+    """Uma fonte nova das somas: `somas` de verdade e a consulta de intervalos que falha
+    (sem fusão no período, ninguém pode pedi-la, #784)."""
 
     def __init__(self, copia: CopiaEmMemoria) -> None:
         self._em_memoria = ConsultaEmMemoria(copia)
@@ -936,6 +942,15 @@ class SoSomas:
         self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
         return self._em_memoria.somas(programas, desde, ate)
+
+    def aparicoes_unidas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        pessoas: Sequence[str],
+    ) -> list[tuple[str, str, int, int]]:
+        raise AssertionError("sem fusão no período não há consulta de intervalos")
 
 
 def test_uma_fonte_so_com_somas_serve_ao_ranking_e_aos_videos_da_pessoa() -> None:
@@ -953,3 +968,253 @@ def test_uma_fonte_so_com_somas_serve_ao_ranking_e_aos_videos_da_pessoa() -> Non
         resposta = nova.get(url, params=params, headers=AUTORIZACAO)
         assert resposta.status_code == 200
         assert resposta.text == velha.get(url, params=params, headers=AUTORIZACAO).text
+
+
+# --- a pessoa fundida numa linha só (#784) ------------------------------------------------
+
+
+def _fusao() -> FusaoDaPessoa:
+    return FusaoDaPessoa(
+        destino_id="p4", em=agora_utc(), por_uid="u", por_email="u@r.com", motivo="x"
+    )
+
+
+def _aparicao(job: str, pessoa: str, ini: int, fim: int, tipo: str = "aparicao") -> Any:
+    return LinhaDoMomento(
+        job_id=job,
+        programa="Jornal",
+        data_de_exibicao=date(2026, 10, 1),
+        tipo=tipo,
+        inicio_ms=ini,
+        fim_ms=fim,
+        pessoas=[PessoaDoMomento(pessoa, pessoa)],
+    )
+
+
+class FonteQueContaIntervalos(ConsultaEmMemoria):
+    def __init__(self, copia: CopiaEmMemoria) -> None:
+        super().__init__(copia)
+        self.pedidos: list[Sequence[str]] = []
+
+    def aparicoes_unidas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        pessoas: Sequence[str],
+    ) -> list[tuple[str, str, int, int]]:
+        self.pedidos.append(pessoas)
+        return super().aparicoes_unidas(programas, desde, ate, pessoas)
+
+
+def _mundo_da_fusao() -> tuple[CatalogoQueConta, FonteQueContaIntervalos]:
+    """p3 foi fundida em p4 ("Carla"). Em j1 as duas aparecem com intervalos que se
+    sobrepõem (p3 0-2 s, p4 1-3 s: 3 s unidos, não 4 s somados) e p3 cita Carla na fala;
+    j2 só tem p3 (1 s); j3 só tem p4 (0,5 s); p1 ("Ana") tem 1,5 s em j3."""
+    catalogo = CatalogoQueConta()
+    for id_, nome in (("p1", "Ana"), ("p3", "Carla Velha"), ("p4", "Carla")):
+        catalogo._itens[id_] = PessoaDoCatalogo(id=id_, nome=nome, papel="")
+    catalogo.definir_fusao("p3", _fusao())
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            _aparicao("j1", "p3", 0, 2_000),
+            _aparicao("j1", "p4", 1_000, 3_000),
+            _aparicao("j1", "p3", 0, 0, "mencao_na_fala"),
+        ],
+    )
+    copia.gravar("j2", [_aparicao("j2", "p3", 0, 1_000)])
+    copia.gravar("j3", [_aparicao("j3", "p4", 0, 500), _aparicao("j3", "p1", 0, 1_500)])
+    return catalogo, FonteQueContaIntervalos(copia)
+
+
+def _producao(
+    catalogo: CatalogoEmMemoria, fonte: ConsultaDeMomentos, cache: CacheCurto
+) -> TestClient:
+    """Como em `api/main.py`: o cache entre a consulta e `SoComQuemConta`."""
+    return _cliente(consulta=ComCache(fonte, cache), catalogo=catalogo)
+
+
+def test_pessoa_fundida_soma_na_linha_do_destino_com_o_tempo_unido() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    corpo = cliente.get(ROTA, headers=AUTORIZACAO).json()
+
+    carla = next(p for p in corpo["pessoas"] if p["pessoa_id"] == "p4")
+    assert [p["pessoa_id"] for p in corpo["pessoas"]] == ["p4", "p1"]
+    assert carla["nome"] == "Carla"  # o nome atual do destino
+    assert carla["tempo_de_tela_ms"] == 3_000 + 1_000 + 500  # j1 unido + j2 + j3
+    assert carla["aparicoes"] == 3 and carla["videos"] == 3
+    assert carla["mencoes_na_fala"] == 1
+    por_video = {v["job_id"]: v["tempo_de_tela_ms"] for v in carla["por_video"]}
+    assert por_video == {"j1": 3_000, "j2": 1_000, "j3": 500}
+    total = cliente.get(ROTA, params={"limite": 5}, headers=AUTORIZACAO).json()["total"]
+    assert total["pessoas"] == 2
+    assert total["tempo_de_tela_ms"] == 4_500 + 1_500
+    assert total["aparicoes"] == 4
+
+
+def test_pessoa_fundida_sai_numa_linha_so_no_csv_e_nas_paginas() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO).text
+    pagina = cliente.get(ROTA, params={"limite": 1}, headers=AUTORIZACAO).json()
+
+    linhas = list(csv.DictReader(io.StringIO(csv_)))
+    assert [(r["pessoa_id"], r["tempo_de_tela_ms"]) for r in linhas] == [
+        ("p4", "4500"),
+        ("p1", "1500"),
+    ]
+    assert [p["pessoa_id"] for p in pagina["pessoas"]] == ["p4"]
+    assert pagina["total"]["pessoas"] == 2
+
+
+def test_os_videos_do_destino_trazem_um_item_por_video_com_os_das_origens() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    videos = cliente.get(
+        f"{ROTA}/videos", params={"pessoa_id": "p4"}, headers=AUTORIZACAO
+    ).json()
+    da_origem = cliente.get(
+        f"{ROTA}/videos", params={"pessoa_id": "p3"}, headers=AUTORIZACAO
+    ).json()
+
+    assert [
+        (
+            v["job_id"],
+            v["tempo_de_tela_ms"],
+            v["aparicoes"],
+            v["mencoes_na_fala"],
+            v["mencoes_no_texto"],
+        )
+        for v in videos
+    ] == [("j1", 3_000, 1, 1, 0), ("j2", 1_000, 1, 0, 0), ("j3", 500, 1, 0, 0)]
+    assert da_origem == []  # a origem não é linha do ranking
+
+
+def test_origem_sozinha_no_video_so_troca_o_id_e_nao_consulta_intervalos() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    fonte._copia.por_job.pop("j1")  # sem o vídeo em que as duas aparecem
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    corpo = cliente.get(ROTA, headers=AUTORIZACAO).json()
+
+    carla = next(p for p in corpo["pessoas"] if p["pessoa_id"] == "p4")
+    assert carla["tempo_de_tela_ms"] == 1_500  # j2 (de p3) e j3 (de p4)
+    assert fonte.pedidos == []
+
+
+def test_duas_origens_no_mesmo_destino_somam_uma_linha() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    catalogo._itens["p5"] = PessoaDoCatalogo(id="p5", nome="Carla Outra", papel="")
+    catalogo.definir_fusao("p5", _fusao())
+    fonte._copia.gravar(
+        "j4",
+        [
+            _aparicao("j4", "p3", 0, 1_000),
+            _aparicao("j4", "p5", 500, 1_500),
+            _aparicao("j4", "p4", 5_000, 6_000),
+        ],
+    )
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    corpo = cliente.get(ROTA, headers=AUTORIZACAO).json()
+
+    carla = corpo["pessoas"][0]
+    por_video = {v["job_id"]: v["tempo_de_tela_ms"] for v in carla["por_video"]}
+    assert por_video["j4"] == 1_500 + 1_000  # 0-1,5 s unido e 5-6 s
+    assert next(v for v in carla["por_video"] if v["job_id"] == "j4")["aparicoes"] == 2
+    assert [p["pessoa_id"] for p in corpo["pessoas"]] == ["p4", "p1"]
+    assert fonte.pedidos and set(fonte.pedidos[0]) == {"p3", "p4", "p5"}
+
+
+def test_sem_fusao_no_periodo_nao_ha_segunda_consulta() -> None:
+    copia = _varias_pessoas()
+    catalogo = _catalogo_da_copia(ConsultaEmMemoria(copia))
+    cliente = _producao(catalogo, SoSomas(copia), CacheCurto())
+
+    assert cliente.get(ROTA, headers=AUTORIZACAO).status_code == 200
+    assert (
+        cliente.get(
+            f"{ROTA}/videos", params={"pessoa_id": "c1"}, headers=AUTORIZACAO
+        ).status_code
+        == 200
+    )
+
+
+def test_fundida_na_lixeira_ou_com_destino_purgado_continua_fora() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+    # destino na lixeira: a origem também não conta (o elo do caminho está nela)
+    catalogo.definir_lixeira(
+        "p4",
+        EnvioParaLixeira(em=agora_utc(), por_uid="u", por_email="u@r.com", motivo="x"),
+    )
+
+    na_lixeira = cliente.get(ROTA, params={"limite": 5}, headers=AUTORIZACAO).json()
+    assert [p["pessoa_id"] for p in na_lixeira["pessoas"]] == ["p1"]
+    assert na_lixeira["total"]["pessoas"] == 1
+
+    catalogo.definir_lixeira("p4", None)
+    catalogo.apagar("p4")  # destino purgado
+    purgado = cliente.get(ROTA, headers=AUTORIZACAO).json()
+    assert [p["pessoa_id"] for p in purgado["pessoas"]] == ["p1"]
+    assert (
+        cliente.get(
+            f"{ROTA}/videos", params={"pessoa_id": "p4"}, headers=AUTORIZACAO
+        ).json()
+        == []
+    )
+
+
+def test_o_cache_das_somas_guarda_as_somas_sem_fusao_na_mesma_chave() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cache = CacheCurto()
+    cliente = _producao(catalogo, fonte, cache)
+    cliente.get(ROTA, headers=AUTORIZACAO)
+
+    guardadas: list[PessoaNoVideo] = cache.obter(
+        ("tempo-de-tela", (), None, None), lambda: pytest.fail()
+    )
+
+    assert guardadas == fonte.somas((), None, None)
+    assert {s.pessoa_id for s in guardadas} == {"p1", "p3", "p4"}  # ids originais
+
+
+def test_bigquery_pede_os_intervalos_so_das_pessoas_com_os_filtros_da_soma() -> None:
+    transporte = Transporte(
+        {"jobComplete": True, "rows": [_linha_do_bq("j1", "p3", "0", "2000")]}
+    )
+
+    intervalos = ConsultaBigQuery(CONFIG, transporte).aparicoes_unidas(
+        ("Jornal",), date(2026, 10, 1), date(2026, 10, 31), ["p3", "p4"]
+    )
+
+    assert intervalos == [("j1", "p3", 0, 2_000)]
+    (corpo,) = transporte.corpos
+    consulta = corpo["query"]
+    assert "`proj.ds.tab`" in consulta
+    assert "p.id IN UNNEST(@pessoas)" in consulta
+    assert "t.programa IN UNNEST(@programas)" in consulta
+    assert "t.data_de_exibicao >= @desde" in consulta
+    assert "t.data_de_exibicao <= @ate" in consulta
+    assert "p3" not in consulta  # os ids vão como parâmetro
+    por_nome = {p["name"]: p["parameterValue"] for p in corpo["queryParameters"]}
+    assert [v["value"] for v in por_nome["pessoas"]["arrayValues"]] == ["p3", "p4"]
+    assert set(por_nome) == {"pessoas", "programas", "desde", "ate"}
+
+
+def test_videos_de_quem_nao_esta_em_fusao_nao_consultam_intervalos() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    resposta = cliente.get(
+        f"{ROTA}/videos", params={"pessoa_id": "p1"}, headers=AUTORIZACAO
+    )
+
+    assert [v["job_id"] for v in resposta.json()] == ["j3"]
+    assert fonte.pedidos == []  # a fusão p3 -> p4 não é da p1
