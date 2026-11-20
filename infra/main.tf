@@ -101,12 +101,6 @@ variable "busca_aceita_teste_de_carga" {
   default     = false
 }
 
-variable "banco_firestore" {
-  type        = string
-  default     = "mam-principal"
-  description = "Nome do banco principal do Firestore (#536)."
-}
-
 variable "vagas_de_gpu" {
   description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
   type        = number
@@ -128,10 +122,6 @@ module "mam" {
   imagem_transcricao_gpu       = var.imagem_transcricao_gpu
   imagem_ocr_gpu               = var.imagem_ocr_gpu
   imagem_objetos               = var.imagem_objetos
-  florence_modelo              = var.florence_modelo
-  florence_feixes              = var.florence_feixes
-  florence_lote                = var.florence_lote
-  florence_legendas            = var.florence_legendas
   dominio                      = var.dominio
   waf_ativo                    = var.waf_ativo
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
@@ -139,7 +129,6 @@ module "mam" {
   vagas_de_gpu                 = var.vagas_de_gpu
   busca_consultas_por_minuto   = var.busca_consultas_por_minuto
   busca_aceita_teste_de_carga  = var.busca_aceita_teste_de_carga
-  banco_firestore              = var.banco_firestore
 
   # O índice ANN da descrição (~R$ 290/mês; ADR 0006): o KNN sem índice aceita só 100 mil
   # registros, uns 44 h de vídeo.
@@ -399,16 +388,6 @@ moved {
 moved {
   from = google_firestore_index.acervo
   to   = module.mam.google_firestore_index.acervo
-}
-
-moved {
-  from = google_firestore_index.auditoria
-  to   = module.mam.google_firestore_index.auditoria
-}
-
-moved {
-  from = google_model_armor_template.consulta_da_busca
-  to   = module.mam.google_model_armor_template.consulta_da_busca
 }
 
 moved {
@@ -703,12 +682,4 @@ moved {
 
 output "indices_da_mescla" {
   value = module.mam.indices_da_mescla
-}
-
-output "indices_a_remover" {
-  value = module.mam.indices_a_remover
-}
-
-output "indices_que_ficam" {
-  value = module.mam.indices_que_ficam
 }

@@ -64,11 +64,8 @@ HASH_DA_AMOSTRA = "8cd28b372908bcaa704a438965f8de47238c9514d5efefa89c510b82032f9
 def test_o_alvo_baixa_o_modelo_na_revisao_do_adaptador_conferindo_cada_hash() -> None:
     hashes_especificos = {
         "large": [ARQUIVOS_DO_MODELO[0][0], ARQUIVOS_DO_MODELO[2][0]],
-        "base": [
-            "2a4dfe9885d183da121f239ada734bd700ee6908b650a7a25ab32eb104fe1d7a",
-            "62f3e696da74f8869a68ddb529a9b3e14eb25b21c592cb3dea6179bf944df6a0",
-        ],
     }
+    assert list(florence.MODELOS) == ["large"]
     for nome, modelo in florence.MODELOS.items():
         repositorio, revisao = modelo.split("@")
         assert (
@@ -84,6 +81,11 @@ def test_o_alvo_baixa_o_modelo_na_revisao_do_adaptador_conferindo_cada_hash() ->
     assert "$4  /modelo/$nome/config.json" in ALVO
     assert "$5  /modelo/$nome/model.safetensors" in ALVO
     assert "sha256sum -c /tmp/hashes || exit 1;" in ALVO
+
+
+def test_o_alvo_nao_baixa_o_florence_base() -> None:
+    assert "Florence-2-base" not in ALVO
+    assert "/modelo/base" not in ALVO
 
 
 def test_o_alvo_baixa_a_amostra_conferindo_o_hash_antes_do_uv_sync() -> None:
@@ -123,11 +125,10 @@ def test_o_bake_monta_e_envia_a_imagem_com_cache_da_gpu() -> None:
     bake = (RAIZ / "docker-bake.hcl").read_text()
     cloudbuild = (RAIZ / "cloudbuild.yaml").read_text()
     padrao = bake[bake.index('group "default"') :].split("}")[0]
-    gpu = bake[bake.index('group "gpu"') :].split("}")[0]
     bloco = bake[bake.index('target "objetos-gpu"') :].split("\n}")[0]
 
     assert 'variable "OBJETOS_GPU" {}' in bake
-    assert "objetos-gpu" in padrao and "objetos-gpu" in gpu
+    assert "objetos-gpu" in padrao
     assert 'inherits   = ["base"]' in bloco
     assert "tags       = [OBJETOS_GPU]" in bloco
     assert "type=registry,ref=${CACHE_GPU}:objetos-gpu" in bloco
@@ -171,7 +172,7 @@ def test_o_job_de_objetos_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu() -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
 
     assert 'name                = "mam-objetos-gpu"' in job
-    assert "location            = var.regiao_gpu" in job
+    assert "location            = local.regiao_gpu" in job
     assert 'accelerator = "nvidia-l4"' in job
     assert '"nvidia.com/gpu" = "1"' in job
     assert re.search(r'cpu\s+= "4"', job) and re.search(r'memory\s+= "16Gi"', job)
@@ -181,8 +182,13 @@ def test_o_job_de_objetos_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu() -> None:
     assert 'google_service_account.mam["objetos"]' in job
     assert "image = var.imagem_objetos\n" in job
     assert "max_retries     = 0" in job
-    assert re.search(r'timeout\s+= "10800s"', job)
-    assert re.search(r'name\s+= "GCP_PROJECT_ID"\s+value = var.projeto', job)
+    assert re.search(
+        r'timeout\s+= "\$\{local\.timeout_dos_jobs_s\.objetos_gpu\}s"', job
+    )
+    assert re.search(
+        r"\bobjetos_gpu\s*=\s*10800\b", MAIN[MAIN.index("timeout_dos_jobs_s = {") :]
+    )
+    assert "for_each = local.env_do_projeto" in job
     assert re.search(
         r'name\s+= "BUCKET_DECUPAGENS"\s+value = local.buckets\["decupagens"\]', job
     )
@@ -209,16 +215,12 @@ def test_a_orquestracao_roda_o_job_de_objetos() -> None:
     assert 'google_service_account.mam["orquestracao"]' in iam
 
 
-def test_o_motor_dos_objetos_e_florence_por_padrao_e_so_aceita_dois_valores() -> None:
-    variavel = _bloco('variable "motor_objetos"')
-
-    assert 'default     = "florence"' in variavel or 'default = "florence"' in variavel
-    assert '"florence"' in variavel and '"gemini"' in variavel
-    assert "contains(" in variavel
+def test_o_motor_dos_objetos_nao_e_variavel_do_terraform() -> None:
+    assert "motor_objetos" not in MAIN
+    assert "MOTOR_OBJETOS" not in MAIN
 
 
-def test_o_workflows_recebe_o_motor_e_o_job_de_objetos_e_o_cabecalho_os_cita() -> None:
-    assert re.search(r"motor_objetos\s+= var\.motor_objetos", MAIN)
+def test_o_workflows_recebe_o_job_de_objetos_e_o_cabecalho_o_cita() -> None:
     assert re.search(
         r"job_de_objetos_gpu\s+= google_cloud_run_v2_job\.objetos_gpu\.name", MAIN
     )
@@ -227,7 +229,7 @@ def test_o_workflows_recebe_o_motor_e_o_job_de_objetos_e_o_cabecalho_os_cita() -
         .read_text()
         .split("\nmain:")[0]
     )
-    assert "${motor_objetos}" in cabecalho and "${job_de_objetos_gpu}" in cabecalho
+    assert "motor_objetos" not in cabecalho and "${job_de_objetos_gpu}" in cabecalho
 
 
 def test_a_imagem_e_o_nome_do_job_saem_como_output() -> None:
@@ -240,18 +242,19 @@ def test_a_imagem_e_o_nome_do_job_saem_como_output() -> None:
 def test_deploy_dev_publica_e_testa_o_job_de_objetos_pelo_digest() -> None:
     deploy = (RAIZ / "scripts" / "deploy-dev.sh").read_text()
 
-    primeiro = deploy[: deploy.index("REPOSITORIO=$(")]
+    primeiro = deploy[: deploy.index("\nler_ambiente REPOSITORIO=")]
     assert "-var imagem_objetos=pendente" in primeiro
     assert 'OBJETOS_GPU="$REPOSITORIO_GPU/objetos-gpu:$COMMIT"' in deploy
-    assert "OBJETOS_GPU_ANTES=$(imagem_do_job objetos_gpu job_de_objetos_gpu)" in deploy
+    assert 'OBJETOS_GPU_ANTES=$(imagem_do_job objetos_gpu "$JOB_OBJETOS_GPU")' in deploy
     assert "_OBJETOS_GPU=$OBJETOS_GPU" in deploy
     assert 'IMAGEM_OBJETOS=$(digest "$OBJETOS_GPU")' in deploy
     assert '-var "imagem_objetos=$IMAGEM_OBJETOS"' in deploy
-    assert "job_de_objetos_gpu),$OBJETOS_GPU_ANTES,$IMAGEM_OBJETOS" in deploy
+    assert "$JOB_OBJETOS_GPU,$OBJETOS_GPU_ANTES,$IMAGEM_OBJETOS" in deploy
+    assert "JOB_OBJETOS_GPU=job_de_objetos_gpu" in deploy
     assert "as cinco imagens" in deploy
 
 
-def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_motor_e_o_modelo() -> None:
+def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_modelo() -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "inventario"')
 
     assert 'name                = "mam-inventario"' in job
@@ -263,15 +266,17 @@ def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_motor_e_o_modelo() -
     assert 'egress = "ALL_TRAFFIC"' in job
     assert "google_compute_subnetwork.validacao.id" in job
     assert 'value = local.buckets["decupagens"]' in job
-    assert "value = var.motor_objetos" in job
-    assert "value = var.modelo_objetos" in job
+    assert "value = local.modelo_objetos" in job
     assert "max_retries     = 0" in job
 
 
 def test_o_modelo_do_inventario_e_o_flash_lite_do_gemini() -> None:
     from api.gemini import MODELO
 
-    assert f'default     = "{MODELO}"' in _bloco('variable "modelo_objetos"')
+    assert 'variable "modelo_objetos"' not in MAIN
+    assert re.search(
+        rf'^\s+modelo_objetos\s*= "{re.escape(MODELO)}"$', MAIN, re.MULTILINE
+    )
 
 
 def test_a_orquestracao_roda_o_job_do_inventario_e_o_workflows_o_recebe() -> None:
@@ -289,43 +294,28 @@ def test_a_orquestracao_roda_o_job_do_inventario_e_o_workflows_o_recebe() -> Non
 
 
 @pytest.mark.parametrize("raiz", ["infra", "infra/ambientes/prod"])
-def test_as_quatro_variaveis_do_florence_chegam_ao_job_com_os_padroes(
-    raiz: str,
-) -> None:
-    modulo = RAIZ / "infra/modulos/mam"
+def test_os_tres_locals_do_florence_chegam_ao_job_com_os_padroes(raiz: str) -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
     chamada = (
         (RAIZ / raiz / "main.tf").read_text().split('module "mam"')[1].split("\n}")[0]
     )
-    for nome, padrao, expressao in (
-        ("modelo", '"large"', "var.florence_modelo"),
-        ("feixes", "1", "tostring(var.florence_feixes)"),
-        ("lote", "16", "tostring(var.florence_lote)"),
-        ("legendas", "1", "tostring(var.florence_legendas)"),
-    ):
-        variavel = f"florence_{nome}"
-        for pasta in (RAIZ / raiz, modulo):
-            texto = (pasta / "variables.tf").read_text()
-            bloco = texto.split(f'variable "{variavel}"')[1].split("\n}")[0]
-            assert re.search(rf"default\s*= {re.escape(padrao)}\n", bloco)
-            assert "validation {" in bloco
-        assert re.search(rf"{variavel}\s*= var\.{variavel}\n", chamada)
+    assert not (RAIZ / raiz / "variables.tf").exists()
+    assert not (RAIZ / "infra/modulos/mam/variables.tf").exists()
+    for nome, padrao in (("feixes", "1"), ("lote", "16"), ("legendas", "1")):
+        local = f"florence_{nome}"
+        assert f'variable "{local}"' not in MAIN
+        assert re.search(rf"^\s+{local}\s*= {padrao}$", MAIN, re.MULTILINE)
+        assert local not in chamada
         assert re.search(
-            rf'name\s*= "FLORENCE_{nome.upper()}"\s+value\s*= {re.escape(expressao)}\n',
+            rf'name\s*= "FLORENCE_{nome.upper()}"\s+value\s*= tostring\(local\.{local}\)\n',
             job,
         )
 
 
 @pytest.mark.parametrize("raiz", ["infra", "infra/ambientes/prod"])
-def test_a_escolha_large_na_raiz_e_repassada_sem_fixar_base_no_job(raiz: str) -> None:
-    chamada = (
-        (RAIZ / raiz / "main.tf").read_text().split('module "mam"')[1].split("\n}")[0]
-    )
+def test_nenhuma_raiz_nem_o_job_escolhem_o_modelo_do_florence(raiz: str) -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
-    assert re.search(r"florence_modelo\s*= var\.florence_modelo\n", chamada)
-    assert re.search(r'name\s*= "FLORENCE_MODELO"\s+value = var\.florence_modelo', job)
+    assert "FLORENCE_MODELO" not in job
     for pasta in (RAIZ / raiz, RAIZ / "infra/modulos/mam"):
-        assert (
-            'contains(["base", "large"], var.florence_modelo)'
-            in (pasta / "variables.tf").read_text()
-        )
+        for arquivo in pasta.glob("*.tf"):
+            assert "florence_modelo" not in arquivo.read_text()

@@ -1,6 +1,10 @@
 # O ffmpeg dos alvos validacao e ocr-gpu, o mesmo do scripts/afk/Dockerfile (o make verificar confere).
 # Antes do primeiro FROM, para valer em todos os estágios que o declaram com `ARG FFMPEG`.
 ARG FFMPEG=7:5.1.9-0+deb12u1
+# O uv e a imagem base do Python dos estágios abaixo, escritos uma vez. O scripts/afk/Dockerfile usa os mesmos (o make verificar confere).
+ARG UV_VERSAO=0.12.2
+ARG PYTHON_BASE=python:3.12-slim-bookworm
+FROM ghcr.io/astral-sh/uv:${UV_VERSAO} AS uv
 
 # Serviço único da E0: o FastAPI serve a API e o build do React.
 FROM node:22-slim AS web
@@ -15,8 +19,8 @@ RUN npm run build
 # Job de validação (#38): `docker build --target validacao`. Sem o build do front.
 # Usuário sem privilégios e nenhuma pasta da imagem gravável: o TMPDIR aponta para
 # o volume em memória que o Cloud Run monta em /saida, a única pasta gravável.
-FROM python:3.12-slim-bookworm AS validacao
-COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+FROM ${PYTHON_BASE} AS validacao
+COPY --from=uv /uv /bin/uv
 # O mesmo ffmpeg do scripts/afk/Dockerfile (o make verificar confere): o loop AFK testa o validador com ele.
 ARG FFMPEG
 RUN apt-get update \
@@ -25,8 +29,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev
+RUN uv sync --locked --no-dev --compile-bytecode
 COPY api/ api/
+# Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
+RUN /app/.venv/bin/python -m compileall -q api
 USER nobody
 ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "-m", "api.validacao_job"]
@@ -34,11 +40,16 @@ CMD ["python", "-m", "api.validacao_job"]
 # Base da transcrição (#104): só o faster-whisper e o
 # modelo, sem ffmpeg nem front. O modelo é baixado aqui, na construção, na revisão fixada
 # e conferido pelo SHA-256 de cada arquivo; no ar o Job roda sem internet (HF_HUB_OFFLINE).
-FROM python:3.12-slim-bookworm AS transcricao-base
-COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+FROM ${PYTHON_BASE} AS transcricao-base
+COPY --from=uv /uv /bin/uv
 ARG MODELO_REPOSITORIO=dropbox-dash/faster-whisper-large-v3-turbo
 ARG MODELO_REVISAO=0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf
 ARG MODELO_SHA256=e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da
+# Os hashes dos arquivos pequenos, presos à revisão acima: trocar a revisão troca estes juntos (o SEGMENTADOR é o tokenizer.json; "TOKENIZER" no nome faz o gitleaks acusar chave).
+ARG MODELO_SHA256_CONFIG=b0253ea6c0d3bea6b1e19e91a02acfd3b53f4467362efcb5a3e6b16c9b3a9b7e
+ARG MODELO_SHA256_PREPROCESSOR=7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711
+ARG MODELO_SHA256_SEGMENTADOR=297b13372ac43916285644fb9687add3cc62ee2a1adb60da3dc25cc94c1871fd
+ARG MODELO_SHA256_VOCABULARIO=c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1
 # O modelo vem antes do `uv sync` (#211): só uma mudança de modelo o baixa de novo. O
 # download usa só o urllib, do Python da imagem base, como o do OCR.
 RUN mkdir /modelo && for arquivo in config.json model.bin preprocessor_config.json tokenizer.json vocabulary.json; do \
@@ -46,10 +57,10 @@ RUN mkdir /modelo && for arquivo in config.json model.bin preprocessor_config.js
         "https://huggingface.co/$MODELO_REPOSITORIO/resolve/$MODELO_REVISAO/$arquivo" "/modelo/$arquivo" || exit 1; \
     done \
     && echo "$MODELO_SHA256  /modelo/model.bin" > /tmp/hashes \
-    && echo "b0253ea6c0d3bea6b1e19e91a02acfd3b53f4467362efcb5a3e6b16c9b3a9b7e  /modelo/config.json" >> /tmp/hashes \
-    && echo "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711  /modelo/preprocessor_config.json" >> /tmp/hashes \
-    && echo "297b13372ac43916285644fb9687add3cc62ee2a1adb60da3dc25cc94c1871fd  /modelo/tokenizer.json" >> /tmp/hashes \
-    && echo "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1  /modelo/vocabulary.json" >> /tmp/hashes \
+    && echo "${MODELO_SHA256_CONFIG}  /modelo/config.json" >> /tmp/hashes \
+    && echo "${MODELO_SHA256_PREPROCESSOR}  /modelo/preprocessor_config.json" >> /tmp/hashes \
+    && echo "${MODELO_SHA256_SEGMENTADOR}  /modelo/tokenizer.json" >> /tmp/hashes \
+    && echo "${MODELO_SHA256_VOCABULARIO}  /modelo/vocabulary.json" >> /tmp/hashes \
     && sha256sum -c /tmp/hashes && rm /tmp/hashes
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
@@ -64,7 +75,7 @@ ENV PATH=/app/.venv/bin:$PATH TMPDIR=/saida PASTA_DO_MODELO=/modelo HF_HUB_OFFLI
 # na construção (sem arquivo binário no repositório). A frase é a de `api/teste_dos_jobs.py`
 # (`FRASE_FALADA`); o teste do repositório confere que as duas combinam. O quadro com
 # `REDETV` nasce no alvo `ocr-gpu`, que tem o OpenCV.
-FROM python:3.12-slim-bookworm AS amostras
+FROM ${PYTHON_BASE} AS amostras
 RUN apt-get update \
     && apt-get install -y --no-install-recommends espeak-ng \
     && rm -rf /var/lib/apt/lists/* \
@@ -83,6 +94,7 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/a
     AMOSTRAS=/amostras DISPOSITIVO=gpu
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+# >>> copy gerado: transcricao-gpu
 COPY api/__init__.py \
      api/ambiente.py \
      api/assinatura_do_nome.py \
@@ -90,6 +102,7 @@ COPY api/__init__.py \
      api/auth.py \
      api/bancos.py \
      api/cache_curto.py \
+     api/canonicos.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -97,10 +110,8 @@ COPY api/__init__.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
-     api/canonicos.py \
-     api/texto.py \
-     api/correcoes.py \
      api/cofre_secret_manager.py \
+     api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
@@ -126,8 +137,8 @@ COPY api/__init__.py \
      api/numero.py \
      api/nuvem.py \
      api/paddle.py \
-     api/paralelo.py \
      api/papeis.py \
+     api/paralelo.py \
      api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
@@ -140,6 +151,7 @@ COPY api/__init__.py \
      api/taxonomia_de_objetos.json \
      api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
+     api/texto.py \
      api/texto_como_dado.py \
      api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
@@ -148,6 +160,7 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# <<< copy gerado
 # Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
 RUN /app/.venv/bin/python -m compileall -q api
 # A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
@@ -162,8 +175,8 @@ CMD ["python", "-m", "api.transcricao_job"]
 # pelo script, com detector `server`, e `paddlepaddle-gpu` 3.2.2 (CUDA 12.6, do índice
 # do Paddle). O driver é do Cloud Run, em /usr/local/nvidia/lib64. As bibliotecas CUDA
 # vêm das rodas `nvidia-*` (uv.lock), como no alvo `transcricao-gpu`.
-FROM python:3.12-slim-bookworm AS ocr-gpu
-COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+FROM ${PYTHON_BASE} AS ocr-gpu
+COPY --from=uv /uv /bin/uv
 ARG FFMPEG
 RUN apt-get update \
     && (apt-get install -y --no-install-recommends ffmpeg=$FFMPEG libgl1 libglib2.0-0 libgomp1 \
@@ -176,6 +189,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr-gpu --compile-bytecode
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+# >>> copy gerado: ocr-gpu
 COPY api/__init__.py \
      api/ambiente.py \
      api/assinatura_do_nome.py \
@@ -183,6 +197,7 @@ COPY api/__init__.py \
      api/auth.py \
      api/bancos.py \
      api/cache_curto.py \
+     api/canonicos.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -190,10 +205,8 @@ COPY api/__init__.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
-     api/canonicos.py \
-     api/texto.py \
-     api/correcoes.py \
      api/cofre_secret_manager.py \
+     api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
@@ -221,8 +234,8 @@ COPY api/__init__.py \
      api/nuvem.py \
      api/ocr_job.py \
      api/paddle.py \
-     api/paralelo.py \
      api/papeis.py \
+     api/paralelo.py \
      api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
@@ -236,6 +249,7 @@ COPY api/__init__.py \
      api/taxonomia_de_objetos.json \
      api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
+     api/texto.py \
      api/texto_como_dado.py \
      api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
@@ -243,6 +257,7 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# <<< copy gerado
 # Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
 RUN /app/.venv/bin/python -m compileall -q api
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
@@ -266,15 +281,14 @@ CMD ["python", "-m", "api.ocr_job"]
 # sem internet. O quadro de amostra do teste (um carro, `OBJETO_DO_QUADRO` em
 # `api/teste_dos_jobs.py`) vem de um dataset público da Hugging Face, numa revisão fixada
 # e conferido pelo hash. O driver é do Cloud Run, em /usr/local/nvidia/lib64.
-FROM python:3.12-slim-bookworm AS objetos-gpu
-COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+FROM ${PYTHON_BASE} AS objetos-gpu
+COPY --from=uv /uv /bin/uv
 ARG AMOSTRA_REVISAO=9dd8e4710f6b2ddf5184d308639e0359bc7b55be
 # Os pesos e a amostra vêm antes do `uv sync` (#211): só uma mudança deles os baixa de
 # novo. O download usa só o urllib, do Python da imagem base.
 RUN mkdir -p /amostras \
     && for dados in \
-        "large florence-community/Florence-2-large 4271c66b88cdbc05735372ec13b2360108de5317 8412483f687f2f71587328a38c6fa70a68d9488f28e90607be3c182641f60f2c 7715423d6549bf1e71188bdd84f4ac960cc0597886af24a5ef7b66f128660685" \
-        "base florence-community/Florence-2-base 00921df66db728a9ceb750f5eca43e5c203a2051 2a4dfe9885d183da121f239ada734bd700ee6908b650a7a25ab32eb104fe1d7a 62f3e696da74f8869a68ddb529a9b3e14eb25b21c592cb3dea6179bf944df6a0"; do \
+        "large florence-community/Florence-2-large 4271c66b88cdbc05735372ec13b2360108de5317 8412483f687f2f71587328a38c6fa70a68d9488f28e90607be3c182641f60f2c 7715423d6549bf1e71188bdd84f4ac960cc0597886af24a5ef7b66f128660685"; do \
         set -- $dados; nome=$1; MODELO=$2; MODELO_REVISAO=$3; \
         mkdir -p "/modelo/$nome" \
         && for arquivo in config.json generation_config.json model.safetensors preprocessor_config.json processor_config.json tokenizer.json tokenizer_config.json added_tokens.json merges.txt special_tokens_map.json vocab.json; do \
@@ -303,12 +317,14 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group objetos --compile-bytecode
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+# >>> copy gerado: objetos-gpu
 COPY api/__init__.py \
      api/ambiente.py \
      api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
      api/cache_curto.py \
+     api/canonicos.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -316,8 +332,6 @@ COPY api/__init__.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
-     api/canonicos.py \
-     api/texto.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
@@ -343,8 +357,8 @@ COPY api/__init__.py \
      api/nuvem.py \
      api/objetos_job.py \
      api/paddle.py \
-     api/paralelo.py \
      api/papeis.py \
+     api/paralelo.py \
      api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
@@ -357,6 +371,7 @@ COPY api/__init__.py \
      api/taxonomia_de_objetos.json \
      api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
+     api/texto.py \
      api/texto_como_dado.py \
      api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
@@ -364,6 +379,7 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# <<< copy gerado
 # Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
 RUN /app/.venv/bin/python -m compileall -q api
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DO_MODELO=/modelo AMOSTRAS=/amostras \
@@ -379,7 +395,7 @@ USER nobody
 CMD ["python", "-m", "api.objetos_job"]
 
 FROM python:3.12-slim
-COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /bin/uv
+COPY --from=uv /uv /bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 # Bytecode pronto (#558): `nobody` não grava `.pyc` em /app, então sem isto cada partida a frio

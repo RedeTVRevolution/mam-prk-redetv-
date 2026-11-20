@@ -168,13 +168,17 @@ def test_os_bancos_novos_mantem_protecao_e_recuperacao() -> None:
 def test_os_nomes_padrao_dos_bancos_passam_na_regra_do_firestore() -> None:
     # A API recusa o ID com menos de 4 caracteres ("mam" derrubou o apply da troca em 10/11).
     regra = re.compile(r"^[a-z][a-z0-9-]{2,61}[a-z0-9]$")
-    for arquivo in (
-        RAIZ / "infra" / "main.tf",
-        RAIZ / "infra" / "ambientes" / "prod" / "main.tf",
-        MODULO / "main.tf",
-    ):
-        padrao = re.search(
-            r'variable "banco_firestore" \{[^}]*default\s+= "([^"]+)"',
-            arquivo.read_text(),
+    padrao = re.search(
+        r'variable "banco_firestore" \{[^}]*default\s+= "([^"]+)"',
+        (MODULO / "main.tf").read_text(),
+    )
+    assert padrao and regra.match(padrao.group(1))
+
+
+def test_o_model_armor_nao_existe_mais_na_infra_nem_no_wizard() -> None:
+    arquivos = [*MODULO.glob("*.tf"), RAIZ / "infra" / "main.tf"]
+    arquivos.append(RAIZ / "scripts" / "wizard-gcp-dev.sh")
+    for arquivo in arquivos:
+        assert not re.search(r"model_?armor", arquivo.read_text(), re.IGNORECASE), (
+            arquivo
         )
-        assert padrao and regra.match(padrao.group(1)), arquivo

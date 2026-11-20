@@ -16,5 +16,31 @@ resource "google_project_iam_custom_role" "vertex_predicao" {
 resource "google_project_iam_member" "terraform_predicao_vertex" {
   project = var.projeto
   role    = google_project_iam_custom_role.vertex_predicao.id
-  member  = "serviceAccount:mam-terraform@${var.projeto}.iam.gserviceaccount.com"
+  member  = "serviceAccount:${local.conta_do_terraform}"
+}
+
+# O deploy cria as coleções e o índice da busca como a mam-terraform (#757, api/criar_colecao_da_busca.py).
+# Papel sob medida com só o que ele chama: criar, ler e atualizar coleção (o PATCH do esquema),
+# criar e ler índice e ler operação. Os predefinidos (collectionWriter, indexWriter) também
+# apagam. Nenhum dá acesso aos dados (dataObjects). Ela nasce no wizard, fora do Terraform.
+resource "google_project_iam_custom_role" "busca_no_deploy" {
+  project     = var.projeto
+  role_id     = "mamBuscaNoDeploy"
+  title       = "MAM: criação da busca no deploy"
+  description = "Criar e atualizar coleções e índices do Vector Search; nada de apagar nem de ler dados."
+  permissions = [
+    "vectorsearch.collections.create",
+    "vectorsearch.collections.get",
+    "vectorsearch.collections.update",
+    "vectorsearch.indexes.create",
+    "vectorsearch.indexes.get",
+    "vectorsearch.operations.get",
+  ]
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_project_iam_member" "terraform_busca" {
+  project = var.projeto
+  role    = google_project_iam_custom_role.busca_no_deploy.id
+  member  = "serviceAccount:${local.conta_do_terraform}"
 }

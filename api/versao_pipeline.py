@@ -22,7 +22,7 @@ from api import (
 from api.agent_retrieval import MODELO_DO_EMBEDDING
 from api.decupagem import VERSAO_ESQUEMA
 
-VERSAO_PIPELINE = "2026.11.16"
+VERSAO_PIPELINE = "2026.11.19"
 
 
 def _hash(texto: str) -> str:
@@ -63,7 +63,7 @@ def manifesto() -> dict[str, Any]:
                 "reconhecedor": paddle.RECONHECEDOR,
             },
             # O padrão do Florence-2; o Job do inventário troca `motor` e `modelo` pelos
-            # do ambiente (`MOTOR_OBJETOS`, `MODELO_OBJETOS`) ao gravar (`aplicar_inventario`).
+            # do ambiente (`MODELO_OBJETOS`; o motor é o `florence`) ao gravar (`aplicar_inventario`).
             "objetos": {
                 "motor": "florence",
                 "modelo": None,

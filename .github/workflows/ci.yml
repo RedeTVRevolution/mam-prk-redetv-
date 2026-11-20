@@ -76,7 +76,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
       - run: terraform -chdir=infra init -backend=false -input=false
-      - run: terraform -chdir=infra fmt -check
+      # -recursive cobre o módulo e a prod: o formato vale para todo o infra/.
+      - run: terraform -chdir=infra fmt -check -recursive
       - run: terraform -chdir=infra validate
       # Plano do dev com o provider simulado (infra/plano_simulado.tftest.hcl): pega erro que só
       # aparece no plan, como tipos diferentes numa condicional, sem credencial de nuvem.
@@ -85,8 +86,9 @@ jobs:
       # instalar nada: este job, na mesma imagem e também sem Python instalado, prova que ele roda.
       - run: echo '{"resource_changes":[]}' >"$RUNNER_TEMP/plano.json" && python3 -m api.pre_voo "$RUNNER_TEMP/plano.json"
       - run: terraform -chdir=infra/ambientes/prod init -backend=false -input=false
-      - run: terraform -chdir=infra/ambientes/prod fmt -check
       - run: terraform -chdir=infra/ambientes/prod validate
+      # Os casos de infra/ambientes/prod/*.tftest.hcl (a validação de janelas_em_paralelo).
+      - run: terraform -chdir=infra/ambientes/prod test
 
   loop-afk:
     runs-on: ubuntu-26.04
@@ -173,7 +175,8 @@ jobs:
       IPS_DA_REDETV: ${{ vars.IPS_DA_REDETV }}
       CLOUDSDK_ACTIVE_CONFIG_NAME: default
       TF_IN_AUTOMATION: "1"
-      # À mão, cada apply pede confirmação; aqui o CI verde é a aprovação.
+      # O deploy aplica o plano gravado (scripts/aplicar-sem-destruir.sh), que não pede
+      # confirmação nem à mão; o -auto-approve só vale para um apply sem plano gravado.
       TF_CLI_ARGS_apply: -auto-approve
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

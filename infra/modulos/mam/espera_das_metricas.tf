@@ -6,8 +6,8 @@ resource "time_sleep" "metricas_dos_alertas" {
   create_duration = "60s"
   triggers = {
     metricas = join(",", concat(
-      [for m in google_logging_metric.sinal_percentual : m.name],
       [
+        google_logging_metric.sinal_percentual.name,
         google_logging_metric.respostas_fora_do_esquema.name,
         google_logging_metric.falhas_por_etapa.name,
         google_logging_metric.desvio_de_programa.name,

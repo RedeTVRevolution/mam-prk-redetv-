@@ -50,7 +50,12 @@ def _vai_para_a_nuvem(*caminhos: str) -> bool:
     [
         ("docs/Plano_MAM.md", "docs/api/openapi.json", "GLOSSARY.md"),
         ("README.md", "AGENTS.md", "infra/README.md", ".gitignore"),
-        ("evals/gabarito/README.md", "scripts/afk/main.mts", ".claude/settings.json"),
+        (
+            "evals/gabarito/README.md",
+            "scripts/afk/main.mts",
+            ".claude/settings.json",
+            "scripts/copy_das_imagens_gpu.py",
+        ),
         ("api/tests/test_busca.py", ".githooks/pre-commit", "docs/migração.md"),
         (),
     ],

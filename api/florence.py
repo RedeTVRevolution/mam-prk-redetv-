@@ -24,7 +24,6 @@ log = logging.getLogger(__name__)
 VERSAO_DO_FORMATO = 1
 MODELOS = {
     "large": "florence-community/Florence-2-large@4271c66b88cdbc05735372ec13b2360108de5317",
-    "base": "florence-community/Florence-2-base@00921df66db728a9ceb750f5eca43e5c203a2051",
 }
 
 DETECCAO = "<OD>"
@@ -72,7 +71,7 @@ def ler_configuracao(ambiente: Mapping[str, str] | None = None) -> Configuracao:
     padrao = Configuracao()
     modelo = e.get("FLORENCE_MODELO", "").strip() or padrao.modelo
     if modelo not in MODELOS:
-        raise ValueError(f"FLORENCE_MODELO={modelo!r}: use base ou large.")
+        raise ValueError(f"FLORENCE_MODELO={modelo!r}: use large.")
     legendas = e.get("FLORENCE_LEGENDAS", "").strip()
     if legendas not in ("", "0", "1"):
         raise ValueError(f"FLORENCE_LEGENDAS={legendas!r}: use 0 ou 1.")

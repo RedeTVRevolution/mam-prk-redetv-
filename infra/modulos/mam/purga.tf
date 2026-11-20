@@ -11,7 +11,7 @@ resource "google_cloud_run_v2_job" "purga" {
       service_account = google_service_account.mam["purga"].email
       max_retries     = 0
       # Quem falha fica na lixeira e o dia seguinte tenta de novo.
-      timeout = "1800s"
+      timeout = "${local.timeout_dos_jobs_s.purga}s"
       containers {
         image   = var.imagem
         command = ["python"]
@@ -22,13 +22,12 @@ resource "google_cloud_run_v2_job" "purga" {
             memory = "512Mi"
           }
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BIGQUERY_DATASET"
@@ -74,33 +73,12 @@ resource "google_cloud_run_v2_job" "purga" {
           name  = "BUCKET_REFERENCIAS"
           value = local.buckets["referencias"]
         }
-        env {
-          name  = "BUSCA_REGIAO"
-          value = var.regiao_da_busca
-        }
-        env {
-          name  = "BUSCA_COLECAO"
-          value = local.colecao_da_busca
-        }
-        env {
-          name  = "BUSCA_COLECAO_DE_TEXTO"
-          value = local.colecao_de_texto_da_busca
-        }
-        env {
-          name  = "BUSCA_INDICE_DESCRICAO"
-          value = local.indice_da_descricao
-        }
-        env {
-          name  = "BUSCA_INDICES_LIGADOS"
-          value = tostring(var.indices_da_busca_ligados)
-        }
-        env {
-          name  = "BUSCA_DIMENSAO"
-          value = tostring(var.dimensao_dos_vetores)
-        }
-        env {
-          name  = "BUSCA_COTA_DE_ESCRITA"
-          value = tostring(var.cota_de_escrita_da_busca)
+        dynamic "env" {
+          for_each = local.env_da_busca
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
       }
     }
@@ -118,8 +96,8 @@ resource "google_cloud_run_v2_job_iam_member" "agendador_roda_purga" {
 resource "google_cloud_scheduler_job" "purga" {
   name      = "mam-purga-diaria"
   region    = var.regiao
-  schedule  = var.agenda_da_purga
-  time_zone = var.fuso_da_agenda
+  schedule  = local.agenda_da_purga
+  time_zone = local.fuso_da_agenda
   http_target {
     http_method = "POST"
     uri         = "https://run.googleapis.com/v2/projects/${var.projeto}/locations/${google_cloud_run_v2_job.purga.location}/jobs/${google_cloud_run_v2_job.purga.name}:run"

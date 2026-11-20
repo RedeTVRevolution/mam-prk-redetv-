@@ -40,12 +40,7 @@ target "validacao" {
   cache-to   = ["type=registry,ref=${CACHE}:validacao,mode=max,image-manifest=true,oci-mediatypes=true"]
 }
 
-# As imagens com GPU (E1, ADR 0007, #238): estão no grupo `default`, que o cloudbuild.yaml
-# envia. O grupo `gpu` monta só elas, para quem quiser conferir uma construção à mão.
-group "gpu" {
-  targets = ["transcricao-gpu", "ocr-gpu", "objetos-gpu"]
-}
-
+# As imagens com GPU (E1, ADR 0007, #238) estão no grupo `default`, que o cloudbuild.yaml envia.
 target "transcricao-gpu" {
   inherits   = ["base"]
   target     = "transcricao-gpu"

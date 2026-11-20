@@ -438,11 +438,11 @@ def test_o_storage_le_a_base_em_utf8_e_so_ausencia_vira_none(
         armazem.ler_texto(caminho)
 
 
-def test_grava_o_nome_e_a_revisao_do_modelo_base_que_rodou() -> None:
+def test_grava_o_nome_e_a_revisao_do_modelo_large_que_rodou() -> None:
     armazenamento = _armazenamento()
     executar(
-        "j1", armazenamento, DetectorFalso(), configuracao=Configuracao(modelo="base")
+        "j1", armazenamento, DetectorFalso(), configuracao=Configuracao(modelo="large")
     )
     assert armazenamento.resultados[("j1", None)].modelo == (
-        "florence-community/Florence-2-base@00921df66db728a9ceb750f5eca43e5c203a2051"
+        "florence-community/Florence-2-large@4271c66b88cdbc05735372ec13b2360108de5317"
     )

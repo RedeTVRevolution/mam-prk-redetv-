@@ -23,7 +23,7 @@ O preço oficial: L4 a US$ 0,0001867 por segundo, CPU a US$ 0,000018 por segundo
 
 As imagens:
 - **Transcrição:** o mesmo modelo (`large-v3-turbo`), na mesma revisão e com os mesmos hashes, vindos do alvo `transcricao-base`. O CTranslate2 4 pede CUDA 12 e cuDNN 9; as rodas `nvidia-cublas-cu12` e `nvidia-cudnn-cu12` do PyPI os trazem, e um runtime CUDA 12 roda num driver 580. Na GPU, o `compute_type` é `float16` (usa os tensor cores da L4 sem perder precisão); em CPU continua `int8`.
-- **Leitura da tela:** os modelos baixados pelo script `scripts/baixar-modelos-ocr.sh`, e o `paddlepaddle-gpu` 3.2.2, a mesma versão do de CPU, com CUDA 12.6, do índice de rodas do Paddle (`pyproject.toml`). O erro do oneDNN que fixou o 3.2.2 é do caminho em CPU. Os grupos `ocr` e `ocr-gpu` declaram conflito no `uv.lock`, porque as duas rodas são o mesmo módulo `paddle`.
+- **Leitura da tela:** os modelos baixados pelo script `scripts/baixar-modelos-ocr.sh`, e o `paddlepaddle-gpu` 3.2.2, com CUDA 12.6, do índice de rodas do Paddle (`pyproject.toml`). O erro do oneDNN que fixou o 3.2.2 é do caminho em CPU.
 - **Falha clara:** com `DISPOSITIVO=gpu` numa instância sem GPU, o Job falha com mensagem que diz o motivo, e nunca cai para a CPU em silêncio. O log diz em qual dispositivo rodou.
 - **Detecção de voz:** o Whisper pula o que não é fala (`vad_filter`), nas duas versões, com os tempos das palavras ainda contados do início do arquivo.
 - **Construção e cache:** as imagens GPU vão para um repositório do Artifact Registry em `us-east4`, que guarda também o cache das camadas do build. É só código e modelos públicos, sem dado de vídeo, e deixa o Job puxar a imagem de 5 GB ou mais na mesma região em que roda. A sub-rede e o repositório nascem no `infra/main.tf`.

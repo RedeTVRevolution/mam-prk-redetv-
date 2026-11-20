@@ -64,8 +64,10 @@ def test_os_comandos_do_makefile_recebem_o_banco_de_seguranca() -> None:
     ):
         antes = makefile[: makefile.index(f"python -m {modulo}")]
         ultimo_alvo = antes[antes.rindex("\n\n") :]
-        assert f"{VARIAVEL}=" in ultimo_alvo, modulo
-        assert "output -raw banco_de_seguranca" in ultimo_alvo, modulo
+        # O ponto único (scripts/ler-ambiente.sh) entrega a variável, lida de banco_de_seguranca.
+        assert re.search(rf"\$\(call LER_AMBIENTE,[^)]*\b{VARIAVEL}\b", ultimo_alvo), (
+            modulo
+        )
 
 
 def test_so_a_web_e_a_purga_tem_datastore_user_sem_condicao() -> None:
@@ -96,12 +98,11 @@ def test_os_jobs_do_processamento_tem_datastore_user_e_ficam_com_a_condicao() ->
     assert not (set(CONTAS_DO_PROCESSAMENTO) & _recursos_com_a_variavel())
 
 
-def test_o_indice_da_auditoria_nasce_no_banco_novo_e_o_antigo_fica() -> None:
+def test_o_indice_da_auditoria_so_existe_no_banco_de_seguranca() -> None:
     novo = _bloco('resource "google_firestore_index" "auditoria_na_seguranca"')
-    antigo = _bloco('resource "google_firestore_index" "auditoria"')
 
     assert "database   = google_firestore_database.seguranca.name" in novo
-    assert "database   = google_firestore_database.mam.name" in antigo
+    assert 'resource "google_firestore_index" "auditoria" ' not in TF
 
 
 def test_o_banco_de_seguranca_tem_as_mesmas_agendas_de_backup() -> None:
@@ -112,8 +113,12 @@ def test_o_banco_de_seguranca_tem_as_mesmas_agendas_de_backup() -> None:
     semanal = _bloco(
         'resource "google_firestore_backup_schedule" "semanal_na_seguranca"'
     )
-    assert "daily_recurrence" in diaria and '"604800s"' in diaria
-    assert "weekly_recurrence" in semanal and '"8467200s"' in semanal
+    assert "daily_recurrence" in diaria
+    assert "retention = local.retencao_do_backup_diario" in diaria
+    assert "weekly_recurrence" in semanal
+    assert "retention = local.retencao_do_backup_semanal" in semanal
+    assert re.search(r'retencao_do_backup_diario\s*=\s*"604800s"', TF)
+    assert re.search(r'retencao_do_backup_semanal\s*=\s*"8467200s"', TF)
 
 
 def test_o_banco_principal_vem_da_variavel_e_chega_a_todo_servico_e_job() -> None:
@@ -133,8 +138,10 @@ def test_o_banco_principal_vem_da_variavel_e_chega_a_todo_servico_e_job() -> Non
         ):
             fim = texto.find("\nresource ", recurso.end())
             corpo = texto[recurso.start() : fim if fim != -1 else len(texto)]
-            assert 'name  = "FIRESTORE_BANCO"' in corpo, recurso.group(1)
+            assert "for_each = local.env_do_projeto" in corpo, recurso.group(1)
             todos.add(recurso.group(1))
+    assert re.search(r'name = "FIRESTORE_BANCO", value = var.banco_firestore', TF)
     assert {"web", "purga", "validacao", "identificacao", "fim"} <= todos
     for nome in ("main.tf", "ambientes/prod/main.tf"):
-        assert "banco_firestore" in (RAIZ / "infra" / nome).read_text(), nome
+        # As raízes só exportam o nome (output); o padrão mora no módulo.
+        assert "module.mam.banco_firestore" in (RAIZ / "infra" / nome).read_text()

@@ -6,7 +6,7 @@ Em 5/11/2026, o Bruno decidiu os modelos de cada etapa da decupagem. A regra ger
 |---|---|---|---|
 | Análise por janelas (o volume) | Gemini 3.5 Flash-Lite | Flex | `MODELO` em `api/gemini.py` |
 | Pessoas sem nome (modelo forte) | Gemini 3.5 Flash-Lite (era o 3.8 Flash até 09/11/2026, #539), até 8 pessoas por vídeo | Standard, com cache (#414) | `MODELO_FORTE` em `api/modelo_forte.py`; o limite é `limite_de_pessoas_do_modelo_forte` no Terraform |
-| Inventário de objetos | Florence-2 large na GPU L4, com conversão pelo 3.5 Flash-Lite | Flex (#402) | `motor_objetos = florence` e `modelo_objetos` no Terraform (ADR 0008, ADR 0009) |
+| Inventário de objetos | Florence-2 large na GPU L4, com conversão pelo 3.5 Flash-Lite | Flex (#402) | `modelo_objetos` no Terraform (ADR 0008, ADR 0009) |
 | Entendimento da consulta da busca, e o termo da foto na busca por imagem (ADR 0015) | Gemini 3.5 Flash-Lite | Standard (a pessoa espera na tela) | `MODELO_DA_CONSULTA` em `api/entendimento_da_consulta.py` |
 | Vetores da busca | `gemini-embedding-001` só na descrição dos planos (#505); falas, textos na tela e objetos sem vetor | — | `MODELO_DO_EMBEDDING` em `api/agent_retrieval.py` (o `gemini-embedding-2` do quadro saiu em 6/11/2026, ADR 0006) |
 | Transcrição e leitura da tela | faster-whisper large-v3-turbo e PaddleOCR, só na GPU, sem plano B em CPU (decisão de 07/11/2026) | — | ADR 0007 |

@@ -37,12 +37,6 @@ output "bigquery_tabela_da_taxa" {
   value       = local.tabela_da_taxa_de_correcao
 }
 
-variable "agenda_da_taxa_diaria" {
-  description = "Cron (formato do Cloud Scheduler) que refaz hoje e ontem na tabela da taxa de correção por dia (#455); a cada hora"
-  type        = string
-  default     = "10 * * * *"
-}
-
 resource "google_cloud_run_v2_job" "taxa_diaria" {
   name                = "mam-taxa-diaria"
   location            = var.regiao
@@ -54,7 +48,7 @@ resource "google_cloud_run_v2_job" "taxa_diaria" {
       service_account = google_service_account.mam["taxa"].email
       max_retries     = 0
       # Quem falha é refeito na hora seguinte, junto com o resto.
-      timeout = "900s"
+      timeout = "${local.timeout_dos_jobs_s.taxa_diaria}s"
       containers {
         image   = var.imagem
         command = ["python"]
@@ -65,13 +59,12 @@ resource "google_cloud_run_v2_job" "taxa_diaria" {
             memory = "512Mi"
           }
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_ACEITOS"
@@ -113,8 +106,8 @@ resource "google_cloud_run_v2_job_iam_member" "agendador_roda_taxa_diaria" {
 resource "google_cloud_scheduler_job" "taxa_diaria" {
   name      = "mam-taxa-diaria-horaria"
   region    = var.regiao
-  schedule  = var.agenda_da_taxa_diaria
-  time_zone = var.fuso_da_agenda
+  schedule  = local.agenda_da_taxa_diaria
+  time_zone = local.fuso_da_agenda
   http_target {
     http_method = "POST"
     uri         = "https://run.googleapis.com/v2/projects/${var.projeto}/locations/${google_cloud_run_v2_job.taxa_diaria.location}/jobs/${google_cloud_run_v2_job.taxa_diaria.name}:run"

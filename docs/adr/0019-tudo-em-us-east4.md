@@ -1,6 +1,6 @@
 # Tudo em us-east4, nada em São Paulo
 
-Todo recurso regional e todo dado do MAM ficam em `us-east4` (norte da Virgínia): Cloud Run (`mam-web` e os Jobs), Workflows, Scheduler, Eventarc, buckets, Firestore, BigQuery, Artifact Registry, KMS e Model Armor. A busca ([ADR 0006](0006-indice-da-busca-nos-eua.md)) e a GPU ([ADR 0007](0007-transcricao-e-ocr-em-gpu-no-us-east4.md)) já estavam lá.
+Todo recurso regional e todo dado do MAM ficam em `us-east4` (norte da Virgínia): Cloud Run (`mam-web` e os Jobs), Workflows, Scheduler, Eventarc, buckets, Firestore, BigQuery, Artifact Registry e KMS. A busca ([ADR 0006](0006-indice-da-busca-nos-eua.md)) e a GPU ([ADR 0007](0007-transcricao-e-ocr-em-gpu-no-us-east4.md)) já estavam lá.
 
 **Decisão de 09/11/2026 — Bruno (spec #535):** o motivo é custo. Em `southamerica-east1`, os Jobs custam cerca de 17% a mais por vCPU·s, o Cloud Build em São Paulo puxa de `us-east4` o cache das imagens de GPU (R$ 66,53 de egress de 02/11 a 09/11, uns R$ 250 por mês), e Storage e Firestore também saem mais baratos. O aval jurídico é o do próprio Bruno. Esta ADR substitui o que as ADRs 0001, 0006, 0007 e 0008 dizem sobre a região: as proibições de guardar dados em `us-east4` e o "Brasil" como lugar dos vídeos, das decupagens, do Firestore e do BigQuery deixam de valer. O Gemini continua no endpoint global ([ADR 0001](0001-gemini-endpoint-global.md)).
 

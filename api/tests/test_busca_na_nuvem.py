@@ -1,4 +1,4 @@
-"""Adaptadores do Model Armor e da Ranking e a montagem pelo ambiente, sem rede."""
+"""Adaptadores da Ranking e da consulta e a montagem pelo ambiente, sem rede."""
 
 import json
 from typing import Any
@@ -19,35 +19,9 @@ from api.indice_da_busca import Registro
 from api.tests.test_gemini import RespostaFalsa, RespostaSemJson, SessaoFalsa
 
 
-def test_configuracao_antiga_do_armor_nao_abre_sessao_sem_projeto() -> None:
-    def sem_sessao() -> Any:
-        raise AssertionError("não devia abrir sessão")
-
-    adaptadores = adaptadores_da_busca(
-        {"MODEL_ARMOR_MODELO": "m", "MODEL_ARMOR_REGIAO": "r"}, sem_sessao
-    )
-    assert adaptadores.transporte_da_consulta is None
-
-
 def test_modelo_da_foto_independe_do_armor() -> None:
     adaptadores = adaptadores_da_busca(
         {"GCP_PROJECT_ID": "proj"}, lambda: SessaoFalsa()
-    )
-    assert isinstance(adaptadores.transporte_da_consulta, TransporteVertex)
-
-
-def test_configuracao_antiga_do_armor_nao_envia_pedido() -> None:
-    sessao = SessaoFalsa()
-    adaptadores_da_busca(AMBIENTE, lambda: sessao)
-    assert sessao.pedidos == []
-
-
-@pytest.mark.parametrize(
-    "ambiente", [{"MODEL_ARMOR_MODELO": "m"}, {"MODEL_ARMOR_REGIAO": "r"}]
-)
-def test_armor_parcial_nao_desliga_descricao_da_foto(ambiente: dict[str, str]) -> None:
-    adaptadores = adaptadores_da_busca(
-        {"GCP_PROJECT_ID": "proj", **ambiente}, lambda: SessaoFalsa()
     )
     assert isinstance(adaptadores.transporte_da_consulta, TransporteVertex)
 
@@ -164,8 +138,6 @@ def test_ranking_erro_http_vira_excecao() -> None:
 
 AMBIENTE = {
     "GCP_PROJECT_ID": "proj",
-    "MODEL_ARMOR_MODELO": "modelo-y",
-    "MODEL_ARMOR_REGIAO": "reg-x",
     "RANKING_CONFIG": "config-z",
 }
 
@@ -186,17 +158,12 @@ def test_sem_as_variaveis_ficam_os_substitutos_de_hoje() -> None:
     assert adaptadores.ranking is None
 
 
-def test_foto_e_ranking_nao_dependem_da_configuracao_do_armor() -> None:
+def test_foto_e_ranking_nao_dependem_um_do_outro() -> None:
     so_ranking = adaptadores_da_busca(
         {"GCP_PROJECT_ID": "proj", "RANKING_CONFIG": "c"}, lambda: SessaoFalsa()
     )
     assert so_ranking.ranking is not None
     assert so_ranking.transporte_da_consulta is not None
-
-    meio = adaptadores_da_busca(
-        {"GCP_PROJECT_ID": "proj", "MODEL_ARMOR_MODELO": "m"}, lambda: SessaoFalsa()
-    )
-    assert meio.transporte_da_consulta is not None
 
 
 def test_a_consulta_registra_o_uso_do_modelo_com_a_etapa_busca(

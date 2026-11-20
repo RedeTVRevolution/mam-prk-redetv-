@@ -1,13 +1,18 @@
 """Definição do Workflows da validação: o comportamento real é conferido no #14."""
 
+import math
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 import yaml
 
+from api.gemini import PRAZO_DA_ANALISE_S
+from api.janelas import DURACAO_DA_JANELA_MS, LIMITE_DE_TENTATIVAS
 from api.jobs import CONFERENCIA_DA_FILA_GPU_S, FOLGA_DA_FILA_GPU_S
+from api.modelo_do_job import CodigoDeFalha, Etapa, NomeDaEtapa, ResultadoDaEtapa
+from api.validador import DURACAO_MAXIMA_S
 
 INFRA = Path(__file__).parents[2] / "infra"
 MODULO = INFRA / "modulos" / "mam"
@@ -53,8 +58,9 @@ def test_roda_o_job_de_analise_so_se_o_job_esta_em_analisando() -> None:
     # O único `http.post` é o aviso da fila de GPU (#534), num subworkflow à parte.
     assert texto.count("call: http.post") == 1 and "url_da_analise" not in texto
     assert "call: http.post" in _subworkflow(texto, "avisa_a_espera")
-    # O conector espera mais que o timeout de 21600 s do Job, não o padrão de 1800 s.
-    assert "timeout: 21900" in passo
+    # O conector espera mais que o timeout do Job, não o padrão de 1800 s (a conta fica no
+    # teste do conector de cada passo).
+    assert "timeout: ${prazo_do_conector_s.analise}" in passo
     # Fora de `analisando` o fluxo pula a análise.
     assert "next: fim" in texto
 
@@ -224,7 +230,7 @@ def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
     assert re.search(r"job_de_analise\s+= google_cloud_run_v2_job\.analise\.name", main)
     assert "google_cloud_run_v2_service.analise" not in main
     # O Job de análise dura mais que o teto de 1800 s da chamada HTTP do Workflows.
-    assert 'timeout = "21600s"' in job
+    assert _timeout_do_job(main, "analise") > 1800
 
 
 def test_jobs_de_analise_e_identificacao_recebem_a_mesma_tolerancia_da_fala() -> None:
@@ -235,26 +241,60 @@ def test_jobs_de_analise_e_identificacao_recebem_a_mesma_tolerancia_da_fala() ->
             "\nresource "
         )[0]
         assert re.search(
-            r'name\s+= "TOLERANCIA_DA_FALA_MS"\s+value\s+= tostring\(var\.tolerancia_da_fala_ms\)',
+            r'name\s+= "TOLERANCIA_DA_FALA_MS"\s+value\s+= tostring\(local\.tolerancia_da_fala_ms\)',
             job,
         ), nome
 
 
-def test_quadros_chave_rodam_depois_da_analise_e_a_falha_deles_nao_derruba_o_job() -> (
-    None
-):
+# Os quatro passos de melhor esforço chamam o mesmo subworkflow: o Job e o prazo do conector.
+MELHOR_ESFORCO = {
+    "identifica": ("identificacao", "job_de_identificacao", "identificacao"),
+    "tira_os_quadros": ("quadros_chave", "job_de_quadros", "quadros"),
+    "roda_o_inventario": ("inventario_de_objetos", "job_de_inventario", "inventario"),
+    "indexa": ("indexacao", "job_de_indexacao", "indexacao"),
+}
+
+
+def _passo(texto: str, nome: str) -> str:
+    """O corpo de um passo do `processa` (do nome ao próximo passo do mesmo nível)."""
+    corpo = texto[texto.index(f"\n    - {nome}:\n") + 1 :]
+    return corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
+
+
+def test_etapas_de_melhor_esforco_so_chamam_o_subworkflow_com_o_job_e_o_prazo() -> None:
     texto = _texto()
 
-    analisa = texto.index("- analisa:")
-    quadros = texto.index("- tira_os_quadros:")
-    fim = texto.index("- fim:")
-    assert analisa < quadros < fim
-    passo = texto[quadros:fim]
-    assert "googleapis.run.v2.projects.locations.jobs.run" in passo
-    assert "jobs/${job_de_quadros}" in passo
-    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
-    # O Job já está concluído: sem os JPEGs a Decupagem segue valendo.
-    assert "except:" in passo and "sys.log" in passo and "raise" not in passo
+    for nome, (etapa, job, prazo) in MELHOR_ESFORCO.items():
+        passo = _passo(texto, nome)
+        assert "call: roda_o_job_de_etapa" in passo, nome
+        assert f"etapa: {etapa}\n" in passo, nome
+        assert f"job: ${{{job}}}\n" in passo, nome
+        assert f"prazo: ${{prazo_do_conector_s.{prazo}}}\n" in passo, nome
+        assert "try:" not in passo and "jobs.run" not in passo, nome
+    # O resto do YAML não repete o `try` do Job: só o subworkflow e o Florence com GPU.
+    assert texto.count("googleapis.run.v2.projects.locations.jobs.run") == 5
+
+
+def test_subworkflow_da_etapa_roda_o_job_e_a_falha_dele_nao_derruba_o_job() -> None:
+    sub = _subworkflow(_texto(), "roda_o_job_de_etapa")
+
+    assert "googleapis.run.v2.projects.locations.jobs.run" in sub
+    assert 'name: $${"projects/${projeto}/locations/${regiao}/jobs/" + job}' in sub
+    assert "name: JOB_ID" in sub and "value: $${job_id}" in sub
+    assert "timeout: $${prazo}" in sub
+    # O Job já está concluído: a falha vai à etapa e ao log, e devolve `true`.
+    excecao = sub[sub.index("except:") :]
+    assert "etapa: $${etapa}" in excecao and "falhou_na_execucao: true" in excecao
+    assert "sys.log" in excecao and "raise" not in excecao
+    assert "return: true" in excecao and "return: false" in sub
+    assert "documents.patch" not in sub
+
+
+def test_quadros_chave_rodam_depois_da_analise() -> None:
+    texto = _texto()
+
+    assert texto.index("- analisa:") < texto.index("- tira_os_quadros:")
+    assert texto.index("- tira_os_quadros:") < texto.index("- fim:")
 
 
 def test_job_de_quadros_no_main_tf_sem_internet_com_a_imagem_da_validacao() -> None:
@@ -274,17 +314,13 @@ def test_job_de_quadros_no_main_tf_sem_internet_com_a_imagem_da_validacao() -> N
     assert 'decupagens = "roles/storage.objectUser"' in main
 
 
-def test_indexacao_roda_depois_dos_quadros_e_a_falha_dela_nao_derruba_o_job() -> None:
+def test_indexacao_roda_depois_dos_quadros() -> None:
     texto = _texto()
 
     quadros = texto.index("- tira_os_quadros:")
     indexa = texto.index("- indexa:")
     fim = texto.index("- fim:")
     assert quadros < indexa < fim
-    passo = texto[indexa:fim]
-    assert "jobs/${job_de_indexacao}" in passo
-    assert "name: JOB_ID" in passo and "value: $${job_id}" in passo
-    assert "except:" in passo and "sys.log" in passo and "raise" not in passo
 
 
 def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
@@ -296,8 +332,14 @@ def test_job_de_indexacao_no_main_tf_com_internet_e_so_a_decupagem() -> None:
     assert "vpc_access" not in job
     assert 'args    = ["-m", "api.indexacao"]' in job
     assert "max_retries     = 0" in job
-    assert "BUSCA_COLECAO" in job and "BUSCA_INDICE_DESCRICAO" in job
-    assert "BUSCA_COLECAO_DE_TEXTO" in job
+    # As BUSCA_* chegam pelo `dynamic "env"` do local; o local as nomeia.
+    assert "for_each = local.env_da_busca" in job
+    for variavel in (
+        "BUSCA_COLECAO",
+        "BUSCA_INDICE_DESCRICAO",
+        "BUSCA_COLECAO_DE_TEXTO",
+    ):
+        assert f'name = "{variavel}"' in main
     assert re.search(
         r"job_de_indexacao\s+= google_cloud_run_v2_job\.indexacao\.name", main
     )
@@ -309,40 +351,132 @@ def _segundos(texto: str) -> int:
     return int(texto.strip().removesuffix("s"))
 
 
-def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
+# A folga do conector sobre o timeout do Job, no módulo e aqui.
+FOLGA_DO_CONECTOR_S = 300
+
+
+def _timeout_do_job(main: str, chave: str) -> int:
+    """O timeout, em s, do Job `chave` no bloco `local.timeout_dos_jobs_s`."""
+    bloco = main[main.index("timeout_dos_jobs_s = {") :]
+    bloco = bloco[: bloco.index("}")]
+    achado = re.search(rf"\b{chave}\s*=\s*(\d+)", bloco)
+    assert achado is not None, chave
+    return int(achado.group(1))
+
+
+def _valor_do_yaml(trecho: str, campo: str, job: str) -> int:
+    """O prazo que o YAML escreve em `campo`: tem de ser o `prazo_do_conector_s` do próprio
+    Job, que o módulo monta como o timeout dele mais 300 s."""
+    assert f"{campo}: ${{prazo_do_conector_s.{job}}}" in trecho, (campo, job)
+    assert re.search(
+        r"^  prazo_do_conector_s = \{ for k, v in local\.timeout_dos_jobs_s : "
+        rf"k => v \+ {FOLGA_DO_CONECTOR_S} \}}$",
+        MAIN.read_text(),
+        re.MULTILINE,
+    )
+    return _timeout_do_job(MAIN.read_text(), job) + FOLGA_DO_CONECTOR_S
+
+
+def test_conector_de_cada_passo_e_o_timeout_do_job_mais_300_s() -> None:
+    """Todo passo que espera um Job: o conector passa do timeout do Job (o padrão do
+    Workflows é 1800 s) e é igual a ele mais 300 s onde o YAML o escreve. O `mam-fim`
+    fica de fora: `avisa_o_fim` usa o padrão de 1800 s, e o Job dura 300 s."""
     main = MAIN.read_text()
     texto = _texto()
     passos = {
-        "valida": ("validacao", "- valida:", "- le_o_job:"),
-        "analisa": ("analise", "- analisa:", "- inicia_identificacao:"),
-        "identifica": ("identificacao", "- identifica:", "- inicia_quadros_chave:"),
-        "tira_os_quadros": ("quadros", "- tira_os_quadros:", "- indexa:"),
-        "indexa": ("indexacao", "- indexa:", "- fim:"),
+        "validacao": texto[texto.index("- valida:") : texto.index("- le_o_job:")],
+        "analise": texto[
+            texto.index("- analisa:") : texto.index("- inicia_identificacao:")
+        ],
+        "transcricao_gpu": _ramo(texto, "ramo_da_transcricao"),
+        "ocr_gpu": _ramo(texto, "ramo_da_leitura_da_tela"),
+        "objetos_gpu": _passo_do_inventario(),
     }
-    for nome, (job, de, ate) in passos.items():
-        passo = texto[texto.index(de) : texto.index(ate)]
-        conector = re.search(r"connector_params:\s+timeout: (\d+)", passo)
-        assert conector is not None, nome
-        assert int(conector.group(1)) > _timeout_do_job(main, job), nome
+    campos = {"validacao": "timeout", "analise": "timeout"}
+    for job, trecho in passos.items():
+        conector = _valor_do_yaml(trecho, campos.get(job, "timeout_gpu"), job)
+        assert conector > _timeout_do_job(main, job), job
+        assert conector == _timeout_do_job(main, job) + FOLGA_DO_CONECTOR_S, job
 
-    # O timeout de cada ramo cobre o Job com GPU.
-    for ramo, job in {
-        "ramo_da_transcricao": "transcricao_gpu",
-        "ramo_da_leitura_da_tela": "ocr_gpu",
-    }.items():
-        achado = re.search(r"timeout_gpu: (\d+)", _ramo(texto, ramo))
-        assert achado is not None, ramo
-        assert int(achado.group(1)) > _timeout_do_job(main, job), ramo
-    roda = _subworkflow(texto, "roda_o_job_com_gpu")
-    assert "timeout: $${timeout_gpu}" in roda
+    # O prazo que cada etapa de melhor esforço passa ao subworkflow também.
+    for nome, (_, _, job) in MELHOR_ESFORCO.items():
+        prazo = _valor_do_yaml(_passo(texto, nome), "prazo", job)
+        assert prazo == _timeout_do_job(main, job) + FOLGA_DO_CONECTOR_S, nome
+    # O inventário espera até o fim do Job (9000 s), não 3900 s.
+    assert (
+        _valor_do_yaml(_passo(texto, "roda_o_inventario"), "prazo", "inventario")
+        == 9300
+    )
+
+    # O subworkflow e o de GPU repassam o prazo ao conector.
+    assert "timeout: $${prazo}" in _subworkflow(texto, "roda_o_job_de_etapa")
+    assert "timeout: $${timeout_gpu}" in _subworkflow(texto, "roda_o_job_com_gpu")
+    # O aviso do fim não escreve `connector_params`.
+    assert "connector_params" not in _subworkflow(texto, "avisa_o_fim")
+    assert _timeout_do_job(main, "fim") == 300
 
 
-def _timeout_do_job(main: str, job: str) -> int:
-    recurso = main[main.index(f'resource "google_cloud_run_v2_job" "{job}"') :]
-    recurso = recurso[: recurso.index("\n}\n")]
-    achado = re.search(r'timeout\s*=\s*"(\d+s)"', recurso)
-    assert achado is not None, job
-    return _segundos(achado.group(1))
+def _janelas_em_paralelo_do_modulo() -> int:
+    """O menor padrão de `variable "janelas_em_paralelo"`, no módulo e na raiz da prod."""
+    padroes = []
+    for arquivo in (MAIN, MAIN.parents[2] / "ambientes/prod/main.tf"):
+        bloco = (
+            arquivo.read_text()
+            .split('variable "janelas_em_paralelo" {')[1]
+            .split("\n}")[0]
+        )
+        achado = re.search(r"default\s*=\s*(\d+)", bloco)
+        assert achado is not None, arquivo
+        padroes.append(int(achado.group(1)))
+    return min(padroes)
+
+
+def _cobre_as_rodadas_sem_tentativa_extra(janelas_em_paralelo: int) -> bool:
+    janelas = DURACAO_MAXIMA_S / (DURACAO_DA_JANELA_MS / 1000)
+    rodadas = math.ceil(janelas / janelas_em_paralelo)
+    return rodadas * PRAZO_DA_ANALISE_S <= _timeout_do_job(MAIN.read_text(), "analise")
+
+
+def test_timeout_do_job_de_analise_cobre_as_rodadas_sem_tentativa_extra() -> None:
+    """`ceil(48 / janelas_em_paralelo) x PRAZO_DA_ANALISE_S` cabe no timeout do Job (18000 s
+    contra 21600 s). NÃO cobre o pior caso com as `LIMITE_DE_TENTATIVAS` tentativas por
+    janela (54000 s): risco aceito por decisão de 14/11, a rever com a medição."""
+    assert DURACAO_MAXIMA_S / (DURACAO_DA_JANELA_MS / 1000) == 48
+    assert _cobre_as_rodadas_sem_tentativa_extra(_janelas_em_paralelo_do_modulo())
+    # Com 3 janelas em paralelo (16 rodadas, 24000 s) o timeout já não cobre.
+    assert not _cobre_as_rodadas_sem_tentativa_extra(3)
+    # O pior caso com as tentativas extras não é coberto (decisão de 14/11).
+    com_tentativas = (
+        math.ceil(48 / _janelas_em_paralelo_do_modulo())
+        * PRAZO_DA_ANALISE_S
+        * LIMITE_DE_TENTATIVAS
+    )
+    assert com_tentativas > _timeout_do_job(MAIN.read_text(), "analise")
+
+
+def test_limite_de_pessoas_do_modelo_forte_e_inteiro_a_partir_de_zero() -> None:
+    achado = re.search(
+        r"limite_de_pessoas_do_modelo_forte\s*=\s*(\S+)", MAIN.read_text()
+    )
+    assert achado is not None and re.fullmatch(r"\d+", achado.group(1))
+
+
+def test_timeout_de_cada_job_vem_do_bloco_de_locals() -> None:
+    """Os timeouts dos Jobs moram num `locals` só; nenhum Job escreve o literal, e o
+    conector de cada passo é esse timeout mais 300 s."""
+    jobs = 0
+    for arquivo in MODULO.glob("*.tf"):
+        for job in re.findall(
+            r'resource "google_cloud_run_v2_job" "\w+" \{.*?\n\}\n',
+            arquivo.read_text(),
+            re.DOTALL,
+        ):
+            jobs += 1
+            assert re.search(
+                r'timeout\s*=\s*"\$\{local\.timeout_dos_jobs_s\.\w+\}s"', job
+            ), (arquivo.name, job[:80])
+    assert jobs == 12
+    assert re.search(r"v \+ 300", MAIN.read_text())
 
 
 def test_nenhum_comentario_da_infra_fala_em_ate_10_min() -> None:
@@ -376,7 +510,7 @@ def test_cada_etapa_grava_o_inicio_antes_e_o_fim_depois_de_rodar() -> None:
 def test_falha_da_execucao_de_cada_etapa_grava_o_fim_como_falhou() -> None:
     texto = _texto()
 
-    for passo, etapa in ETAPAS:
+    for passo, etapa in ETAPAS[:2]:
         inicio = texto.index(f"\n    - {passo}:\n")
         corpo = texto[inicio + 1 :]
         corpo = corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
@@ -409,7 +543,7 @@ def test_passos_depois_da_analise_so_comecam_com_o_job_concluido() -> None:
 def test_falha_de_cada_etapa_nao_cai_no_encerra_que_a_gravaria_como_concluida() -> None:
     texto = _texto()
 
-    for passo, etapa in ETAPAS:
+    for passo, etapa in ETAPAS[:2]:
         excecao = texto[
             texto.index(
                 "        except:\n", texto.index(f"\n    - {passo}:\n")
@@ -417,6 +551,19 @@ def test_falha_de_cada_etapa_nao_cai_no_encerra_que_a_gravaria_como_concluida() 
         ]
         ultimo_passo = excecao.rstrip().rsplit("\n            - ", 1)[1]
         assert "raise:" in ultimo_passo or "next:" in ultimo_passo, passo
+    # Nas outras, quem pula o `encerra_` é o passo logo depois da chamada.
+    for passo, etapa, destino in [
+        ("tira_os_quadros", "quadros_chave", "inicia_inventario_de_objetos"),
+        ("roda_o_inventario", "inventario_de_objetos", "inicia_indexacao"),
+        ("indexa", "indexacao", "fim"),
+    ]:
+        chamada = _passo(texto, passo)
+        resultado = re.search(r"result: (\w+)", chamada)
+        assert resultado, passo
+        confere = texto[texto.index(chamada) + len(chamada) :]
+        confere = confere[: confere.index(f"- encerra_{etapa}:")]
+        assert f"condition: $${{{resultado[1]}}}" in confere, passo
+        assert f"next: {destino}\n" in confere, passo
 
 
 def test_fim_de_etapa_sem_inicio_nao_e_gravado() -> None:
@@ -446,7 +593,7 @@ def test_ordem_nova_identificacao_quadros_indexacao() -> None:
         )
         assert inicio, job
         assert (
-            f"jobs/${{job_de_{job}}}"
+            f"job: ${{job_de_{job}}}"
             in texto[inicio.end() :].split("- tira_os_quadros:")[0]
         )
     # O nome de cada Job vem do main.tf pelo templatefile.
@@ -455,25 +602,17 @@ def test_ordem_nova_identificacao_quadros_indexacao() -> None:
         assert f"job_de_{job}" in main
 
 
-@pytest.mark.parametrize(
-    ("passo", "etapa", "seguinte"),
-    [
-        ("identifica", "identificacao", "inicia_quadros_chave"),
-    ],
-)
-def test_falha_dos_passos_novos_vai_ao_log_e_a_etapa_e_os_seguintes_rodam(
-    passo: str, etapa: str, seguinte: str
-) -> None:
+def test_falha_da_identificacao_vai_ao_log_e_a_etapa_e_os_quadros_rodam() -> None:
     texto = _texto()
 
-    corpo = texto[texto.index(f"\n    - {passo}:\n") + 1 :]
-    corpo = corpo[: re.search(r"\n    - ", corpo[5:]).end() + 5]  # type: ignore[union-attr]
-    excecao = corpo[corpo.index("except:") :]
-    assert "falhou_na_execucao: true" in excecao
-    assert "sys.log" in excecao and "raise" not in excecao
-    assert f"next: {seguinte}" in excecao
-    # Nunca mexem no `estado` do Job: o Job continua `concluido`.
-    assert "documents.patch" not in excecao
+    # Sem `result`, sem desvio e sem `encerra_`: com ou sem falha, o passo seguinte é o
+    # início dos quadros-chave, e o Job continua `concluido`.
+    passo = _passo(texto, "identifica")
+    assert "result:" not in passo and "next:" not in passo
+    assert _passo(texto, "inicia_quadros_chave").startswith(
+        "    - inicia_quadros_chave"
+    )
+    assert "documents.patch" not in _subworkflow(texto, "roda_o_job_de_etapa")
 
 
 def test_depois_da_identificacao_nenhum_desvio_pula_os_quadros_nem_a_indexacao() -> (
@@ -554,7 +693,7 @@ def test_partindo_da_indexacao_nada_antes_dela_roda() -> None:
 
     assert destino == "inicia_indexacao"
     daqui = _depois_de(texto, destino).split("# Tempo de cada etapa")[0]
-    assert "jobs/${job_de_indexacao}" in daqui
+    assert "job: ${job_de_indexacao}" in daqui
     for antes in (
         "job_de_validacao",
         "job_de_transcricao_gpu",
@@ -611,7 +750,7 @@ def test_job_de_identificacao_sem_internet_com_a_imagem_do_ffmpeg() -> None:
 def test_variaveis_dos_jobs_novos_vem_do_main_tf() -> None:
     ident = _job_do_main_tf("identificacao")
 
-    assert "var.limite_de_pessoas_do_modelo_forte" in ident
+    assert "local.limite_de_pessoas_do_modelo_forte" in ident
     assert 'name  = "LIMITE_DE_PESSOAS_DO_MODELO_FORTE"' in ident
     assert 'local.buckets["referencias"]' not in ident
 
@@ -701,12 +840,10 @@ def test_reprocessar_a_transcricao_roda_os_dois_ramos() -> None:
         "- parte_da_etapa:"
     )[0]
     assert "roda_a_transcricao: true" in atribuicoes
-    assert "roda_a_leitura_da_tela: true" in atribuicoes
-    # Cada ramo só roda se a sua variável deixa.
+    # A transcrição só roda se a variável deixa; a leitura da tela roda sempre.
     assert "condition: $${roda_a_transcricao}" in _ramo(texto, "ramo_da_transcricao")
-    assert "condition: $${roda_a_leitura_da_tela}" in _ramo(
-        texto, "ramo_da_leitura_da_tela"
-    )
+    assert "condition" not in _ramo(texto, "ramo_da_leitura_da_tela")
+    assert "roda_a_leitura_da_tela" not in texto
 
 
 def test_reprocessar_a_leitura_da_tela_roda_so_o_ocr_e_ele_mostra_a_etapa() -> None:
@@ -746,7 +883,7 @@ def test_espera_total_vem_de_uma_variavel_do_main_tf_com_27_minutos() -> None:
     texto = _texto()
     assert texto.count("${gpu_espera_total_s}") >= 1
     for nome in ("gpu_espera_s", "gpu_fator_da_espera", "gpu_espera_maxima_s"):
-        assert re.search(rf"{nome}\s+= var\.{nome}", main), nome
+        assert re.search(rf"{nome}\s+= local\.{nome}", main), nome
         assert "${" + nome + "}" in texto, nome
 
 
@@ -807,12 +944,16 @@ def test_a_conta_das_tentativas_dos_valores_propostos_e_de_uma_espera_menor() ->
     main = MAIN.read_text()
 
     def padrao(nome: str) -> int:
+        # As esperas são locals; só `espera_gpu_minutos` é variável com padrão.
         variavel = main.split(f'variable "{nome}"')[1].split("\n}")[0]
         return int(re.search(r"default\s+=\s+(\d+)", variavel).group(1))  # type: ignore[union-attr]
 
-    inicio = padrao("gpu_espera_s")
-    fator = padrao("gpu_fator_da_espera")
-    teto = padrao("gpu_espera_maxima_s")
+    def valor(nome: str) -> int:
+        return int(re.search(rf"^\s+{nome}\s*=\s*(\d+)$", main, re.MULTILINE).group(1))  # type: ignore[union-attr]
+
+    inicio = valor("gpu_espera_s")
+    fator = valor("gpu_fator_da_espera")
+    teto = valor("gpu_espera_maxima_s")
     total = padrao("espera_gpu_minutos") * 60
 
     # 60, 120 e seis esperas de 240 s: 9 tentativas em 27 minutos.
@@ -938,27 +1079,27 @@ def test_o_inventario_de_objetos_fica_entre_os_quadros_chave_e_a_indexacao() -> 
     assert "etapa: inventario_de_objetos" in _passo_do_inventario()
 
 
-def test_o_motor_florence_roda_a_gpu_sem_plano_b_e_depois_o_job_em_cpu() -> None:
+def test_o_florence_roda_a_gpu_sem_plano_b_e_depois_o_job_em_cpu() -> None:
     passo = _passo_do_inventario()
 
-    assert '"${motor_objetos}" == "florence"' in passo
+    assert "motor_objetos" not in passo
     florence = passo[
         passo.index("- roda_o_florence:") : passo.index("- roda_o_inventario:")
     ]
     assert "call: roda_o_job_com_gpu" in florence
     assert "job_gpu: ${job_de_objetos_gpu}" in florence
-    assert "timeout_gpu: 11100" in florence
+    assert "timeout_gpu: ${prazo_do_conector_s.objetos_gpu}" in florence
     cpu = passo[passo.index("- roda_o_inventario:") :]
-    assert "jobs/${job_de_inventario}" in cpu
-    assert "timeout: 3900" in cpu
-    # O motor gemini pula o Job com GPU.
-    assert passo.index("next: roda_o_florence") < passo.index("next: roda_o_inventario")
+    assert "call: roda_o_job_de_etapa" in cpu
+    assert "job: ${job_de_inventario}" in cpu
+    assert "prazo: ${prazo_do_conector_s.inventario}" in cpu
 
 
 def test_a_falha_do_inventario_marca_a_etapa_e_segue_para_a_indexacao() -> None:
     passo = _passo_do_inventario()
 
-    assert passo.count("falhou_na_execucao: true") == 2
+    # O Florence grava a falha ele mesmo; a do Job em CPU vem do subworkflow.
+    assert passo.count("falhou_na_execucao: true") == 1
     assert passo.count("next: inicia_indexacao") == 2
 
 
@@ -977,7 +1118,7 @@ def test_a_gpu_esgotada_sobe_pelo_tratamento_que_libera_a_vaga() -> None:
 def test_a_definicao_renderizada_e_yaml_valido() -> None:
     # O Workflows lê YAML: uma expressão sem aspas com ": " dentro vira chave e valor, e a
     # publicação falha (deploy de 2026-11-03). Renderiza como o templatefile e abre.
-    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "x", _texto()).replace("$${", "${")
+    renderizado = re.sub(r"(?<!\$)\$\{[\w.]+\}", "x", _texto()).replace("$${", "${")
     assert isinstance(yaml.safe_load(renderizado), dict)
 
 
@@ -1109,7 +1250,7 @@ def test_list_concat_anexa_um_item_e_nao_uma_lista() -> None:
 @pytest.mark.parametrize("arquivo", sorted(INFRA.rglob("*.workflow.yaml")))
 def test_expressoes_nao_contem_mapas_literais(arquivo: Path) -> None:
     # Substitui só a interpolação do Terraform antes de conferir as expressões.
-    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "1", arquivo.read_text()).replace(
+    renderizado = re.sub(r"(?<!\$)\$\{[\w.]+\}", "1", arquivo.read_text()).replace(
         "$${", "${"
     )
     assert [e for e in _expressoes(renderizado) if "{" in e] == [], str(arquivo)
@@ -1123,7 +1264,7 @@ def test_conta_da_orquestracao_grava_log_do_sys_log() -> None:
 
 def _definicao(variaveis: dict[str, str] | None = None) -> dict[str, Any]:
     renderizado = re.sub(
-        r"(?<!\$)\$\{(\w+)\}",
+        r"(?<!\$)\$\{([\w.]+)\}",
         lambda m: (variaveis or {}).get(m[1], "1"),
         _texto(),
     ).replace("$${", "${")
@@ -1196,8 +1337,11 @@ def test_o_job_do_aviso_do_fim_e_o_que_o_workflow_roda() -> None:
 
     assert 'resource "google_cloud_run_v2_job" "fim"' in fim
     assert '"api.fim_do_job"' in fim
-    for variavel in ("PUBSUB_TOPICO_EVENTOS", "PUBSUB_TOPICO_USO", "GCP_PROJECT_ID"):
+    for variavel in ("PUBSUB_TOPICO_EVENTOS", "PUBSUB_TOPICO_USO"):
         assert f'"{variavel}"' in fim
+    # O projeto chega pelo `dynamic "env"` do local, que o nomeia.
+    assert "for_each = local.env_do_projeto" in fim
+    assert 'name = "GCP_PROJECT_ID"' in MAIN.read_text()
     assert (
         "job_de_fim             = google_cloud_run_v2_job.fim.name" in MAIN.read_text()
     )
@@ -1281,3 +1425,57 @@ def test_o_banco_do_firestore_vem_da_configuracao_e_nao_e_default() -> None:
     assert "(default)" not in texto
     assert "databases/${banco_firestore}/documents/" in texto
     assert "banco_firestore" in MAIN.read_text().split("validacao.workflow.yaml")[1]
+
+
+def _codigos_de_falha_do_yaml(texto: str) -> set[str]:
+    """Os códigos literais que o YAML grava em `codigo_falha` ou passa em `codigo_da_falha`."""
+    codigos: set[str] = set()
+
+    def anda(no: object) -> None:
+        if isinstance(no, dict):
+            for chave, valor in no.items():
+                if chave == "codigo_falha":
+                    codigos.add(valor["stringValue"])
+                elif chave == "codigo_da_falha":
+                    codigos.add(valor)
+                anda(valor)
+        elif isinstance(no, list):
+            for item in no:
+                anda(item)
+
+    anda(yaml.safe_load(texto))
+    return {codigo for codigo in codigos if not codigo.startswith("$${")}
+
+
+def test_codigos_de_falha_do_yaml_sao_membros_do_codigo_de_falha() -> None:
+    codigos = _codigos_de_falha_do_yaml(_texto())
+
+    assert {"arquivo_corrompido", "analise_falhou", "transcricao_falhou"} <= codigos
+    assert codigos <= set(get_args(CodigoDeFalha))
+
+
+def test_o_conferidor_dos_codigos_acusa_um_codigo_que_o_modelo_nao_tem() -> None:
+    texto = _texto().replace("stringValue: analise_falhou", "stringValue: analise_x")
+
+    assert not _codigos_de_falha_do_yaml(texto) <= set(get_args(CodigoDeFalha))
+    com_aspas = _texto().replace(
+        "codigo_da_falha: ocr_falhou", 'codigo_da_falha: "ocr_invalido"'
+    )
+    assert "ocr_invalido" in _codigos_de_falha_do_yaml(com_aspas)
+
+
+def test_formato_de_etapas_do_yaml_bate_com_o_modelo_da_etapa() -> None:
+    texto = _texto()
+
+    marcas = texto[texto.index("\nmarca_inicio:") : texto.index("\netapa_com_gpu:")]
+    campos = set(re.findall(r'"etapas\." \+ etapa \+ "\.(\w+)"', marcas))
+    assert campos == {"fim", "resultado"}
+    assert campos | {"inicio"} <= set(Etapa.model_fields)
+    resultados = set(
+        re.findall(r"- resultado: (\w+)\n", _subworkflow(texto, "marca_fim"))
+    )
+    assert resultados == set(get_args(ResultadoDaEtapa))
+    # Todo nome de etapa literal que o YAML grava existe no modelo.
+    nomes = set(re.findall(r"\n\s+etapa: ([a-z_]+)\n", texto))
+    assert {"identificacao", "indexacao"} <= nomes
+    assert nomes <= set(get_args(NomeDaEtapa))

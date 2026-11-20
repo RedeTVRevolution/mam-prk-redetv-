@@ -1,4 +1,14 @@
-.PHONY: gravar-jobs-falsos medir-jobs-falsos apagar-jobs-falsos preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave registrar-webhook listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca recalcular-pessoas-dos-jobs gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi aceitar-esquemas cache-dos-quadros conferir-limpeza-de-imagens
+.PHONY: gerar-copy-das-imagens-gpu gravar-jobs-falsos medir-jobs-falsos apagar-jobs-falsos preencher-planos-recorrentes medir-agrupamento-de-objetos verificar-api verificar-web emitir-chave registrar-webhook listar-chaves revogar-chave instalar verificar comparar testar-afk mesclar-afk deploy-dev criar-contas atribuir-papeis corrigir-estado carregar-programas carregar-marcas apagar-referencias-web gravar-cassetes gravar-cassete-da-busca testar-na-imagem criar-colecao-da-busca medir-busca medir-juncao sondar-busca reindexar copiar-para-bigquery migrar-banco-de-seguranca limpar-banco-padrao preencher-catalogo-dos-jobs preencher-filtros-da-busca gravar-mes-nos-jobs gravar-versao-nos-jobs preencher-jobs-do-painel preencher-revisao-do-painel preencher-taxa-diaria comparar-objetos medir-florence comparar-leituras passada-de-comparacao comparar-passadas reprocessar-versao tempo-de-revisao exportar-regressao importar-gabarito regressao taxa-de-correcao caos-dev carga-dev atualizar-openapi aceitar-esquemas cache-dos-quadros conferir-limpeza-de-imagens
+
+# O ponto único que lê os outputs do Terraform (#756): scripts/ler-ambiente.sh roda
+# `terraform output -json` uma vez e exporta só as variáveis pedidas, salvo as que já vierem no
+# ambiente. Se a leitura falha, o alvo para com erro. PASTA_DO_AMBIENTE escolhe a pasta
+# (infra por padrão; make ... PASTA_DO_AMBIENTE=infra/ambientes/prod), e com ela o projeto do
+# arquivo de ambiente deixa de valer: GCP_PROJECT_ID vem do ambiente da pessoa.
+# Uso na receita: $(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) comando...
+LER_AMBIENTE = ambiente=$$(scripts/ler-ambiente.sh $(1)) && eval "$$ambiente" &&
+ENV_LOCAL = projeto_da_pessoa="$${GCP_PROJECT_ID-}" && set -a && . ./.env && set +a && \
+	{ [ "$${PASTA_DO_AMBIENTE:-infra}" = infra ] || GCP_PROJECT_ID="$$projeto_da_pessoa"; } &&
 
 instalar:
 	uv sync --locked
@@ -64,41 +74,38 @@ criar-contas:
 
 # Chave de API de um sistema da RedeTV (E7): make emitir-chave SISTEMA="Nome do sistema" ESCOPOS=criar,ler,cancelar
 emitir-chave:
-	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
+	$(call LER_AMBIENTE,FIRESTORE_BANCO_DE_SEGURANCA) \
 	uv run --locked python -m api.emitir_chave "$(SISTEMA)" "$(ESCOPOS)"
 
 # Webhook de um sistema da RedeTV (E7, #705): make registrar-webhook SISTEMA="Nome do sistema" URL=https://...
 registrar-webhook:
-	FIRESTORE_BANCO="$${FIRESTORE_BANCO:-$$(terraform -chdir=infra output -raw banco_firestore)}" \
-	WEBHOOK_SEGREDOS="$${WEBHOOK_SEGREDOS:-$$(terraform -chdir=infra output -raw webhook_segredos)}" \
+	$(call LER_AMBIENTE,FIRESTORE_BANCO WEBHOOK_SEGREDOS) \
 	uv run --locked python -m api.registrar_webhook "$(SISTEMA)" "$(URL)"
 
 # Rotação de chaves (E7): no máximo duas ativas por sistema.
 listar-chaves:
-	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
+	$(call LER_AMBIENTE,FIRESTORE_BANCO_DE_SEGURANCA) \
 	uv run --locked python -m api.gerir_chaves listar "$(SISTEMA)"
 
 revogar-chave:
-	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
+	$(call LER_AMBIENTE,FIRESTORE_BANCO_DE_SEGURANCA) \
 	uv run --locked python -m api.gerir_chaves revogar "$(ID)"
 
 # Papéis de uma conta (E3): make atribuir-papeis EMAIL=ana@redetv.com.br PAPEIS=editor,curador
 atribuir-papeis:
-	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
+	$(call LER_AMBIENTE,FIRESTORE_BANCO_DE_SEGURANCA) \
 	uv run --locked python -m api.atribuir_papeis "$(EMAIL)" "$(PAPEIS)"
 
 # Correção manual do estado de um Job (#289), com motivo e auditoria: make corrigir-estado JOB=... ESTADO=concluido|falhou MOTIVO=...
 corrigir-estado:
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
-	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS FIRESTORE_BANCO_DE_SEGURANCA) \
 	uv run --locked python -m api.correcao_de_estado "$(JOB)" "$(ESTADO)" "$(MOTIVO)"
 
 # Cache-Control dos quadros já gravados (#410), o mesmo que o gravar_quadro põe nos novos
 # (CACHE_DO_QUADRO, api/nuvem.py): só o metadado de <job>/quadros/*.jpg; não regrava nem apaga.
 # Rodar no dev depois do deploy, e no prod quando houver. Repetir não muda nada.
 cache-dos-quadros:
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" && \
+	$(call LER_AMBIENTE,BUCKET_DECUPAGENS) \
 	gcloud storage objects update "gs://$${BUCKET_DECUPAGENS:?}/*/quadros/*.jpg" \
 		--cache-control="private, max-age=86400"
 
@@ -110,8 +117,7 @@ carregar-programas:
 
 # Carga inicial do catálogo de marcas (#150), a partir dos comerciais das Decupagens; idempotente.
 carregar-marcas:
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \
 	uv run --locked python -m api.carregar_marcas
 
 # Migração única da retirada das referências na web (#327): apaga as fotos, os rostos
@@ -119,18 +125,17 @@ carregar-marcas:
 # antes e depois. Rodar de novo não apaga nada a mais. Depois, rode `make copiar-para-bigquery`
 # e `make reindexar`: o nome que voltou a palpite ainda está no tempo de tela e na busca.
 apagar-referencias-web:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_REFERENCIAS BUCKET_DECUPAGENS) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_REFERENCIAS="$${BUCKET_REFERENCIAS:-$$(terraform -chdir=infra output -raw bucket_referencias)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.apagar_referencias_web
 
 # Cassetes da busca (#507) e do Gemini (#10): chamadas reais no dev, com as
 # credenciais ADC de quem roda. Regrave a cada troca de modelo, esquema ou instrução.
 # O bucket vem do Terraform (output bucket_clipes_ouro), salvo se já vier no ambiente.
 gravar-cassetes: gravar-cassete-da-busca
-	set -a && . ./.env && set +a && \
-	BUCKET_CLIPES_OURO="$${BUCKET_CLIPES_OURO:-$$(terraform -chdir=infra output -raw bucket_clipes_ouro)}" \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_CLIPES_OURO) \
 	uv run --locked python -m api.cassete
 
 # Aceite dos cinco esquemas do Gemini contra o Vertex (#617): chamadas curtas de texto, só 400
@@ -144,33 +149,24 @@ aceitar-esquemas:
 # inválido e o código para com erro, em vez de assumir true e criar índices caros.
 # BUSCA_COTA_DE_ESCRITA vazia (output ainda não aplicado) grava sem ritmo, só com a nova
 # tentativa no 429 (#411).
-AMBIENTE_DA_BUSCA = set -a && . ./.env && set +a && \
-	BUSCA_REGIAO="$${BUSCA_REGIAO:-$$(terraform -chdir=infra output -raw busca_regiao)}" \
-	BUSCA_COLECAO="$${BUSCA_COLECAO:-$$(terraform -chdir=infra output -raw busca_colecao)}" \
-	BUSCA_COLECAO_DE_TEXTO="$${BUSCA_COLECAO_DE_TEXTO:-$$(terraform -chdir=infra output -raw busca_colecao_de_texto)}" \
-	BUSCA_COLECAO_DE_MEDIDA="$${BUSCA_COLECAO_DE_MEDIDA:-$$(terraform -chdir=infra output -raw busca_colecao_de_medida)}" \
-	BUSCA_INDICE_DESCRICAO="$${BUSCA_INDICE_DESCRICAO:-$$(terraform -chdir=infra output -raw busca_indice_descricao)}" \
-	BUSCA_INDICES_LIGADOS="$${BUSCA_INDICES_LIGADOS:-$$(terraform -chdir=infra output -raw busca_indices_ligados || echo terraform_output_falhou)}" \
-	BUSCA_DIMENSAO="$${BUSCA_DIMENSAO:-$$(terraform -chdir=infra output -raw busca_dimensao)}" \
-	BUSCA_COTA_DE_ESCRITA="$${BUSCA_COTA_DE_ESCRITA:-$$(terraform -chdir=infra output -raw busca_cota_de_escrita)}"
+AMBIENTE_DA_BUSCA = $(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUSCA_REGIAO BUSCA_COLECAO BUSCA_COLECAO_DE_TEXTO BUSCA_COLECAO_DE_MEDIDA BUSCA_INDICE_DESCRICAO BUSCA_INDICES_LIGADOS BUSCA_DIMENSAO BUSCA_COTA_DE_ESCRITA:opcional $(1))
 
 # Contrato do OR entre formas (#507): chamada real, separada do cassete do Gemini.
 gravar-cassete-da-busca:
-	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.cassete busca
+	$(call AMBIENTE_DA_BUSCA,) uv run --locked python -m api.cassete busca
 
 # Coleção de momentos e índices ANN da busca, no Agent Retrieval; idempotente.
 criar-colecao-da-busca:
-	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.criar_colecao_da_busca
+	$(call AMBIENTE_DA_BUSCA,) uv run --locked python -m api.criar_colecao_da_busca
 
 # Medição da busca (#117): make medir-busca [CONSULTAS=30] [DIMENSOES="128 256"]; só com credenciais.
 medir-busca:
-	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)
+	$(call AMBIENTE_DA_BUSCA,) uv run --locked python -m api.medir_busca $(or $(CONSULTAS),30) $(DIMENSOES)
 
 # Sonda da busca: as consultas de api/consultas_da_sonda.toml no dev, com o corte do serviço, e um veredito por consulta.
 sondar-busca:
-	$(AMBIENTE_DA_BUSCA) \
-	BUSCA_DISTANCIA_MAXIMA="$${BUSCA_DISTANCIA_MAXIMA:-$$(terraform -chdir=infra output -raw busca_distancia_maxima)}" \
-	BUSCA_PALAVRAS_MINIMAS="$${BUSCA_PALAVRAS_MINIMAS:-$$(terraform -chdir=infra output -raw busca_palavras_minimas)}" \
+	$(call AMBIENTE_DA_BUSCA,BUSCA_DISTANCIA_MAXIMA BUSCA_PALAVRAS_MINIMAS) \
 	uv run --locked python -m api.sondar_busca
 
 # Comparação de duas leituras da tela do mesmo vídeo (#233), sem nuvem:
@@ -183,11 +179,9 @@ comparar-leituras:
 # conversão e os modelos do Gemini; guarda por motor o inventário, os tokens, o tempo e o custo.
 # MODELOS_DA_COMPARACAO e PRECOS_DOS_MODELOS (modelo=entrada:saida, US$ por milhão de tokens) vêm do ambiente.
 comparar-objetos:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_DECUPAGENS REGIAO_GPU JOB_DE_OBJETOS_GPU) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
-	REGIAO_GPU="$${REGIAO_GPU:-$$(terraform -chdir=infra output -raw regiao_gpu)}" \
-	JOB_DE_OBJETOS_GPU="$${JOB_DE_OBJETOS_GPU:-$$(terraform -chdir=infra output -raw job_de_objetos_gpu)}" \
 	uv run --locked python -m api.comparar_objetos "$(JOB)" "$(or $(PASTA),comparacao-objetos)"
 
 # Medição da junção das pessoas sem nome (#547), em Decupagens baixadas: make medir-juncao ARQUIVOS="a.json b.json" [AMOSTRA=100]
@@ -199,11 +193,9 @@ medir-juncao:
 # <job>/objetos/medicao/<variacao>/ sem tocar no inventário do Job; imprime a tabela.
 # MODELO_OBJETOS (no .env ou no ambiente) é o modelo do Gemini que converte o bruto: o mesmo do Job de inventário.
 medir-florence:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_DECUPAGENS REGIAO_GPU JOB_DE_OBJETOS_GPU) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
-	REGIAO_GPU="$${REGIAO_GPU:-$$(terraform -chdir=infra output -raw regiao_gpu)}" \
-	JOB_DE_OBJETOS_GPU="$${JOB_DE_OBJETOS_GPU:-$$(terraform -chdir=infra output -raw job_de_objetos_gpu)}" \
 	uv run --locked python -m api.medir_florence "$(JOB)" $(VARIACOES)
 
 # Reindexa na busca (#118) a Decupagem entregue de um Job ou de todos os concluídos:
@@ -211,9 +203,7 @@ medir-florence:
 # Sempre indexa (os disparos pelo JOB_ID só indexam o que foi pedido, #419), mas respeita a
 # vez de quem já está indexando o vídeo.
 reindexar:
-	$(AMBIENTE_DA_BUSCA) \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
+	$(call AMBIENTE_DA_BUSCA,BUCKET_ACEITOS BUCKET_DECUPAGENS) \
 	uv run --locked python -m api.indexacao $(JOB)
 
 # Dá `sistema` e `na_lixeira` aos objetos antigos da busca (#483): make preencher-filtros-da-busca.
@@ -221,14 +211,15 @@ reindexar:
 # o filtro: objeto sem `na_lixeira` não casa com o filtro, e o acervo antigo some da busca.
 # Idempotente e retomável (só escreve o que falta), dentro da cota de escrita (#460).
 preencher-filtros-da-busca:
-	$(AMBIENTE_DA_BUSCA) uv run --locked python -m api.preencher_filtros_da_busca
+	$(call AMBIENTE_DA_BUSCA,) uv run --locked python -m api.preencher_filtros_da_busca
 
 # Teste do Firestore em escala (#542), só no dev: grava Jobs falsos (id `teste_NNNNNNN`), mede as listas
 # do acervo com filtros combinados e apaga tudo. Veja o docstring de api/firestore_em_escala.py.
 #   make gravar-jobs-falsos N=100000 ; make medir-jobs-falsos ; make apagar-jobs-falsos
-ESCALA = set -a && . ./.env && set +a && \
+ESCALA = { [ "$${PASTA_DO_AMBIENTE:-infra}" = infra ] || { echo "Os testes de escala rodam só no dev." >&2; exit 1; }; } && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,FIRESTORE_BANCO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	FIRESTORE_BANCO="$${FIRESTORE_BANCO:-$$(terraform -chdir=infra output -raw banco_firestore)}" \
 	LISTAGEM_POR_MES="$${LISTAGEM_POR_MES:-true}" \
 	uv run --locked python -m api.firestore_em_escala
 
@@ -246,30 +237,25 @@ apagar-jobs-falsos:
 # modelo. Sem GRAVAR=1 é a prévia: mostra a contagem de planos e grupos antes e depois e não escreve
 # nada. Idempotente: só regrava a Decupagem do vídeo cujo grupo mudou. Não toca o bruto nem as Correções.
 preencher-planos-recorrentes:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_DECUPAGENS) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.preencher_planos_recorrentes $(if $(GRAVAR),--gravar)
 
 # Copia no BigQuery (#260) as decupagens dos Jobs concluídos, ou a de um Job: make copiar-para-bigquery [JOB=<id>].
 # Troca as linhas do vídeo; repetir dá o mesmo resultado. Nomes vêm do Terraform, salvo se já vierem no ambiente.
 copiar-para-bigquery:
-	$(AMBIENTE_DA_BUSCA) \
+	$(call AMBIENTE_DA_BUSCA,BUCKET_ACEITOS BUCKET_DECUPAGENS BIGQUERY_DATASET BIGQUERY_TABELA BIGQUERY_REGIAO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
-	BIGQUERY_DATASET="$${BIGQUERY_DATASET:-$$(terraform -chdir=infra output -raw bigquery_dataset)}" \
-	BIGQUERY_TABELA="$${BIGQUERY_TABELA:-$$(terraform -chdir=infra output -raw bigquery_tabela)}" \
-	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
 	uv run --locked python -m api.copiar_para_bigquery $(JOB)
 
 # Copia papéis, chaves e auditoria do (default) para o banco de segurança (#465); não apaga a origem.
 # Rodar no dev depois do terraform apply e ANTES de o deploy ligar FIRESTORE_BANCO_DE_SEGURANCA nos
 # serviços (README). Repetir não duplica nada.
 migrar-banco-de-seguranca:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,FIRESTORE_BANCO_DE_SEGURANCA) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
 	uv run --locked python -m api.migrar_banco_de_seguranca
 
 # Limpeza única (#530): as cópias antigas de papéis, chaves e auditoria no banco (default), que
@@ -281,28 +267,22 @@ limpar-banco-padrao:
 
 # Grava em cada Job concluído quem aparece nele (#359): make preencher-catalogo-dos-jobs.
 # Roda no dev depois do deploy: Job sem os campos não entra no impacto da lixeira. Repetir não muda nada.
+# Também recalcula `pessoas_do_catalogo` (#478): Job sem o campo não entra no impacto da fusão e da renomeação.
+# Em páginas; se um Job for apagado no meio (lixeira esvaziada), o cursor fica inválido e a passada aborta: rodar de novo.
 preencher-catalogo-dos-jobs:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.preencher_catalogo_dos_jobs
-
-# Recalcula `pessoas_do_catalogo` de cada Job concluído (#478): make recalcular-pessoas-dos-jobs.
-# Roda no dev depois do deploy: Job sem o campo não entra no impacto da fusão e da renomeação.
-# Em páginas; repetir não muda nada. É a mesma passada do preencher-catalogo-dos-jobs. Se um Job
-# for apagado no meio (lixeira esvaziada), o cursor fica inválido e a passada aborta: rodar de novo.
-recalcular-pessoas-dos-jobs:
-	$(MAKE) preencher-catalogo-dos-jobs
 
 # Troca `operador` por `consulta` nos papéis gravados (#664): make migrar-papel-operador.
 # Irreversível. Roda em cada ambiente ANTES do deploy do código novo e de novo logo antes dele,
 # sem atribuir papéis nessa janela; depois do deploy, `["operador"]` viraria sem permissão.
 # Repetir não muda nada.
 migrar-papel-operador:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,FIRESTORE_BANCO_DE_SEGURANCA) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
 	uv run --locked python -m api.migrar_papel_operador
 
 # Grava `mes_exibicao` nos Jobs antigos que têm data de exibição (#479): make gravar-mes-nos-jobs.
@@ -317,33 +297,27 @@ gravar-mes-nos-jobs:
 # Roda no dev uma vez, depois do deploy: lê a versão da decupagem de cada Job sem o campo. Sem
 # ela, `make reprocessar-versao` ainda abre a decupagem desses Jobs. Repetir não muda nada.
 gravar-versao-nos-jobs:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.gravar_versao_nos_jobs
 
 # Grava na tabela dos Jobs do painel (#454) os Jobs que já existem: make preencher-jobs-do-painel.
 # Roda uma vez no dev depois do apply: a consulta agendada só vê os Jobs com evento de uso. Repetir
 # troca as linhas pelo id e dá o mesmo resultado. Depois, confira a contagem com a da coleção `jobs`.
 preencher-jobs-do-painel:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BIGQUERY_DATASET BIGQUERY_TABELA_DE_JOBS BIGQUERY_REGIAO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BIGQUERY_DATASET="$${BIGQUERY_DATASET:-$$(terraform -chdir=infra output -raw bigquery_dataset)}" \
-	BIGQUERY_TABELA_DE_JOBS="$${BIGQUERY_TABELA_DE_JOBS:-$$(terraform -chdir=infra output -raw bigquery_tabela_de_jobs)}" \
-	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
 	uv run --locked python -m api.jobs_do_painel
 
 # Grava na tabela da revisão do painel (#467) as medidas de revisão que já existem: make
 # preencher-revisao-do-painel. Roda uma vez no dev depois do apply (a web só copia as medidas
 # novas); repetir dá o mesmo resultado. Depois, confira a contagem com `make tempo-de-revisao`.
 preencher-revisao-do-painel:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BIGQUERY_DATASET BIGQUERY_TABELA_DE_JOBS BIGQUERY_TABELA_DE_REVISAO BIGQUERY_REGIAO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BIGQUERY_DATASET="$${BIGQUERY_DATASET:-$$(terraform -chdir=infra output -raw bigquery_dataset)}" \
-	BIGQUERY_TABELA_DE_JOBS="$${BIGQUERY_TABELA_DE_JOBS:-$$(terraform -chdir=infra output -raw bigquery_tabela_de_jobs)}" \
-	BIGQUERY_TABELA_DE_REVISAO="$${BIGQUERY_TABELA_DE_REVISAO:-$$(terraform -chdir=infra output -raw bigquery_tabela_de_revisao)}" \
-	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
 	uv run --locked python -m api.revisao_do_painel
 
 # Grava a contagem de itens das decupagens que ainda não a têm e refaz o último ano na tabela da
@@ -351,26 +325,18 @@ preencher-revisao-do-painel:
 # do apply, e de novo depois de `make reprocessar-versao` (o reprocessamento muda dias antigos; a
 # execução agendada só refaz hoje e ontem). Repetir dá o mesmo resultado.
 preencher-taxa-diaria:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS BIGQUERY_DATASET BIGQUERY_TABELA_DA_TAXA BIGQUERY_REGIAO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
-	BIGQUERY_DATASET="$${BIGQUERY_DATASET:-$$(terraform -chdir=infra output -raw bigquery_dataset)}" \
-	BIGQUERY_TABELA_DA_TAXA="$${BIGQUERY_TABELA_DA_TAXA:-$$(terraform -chdir=infra output -raw bigquery_tabela_da_taxa)}" \
-	BIGQUERY_REGIAO="$${BIGQUERY_REGIAO:-$$(terraform -chdir=infra output -raw bigquery_regiao)}" \
 	uv run --locked python -m api.taxa_diaria PREENCHER $(DIAS)
 
 # Reprocessa o acervo de propósito (#250): make reprocessar-versao [DE=<versão ou anterior>] [LIMITE=<n>]
 # Lista os Jobs concluídos de versão do pipeline anterior à atual (api/versao_pipeline.py) e o custo
 # estimado (CUSTO_POR_HORA_USD, opcional). Só com CONFIRMAR=1 reprocessa, em lotes, pela análise.
 reprocessar-versao:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS WORKFLOW_REGIAO WORKFLOW_VALIDACAO FIRESTORE_BANCO_DE_SEGURANCA) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
-	WORKFLOW_REGIAO="$${WORKFLOW_REGIAO:-$$(terraform -chdir=infra output -raw workflow_regiao)}" \
-	WORKFLOW_VALIDACAO="$${WORKFLOW_VALIDACAO:-$$(terraform -chdir=infra output -raw workflow_validacao)}" \
-	FIRESTORE_BANCO_DE_SEGURANCA="$${FIRESTORE_BANCO_DE_SEGURANCA:-$$(terraform -chdir=infra output -raw banco_de_seguranca)}" \
 	CONFIRMAR="$(CONFIRMAR)" \
 	uv run --locked python -m api.reprocessar_versao "$(DE)" "$(LIMITE)"
 
@@ -379,10 +345,9 @@ reprocessar-versao:
 # ao lado da Decupagem, que não muda. PRECOS_DOS_MODELOS (modelo=entrada:saida, US$ por milhão
 # de tokens) vem do ambiente; JANELAS_EM_PARALELO é opcional (1 por padrão).
 passada-de-comparacao:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.passadas "$(JOB)" "$(MODELO)"
 
 # Compara a decupagem do Job com uma passada (#248): make comparar-passadas JOB=<id> [PASSADA=<id>]
@@ -390,10 +355,9 @@ passada-de-comparacao:
 # Grava Markdown e JSON em PASTA (comparacao-passadas). PRECOS_DOS_MODELOS, DATA_DA_TABELA_DE_PRECOS
 # e, opcional, TOKENS_DO_JOB (job=entrada:saida,...) vêm do ambiente.
 comparar-passadas:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.ferramentas.comparar_passadas "$(or $(JOBS),$(JOB))" "$(PASSADA)" "$(MODELO)" "$(PASTA)"
 
 # Tempo de revisão por vídeo e por pessoa, em CSV (#251): make tempo-de-revisao [DESDE=2026-11-01]
@@ -404,10 +368,9 @@ tempo-de-revisao:
 
 # Casos de regressão das correções em vigor (#253): make exportar-regressao [PASTA=evals/regressao/casos]
 exportar-regressao:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.regressao "$(PASTA)"
 
 # Casos de regressão do gabarito de famosos em CSV (#353): make importar-gabarito [GABARITO=evals/gabarito] [PASTA=evals/regressao/casos]
@@ -426,10 +389,9 @@ regressao:
 # Taxa de correção por tipo, programa e versão do pipeline, em CSV (#265):
 # make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO, UTC, inclusive)
 taxa-de-correcao:
-	set -a && . ./.env && set +a && \
+	$(ENV_LOCAL) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	BUCKET_ACEITOS="$${BUCKET_ACEITOS:-$$(terraform -chdir=infra output -raw bucket_aceitos)}" \
-	BUCKET_DECUPAGENS="$${BUCKET_DECUPAGENS:-$$(terraform -chdir=infra output -raw bucket_decupagens)}" \
 	uv run --locked python -m api.taxa_de_correcao "$(DESDE)" "$(ATE)" "$(PROGRAMA)"
 
 # Teste de caos da API no dev (#274): make caos-dev URL=https://... CHAVE_A=... CHAVE_B=... [CLIPE=arquivo.mp4]
@@ -451,3 +413,7 @@ atualizar-openapi:
 # e o terraform init feito; usa a config gcloud do MAM (mam-dev), como o deploy-dev.
 conferir-limpeza-de-imagens:
 	CLOUDSDK_ACTIVE_CONFIG_NAME="$${CLOUDSDK_ACTIVE_CONFIG_NAME:-mam-dev}" uv run --locked python -m api.limpeza_de_imagens
+
+# Reescreve no Dockerfile o COPY de api/ de cada imagem com GPU a partir do fecho de imports (#758).
+gerar-copy-das-imagens-gpu:
+	uv run --locked python -m scripts.copy_das_imagens_gpu

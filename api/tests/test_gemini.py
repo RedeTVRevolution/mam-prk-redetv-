@@ -390,7 +390,13 @@ def test_tentativa_que_nao_cabe_no_prazo_nao_comeca() -> None:
     with pytest.raises(AnaliseFalhou):
         _rodar(t, relogio)
     assert len(t.chamadas) == 2
-    assert relogio.agora <= PRAZO_DA_ANALISE_S < 1800
+    assert relogio.agora <= PRAZO_DA_ANALISE_S
+    # A análise é um Job, não uma chamada do Workflows: o prazo cabe no timeout do Job.
+    main = (Path(__file__).parents[2] / "infra/modulos/mam/main.tf").read_text()
+    timeout = re.search(
+        r"\banalise\s*=\s*(\d+)", main[main.index("timeout_dos_jobs_s = {") :]
+    )
+    assert timeout and PRAZO_DA_ANALISE_S < int(timeout.group(1))
 
 
 def test_erro_4xx_diferente_de_429_nao_tenta_de_novo() -> None:

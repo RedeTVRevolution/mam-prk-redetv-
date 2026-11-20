@@ -10,11 +10,14 @@
 # Carregado por templatefile: ${projeto}, ${regiao}, ${regiao_gpu}, ${job_de_validacao},
 # ${job_de_transcricao_gpu}, ${job_de_ocr_gpu},
 # ${workflow} (o nome deste Workflows, para ler as execuções), ${gpu_espera_total_s}, ${gpu_espera_s}, ${gpu_fator_da_espera}, ${gpu_espera_maxima_s},
-# ${job_de_objetos_gpu}, ${motor_objetos}, ${job_de_inventario} (o inventário de objetos, #244:
+# ${job_de_objetos_gpu}, ${job_de_inventario} (o inventário de objetos, #244:
 # o Florence-2 num Job com GPU, sem plano B, e o Job em CPU que grava o inventário na Decupagem
-# entre os quadros-chave e a indexação; com o motor gemini só o Job em CPU),
+# entre os quadros-chave e a indexação),
 # ${job_de_analise}, ${job_de_identificacao},
 # ${job_de_quadros}, ${job_de_indexacao}, ${job_de_fim} (o aviso do `falhou` que o Workflows grava, #379).
+# prazo_do_conector_s, mapa lido como `$${prazo_do_conector_s.chave}` (o timeout do Job + 300 s, do `locals` do módulo; chaves: validacao,
+# transcricao_gpu, ocr_gpu, objetos_gpu, analise, inventario, quadros, identificacao e indexacao).
+# O `avisa_o_fim` fica sem prazo: usa o padrão de 1800 s do Workflows.
 # Toda a execução roda num try: um erro que nenhum passo trata (do próprio Workflows,
 # de um conector, de uma permissão) não deixa o Job preso em `analisando`, que a tela
 # mostra como "Decupando" para sempre e o reprocessar recusa (`marca_interrompido`).
@@ -84,7 +87,6 @@ processa:
           - job_id: $${evento.data.name}
           - etapa_inicial: validacao
           - roda_a_transcricao: true
-          - roda_a_leitura_da_tela: true
         next: parte_da_etapa
     - tira_o_id_do_reprocessamento:
         assign:
@@ -94,7 +96,6 @@ processa:
           # leitura da tela, que vem depois dela); reprocessar só a leitura da tela não
           # mexe na transcrição, que já concluiu.
           - roda_a_transcricao: true
-          - roda_a_leitura_da_tela: true
     - parte_da_etapa:
         switch:
           - condition: $${etapa_inicial == "transcricao"}
@@ -129,7 +130,7 @@ processa:
                         value: $${job_id}
             # O conector desiste em 1800 s por padrão; o Job de validação tem até 10800 s.
             connector_params:
-              timeout: 11100
+              timeout: ${prazo_do_conector_s.validacao}
         except:
           as: e
           # Tempo esgotado ou memória estourada: o Job não chegou a gravar o resultado.
@@ -241,25 +242,21 @@ processa:
                                     job_gpu: ${job_de_transcricao_gpu}
                                     # O conector desiste em 1800 s por padrão; o Job de transcrição
                                     # com GPU tem até 10800 s.
-                                    timeout_gpu: 11100
+                                    timeout_gpu: ${prazo_do_conector_s.transcricao_gpu}
                                     codigo_da_falha: transcricao_falhou
                                     mostra_a_etapa: true
               - ramo_da_leitura_da_tela:
                   steps:
-                    - le_a_tela_se_preciso:
-                        switch:
-                          - condition: $${roda_a_leitura_da_tela}
-                            steps:
-                              - le_a_tela:
-                                  call: etapa_com_gpu
-                                  args:
-                                    job_id: $${job_id}
-                                    etapa: leitura_da_tela
-                                    job_gpu: ${job_de_ocr_gpu}
-                                    # O Job de OCR com GPU tem até 21600 s.
-                                    timeout_gpu: 21900
-                                    codigo_da_falha: ocr_falhou
-                                    mostra_a_etapa: $${not roda_a_transcricao}
+                    - le_a_tela:
+                        call: etapa_com_gpu
+                        args:
+                          job_id: $${job_id}
+                          etapa: leitura_da_tela
+                          job_gpu: ${job_de_ocr_gpu}
+                          # O Job de OCR com GPU tem até 21600 s.
+                          timeout_gpu: ${prazo_do_conector_s.ocr_gpu}
+                          codigo_da_falha: ocr_falhou
+                          mostra_a_etapa: $${not roda_a_transcricao}
         except:
           as: e
           steps:
@@ -286,9 +283,10 @@ processa:
                       - name: JOB_ID
                         value: $${job_id}
             # O conector desiste em 1800 s por padrão; o Job de análise tem até 21600 s
-            # (as janelas de um programa de até 4 h, a Flex com 600 s por chamada).
+            # (as janelas de um programa de até 4 h). Os 600 s por chamada são o timeout do servidor
+            # por tentativa da Flex, não o `PRAZO_DA_ANALISE_S` (1500 s) com que o Python desiste da janela.
             connector_params:
-              timeout: 21900
+              timeout: ${prazo_do_conector_s.analise}
         except:
           as: e
           steps:
@@ -355,75 +353,34 @@ processa:
         args:
           job_id: $${job_id}
           etapa: identificacao
+    # A identificação grava o próprio resultado da etapa (`incompleto` fica `falhou`), por isso
+    # não há `encerra_`; com ou sem falha, os quadros-chave rodam em seguida.
     - identifica:
-        try:
-          call: googleapis.run.v2.projects.locations.jobs.run
-          args:
-            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_identificacao}
-            body:
-              overrides:
-                containerOverrides:
-                  - env:
-                      - name: JOB_ID
-                        value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job de identificação tem até 3600 s. Ele grava o
-            # próprio resultado da etapa (`incompleto` fica `falhou`), por isso não há `encerra_`.
-            connector_params:
-              timeout: 3900
-        except:
-          as: e
-          steps:
-            - grava_a_falha_de_identificacao:
-                call: marca_fim
-                args:
-                  job_id: $${job_id}
-                  etapa: identificacao
-                  falhou_na_execucao: true
-            # O Job já está concluído; sem a identificação a Decupagem segue como estava. A falha
-            # fica na etapa e no log, e o salto evita gravar a etapa por cima como `concluida`.
-            - registra_a_falha_de_identificacao:
-                call: sys.log
-                args:
-                  severity: WARNING
-                  text: $${"a identificação falhou para " + job_id}
-                next: inicia_quadros_chave
+        call: roda_o_job_de_etapa
+        args:
+          job_id: $${job_id}
+          etapa: identificacao
+          job: ${job_de_identificacao}
+          prazo: ${prazo_do_conector_s.identificacao}
     - inicia_quadros_chave:
         call: marca_inicio
         args:
           job_id: $${job_id}
           etapa: quadros_chave
     - tira_os_quadros:
-        try:
-          call: googleapis.run.v2.projects.locations.jobs.run
-          args:
-            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_quadros}
-            body:
-              overrides:
-                containerOverrides:
-                  - env:
-                      - name: JOB_ID
-                        value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job de quadros tem até 3600 s.
-            connector_params:
-              timeout: 3900
-        except:
-          as: e
-          steps:
-            - grava_a_falha_de_quadros_chave:
-                call: marca_fim
-                args:
-                  job_id: $${job_id}
-                  etapa: quadros_chave
-                  falhou_na_execucao: true
-            # O Job já está concluído; sem os JPEGs a Decupagem segue valendo. A falha
-            # fica na etapa e no log, e o salto evita o `encerra_quadros_chave`, que a
-            # gravaria por cima como `concluida`.
-            - registra_a_falha_dos_quadros:
-                call: sys.log
-                args:
-                  severity: WARNING
-                  text: $${"quadros-chave falharam para " + job_id}
-                next: inicia_inventario_de_objetos
+        call: roda_o_job_de_etapa
+        args:
+          job_id: $${job_id}
+          etapa: quadros_chave
+          job: ${job_de_quadros}
+          prazo: ${prazo_do_conector_s.quadros}
+        result: quadros_falharam
+    # O Job já está concluído; sem os JPEGs a Decupagem segue valendo. O salto evita o
+    # `encerra_quadros_chave`, que gravaria a etapa por cima como `concluida`.
+    - confere_os_quadros:
+        switch:
+          - condition: $${quadros_falharam}
+            next: inicia_inventario_de_objetos
     - encerra_quadros_chave:
         call: marca_fim
         args:
@@ -435,11 +392,6 @@ processa:
         args:
           job_id: $${job_id}
           etapa: inventario_de_objetos
-    - escolhe_o_motor_de_objetos:
-        switch:
-          - condition: $${"${motor_objetos}" == "florence"}
-            next: roda_o_florence
-        next: roda_o_inventario
     # O Florence-2 num Job com GPU de `${regiao_gpu}`, sem plano B em CPU: esgotada a espera
     # por GPU, a falha sobe (#244). O inventário em CPU lê o que ele gravou.
     - roda_o_florence:
@@ -450,7 +402,7 @@ processa:
             etapa: inventario_de_objetos
             job_gpu: ${job_de_objetos_gpu}
             # O conector desiste em 1800 s por padrão; o Job de objetos tem até 10800 s.
-            timeout_gpu: 11100
+            timeout_gpu: ${prazo_do_conector_s.objetos_gpu}
         except:
           as: e
           steps:
@@ -468,37 +420,19 @@ processa:
                   severity: WARNING
                   text: $${"o Florence-2 falhou para " + job_id}
                 next: inicia_indexacao
-    # O Job em CPU: converte o resultado do Florence-2 (motor florence) ou olha os
-    # quadros-chave (motor gemini), e grava o inventário na Decupagem.
+    # O Job em CPU: converte o resultado do Florence-2 e grava o inventário na Decupagem.
     - roda_o_inventario:
-        try:
-          call: googleapis.run.v2.projects.locations.jobs.run
-          args:
-            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_inventario}
-            body:
-              overrides:
-                containerOverrides:
-                  - env:
-                      - name: JOB_ID
-                        value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job do inventário tem até 3600 s.
-            connector_params:
-              timeout: 3900
-        except:
-          as: e
-          steps:
-            - grava_a_falha_do_inventario:
-                call: marca_fim
-                args:
-                  job_id: $${job_id}
-                  etapa: inventario_de_objetos
-                  falhou_na_execucao: true
-            - registra_a_falha_do_inventario:
-                call: sys.log
-                args:
-                  severity: WARNING
-                  text: $${"o inventário de objetos falhou para " + job_id}
-                next: inicia_indexacao
+        call: roda_o_job_de_etapa
+        args:
+          job_id: $${job_id}
+          etapa: inventario_de_objetos
+          job: ${job_de_inventario}
+          prazo: ${prazo_do_conector_s.inventario}
+        result: inventario_falhou
+    - confere_o_inventario:
+        switch:
+          - condition: $${inventario_falhou}
+            next: inicia_indexacao
     - encerra_inventario_de_objetos:
         call: marca_fim
         args:
@@ -511,36 +445,19 @@ processa:
           job_id: $${job_id}
           etapa: indexacao
     - indexa:
-        try:
-          call: googleapis.run.v2.projects.locations.jobs.run
-          args:
-            name: projects/${projeto}/locations/${regiao}/jobs/${job_de_indexacao}
-            body:
-              overrides:
-                containerOverrides:
-                  - env:
-                      - name: JOB_ID
-                        value: $${job_id}
-            # O conector desiste em 1800 s por padrão; o Job de indexação tem até 1800 s.
-            connector_params:
-              timeout: 2100
-        except:
-          as: e
-          steps:
-            - grava_a_falha_de_indexacao:
-                call: marca_fim
-                args:
-                  job_id: $${job_id}
-                  etapa: indexacao
-                  falhou_na_execucao: true
-            # O Job já está concluído; a falha fica no estado da indexação, na etapa e no
-            # log, e o salto evita o `encerra_indexacao`, que a gravaria como `concluida`.
-            - registra_a_falha_da_indexacao:
-                call: sys.log
-                args:
-                  severity: WARNING
-                  text: $${"indexação falhou para " + job_id}
-                next: fim
+        call: roda_o_job_de_etapa
+        args:
+          job_id: $${job_id}
+          etapa: indexacao
+          job: ${job_de_indexacao}
+          prazo: ${prazo_do_conector_s.indexacao}
+        result: indexacao_falhou
+    # A falha fica no estado da indexação, na etapa e no log; o salto evita o
+    # `encerra_indexacao`, que a gravaria como `concluida`.
+    - confere_a_indexacao:
+        switch:
+          - condition: $${indexacao_falhou}
+            next: fim
     - encerra_indexacao:
         call: marca_fim
         args:
@@ -549,6 +466,46 @@ processa:
           falhou_na_execucao: false
     - fim:
         return: $${job_id}
+
+# Uma etapa de melhor esforço (identificação, quadros-chave, inventário, indexação): roda o Job
+# `job` com o `prazo` do conector, que tem de passar do timeout do Job (o padrão do conector é
+# 1800 s). Devolve `true` se a execução falhou: grava o fim da etapa como `falhou` e
+# registra no log; o Job já está `concluido` e segue assim, e quem chamou pula o `encerra_`
+# para não regravar a etapa como `concluida`.
+roda_o_job_de_etapa:
+  params: [job_id, etapa, job, prazo]
+  steps:
+    - roda:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: $${"projects/${projeto}/locations/${regiao}/jobs/" + job}
+            body:
+              overrides:
+                containerOverrides:
+                  - env:
+                      - name: JOB_ID
+                        value: $${job_id}
+            connector_params:
+              timeout: $${prazo}
+        except:
+          as: e
+          steps:
+            - grava_a_falha:
+                call: marca_fim
+                args:
+                  job_id: $${job_id}
+                  etapa: $${etapa}
+                  falhou_na_execucao: true
+            - registra_a_falha:
+                call: sys.log
+                args:
+                  severity: WARNING
+                  text: $${"a etapa " + etapa + " falhou para " + job_id}
+            - devolve_a_falha:
+                return: true
+    - devolve_o_sucesso:
+        return: false
 
 # O `falhou` que o Workflows grava não passa pelo repositório da API, que é quem publica o
 # evento de fim de Job (webhook) e o evento de uso (#379). Este Job publica os dois, uma vez

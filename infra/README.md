@@ -82,11 +82,11 @@ A `mam-terraform` recebe do wizard os mesmos papéis que tem no dev (`PAPEIS_DA_
 - `roles/cloudkms.admin`
 - `roles/pubsub.admin`
 - `roles/compute.loadBalancerAdmin`
-- `roles/certificatemanager.owner`
 - `roles/compute.securityAdmin`
 - `roles/dns.admin`
 - `roles/iam.roleAdmin`
-- `roles/modelarmor.admin`
+
+O módulo também dá à `mam-terraform` dois papéis do Vector Search (`google_project_iam_member.terraform_busca`, em `modulos/mam/papel_vertex.tf`): `roles/vectorsearch.collectionWriter` e `roles/vectorsearch.indexWriter`, para o deploy criar as coleções e o índice da busca (#757, `scripts/criar-colecao-no-deploy.sh`) se faltarem. Não vêm do wizard: entram no primeiro `apply` (direcionado) do `deploy-dev.sh`, e no primeiro deploy a propagação do IAM pode dar 403 uma vez (o deploy para e basta rodá-lo de novo).
 
 A `mam-build` não é pré-requisito: o próprio módulo a cria (`google_service_account.mam["build"]`) e lhe dá os papéis no `apply`, os mesmos do dev:
 
@@ -131,7 +131,7 @@ O segredo de cada sistema fica no Secret Manager (`mam-segredos-do-webhook`, com
 
 Os eventos de uso (login, envio, fim de processamento, busca, correção e chamada de API) vão ao tópico `mam-eventos-de-uso` (`modulos/mam/eventos_de_uso.tf`, esquema em `evento_de_uso.proto`, `api/eventos_de_uso.py`). A assinatura `mam-eventos-de-uso-bigquery` os grava na tabela `eventos_de_uso` do dataset das decupagens. Quem publica (web, validação, transcrição, OCR e análise) recebe `roles/pubsub.publisher` só no tópico, e o agente de serviço do Pub/Sub, `dataEditor` e `metadataViewer` só na tabela. Nenhum papel novo para a `mam-terraform`. O tópico sai no output `pubsub_topico_uso`.
 
-Os resumos de uso (#280, `modulos/mam/resumos_de_uso.tf` e `.sql`) são quatro tabelas do dataset das decupagens que uma consulta agendada do BigQuery (Data Transfer, a cada hora, conta `mam-resumos-de-uso` com `jobUser` e `dataEditor` no dataset) refaz a partir dos eventos; o painel lê só elas (a conta da web já lê o dataset). Escolhida no lugar da visão materializada, que não aceita `COUNT(DISTINCT)`, função de janela nem a junção com os momentos. Custo estimado no começo: ~300 GB de consulta por mês, contra 1 TiB grátis; mas cada rodada lê a tabela de momentos inteira (duas colunas), e com uns 5 milhões de momentos copiados passa de 1 TB por mês (o comentário de `resumos_de_uso.tf` traz a conta e a saída). Não há tabela de total geral: o total é a soma de `uso_por_dia`, e os usuários ativos de um período contam os distintos de `uso_por_dia_e_usuario`. Liga a API `bigquerydatatransfer.googleapis.com`. Nenhum papel novo para a `mam-terraform` (o `bigquery.admin` cobre). Output `bigquery_tabelas_do_painel`. A web recebe os nomes pelas variáveis `PAINEL_TABELA_*` (#282), e as rotas `/v1/painel/...` leem só essas tabelas.
+Os resumos de uso (#280, `modulos/mam/resumos_de_uso.tf` e `.sql`) são seis tabelas (mais a auxiliar `fins_de_processamento_contados`) do dataset das decupagens que uma consulta agendada do BigQuery (Data Transfer, a cada hora, conta `mam-resumos-de-uso` com `jobUser` e `dataEditor` no dataset) refaz a partir dos eventos; o painel lê quatro delas (`PAINEL_TABELA_*`; a conta da web já lê o dataset). Escolhida no lugar da visão materializada, que não aceita `COUNT(DISTINCT)` nem função de janela. Custo (#380): cada rodada lê só as partições de `eventos_de_uso` da janela, as tabelas por dia que ela troca e a de fins já contados; não lê os momentos (a duração do vídeo vem no evento de fim), então o custo cresce com o uso de cada dia, não com o acervo (o comentário de `resumos_de_uso.tf` traz os detalhes). Não há tabela de total geral: o total é a soma de `uso_por_dia`, e os usuários ativos de um período contam os distintos de `uso_por_dia_e_usuario`. Liga a API `bigquerydatatransfer.googleapis.com`. Nenhum papel novo para a `mam-terraform` (o `bigquery.admin` cobre). Output `bigquery_tabelas_do_painel`. A web recebe os nomes pelas variáveis `PAINEL_TABELA_*` (#282), e as rotas `/v1/painel/...` leem só essas tabelas.
 
 ## Chaves de idempotência (#274)
 
