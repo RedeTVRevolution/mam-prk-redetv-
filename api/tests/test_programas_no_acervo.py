@@ -197,11 +197,9 @@ def _cliente() -> firestore.Client:
     )
 
 
-def _consulta(
-    monkeypatch: pytest.MonkeyPatch, filtro: FiltroDeJobs, por_mes: bool = True
-) -> list[str]:
+def _consulta(monkeypatch: pytest.MonkeyPatch, filtro: FiltroDeJobs) -> list[str]:
     """Os filtros que o repositório manda ao Firestore, como `campo:operador`."""
-    repositorio = RepositorioFirestore(_cliente(), "jobs", listagem_por_mes=por_mes)
+    repositorio = RepositorioFirestore(_cliente(), "jobs")
     vista: dict[str, Any] = {}
 
     def captura(consulta: Any, campo: str, f: FiltroDeJobs) -> PaginaDeJobs:
@@ -311,9 +309,7 @@ class TestConsultaNoFirestore:
 class TestNoEmulador:
     @staticmethod
     def _repositorio() -> RepositorioFirestore:
-        return RepositorioFirestore(
-            _cliente(), f"jobs-{uuid.uuid4().hex}", listagem_por_mes=True
-        )
+        return RepositorioFirestore(_cliente(), f"jobs-{uuid.uuid4().hex}")
 
     @staticmethod
     def _todas_as_paginas(

@@ -220,7 +220,6 @@ ESCALA = { [ "$${PASTA_DO_AMBIENTE:-infra}" = infra ] || { echo "Os testes de es
 	$(ENV_LOCAL) \
 	$(call LER_AMBIENTE,FIRESTORE_BANCO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	LISTAGEM_POR_MES="$${LISTAGEM_POR_MES:-true}" \
 	uv run --locked python -m api.firestore_em_escala
 
 gravar-jobs-falsos:
@@ -286,8 +285,7 @@ migrar-papel-operador:
 	uv run --locked python -m api.migrar_papel_operador
 
 # Grava `mes_exibicao` nos Jobs antigos que têm data de exibição (#479): make gravar-mes-nos-jobs.
-# Roda no dev depois do deploy e antes de ligar `listagem_por_mes` no Terraform: sem o campo,
-# o Job some da lista por período. Repetir não muda nada.
+# Repetir não muda nada.
 gravar-mes-nos-jobs:
 	set -a && . ./.env && set +a && \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \

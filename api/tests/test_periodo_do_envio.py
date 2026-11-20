@@ -43,10 +43,8 @@ def _cliente() -> firestore.Client:
     )
 
 
-def _consulta(
-    monkeypatch: pytest.MonkeyPatch, filtro: FiltroDeJobs, por_mes: bool = True
-) -> list[str]:
-    repositorio = RepositorioFirestore(_cliente(), "jobs", listagem_por_mes=por_mes)
+def _consulta(monkeypatch: pytest.MonkeyPatch, filtro: FiltroDeJobs) -> list[str]:
+    repositorio = RepositorioFirestore(_cliente(), "jobs")
     vista: dict[str, Any] = {}
 
     def captura(consulta: Any, campo: str, f: FiltroDeJobs) -> PaginaDeJobs:
