@@ -82,7 +82,9 @@ def test_job_com_gpu_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu(
     assert "google_compute_subnetwork.validacao.id" not in job
     assert f'google_service_account.mam["{conta}"]' in job
     assert imagem in job
-    assert re.search(rf'timeout\s+= "{timeout}"', job)
+    assert re.search(rf'timeout\s+= "\$\{{local\.timeout_dos_jobs_s\.{nome}\}}s"', job)
+    locais = MAIN[MAIN.index("timeout_dos_jobs_s = {") :]
+    assert re.search(rf"\b{nome}\s*=\s*{timeout.removesuffix('s')}\b", locais)
     assert "max_retries     = 0" in job
     assert 'local.buckets["aceitos"]' in job and "local.env_do_projeto" in job
     assert re.search(r'name\s+= "DISPOSITIVO"\s+value = "gpu"', job)

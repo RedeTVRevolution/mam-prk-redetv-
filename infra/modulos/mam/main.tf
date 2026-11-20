@@ -162,6 +162,10 @@ variable "janelas_em_paralelo" {
   type        = number
   # ponytail: 4 é um chute; o valor sai do piloto e da cota do Gemini.
   default = 4
+  validation {
+    condition     = floor(var.janelas_em_paralelo) == var.janelas_em_paralelo && var.janelas_em_paralelo >= 1
+    error_message = "janelas_em_paralelo é um inteiro a partir de 1."
+  }
 }
 
 variable "limite_de_falhas_por_etapa" {
@@ -234,6 +238,26 @@ locals {
   # Quantas pessoas sem nome por vídeo o modelo forte olha (as de mais tempo na imagem primeiro).
   # Inteiro a partir de 0 (o teste da conta confere).
   limite_de_pessoas_do_modelo_forte = 8
+
+  # O timeout de cada Job, em segundos, num lugar só: cada Job lê o dele aqui e o Workflows
+  # espera cada passo por esse timeout mais 300 s (`prazo_do_conector_s`, chega ao YAML por
+  # templatefile). O padrão do conector é 1800 s. O `mam-fim` não entra no YAML: o aviso
+  # do fim fica com o padrão do Workflows. Um teste (api/tests/test_workflow.py) confere as contas.
+  timeout_dos_jobs_s = {
+    validacao       = 10800
+    transcricao_gpu = 10800
+    ocr_gpu         = 21600
+    objetos_gpu     = 10800
+    analise         = 21600
+    inventario      = 9000
+    quadros         = 3600
+    identificacao   = 3600
+    indexacao       = 1800
+    purga           = 1800
+    taxa_diaria     = 900
+    fim             = 300
+  }
+  prazo_do_conector_s = { for k, v in local.timeout_dos_jobs_s : k => v + 300 }
 
   # Fuso da agenda da purga diária da lixeira; a taxa de correção por dia (#455) também o usa.
   fuso_da_agenda = "America/Sao_Paulo"
@@ -1163,7 +1187,7 @@ resource "google_cloud_run_v2_job" "validacao" {
       # 10800 s dá 4x de folga sobre essa conta (12x sobre a medida). O teto de 7200 s de
       # cada chamada ao ffmpeg só pega um ffmpeg travado; as chamadas são em sequência, e
       # quem limita o total é este timeout.
-      timeout = "10800s"
+      timeout = "${local.timeout_dos_jobs_s.validacao}s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {
@@ -1265,7 +1289,7 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
       # medida (FAMA, 49 min de áudio em 24 min 46 s) roda a 0,5x o tempo real: 4 h de áudio
       # levam 2 h. Mais 1,5x de folga: 10800 s (3 h). A L4 em float16 deve fazer em minutos;
       # o #240 mede e reduz (o conector do passo no Workflows, #239, acompanha).
-      timeout                       = "10800s"
+      timeout                       = "${local.timeout_dos_jobs_s.transcricao_gpu}s"
       gpu_zonal_redundancy_disabled = true
       node_selector {
         accelerator = "nvidia-l4"
@@ -1352,7 +1376,7 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
       # NÃO medido (#240). Pior caso: a GPU não ser mais rápida que a CPU. A CPU de 8 vCPU
       # medida (FAMA, 49 min de programa em 49 min 01 s) lê a 1x o tempo real, um quadro por
       # segundo: 4 h levam 4 h. Mais 1,5x de folga: 21600 s (6 h). O #240 mede e reduz.
-      timeout                       = "21600s"
+      timeout                       = "${local.timeout_dos_jobs_s.ocr_gpu}s"
       gpu_zonal_redundancy_disabled = true
       node_selector {
         accelerator = "nvidia-l4"
@@ -1446,7 +1470,7 @@ resource "google_cloud_run_v2_job" "objetos_gpu" {
       # NÃO medido (#240). Conta: um programa de 4 h tem ~2000 quadros-chave (1 a 3 por
       # plano), a ~3 s cada (<OD> e <DENSE_REGION_CAPTION>, 3 feixes, na L4) = ~6000 s,
       # mais a carga do modelo; vezes 1,75 de folga: 10800 s (3 h). O #240 mede e ajusta.
-      timeout                       = "10800s"
+      timeout                       = "${local.timeout_dos_jobs_s.objetos_gpu}s"
       gpu_zonal_redundancy_disabled = true
       node_selector {
         accelerator = "nvidia-l4"
@@ -1558,7 +1582,7 @@ resource "google_cloud_run_v2_job" "inventario" {
       # (`PARALELISMO_DO_INVENTARIO`); cada lote desiste no prazo de 1500 s
       # (`PRAZO_DA_ANALISE_S`). Pior caso num programa de 4 h: ~38 chamadas = 5 rodadas de
       # 1500 s = 7500 s; 9000 s dão folga. Em série seriam 38 x 15 min = 9,5 h.
-      timeout = "9000s"
+      timeout = "${local.timeout_dos_jobs_s.inventario}s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {
@@ -1644,11 +1668,15 @@ resource "google_cloud_run_v2_job" "analise" {
     template {
       service_account = google_service_account.mam["analise"].email
       max_retries     = 0
-      # 4 h são 48 janelas de 5 min; com `janelas_em_paralelo` = 4, 12 rodadas. Cada janela
-      # desiste em 1500 s (PRAZO_DA_ANALISE_S): o pior caso é 12 x 1500 = 18000 s. 21600 s
-      # (6 h) cobre o pior caso com 1,2x de folga; o caso comum, de 1 a 3 min por janela,
-      # leva de 12 a 36 min. Com um paralelismo menor o pior caso sobe: refaça a conta.
-      timeout = "21600s"
+      # 4 h são 48 janelas de 5 min (`DURACAO_MAXIMA_S / (DURACAO_DA_JANELA_MS / 1000)`, em
+      # api/validador.py e api/janelas.py). Duas contas, com `janelas_em_paralelo` = 4:
+      # - sem tentativa extra: `ceil(48 / janelas_em_paralelo)` rodadas x `PRAZO_DA_ANALISE_S`
+      #   (api/gemini.py, 1500 s) = 12 x 1500 = 18000 s, que o timeout de 21600 s cobre (1,2x
+      #   de folga); o caso comum, de 1 a 3 min por janela, leva de 12 a 36 min;
+      # - com as `LIMITE_DE_TENTATIVAS` (3) tentativas de cada janela: 54000 s, que o timeout NÃO
+      #   cobre. Risco aceito por decisão de 14/11, a rever com a medição.
+      # Com um paralelismo menor o pior caso sobe: refaça a conta (o teste a confere).
+      timeout = "${local.timeout_dos_jobs_s.analise}s"
       containers {
         image   = var.imagem
         command = ["python"]
@@ -1728,7 +1756,7 @@ resource "google_cloud_run_v2_job" "quadros" {
       # NÃO medido (#135): cada quadro é um `ffmpeg -ss` de uma chamada, de 0,1 s a 0,5 s
       # na cópia limpa; milhares de momentos de um programa de 4 h levam de minutos a
       # ~40 min no pior caso. 3600 s dá folga sobre isso; meça no dev com um programa de 4 h.
-      timeout = "3600s"
+      timeout = "${local.timeout_dos_jobs_s.quadros}s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {
@@ -1812,7 +1840,7 @@ resource "google_cloud_run_v2_job" "indexacao" {
       service_account = google_service_account.mam["indexacao"].email
       max_retries     = 0
       # NÃO medido: milhares de registros em lotes de 200, uns segundos por lote.
-      timeout = "1800s"
+      timeout = "${local.timeout_dos_jobs_s.indexacao}s"
       containers {
         image   = var.imagem
         command = ["python"]
@@ -1903,9 +1931,11 @@ resource "google_cloud_run_v2_job" "identificacao" {
       service_account = google_service_account.mam["identificacao"].email
       max_retries     = 0
       # NÃO medido (#135): no máximo `limite_de_pessoas_do_modelo_forte` chamadas ao Gemini
-      # com 2 ou 3 quadros cada, de segundos a ~1 min, e um `ffmpeg -ss` por quadro. 3600 s
-      # dão folga larga; meça no dev com um programa de 4 h.
-      timeout = "3600s"
+      # com 2 ou 3 quadros cada, de segundos a ~1 min, e um `ffmpeg -ss` por quadro. Caso
+      # comum: alguns minutos. Pior caso das chamadas: 8 grupos x `PRAZO_DA_ANALISE_S`
+      # (1500 s) = 12000 s, sem contar a extração dos quadros, acima dos 3600 s do timeout.
+      # O valor depende da medição no dev com um programa de 4 h.
+      timeout = "${local.timeout_dos_jobs_s.identificacao}s"
       vpc_access {
         egress = "ALL_TRAFFIC"
         network_interfaces {
@@ -2007,6 +2037,7 @@ resource "google_workflows_workflow" "validacao" {
     job_de_identificacao   = google_cloud_run_v2_job.identificacao.name
     job_de_quadros         = google_cloud_run_v2_job.quadros.name
     job_de_indexacao       = google_cloud_run_v2_job.indexacao.name
+    prazo_do_conector_s    = local.prazo_do_conector_s
   })
   depends_on = [google_project_service.apis]
 }

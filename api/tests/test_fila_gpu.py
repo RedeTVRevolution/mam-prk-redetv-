@@ -1232,8 +1232,15 @@ def test_espera_apos_429_de_cota_mantem_a_vaga_e_tenta_de_novo(
 JOBS_DE_ETAPA = {
     "identificacao": ("job_de_identificacao", 3900),
     "quadros_chave": ("job_de_quadros", 3900),
-    "inventario_de_objetos": ("job_de_inventario", 3900),
+    "inventario_de_objetos": ("job_de_inventario", 9300),
     "indexacao": ("job_de_indexacao", 2100),
+}
+# A chave de cada etapa no `prazo_do_conector_s` do módulo.
+CHAVE_DO_PRAZO = {
+    "identificacao": "identificacao",
+    "quadros_chave": "quadros",
+    "inventario_de_objetos": "inventario",
+    "indexacao": "indexacao",
 }
 
 
@@ -1245,6 +1252,10 @@ class EtapasLocal(FilaLocal):
         self.definicao = _definicao(
             {"vagas_de_gpu": "1", "job_de_objetos_gpu": "florence"}
             | {var: etapa for etapa, (var, _) in JOBS_DE_ETAPA.items()}
+            | {
+                f"prazo_do_conector_s.{CHAVE_DO_PRAZO[etapa]}": str(prazo)
+                for etapa, (_, prazo) in JOBS_DE_ETAPA.items()
+            }
         )
         self.definicao["marca_inicio"] = {
             "params": ["job_id", "etapa"],

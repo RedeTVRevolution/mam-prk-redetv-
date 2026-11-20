@@ -12,7 +12,7 @@ resource "google_cloud_run_v2_job" "fim" {
     template {
       service_account = google_service_account.mam["fim"].email
       max_retries     = 1
-      timeout         = "300s"
+      timeout         = "${local.timeout_dos_jobs_s.fim}s"
       containers {
         image   = var.imagem
         command = ["python"]

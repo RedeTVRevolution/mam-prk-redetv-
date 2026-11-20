@@ -1,5 +1,6 @@
 """Definição do Workflows da validação: o comportamento real é conferido no #14."""
 
+import math
 import re
 from pathlib import Path
 from typing import Any, get_args
@@ -7,8 +8,11 @@ from typing import Any, get_args
 import pytest
 import yaml
 
+from api.gemini import PRAZO_DA_ANALISE_S
+from api.janelas import DURACAO_DA_JANELA_MS, LIMITE_DE_TENTATIVAS
 from api.jobs import CONFERENCIA_DA_FILA_GPU_S, FOLGA_DA_FILA_GPU_S
 from api.modelo_do_job import CodigoDeFalha, Etapa, NomeDaEtapa, ResultadoDaEtapa
+from api.validador import DURACAO_MAXIMA_S
 
 INFRA = Path(__file__).parents[2] / "infra"
 MODULO = INFRA / "modulos" / "mam"
@@ -54,8 +58,9 @@ def test_roda_o_job_de_analise_so_se_o_job_esta_em_analisando() -> None:
     # O único `http.post` é o aviso da fila de GPU (#534), num subworkflow à parte.
     assert texto.count("call: http.post") == 1 and "url_da_analise" not in texto
     assert "call: http.post" in _subworkflow(texto, "avisa_a_espera")
-    # O conector espera mais que o timeout de 21600 s do Job, não o padrão de 1800 s.
-    assert "timeout: 21900" in passo
+    # O conector espera mais que o timeout do Job, não o padrão de 1800 s (a conta fica no
+    # teste do conector de cada passo).
+    assert "timeout: ${prazo_do_conector_s.analise}" in passo
     # Fora de `analisando` o fluxo pula a análise.
     assert "next: fim" in texto
 
@@ -225,7 +230,7 @@ def test_job_de_analise_no_main_tf_e_o_que_o_workflow_roda() -> None:
     assert re.search(r"job_de_analise\s+= google_cloud_run_v2_job\.analise\.name", main)
     assert "google_cloud_run_v2_service.analise" not in main
     # O Job de análise dura mais que o teto de 1800 s da chamada HTTP do Workflows.
-    assert 'timeout = "21600s"' in job
+    assert _timeout_do_job(main, "analise") > 1800
 
 
 def test_jobs_de_analise_e_identificacao_recebem_a_mesma_tolerancia_da_fala() -> None:
@@ -243,10 +248,10 @@ def test_jobs_de_analise_e_identificacao_recebem_a_mesma_tolerancia_da_fala() ->
 
 # Os quatro passos de melhor esforço chamam o mesmo subworkflow: o Job e o prazo do conector.
 MELHOR_ESFORCO = {
-    "identifica": ("identificacao", "job_de_identificacao", 3900),
-    "tira_os_quadros": ("quadros_chave", "job_de_quadros", 3900),
-    "roda_o_inventario": ("inventario_de_objetos", "job_de_inventario", 3900),
-    "indexa": ("indexacao", "job_de_indexacao", 2100),
+    "identifica": ("identificacao", "job_de_identificacao", "identificacao"),
+    "tira_os_quadros": ("quadros_chave", "job_de_quadros", "quadros"),
+    "roda_o_inventario": ("inventario_de_objetos", "job_de_inventario", "inventario"),
+    "indexa": ("indexacao", "job_de_indexacao", "indexacao"),
 }
 
 
@@ -264,7 +269,7 @@ def test_etapas_de_melhor_esforco_so_chamam_o_subworkflow_com_o_job_e_o_prazo() 
         assert "call: roda_o_job_de_etapa" in passo, nome
         assert f"etapa: {etapa}\n" in passo, nome
         assert f"job: ${{{job}}}\n" in passo, nome
-        assert f"prazo: {prazo}\n" in passo, nome
+        assert f"prazo: ${{prazo_do_conector_s.{prazo}}}\n" in passo, nome
         assert "try:" not in passo and "jobs.run" not in passo, nome
     # O resto do YAML não repete o `try` do Job: só o subworkflow e o Florence com GPU.
     assert texto.count("googleapis.run.v2.projects.locations.jobs.run") == 5
@@ -346,51 +351,121 @@ def _segundos(texto: str) -> int:
     return int(texto.strip().removesuffix("s"))
 
 
-def test_conector_de_cada_passo_espera_mais_que_o_timeout_do_job() -> None:
+# A folga do conector sobre o timeout do Job, no módulo e aqui.
+FOLGA_DO_CONECTOR_S = 300
+
+
+def _timeout_do_job(main: str, chave: str) -> int:
+    """O timeout, em s, do Job `chave` no bloco `local.timeout_dos_jobs_s`."""
+    bloco = main[main.index("timeout_dos_jobs_s = {") :]
+    bloco = bloco[: bloco.index("}")]
+    achado = re.search(rf"\b{chave}\s*=\s*(\d+)", bloco)
+    assert achado is not None, chave
+    return int(achado.group(1))
+
+
+def _valor_do_yaml(trecho: str, campo: str) -> int:
+    """O prazo que o YAML escreve em `campo`: o literal ou o `${prazo_do_conector_s.chave}`
+    do módulo (timeout do Job mais 300 s)."""
+    achado = re.search(rf"{campo}: (\d+|\$\{{prazo_do_conector_s\.(\w+)\}})", trecho)
+    assert achado is not None, campo
+    if achado.group(2) is None:
+        return int(achado.group(1))
+    return _timeout_do_job(MAIN.read_text(), achado.group(2)) + FOLGA_DO_CONECTOR_S
+
+
+def test_conector_de_cada_passo_e_o_timeout_do_job_mais_300_s() -> None:
+    """Todo passo que espera um Job: o conector passa do timeout do Job (o padrão do
+    Workflows é 1800 s) e é igual a ele mais 300 s onde o YAML o escreve. O `mam-fim`
+    fica de fora: `avisa_o_fim` usa o padrão de 1800 s, e o Job dura 300 s."""
     main = MAIN.read_text()
     texto = _texto()
     passos = {
-        "valida": ("validacao", "- valida:", "- le_o_job:"),
-        "analisa": ("analise", "- analisa:", "- inicia_identificacao:"),
+        "validacao": texto[texto.index("- valida:") : texto.index("- le_o_job:")],
+        "analise": texto[
+            texto.index("- analisa:") : texto.index("- inicia_identificacao:")
+        ],
+        "transcricao_gpu": _ramo(texto, "ramo_da_transcricao"),
+        "ocr_gpu": _ramo(texto, "ramo_da_leitura_da_tela"),
+        "objetos_gpu": _passo_do_inventario(),
     }
-    for nome, (job, de, ate) in passos.items():
-        passo = texto[texto.index(de) : texto.index(ate)]
-        conector = re.search(r"connector_params:\s+timeout: (\d+)", passo)
-        assert conector is not None, nome
-        assert int(conector.group(1)) > _timeout_do_job(main, job), nome
+    campos = {"validacao": "timeout", "analise": "timeout"}
+    for job, trecho in passos.items():
+        conector = _valor_do_yaml(trecho, campos.get(job, "timeout_gpu"))
+        assert conector > _timeout_do_job(main, job), job
+        assert conector == _timeout_do_job(main, job) + FOLGA_DO_CONECTOR_S, job
 
     # O prazo que cada etapa de melhor esforço passa ao subworkflow também.
-    recurso = {
-        "job_de_identificacao": "identificacao",
-        "job_de_quadros": "quadros",
-        "job_de_inventario": "inventario",
-        "job_de_indexacao": "indexacao",
-    }
-    for nome, (_, job, prazo) in MELHOR_ESFORCO.items():
-        if job == "job_de_inventario":
-            # Hoje 3900 s contra os 9000 s do Job: fora desta conferência até o ticket
-            # dos prazos decidir (o comportamento não muda aqui).
-            continue
-        assert prazo > _timeout_do_job(main, recurso[job]), nome
+    for nome, (_, _, job) in MELHOR_ESFORCO.items():
+        prazo = _valor_do_yaml(_passo(texto, nome), "prazo")
+        assert prazo == _timeout_do_job(main, job) + FOLGA_DO_CONECTOR_S, nome
+    # O inventário espera até o fim do Job (9000 s), não 3900 s.
+    assert _valor_do_yaml(_passo(texto, "roda_o_inventario"), "prazo") == 9300
 
-    # O timeout de cada ramo cobre o Job com GPU.
-    for ramo, job in {
-        "ramo_da_transcricao": "transcricao_gpu",
-        "ramo_da_leitura_da_tela": "ocr_gpu",
-    }.items():
-        achado = re.search(r"timeout_gpu: (\d+)", _ramo(texto, ramo))
-        assert achado is not None, ramo
-        assert int(achado.group(1)) > _timeout_do_job(main, job), ramo
-    roda = _subworkflow(texto, "roda_o_job_com_gpu")
-    assert "timeout: $${timeout_gpu}" in roda
+    # O subworkflow e o de GPU repassam o prazo ao conector.
+    assert "timeout: $${prazo}" in _subworkflow(texto, "roda_o_job_de_etapa")
+    assert "timeout: $${timeout_gpu}" in _subworkflow(texto, "roda_o_job_com_gpu")
+    # O aviso do fim não escreve `connector_params`.
+    assert "connector_params" not in _subworkflow(texto, "avisa_o_fim")
+    assert _timeout_do_job(main, "fim") == 300
 
 
-def _timeout_do_job(main: str, job: str) -> int:
-    recurso = main[main.index(f'resource "google_cloud_run_v2_job" "{job}"') :]
-    recurso = recurso[: recurso.index("\n}\n")]
-    achado = re.search(r'timeout\s*=\s*"(\d+s)"', recurso)
-    assert achado is not None, job
-    return _segundos(achado.group(1))
+def _janelas_em_paralelo_do_modulo() -> int:
+    """O padrão de `variable "janelas_em_paralelo"` no módulo."""
+    bloco = (
+        MAIN.read_text().split('variable "janelas_em_paralelo" {')[1].split("\n}")[0]
+    )
+    achado = re.search(r"default\s*=\s*(\d+)", bloco)
+    assert achado is not None
+    return int(achado.group(1))
+
+
+def _cobre_as_rodadas_sem_tentativa_extra(janelas_em_paralelo: int) -> bool:
+    janelas = DURACAO_MAXIMA_S / (DURACAO_DA_JANELA_MS / 1000)
+    rodadas = math.ceil(janelas / janelas_em_paralelo)
+    return rodadas * PRAZO_DA_ANALISE_S <= _timeout_do_job(MAIN.read_text(), "analise")
+
+
+def test_timeout_do_job_de_analise_cobre_as_rodadas_sem_tentativa_extra() -> None:
+    """`ceil(48 / janelas_em_paralelo) x PRAZO_DA_ANALISE_S` cabe no timeout do Job (18000 s
+    contra 21600 s). NÃO cobre o pior caso com as `LIMITE_DE_TENTATIVAS` tentativas por
+    janela (54000 s): risco aceito por decisão de 14/11, a rever com a medição."""
+    assert DURACAO_MAXIMA_S / (DURACAO_DA_JANELA_MS / 1000) == 48
+    assert _cobre_as_rodadas_sem_tentativa_extra(_janelas_em_paralelo_do_modulo())
+    # Com 3 janelas em paralelo (16 rodadas, 24000 s) o timeout já não cobre.
+    assert not _cobre_as_rodadas_sem_tentativa_extra(3)
+    # O pior caso com as tentativas extras não é coberto (decisão de 14/11).
+    com_tentativas = (
+        math.ceil(48 / _janelas_em_paralelo_do_modulo())
+        * PRAZO_DA_ANALISE_S
+        * LIMITE_DE_TENTATIVAS
+    )
+    assert com_tentativas > _timeout_do_job(MAIN.read_text(), "analise")
+
+
+def test_limite_de_pessoas_do_modelo_forte_e_inteiro_a_partir_de_zero() -> None:
+    achado = re.search(
+        r"limite_de_pessoas_do_modelo_forte\s*=\s*(\S+)", MAIN.read_text()
+    )
+    assert achado is not None and re.fullmatch(r"\d+", achado.group(1))
+
+
+def test_timeout_de_cada_job_vem_do_bloco_de_locals() -> None:
+    """Os timeouts dos Jobs moram num `locals` só; nenhum Job escreve o literal, e o
+    conector de cada passo é esse timeout mais 300 s."""
+    jobs = 0
+    for arquivo in MODULO.glob("*.tf"):
+        for job in re.findall(
+            r'resource "google_cloud_run_v2_job" "\w+" \{.*?\n\}\n',
+            arquivo.read_text(),
+            re.S,
+        ):
+            jobs += 1
+            assert re.search(
+                r'timeout\s*=\s*"\$\{local\.timeout_dos_jobs_s\.\w+\}s"', job
+            ), (arquivo.name, job[:80])
+    assert jobs == 12
+    assert re.search(r"v \+ 300", MAIN.read_text())
 
 
 def test_nenhum_comentario_da_infra_fala_em_ate_10_min() -> None:
@@ -1002,11 +1077,11 @@ def test_o_florence_roda_a_gpu_sem_plano_b_e_depois_o_job_em_cpu() -> None:
     ]
     assert "call: roda_o_job_com_gpu" in florence
     assert "job_gpu: ${job_de_objetos_gpu}" in florence
-    assert "timeout_gpu: 11100" in florence
+    assert "timeout_gpu: ${prazo_do_conector_s.objetos_gpu}" in florence
     cpu = passo[passo.index("- roda_o_inventario:") :]
     assert "call: roda_o_job_de_etapa" in cpu
     assert "job: ${job_de_inventario}" in cpu
-    assert "prazo: 3900" in cpu
+    assert "prazo: ${prazo_do_conector_s.inventario}" in cpu
 
 
 def test_a_falha_do_inventario_marca_a_etapa_e_segue_para_a_indexacao() -> None:
@@ -1032,7 +1107,7 @@ def test_a_gpu_esgotada_sobe_pelo_tratamento_que_libera_a_vaga() -> None:
 def test_a_definicao_renderizada_e_yaml_valido() -> None:
     # O Workflows lê YAML: uma expressão sem aspas com ": " dentro vira chave e valor, e a
     # publicação falha (deploy de 2026-11-03). Renderiza como o templatefile e abre.
-    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "x", _texto()).replace("$${", "${")
+    renderizado = re.sub(r"(?<!\$)\$\{[\w.]+\}", "x", _texto()).replace("$${", "${")
     assert isinstance(yaml.safe_load(renderizado), dict)
 
 
@@ -1164,7 +1239,7 @@ def test_list_concat_anexa_um_item_e_nao_uma_lista() -> None:
 @pytest.mark.parametrize("arquivo", sorted(INFRA.rglob("*.workflow.yaml")))
 def test_expressoes_nao_contem_mapas_literais(arquivo: Path) -> None:
     # Substitui só a interpolação do Terraform antes de conferir as expressões.
-    renderizado = re.sub(r"(?<!\$)\$\{\w+\}", "1", arquivo.read_text()).replace(
+    renderizado = re.sub(r"(?<!\$)\$\{[\w.]+\}", "1", arquivo.read_text()).replace(
         "$${", "${"
     )
     assert [e for e in _expressoes(renderizado) if "{" in e] == [], str(arquivo)
@@ -1178,7 +1253,7 @@ def test_conta_da_orquestracao_grava_log_do_sys_log() -> None:
 
 def _definicao(variaveis: dict[str, str] | None = None) -> dict[str, Any]:
     renderizado = re.sub(
-        r"(?<!\$)\$\{(\w+)\}",
+        r"(?<!\$)\$\{([\w.]+)\}",
         lambda m: (variaveis or {}).get(m[1], "1"),
         _texto(),
     ).replace("$${", "${")

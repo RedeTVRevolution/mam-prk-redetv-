@@ -182,7 +182,12 @@ def test_o_job_de_objetos_tem_uma_l4_4_cpus_16_gib_e_a_rede_da_gpu() -> None:
     assert 'google_service_account.mam["objetos"]' in job
     assert "image = var.imagem_objetos\n" in job
     assert "max_retries     = 0" in job
-    assert re.search(r'timeout\s+= "10800s"', job)
+    assert re.search(
+        r'timeout\s+= "\$\{local\.timeout_dos_jobs_s\.objetos_gpu\}s"', job
+    )
+    assert re.search(
+        r"\bobjetos_gpu\s*=\s*10800\b", MAIN[MAIN.index("timeout_dos_jobs_s = {") :]
+    )
     assert "for_each = local.env_do_projeto" in job
     assert re.search(
         r'name\s+= "BUCKET_DECUPAGENS"\s+value = local.buckets\["decupagens"\]', job
