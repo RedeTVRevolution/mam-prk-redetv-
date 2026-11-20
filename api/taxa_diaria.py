@@ -16,14 +16,14 @@ O agendamento só refaz hoje e ontem: esses dias antigos exigem nova carga do hi
 Na migração, `make preencher-taxa-diaria` substitui as linhas antigas sem Job nos dias refeitos.
 
 Ambiente do comando: `GCP_PROJECT_ID`, `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`,
-`BIGQUERY_DATASET`, `BIGQUERY_TABELA_DA_TAXA`, `BIGQUERY_REGIAO`.
+`BIGQUERY_DATASET`, `BIGQUERY_TABELA_DA_TAXA`, `BIGQUERY_TABELA_DE_EVENTOS`, `BIGQUERY_REGIAO`.
 """
 
 import json
 import logging
 import os
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import date, timedelta
 from typing import Any, Protocol
@@ -228,11 +228,24 @@ class TabelaDaTaxaBigQuery:
         self,
         config: ConfigDaTaxa,
         transporte: Transporte,
+        tabela_de_eventos: str,
         dias_por_merge: int = DIAS_POR_MERGE,
     ) -> None:
         self._config = config
         self._transporte = transporte
+        self._eventos = tabela_de_eventos
         self._dias_por_merge = dias_por_merge
+
+    @classmethod
+    def do_ambiente(
+        cls, ambiente: Mapping[str, str], transporte: Transporte
+    ) -> "TabelaDaTaxaBigQuery":
+        """A tabela de eventos só o escritor exige; o leitor da web não a tem."""
+        return cls(
+            ConfigDaTaxa.do_ambiente(ambiente),
+            transporte,
+            exigir_do_ambiente(ambiente, "BIGQUERY_TABELA_DE_EVENTOS"),
+        )
 
     def substituir(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
         por_dia: dict[date, list[LinhaDiaria]] = {}
@@ -265,6 +278,7 @@ class TabelaDaTaxaBigQuery:
     def _merge(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
         c = self._config
         tabela = f"`{c.projeto}.{c.dataset}.{c.tabela}`"
+        eventos = f"`{c.projeto}.{c.dataset}.{self._eventos}`"
         consulta = f"""
 MERGE {tabela} AS t
 USING (
@@ -277,6 +291,12 @@ USING (
     CAST(JSON_VALUE(l, '$.correcoes') AS INT64) AS correcoes,
     CAST(JSON_VALUE(l, '$.itens') AS INT64) AS itens
   FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
+  -- O marcador da purga (ADR 0010) barra o Job para sempre; o filtro fica aqui porque o
+  -- BigQuery recusa subconsulta no ON.
+  WHERE NOT EXISTS (
+    SELECT 1 FROM {eventos} AS p
+    WHERE p.tipo = 'purga' AND p.job_id = JSON_VALUE(l, '$.job_id')
+  )
 ) AS s
 ON t.dia IN UNNEST(@dias)
   AND t.dia = s.dia
@@ -329,6 +349,9 @@ def main(argumentos: list[str]) -> int:
             project=exigir_do_ambiente(os.environ, "GCP_PROJECT_ID")
         )
         decupagens = DecupagensStorage.do_ambiente(os.environ, cliente)
+        tabela = TabelaDaTaxaBigQuery.do_ambiente(
+            os.environ, transporte_http(os.environ["GCP_PROJECT_ID"])
+        )
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -344,7 +367,7 @@ def main(argumentos: list[str]) -> int:
         itens,
         RepositorioDeCorrecoesFirestore(banco),
         RepositorioDeRevisaoFirestore(banco),
-        TabelaDaTaxaBigQuery(config, transporte_http(config.projeto)),
+        tabela,
         lambda job_id: modelo_da_decupagem(decupagens, job_id),
     )
     print(f"{gravadas} linhas gravadas em {quantos} dias")

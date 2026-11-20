@@ -218,7 +218,7 @@ def test_cada_modulo_cancela_quando_o_job_nao_termina(
             ConfigDaRevisao("p", "d", "r", "t1", "t2"), t
         ).gravar([]),
         "taxa": lambda t: TabelaDaTaxaBigQuery(
-            ConfigDaTaxa("p", "d", "r", "t"), t
+            ConfigDaTaxa("p", "d", "r", "t"), t, "e"
         ).substituir([date(2026, 1, 1)], []),
         "purga": lambda t: executar_purga(
             ConfigDoBigQuery("p", "d", "t", "r"), t, "DELETE x", "j1"
