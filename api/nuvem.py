@@ -591,6 +591,12 @@ class RepositorioFirestore:
                 return PaginaDeJobs(aprovados)
         return PaginaDeJobs(aprovados, ultimo_id)
 
+    def _paginar_em_python(self, consulta: Any, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return paginar_em_python(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
+        )
+
     def _consultar_pelo_catalogo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # Só um `array_contains` (índice automático) vai ao Firestore: lê os vídeos da
         # pessoa ou da marca, não o acervo. O resto do filtro, a ordem e o cursor ficam
@@ -607,20 +613,14 @@ class RepositorioFirestore:
                     "marcas_do_catalogo", "array_contains", filtro.marca_do_catalogo
                 )
             )
-        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
-        return paginar_em_python(
-            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
-        )
+        return self._paginar_em_python(consulta, filtro)
 
     def _consultar_o_fim_a_avisar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # No servidor: a lista só tem itens enquanto o aviso está pendente (índice automático).
         consulta = self._colecao.where(
             filter=FieldFilter("fim_a_avisar", "array_contains_any", ["webhook", "uso"])
         )
-        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
-        return paginar_em_python(
-            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
-        )
+        return self._paginar_em_python(consulta, filtro)
 
     def _consultar_pelo_arquivo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # Poucos Jobs por arquivo: só a igualdade no `sha256` (índice automático) vai ao
@@ -629,10 +629,7 @@ class RepositorioFirestore:
         consulta = self._colecao.where(
             filter=FieldFilter("sha256", "==", filtro.sha256)
         )
-        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
-        return paginar_em_python(
-            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
-        )
+        return self._paginar_em_python(consulta, filtro)
 
 
 class RepositorioDeChavesFirestore:
