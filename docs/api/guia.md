@@ -108,7 +108,7 @@ Todo erro vem como JSON `{"detail": "<mensagem>"}` (no 422 de validação, `deta
 | 422 | `Envie a imagem no campo arquivo ou o token no campo token, só um deles` | O multipart da busca por imagem não tem o campo `arquivo` nem o `token`, ou tem os dois. |
 | 422 | `Token da foto inválido` | O `token` da busca por imagem não existe, venceu (15 min), é de outra chave ou não é um token da foto: reenvie a foto no campo `arquivo`. |
 | 429 | `Teto de 200 Jobs por hora atingido` | A chave criou 200 Jobs na última hora (o teto de uma pessoa é 30). Espere os segundos do cabeçalho `Retry-After` (3600, o pior caso), mande menos vídeos por hora e repita com o mesmo `Idempotency-Key`. |
-| 429 | `Consultas demais; tente em um minuto` | As buscas têm limite de 30 por minuto por chave. Espere e repita. |
+| 429 | `Consultas demais; tente em um minuto` | As buscas têm limite de 30 consultas por minuto por chave; a página seguinte (`cursor`) não conta nelas e tem um contador próprio de 120 páginas por minuto. Espere e repita. |
 | 503 | `A busca por imagem não está disponível agora` | O modelo que descreve a foto está fora, ou não achou objeto nela. Repita com espera crescente ou tente outra foto. |
 | 504 | `A busca demorou demais` | Repita; se persistir, simplifique a consulta. |
 | 503 | `Serviço indisponível` | Falha passageira. Repita com espera crescente; no `POST /v1/jobs`, com o mesmo `Idempotency-Key`. |

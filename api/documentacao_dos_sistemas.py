@@ -143,7 +143,8 @@ _MUITA_CONSULTA = Erro(
     429,
     "Consultas demais; tente em um minuto",
     "O limite é de 30 consultas por minuto por chave (a busca por texto e a por imagem "
-    "dividem o mesmo limite). Espere e repita.",
+    "dividem o mesmo limite); a página seguinte, pedida com `cursor`, não conta nas "
+    "consultas e tem um contador próprio de 120 páginas por minuto. Espere e repita.",
 )
 _DEMOROU = Erro(
     504,
@@ -823,7 +824,8 @@ OPERACOES: tuple[Operacao, ...] = (
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
-        + " Limite de 30 consultas por minuto por chave. `ev` restringe também o texto "
+        + " Limite de 30 consultas por minuto por chave; a página seguinte (`cursor`) não conta "
+        "nelas e tem o contador próprio de 120 páginas por minuto. `ev` restringe também o texto "
         "livre: `imagem` busca planos, `fala` falas e `gc` textos na tela; sem `ev`, todos "
         "os tipos entram. `entendida` traz os filtros aplicados e `plano_b` fica `false`, "
         "mantido por compatibilidade.",
@@ -856,7 +858,8 @@ OPERACOES: tuple[Operacao, ...] = (
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
-        + " Divide com a busca por texto o limite de 30 consultas por minuto.",
+        + " Divide com a busca por texto o limite de 30 consultas por minuto; a página seguinte "
+        "(`cursor`) não conta nelas e tem o contador próprio de 120 páginas por minuto.",
         _BUSCA,
         (
             *_sem_chave("ler"),

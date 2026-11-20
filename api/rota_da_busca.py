@@ -46,6 +46,8 @@ from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
+# A página seguinte (pedido com cursor) gasta este contador, não o das consultas (#803).
+PAGINAS_POR_MINUTO = 120
 # O cabeçalho da carga fica fora do OpenAPI: não é parte do contrato para os sistemas.
 TesteDeCarga = Annotated[
     str | None,
@@ -58,20 +60,28 @@ TesteDeCarga = Annotated[
 ]
 
 
-def consultas_por_minuto_do_ambiente(env: Mapping[str, str]) -> int:
-    """O limite de `BUSCA_CONSULTAS_POR_MINUTO`; ausente ou vazia vale o padrão."""
-    bruto = env.get("BUSCA_CONSULTAS_POR_MINUTO") or ""
+def _teto_do_ambiente(env: Mapping[str, str], nome: str, padrao: int) -> int:
+    """O inteiro (a partir de 1) da variável `nome`; ausente ou vazia vale o padrão."""
+    bruto = env.get(nome) or ""
     if not bruto:
-        return CONSULTAS_POR_MINUTO
+        return padrao
     try:
         valor = int(bruto)
     except ValueError:
         valor = 0
     if valor < 1:
-        raise ValueError(
-            f"BUSCA_CONSULTAS_POR_MINUTO deve ser um inteiro a partir de 1, veio {bruto!r}"
-        )
+        raise ValueError(f"{nome} deve ser um inteiro a partir de 1, veio {bruto!r}")
     return valor
+
+
+def consultas_por_minuto_do_ambiente(env: Mapping[str, str]) -> int:
+    """O limite de `BUSCA_CONSULTAS_POR_MINUTO`; ausente ou vazia vale o padrão."""
+    return _teto_do_ambiente(env, "BUSCA_CONSULTAS_POR_MINUTO", CONSULTAS_POR_MINUTO)
+
+
+def paginas_por_minuto_do_ambiente(env: Mapping[str, str]) -> int:
+    """O teto de `BUSCA_PAGINAS_POR_MINUTO`; ausente ou vazia vale o padrão."""
+    return _teto_do_ambiente(env, "BUSCA_PAGINAS_POR_MINUTO", PAGINAS_POR_MINUTO)
 
 
 # O plano limita o texto da busca (docs/Plano_MAM.md); o campo do front tem o mesmo teto.
@@ -153,10 +163,12 @@ def criar_rotas_da_busca(
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     eventos: Eventos | None = None,
     aceita_teste_de_carga: bool = False,
+    paginas_por_minuto: int = PAGINAS_POR_MINUTO,
 ) -> APIRouter:
     rotas = APIRouter()
     publicador = eventos or SemEventos()
     limite = LimiteDeConsultas(consultas_por_minuto, relogio)
+    limite_de_paginas = LimiteDeConsultas(paginas_por_minuto, relogio)
 
     def da_carga(cabecalho: str | None) -> bool:
         """Só a chave ligada com o valor exato `1` tira a busca dos indicadores de uso."""
@@ -199,7 +211,7 @@ def criar_rotas_da_busca(
         preparar: Callable[[], dict[str, Any]],
         registrar_o_uso: Callable[[ResultadoDaBusca], None],
     ) -> ResultadoDaBusca:
-        """A sequência das duas rotas: período, limite, busca com prazo, evento e cursor.
+        """A sequência das duas rotas: período, limite (de consultas ou de páginas), busca com prazo, evento e cursor.
 
         `preparar` roda depois do limite (a foto só é recodificada para quem ainda tem
         cota) e devolve o `texto`, o `imagem`, o `ordem` e os `ajustes` da `busca.buscar`.
@@ -207,7 +219,8 @@ def criar_rotas_da_busca(
         if desde and ate and desde > ate:
             raise HTTPException(422, "O início do período passa do fim")
         sistema, quem = _quem_e(chamador)
-        if not limite.consumir(quem):
+        # A página seguinte gasta o contador de páginas; só a consulta nova gasta o das consultas.
+        if not (limite if cursor is None else limite_de_paginas).consumir(quem):
             raise HTTPException(429, "Consultas demais; tente em um minuto")
         entrada = preparar()
         cancelado = threading.Event()
