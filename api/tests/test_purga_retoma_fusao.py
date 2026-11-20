@@ -59,7 +59,11 @@ def test_a_varredura_conclui_as_duas_fases_e_a_segunda_nao_faz_nada(
         "BIGQUERY_TABELA_DE_EVENTOS": "e",
         "BIGQUERY_TABELA_DE_REVISAO": "v",
         "BIGQUERY_TABELA_DA_TAXA": "x",
+        "BUSCA_REGIAO": "r",
         "BUSCA_COLECAO": "c",
+        "BUSCA_COLECAO_DE_TEXTO": "ct",
+        "BUSCA_INDICE_DESCRICAO": "i",
+        "BUSCA_DIMENSAO": "8",
     }
     ClienteStorage(project=projeto).create_bucket(ambiente["BUCKET_REFERENCIAS"])
     cliente = firestore.Client(project=projeto)
