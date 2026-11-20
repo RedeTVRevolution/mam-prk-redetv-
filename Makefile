@@ -216,7 +216,8 @@ preencher-filtros-da-busca:
 # Teste do Firestore em escala (#542), só no dev: grava Jobs falsos (id `teste_NNNNNNN`), mede as listas
 # do acervo com filtros combinados e apaga tudo. Veja o docstring de api/firestore_em_escala.py.
 #   make gravar-jobs-falsos N=100000 ; make medir-jobs-falsos ; make apagar-jobs-falsos
-ESCALA = $(ENV_LOCAL) \
+ESCALA = { [ "$${PASTA_DO_AMBIENTE:-infra}" = infra ] || { echo "Os testes de escala rodam só no dev." >&2; exit 1; }; } && \
+	$(ENV_LOCAL) \
 	$(call LER_AMBIENTE,FIRESTORE_BANCO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	LISTAGEM_POR_MES="$${LISTAGEM_POR_MES:-true}" \

@@ -2900,16 +2900,21 @@ output "bigquery_regiao" {
 }
 
 # Para o make criar-colecao-da-busca, o make medir-busca e o make sondar-busca.
+# Os seis outputs que a criação da busca lê antes do build (#757) dependem do papel do primeiro
+# apply: num apply com -target, o Terraform só grava output com dependência no alvo.
 output "busca_regiao" {
-  value = local.regiao_da_busca
+  value      = local.regiao_da_busca
+  depends_on = [google_project_iam_member.terraform_busca]
 }
 
 output "busca_colecao" {
-  value = local.colecao_da_busca
+  value      = local.colecao_da_busca
+  depends_on = [google_project_iam_member.terraform_busca]
 }
 
 output "busca_colecao_de_texto" {
-  value = local.colecao_de_texto_da_busca
+  value      = local.colecao_de_texto_da_busca
+  depends_on = [google_project_iam_member.terraform_busca]
 }
 
 output "busca_colecao_de_medida" {
@@ -2917,15 +2922,18 @@ output "busca_colecao_de_medida" {
 }
 
 output "busca_indice_descricao" {
-  value = local.indice_da_descricao
+  value      = local.indice_da_descricao
+  depends_on = [google_project_iam_member.terraform_busca]
 }
 
 output "busca_indices_ligados" {
-  value = var.indices_da_busca_ligados
+  value      = var.indices_da_busca_ligados
+  depends_on = [google_project_iam_member.terraform_busca]
 }
 
 output "busca_dimensao" {
-  value = local.dimensao_dos_vetores
+  value      = local.dimensao_dos_vetores
+  depends_on = [google_project_iam_member.terraform_busca]
 }
 
 # O ritmo do `make reindexar`, o mesmo do Job de indexação.

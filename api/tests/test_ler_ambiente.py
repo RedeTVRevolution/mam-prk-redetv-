@@ -475,3 +475,22 @@ def test_o_alvo_da_busca_recebe_a_colecao_de_texto_do_ponto_unico(
     )
 
     assert feito.stdout == "texto\n", feito.stderr
+
+
+@pytest.mark.parametrize(
+    "alvo", ["gravar-jobs-falsos", "medir-jobs-falsos", "apagar-jobs-falsos"]
+)
+def test_os_testes_de_escala_recusam_a_prod(tmp_path: Path, alvo: str) -> None:
+    # Numa pasta vazia, sem o arquivo de ambiente nem os scripts: se a guarda faltar, nada chega
+    # à nuvem.
+    (tmp_path / "Makefile").write_text(MAKEFILE)
+    feito = subprocess.run(
+        ["make", "-s", alvo, "N=1"],
+        cwd=tmp_path,
+        env={**os.environ, "PASTA_DO_AMBIENTE": "infra/ambientes/prod"},
+        capture_output=True,
+        text=True,
+    )
+
+    assert feito.returncode != 0
+    assert "só no dev" in feito.stderr

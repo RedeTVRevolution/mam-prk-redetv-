@@ -454,8 +454,16 @@ def test_o_papel_da_busca_da_mam_terraform_esta_no_modulo_e_no_primeiro_apply() 
         deploy.index("scripts/aplicar-sem-destruir.sh -target=module.mam.") :
     ].split("-var imagem=pendente")[0]
 
-    assert "roles/vectorsearch.collectionWriter" in bloco
-    assert "roles/vectorsearch.indexWriter" in bloco
+    # Papel sob medida: só o que api.criar_colecao_da_busca chama, nada de apagar.
+    assert set(re.findall(r'"(vectorsearch\.[\w.]+)"', papel)) == {
+        "vectorsearch.collections.create",
+        "vectorsearch.collections.get",
+        "vectorsearch.collections.update",
+        "vectorsearch.indexes.create",
+        "vectorsearch.indexes.get",
+        "vectorsearch.operations.get",
+    }
+    assert "role    = google_project_iam_custom_role.busca_no_deploy.id" in bloco
     assert "local.conta_do_terraform" in bloco
     assert "-target=module.mam.google_project_iam_member.terraform_busca" in primeiro
     assert "terraform_predicao_vertex" in primeiro
@@ -517,7 +525,7 @@ def test_o_aviso_de_reindexar_sai_mesmo_se_a_criacao_falha_depois_do_patch(
     feito = _criar(
         tmp_path,
         SAIDAS_DA_BUSCA,
-        "Campos acrescentados: x. Rode `make reindexar`.\n429 cota",
+        "Campos acrescentados ao esquema: x. Rode `make reindexar`.\n429 cota",
         codigo=1,
         GITHUB_STEP_SUMMARY=str(resumo),
     )
@@ -525,6 +533,32 @@ def test_o_aviso_de_reindexar_sai_mesmo_se_a_criacao_falha_depois_do_patch(
     assert feito.returncode == 1
     assert "make reindexar" in resumo.read_text()
     assert "rode o deploy de novo" in feito.stderr
+
+
+def test_os_outputs_que_a_criacao_le_existem_depois_do_apply_direcionado() -> None:
+    """Num apply com -target, o Terraform só grava o output com dependência no alvo: sem ela,
+    os outputs feitos só de locals não existiriam num estado novo e a criação pararia o deploy."""
+    modulo = (MODULO / "main.tf").read_text()
+    for saida in SAIDAS_DA_BUSCA:
+        bloco = modulo[modulo.index(f'output "{saida}" {{') :].split("\n}")[0]
+        assert "depends_on = [google_project_iam_member.terraform_busca]" in bloco, saida
+
+
+def test_o_erro_de_esquema_incompativel_nao_vira_aviso_de_reindexar(
+    tmp_path: Path,
+) -> None:
+    # A orientação do erro (api/agent_retrieval.py) cita `make reindexar` sem PATCH feito.
+    resumo = tmp_path / "resumo"
+    feito = _criar(
+        tmp_path,
+        SAIDAS_DA_BUSCA,
+        "esquema incompatível: rode `make criar-colecao-da-busca` e `make reindexar`",
+        codigo=1,
+        GITHUB_STEP_SUMMARY=str(resumo),
+    )
+
+    assert feito.returncode == 1
+    assert not resumo.exists() or "ganhou campos" not in resumo.read_text()
 
 
 def test_a_chamada_no_deploy_nao_engole_a_falha() -> None:
@@ -601,7 +635,7 @@ def test_o_aviso_de_reindexar_e_repassado(tmp_path: Path) -> None:
     feito = _criar(
         tmp_path,
         SAIDAS_DA_BUSCA,
-        "Campos acrescentados: x. Rode `make reindexar`.",
+        "Campos acrescentados ao esquema: x. Rode `make reindexar`.",
         GITHUB_STEP_SUMMARY=str(resumo),
     )
 

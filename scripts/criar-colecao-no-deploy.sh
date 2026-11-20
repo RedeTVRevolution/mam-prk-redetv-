@@ -22,7 +22,7 @@ falhou=0
 uv run --locked python -m api.criar_colecao_da_busca \
   --personificar "${GOOGLE_IMPERSONATE_SERVICE_ACCOUNT:?}" 2>&1 | tee "$saida" || falhou=1
 # O aviso sai mesmo se a criação falhou depois do PATCH: na nova tentativa o campo já existe.
-if grep -q 'make reindexar' "$saida"; then
+if grep -qF 'Campos acrescentados ao esquema:' "$saida"; then
   echo "Aviso: o esquema da busca ganhou campos; rode \`make reindexar\`." | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}" >&2
 fi
 if [[ $falhou == 1 ]]; then
