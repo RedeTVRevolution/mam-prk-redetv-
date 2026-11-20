@@ -59,6 +59,11 @@ def _saidas(texto: str) -> list[str]:
 RAIZES = {"dev": INFRA / "main.tf", "prod": INFRA / "ambientes" / "prod" / "main.tf"}
 
 
+def _texto_da_raiz(raiz: Path) -> str:
+    # Todos os .tf da pasta da raiz, não só o main.tf.
+    return "\n".join(f.read_text() for f in sorted(raiz.parent.glob("*.tf")))
+
+
 @pytest.mark.parametrize("raiz", RAIZES)
 def test_cada_output_do_modulo_sai_na_raiz_para_o_make_e_o_deploy(raiz: str) -> None:
     texto = RAIZES[raiz].read_text()
@@ -94,7 +99,7 @@ def test_nenhuma_raiz_exporta_o_projeto() -> None:
 def test_nenhum_tf_fora_do_modulo_escreve_nome_de_recurso() -> None:
     # Só o módulo monta nomes (AGENTS.md); `mam-principal` era o caso nas raízes.
     for raiz in RAIZES.values():
-        assert not re.search(r'"mam-[a-z0-9-]+"', raiz.read_text()), raiz
+        assert not re.search(r'"mam-[a-z0-9-]+"', _texto_da_raiz(raiz)), raiz
 
 
 def _padrao(texto: str, nome: str) -> str | None:
@@ -108,7 +113,7 @@ def _padrao(texto: str, nome: str) -> str | None:
 
 @pytest.mark.parametrize("raiz", RAIZES)
 def test_o_padrao_de_cada_variavel_da_raiz_e_o_do_modulo(raiz: str) -> None:
-    texto = RAIZES[raiz].read_text()
+    texto = _texto_da_raiz(RAIZES[raiz])
     modulo = _texto_do_modulo()
     redeclaradas = [
         n
