@@ -37,14 +37,14 @@ resource "google_firestore_index" "auditoria_na_seguranca" {
 # por banco, e a auditoria e os papéis precisam voltar tanto quanto o resto.
 resource "google_firestore_backup_schedule" "diaria_na_seguranca" {
   database  = google_firestore_database.seguranca.name
-  retention = "604800s" # 7 dias
+  retention = local.retencao_do_backup_diario
 
   daily_recurrence {}
 }
 
 resource "google_firestore_backup_schedule" "semanal_na_seguranca" {
   database  = google_firestore_database.seguranca.name
-  retention = "8467200s" # 14 semanas
+  retention = local.retencao_do_backup_semanal
 
   weekly_recurrence {
     day = "SUNDAY"

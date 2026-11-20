@@ -19,12 +19,13 @@ def test_a_cota_chega_ao_web_ao_purga_e_a_indexacao_pela_mesma_variavel() -> Non
         "indexacao": _bloco(MAIN, 'resource "google_cloud_run_v2_job" "indexacao"'),
         "purga": _bloco(PURGA, 'resource "google_cloud_run_v2_job" "purga"'),
     }
+    assert re.search(
+        r'name\s*=\s*"BUSCA_COTA_DE_ESCRITA",\s*value\s*=\s*'
+        r"tostring\(local\.cota_de_escrita_da_busca\)",
+        MAIN,
+    )
     for nome, bloco in blocos.items():
-        assert re.search(
-            r'name\s*=\s*"BUSCA_COTA_DE_ESCRITA"\s*value\s*=\s*'
-            r"tostring\(local\.cota_de_escrita_da_busca\)",
-            bloco,
-        ), nome
+        assert "for_each = local.env_da_busca" in bloco, nome
 
 
 def test_colecao_de_texto_chega_aos_tres_escritores_e_aos_outputs() -> None:
@@ -33,10 +34,11 @@ def test_colecao_de_texto_chega_aos_tres_escritores_e_aos_outputs() -> None:
         (MAIN, 'resource "google_cloud_run_v2_job" "indexacao"'),
         (PURGA, 'resource "google_cloud_run_v2_job" "purga"'),
     ):
-        assert re.search(
-            r'name\s*=\s*"BUSCA_COLECAO_DE_TEXTO"\s*value\s*=\s*local\.colecao_de_texto_da_busca',
-            _bloco(texto, cabecalho),
-        )
+        assert "for_each = local.env_da_busca" in _bloco(texto, cabecalho)
+    assert re.search(
+        r'name\s*=\s*"BUSCA_COLECAO_DE_TEXTO",\s*value\s*=\s*local\.colecao_de_texto_da_busca',
+        MAIN,
+    )
     assert 'output "busca_colecao_de_texto"' in MAIN
     for raiz in (
         MODULO.parents[1] / "main.tf",

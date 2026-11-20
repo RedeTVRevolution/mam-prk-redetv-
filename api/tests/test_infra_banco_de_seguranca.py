@@ -111,8 +111,12 @@ def test_o_banco_de_seguranca_tem_as_mesmas_agendas_de_backup() -> None:
     semanal = _bloco(
         'resource "google_firestore_backup_schedule" "semanal_na_seguranca"'
     )
-    assert "daily_recurrence" in diaria and '"604800s"' in diaria
-    assert "weekly_recurrence" in semanal and '"8467200s"' in semanal
+    assert "daily_recurrence" in diaria
+    assert "retention = local.retencao_do_backup_diario" in diaria
+    assert "weekly_recurrence" in semanal
+    assert "retention = local.retencao_do_backup_semanal" in semanal
+    assert re.search(r'retencao_do_backup_diario\s*=\s*"604800s"', TF)
+    assert re.search(r'retencao_do_backup_semanal\s*=\s*"8467200s"', TF)
 
 
 def test_o_banco_principal_vem_da_variavel_e_chega_a_todo_servico_e_job() -> None:
@@ -132,8 +136,9 @@ def test_o_banco_principal_vem_da_variavel_e_chega_a_todo_servico_e_job() -> Non
         ):
             fim = texto.find("\nresource ", recurso.end())
             corpo = texto[recurso.start() : fim if fim != -1 else len(texto)]
-            assert 'name  = "FIRESTORE_BANCO"' in corpo, recurso.group(1)
+            assert "for_each = local.env_do_projeto" in corpo, recurso.group(1)
             todos.add(recurso.group(1))
+    assert re.search(r'name = "FIRESTORE_BANCO", value = var.banco_firestore', TF)
     assert {"web", "purga", "validacao", "identificacao", "fim"} <= todos
     for nome in ("main.tf", "ambientes/prod/main.tf"):
         assert "banco_firestore" in (RAIZ / "infra" / nome).read_text(), nome

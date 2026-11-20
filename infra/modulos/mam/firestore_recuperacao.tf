@@ -5,14 +5,14 @@
 # banco novo (infra/README.md).
 resource "google_firestore_backup_schedule" "diaria" {
   database  = google_firestore_database.mam.name
-  retention = "604800s" # 7 dias
+  retention = local.retencao_do_backup_diario
 
   daily_recurrence {}
 }
 
 resource "google_firestore_backup_schedule" "semanal" {
   database  = google_firestore_database.mam.name
-  retention = "8467200s" # 14 semanas
+  retention = local.retencao_do_backup_semanal
 
   weekly_recurrence {
     day = "SUNDAY"

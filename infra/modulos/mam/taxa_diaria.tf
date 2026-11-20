@@ -59,13 +59,12 @@ resource "google_cloud_run_v2_job" "taxa_diaria" {
             memory = "512Mi"
           }
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_ACEITOS"

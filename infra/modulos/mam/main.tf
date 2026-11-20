@@ -349,6 +349,34 @@ resource "google_project_service" "apis" {
 # - Ensaio: com limpeza_so_ensaia, o Google só registra o que apagaria (BatchDeleteVersions com
 #   validateOnly no log Data Access, ligado no limpeza_de_imagens.tf). Ligada de verdade desde o
 #   #456; para voltar ao ensaio basta trocar o valor, sem recriar o repositório.
+# Valores que o módulo repetia em vários recursos, num lugar só (#755).
+locals {
+  # O banco do projeto e o projeto chegam a todo Job e serviço pelo `dynamic "env"`.
+  env_do_projeto = [
+    { name = "GCP_PROJECT_ID", value = var.projeto },
+    { name = "FIRESTORE_BANCO", value = var.banco_firestore },
+  ]
+  # As sete variáveis da busca do mam-web, da indexação e da purga.
+  env_da_busca = [
+    { name = "BUSCA_REGIAO", value = local.regiao_da_busca },
+    { name = "BUSCA_COLECAO", value = local.colecao_da_busca },
+    { name = "BUSCA_COLECAO_DE_TEXTO", value = local.colecao_de_texto_da_busca },
+    { name = "BUSCA_INDICE_DESCRICAO", value = local.indice_da_descricao },
+    { name = "BUSCA_INDICES_LIGADOS", value = tostring(var.indices_da_busca_ligados) },
+    { name = "BUSCA_DIMENSAO", value = tostring(local.dimensao_dos_vetores) },
+    { name = "BUSCA_COTA_DE_ESCRITA", value = tostring(local.cota_de_escrita_da_busca) },
+  ]
+  # Backups do Firestore (firestore_recuperacao.tf, banco_de_seguranca.tf): o diário guarda 7
+  # dias; o semanal, 14 semanas (o teto do Firestore).
+  retencao_do_backup_diario  = "604800s"
+  retencao_do_backup_semanal = "8467200s"
+  # Dias até expirar a cópia limpa e o áudio do bucket `aceitos`: o PRAZO_DO_REPROCESSAMENTO
+  # (api/ciclo_de_vida.py). Depois disso a API recusa reprocessar, então o arquivo não serve mais.
+  dias_da_copia_limpa_e_do_audio = 7
+  # A conta que roda o Terraform; nasce no wizard, fora do módulo.
+  conta_do_terraform = "mam-terraform@${var.projeto}.iam.gserviceaccount.com"
+}
+
 locals {
   versoes_guardadas_por_imagem = 3 * var.builds_de_imagem_guardados
   # Idade por repositório: a GPU, que pesa mais, sai em 7 dias; a comum, em 14.
@@ -361,6 +389,15 @@ locals {
   # versão estável"); nenhum script a move.
   tag_estavel     = "estavel"
   tags_protegidas = [local.tag_do_build_em_uso, local.tag_da_volta, local.tag_estavel]
+  # As quatro regras de cada repositório: três KEEP e um DELETE, que só difere na idade.
+  politicas_de_limpeza = {
+    for repo, idade in local.idade_minima_para_apagar : repo => [
+      { id = "guarda-os-ultimos-builds", action = "KEEP", keep_count = local.versoes_guardadas_por_imagem, condition = null },
+      { id = "guarda-o-cache", action = "KEEP", keep_count = null, condition = { tag_state = "TAGGED", package_name_prefixes = local.pacotes_do_cache, tag_prefixes = null, older_than = null } },
+      { id = "guarda-o-build-em-uso-e-o-da-volta", action = "KEEP", keep_count = null, condition = { tag_state = "TAGGED", package_name_prefixes = null, tag_prefixes = local.tags_protegidas, older_than = null } },
+      { id = "apaga-o-resto", action = "DELETE", keep_count = null, condition = { tag_state = "ANY", package_name_prefixes = null, tag_prefixes = null, older_than = idade } },
+    ]
+  }
 }
 
 resource "google_artifact_registry_repository" "mam" {
@@ -369,35 +406,26 @@ resource "google_artifact_registry_repository" "mam" {
   format                 = "DOCKER"
   depends_on             = [google_project_service.apis]
   cleanup_policy_dry_run = local.limpeza_so_ensaia
-  cleanup_policies {
-    id     = "guarda-os-ultimos-builds"
-    action = "KEEP"
-    most_recent_versions {
-      keep_count = local.versoes_guardadas_por_imagem
-    }
-  }
-  cleanup_policies {
-    id     = "guarda-o-cache"
-    action = "KEEP"
-    condition {
-      tag_state             = "TAGGED"
-      package_name_prefixes = local.pacotes_do_cache
-    }
-  }
-  cleanup_policies {
-    id     = "guarda-o-build-em-uso-e-o-da-volta"
-    action = "KEEP"
-    condition {
-      tag_state    = "TAGGED"
-      tag_prefixes = local.tags_protegidas
-    }
-  }
-  cleanup_policies {
-    id     = "apaga-o-resto"
-    action = "DELETE"
-    condition {
-      tag_state  = "ANY"
-      older_than = local.idade_minima_para_apagar["mam"]
+  dynamic "cleanup_policies" {
+    for_each = local.politicas_de_limpeza["mam"]
+    content {
+      id     = cleanup_policies.value.id
+      action = cleanup_policies.value.action
+      dynamic "most_recent_versions" {
+        for_each = cleanup_policies.value.keep_count == null ? [] : [cleanup_policies.value.keep_count]
+        content {
+          keep_count = most_recent_versions.value
+        }
+      }
+      dynamic "condition" {
+        for_each = cleanup_policies.value.condition == null ? [] : [cleanup_policies.value.condition]
+        content {
+          tag_state             = condition.value.tag_state
+          package_name_prefixes = condition.value.package_name_prefixes
+          tag_prefixes          = condition.value.tag_prefixes
+          older_than            = condition.value.older_than
+        }
+      }
     }
   }
 }
@@ -411,35 +439,26 @@ resource "google_artifact_registry_repository" "mam_gpu" {
   format                 = "DOCKER"
   depends_on             = [google_project_service.apis]
   cleanup_policy_dry_run = local.limpeza_so_ensaia
-  cleanup_policies {
-    id     = "guarda-os-ultimos-builds"
-    action = "KEEP"
-    most_recent_versions {
-      keep_count = local.versoes_guardadas_por_imagem
-    }
-  }
-  cleanup_policies {
-    id     = "guarda-o-cache"
-    action = "KEEP"
-    condition {
-      tag_state             = "TAGGED"
-      package_name_prefixes = local.pacotes_do_cache
-    }
-  }
-  cleanup_policies {
-    id     = "guarda-o-build-em-uso-e-o-da-volta"
-    action = "KEEP"
-    condition {
-      tag_state    = "TAGGED"
-      tag_prefixes = local.tags_protegidas
-    }
-  }
-  cleanup_policies {
-    id     = "apaga-o-resto"
-    action = "DELETE"
-    condition {
-      tag_state  = "ANY"
-      older_than = local.idade_minima_para_apagar["mam-gpu"]
+  dynamic "cleanup_policies" {
+    for_each = local.politicas_de_limpeza["mam-gpu"]
+    content {
+      id     = cleanup_policies.value.id
+      action = cleanup_policies.value.action
+      dynamic "most_recent_versions" {
+        for_each = cleanup_policies.value.keep_count == null ? [] : [cleanup_policies.value.keep_count]
+        content {
+          keep_count = most_recent_versions.value
+        }
+      }
+      dynamic "condition" {
+        for_each = cleanup_policies.value.condition == null ? [] : [cleanup_policies.value.condition]
+        content {
+          tag_state             = condition.value.tag_state
+          package_name_prefixes = condition.value.package_name_prefixes
+          tag_prefixes          = condition.value.tag_prefixes
+          older_than            = condition.value.older_than
+        }
+      }
     }
   }
 }
@@ -558,12 +577,12 @@ resource "google_storage_bucket" "mam" {
       }
     }
   }
-  # Manter age = 7 em acordo com PRAZO_DO_REPROCESSAMENTO (api/ciclo_de_vida.py).
+  # O prazo é o PRAZO_DO_REPROCESSAMENTO (api/ciclo_de_vida.py); um teste confere os dois.
   dynamic "lifecycle_rule" {
     for_each = each.key == "aceitos" ? [1] : []
     content {
       condition {
-        age            = 7
+        age            = local.dias_da_copia_limpa_e_do_audio
         matches_suffix = ["copia_limpa.mp4", "audio.wav"]
       }
       action {
@@ -865,7 +884,7 @@ resource "google_bigquery_dataset_iam_member" "grava_momentos" {
 
 # A mam-terraform nasce no wizard, fora do Terraform; aqui só ganha quem a impersona.
 resource "google_service_account_iam_member" "github_impersona_terraform" {
-  service_account_id = "projects/${var.projeto}/serviceAccounts/mam-terraform@${var.projeto}.iam.gserviceaccount.com"
+  service_account_id = "projects/${var.projeto}/serviceAccounts/${local.conta_do_terraform}"
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${local.repositorio_github_id}"
 }
@@ -908,13 +927,12 @@ resource "google_cloud_run_v2_service" "web" {
         startup_cpu_boost = true
       }
       # Liga o verificador de token do Identity Platform na API (api/main.py).
-      env {
-        name  = "GCP_PROJECT_ID"
-        value = var.projeto
-      }
-      env {
-        name  = "FIRESTORE_BANCO"
-        value = var.banco_firestore
+      dynamic "env" {
+        for_each = local.env_do_projeto
+        content {
+          name  = env.value.name
+          value = env.value.value
+        }
       }
       env {
         name  = "FIRESTORE_BANCO_DE_SEGURANCA"
@@ -976,37 +994,16 @@ resource "google_cloud_run_v2_service" "web" {
         name  = "BUSCA_ACEITA_TESTE_DE_CARGA"
         value = tostring(var.busca_aceita_teste_de_carga)
       }
-      env {
-        name  = "BUSCA_REGIAO"
-        value = local.regiao_da_busca
-      }
-      env {
-        name  = "BUSCA_COLECAO"
-        value = local.colecao_da_busca
-      }
-      env {
-        name  = "BUSCA_COLECAO_DE_TEXTO"
-        value = local.colecao_de_texto_da_busca
-      }
-      env {
-        name  = "BUSCA_INDICE_DESCRICAO"
-        value = local.indice_da_descricao
-      }
-      env {
-        name  = "BUSCA_INDICES_LIGADOS"
-        value = tostring(var.indices_da_busca_ligados)
+      dynamic "env" {
+        for_each = local.env_da_busca
+        content {
+          name  = env.value.name
+          value = env.value.value
+        }
       }
       env {
         name  = "LISTAGEM_POR_MES"
         value = tostring(var.listagem_por_mes)
-      }
-      env {
-        name  = "BUSCA_DIMENSAO"
-        value = tostring(local.dimensao_dos_vetores)
-      }
-      env {
-        name  = "BUSCA_COTA_DE_ESCRITA"
-        value = tostring(local.cota_de_escrita_da_busca)
       }
       env {
         name  = "BIGQUERY_DATASET"
@@ -1186,13 +1183,12 @@ resource "google_cloud_run_v2_job" "validacao" {
           name  = "PUBSUB_TOPICO_USO"
           value = google_pubsub_topic.eventos_de_uso.id
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_QUARENTENA"
@@ -1293,13 +1289,12 @@ resource "google_cloud_run_v2_job" "transcricao_gpu" {
           name  = "PUBSUB_TOPICO_USO"
           value = google_pubsub_topic.eventos_de_uso.id
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_ACEITOS"
@@ -1385,13 +1380,12 @@ resource "google_cloud_run_v2_job" "ocr_gpu" {
           name  = "LIMIAR_DE_MUDANCA"
           value = tostring(local.limiar_de_mudanca_do_ocr)
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_ACEITOS"
@@ -1466,13 +1460,12 @@ resource "google_cloud_run_v2_job" "objetos_gpu" {
       }
       containers {
         image = var.imagem_objetos
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_DECUPAGENS"
@@ -1577,13 +1570,12 @@ resource "google_cloud_run_v2_job" "inventario" {
         image   = var.imagem_validacao
         command = ["python"]
         args    = ["-m", "api.inventario_job"]
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_DECUPAGENS"
@@ -1683,13 +1675,12 @@ resource "google_cloud_run_v2_job" "analise" {
           name  = "PUBSUB_TOPICO_USO"
           value = google_pubsub_topic.eventos_de_uso.id
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_ACEITOS"
@@ -1749,13 +1740,12 @@ resource "google_cloud_run_v2_job" "quadros" {
         image   = var.imagem_validacao
         command = ["python"]
         args    = ["-m", "api.quadros_chave"]
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_ACEITOS"
@@ -1833,13 +1823,12 @@ resource "google_cloud_run_v2_job" "indexacao" {
             memory = "1Gi"
           }
         }
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_ACEITOS"
@@ -1849,33 +1838,12 @@ resource "google_cloud_run_v2_job" "indexacao" {
           name  = "BUCKET_DECUPAGENS"
           value = local.buckets["decupagens"]
         }
-        env {
-          name  = "BUSCA_REGIAO"
-          value = local.regiao_da_busca
-        }
-        env {
-          name  = "BUSCA_COLECAO"
-          value = local.colecao_da_busca
-        }
-        env {
-          name  = "BUSCA_COLECAO_DE_TEXTO"
-          value = local.colecao_de_texto_da_busca
-        }
-        env {
-          name  = "BUSCA_INDICE_DESCRICAO"
-          value = local.indice_da_descricao
-        }
-        env {
-          name  = "BUSCA_INDICES_LIGADOS"
-          value = tostring(var.indices_da_busca_ligados)
-        }
-        env {
-          name  = "BUSCA_DIMENSAO"
-          value = tostring(local.dimensao_dos_vetores)
-        }
-        env {
-          name  = "BUSCA_COTA_DE_ESCRITA"
-          value = tostring(local.cota_de_escrita_da_busca)
+        dynamic "env" {
+          for_each = local.env_da_busca
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BIGQUERY_DATASET"
@@ -1949,13 +1917,12 @@ resource "google_cloud_run_v2_job" "identificacao" {
         image   = var.imagem_validacao
         command = ["python"]
         args    = ["-m", "api.identificacao_job"]
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.projeto
-        }
-        env {
-          name  = "FIRESTORE_BANCO"
-          value = var.banco_firestore
+        dynamic "env" {
+          for_each = local.env_do_projeto
+          content {
+            name  = env.value.name
+            value = env.value.value
+          }
         }
         env {
           name  = "BUCKET_ACEITOS"
