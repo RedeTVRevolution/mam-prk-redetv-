@@ -1,13 +1,16 @@
 """As leituras do painel em paralelo, o cache dos e-mails e o corpo da consulta."""
 
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
 import pytest
 
 from api.auditoria import RegistroDeAuditoria
+from api.custo_do_painel import CustoEmMemoria
 from api.painel import EmailsDasContas
+from api.qualidade_do_painel import QualidadeEmMemoria
 from api.relatorios import em_paralelo, linhas_da_consulta
 from api.resumos_de_uso import ResumosEmMemoria
 from api.tests.test_rotas_do_painel import LINHAS, USO, Mundo
@@ -191,3 +194,80 @@ def test_sem_gravar_a_auditoria_a_requisicao_falha(
     monkeypatch.setattr(mundo.auditoria, "acrescentar", nao_grava)
 
     assert mundo.get(rota, **params).status_code == 503
+
+
+# --- /revisao e e-mails em paralelo (#775) -----------------------------------------------
+
+
+class QualidadeLenta(QualidadeEmMemoria):
+    """Cada leitura leva `espera` s e conta as chamadas da taxa."""
+
+    def __init__(self, espera: float) -> None:
+        super().__init__([], [])
+        self.espera = espera
+        self.taxas = 0
+
+    def taxa_de_correcao(self, *a: Any, **k: Any) -> Any:
+        self.taxas += 1
+        time.sleep(self.espera)
+        return super().taxa_de_correcao(*a, **k)
+
+    def tempo_de_revisao(self, *a: Any, **k: Any) -> Any:
+        time.sleep(self.espera)
+        return super().tempo_de_revisao(*a, **k)
+
+
+class ResumosLentos(ResumosEmMemoria):
+    def __init__(self, espera: float) -> None:
+        super().__init__(LINHAS, ["Hoje"], USO)
+        self.espera = espera
+
+    def correcoes(self, *a: Any, **k: Any) -> Any:
+        time.sleep(self.espera)
+        return super().correcoes(*a, **k)
+
+
+def test_revisao_le_correcoes_taxa_tempo_e_emails_ao_mesmo_tempo() -> None:
+    espera = 0.2
+    mundo = Mundo(
+        ["diretoria"], resumos=ResumosLentos(espera), qualidade=QualidadeLenta(espera)
+    )
+    antes = time.monotonic()
+
+    r = mundo.get("/revisao")
+
+    assert r.status_code == 200
+    assert time.monotonic() - antes < 3 * espera  # em série seriam 3 x 0,2 s
+
+
+def test_revisao_com_filtro_de_usuario_nao_le_a_taxa() -> None:
+    qualidade = QualidadeLenta(0)
+    mundo = Mundo(["diretoria"], qualidade=qualidade)
+
+    assert mundo.get("/revisao", usuario="bia").status_code == 200
+    assert qualidade.taxas == 0
+
+
+@pytest.mark.parametrize(
+    ("rota", "leitura"),
+    [("/acessos", "acessos"), ("/buscas", "uso_por_quem"), ("/custo", "custos")],
+)
+def test_a_leitura_e_os_emails_frios_andam_ao_mesmo_tempo(
+    rota: str, leitura: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    encontro = threading.Barrier(2, timeout=5)  # em série, o primeiro esperaria em vão
+    faturamento = CustoEmMemoria([], [])
+    mundo = Mundo(["diretoria"], faturamento=faturamento)
+
+    def com_encontro(original: Callable[..., Any]) -> Callable[..., Any]:
+        def chamar(*a: Any, **k: Any) -> Any:
+            encontro.wait()
+            return original(*a, **k)
+
+        return chamar
+
+    monkeypatch.setattr(mundo.contas, "listar", com_encontro(mundo.contas.listar))
+    fonte = faturamento if rota == "/custo" else mundo.resumos
+    monkeypatch.setattr(fonte, leitura, com_encontro(getattr(fonte, leitura)))
+
+    assert mundo.get(rota).status_code == 200

@@ -2,6 +2,7 @@
 BigQuery, a página e a pessoa saem da soma já lida, a auditoria segue e o dado vence no TTL."""
 
 import threading
+import time
 from datetime import date
 from typing import Any
 
@@ -384,3 +385,93 @@ def test_trocar_de_pagina_nas_marcas_nao_consulta_de_novo() -> None:
         f"{rota}/insercoes", params={"marca": "Ambev"}, headers=AUTORIZACAO
     )
     assert lista.json() == esperada.json()
+
+
+# --- falha guardada (#775) ---------------------------------------------------------------
+
+
+def test_com_a_janela_da_falha_quem_esperava_recebe_o_mesmo_erro_sem_calcular_de_novo() -> (
+    None
+):
+    n = 4
+    cache = CacheCurto(validade_da_falha_s=10)
+    chamadas = 0
+    todos_na_trava = threading.Barrier(n, timeout=5)
+    erros: list[BaseException] = []
+
+    def calcular() -> int:
+        nonlocal chamadas
+        chamadas += 1
+        time.sleep(0.2)  # dá tempo de os outros chegarem na trava
+        raise RuntimeError("BigQuery fora")
+
+    def pedir() -> None:
+        todos_na_trava.wait()
+        try:
+            cache.obter("k", calcular)
+        except RuntimeError as e:
+            erros.append(e)
+
+    threads = [threading.Thread(target=pedir) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert chamadas == 1
+    assert len(erros) == n
+    assert {id(e) for e in erros} == {id(erros[0])}
+
+
+def test_a_falha_guardada_vence_na_janela_e_a_proxima_chamada_refaz() -> None:
+    agora = [0.0]
+    cache = CacheCurto(validade_da_falha_s=10, relogio=lambda: agora[0])
+    chamadas = 0
+
+    def calcular() -> str:
+        nonlocal chamadas
+        chamadas += 1
+        if chamadas == 1:
+            raise RuntimeError("fora")
+        return "ok"
+
+    with pytest.raises(RuntimeError):
+        cache.obter("k", calcular)
+    agora[0] = 9.9
+    with pytest.raises(RuntimeError):
+        cache.obter("k", calcular)
+    assert chamadas == 1
+
+    agora[0] = 10.0
+    assert cache.obter("k", calcular) == "ok"
+    assert chamadas == 2
+
+
+def test_a_rota_com_a_leitura_que_falha_responde_503_sem_ler_de_novo() -> None:
+    class Falha(ResumosEmMemoria):
+        leituras = 0
+
+        def correcoes(self, *a: Any, **k: Any) -> Any:
+            self.leituras += 1
+            raise RuntimeError("BigQuery fora")
+
+    resumos = Falha(LINHAS, ["Hoje"], USO)
+    mundo = Mundo(
+        ["diretoria"],
+        resumos=resumos,
+        cache_do_painel=CacheCurto(validade_da_falha_s=10),
+    )
+
+    assert mundo.get("/revisao").status_code == 503
+    assert mundo.get("/revisao").status_code == 503
+    assert resumos.leituras == 1
+
+
+def test_so_o_painel_e_os_relatorios_ligam_a_janela_da_falha() -> None:
+    from api.main import VALIDADE_DA_FALHA_S, _com_cache
+
+    cache = _com_cache(object(), lambda _, c: c)
+
+    assert cache is not None
+    assert cache._validade_da_falha == VALIDADE_DA_FALHA_S == 10
+    assert CacheCurto()._validade_da_falha == 0
