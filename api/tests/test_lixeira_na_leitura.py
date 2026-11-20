@@ -298,7 +298,7 @@ def test_purgada_some_e_a_nova_com_o_mesmo_nome_conta_so_nos_videos_do_id_novo()
     )
 
 
-def test_fundida_conta_enquanto_o_destino_conta_e_aparece_como_ela_mesma() -> None:
+def test_fundida_conta_enquanto_o_destino_conta_e_soma_na_linha_do_destino() -> None:
     mundo = Mundo()
     b, c = mundo.bia, mundo.cris
     mundo.catalogo.definir_fusao(mundo.ana.id, _fusao(b))
@@ -306,14 +306,16 @@ def test_fundida_conta_enquanto_o_destino_conta_e_aparece_como_ela_mesma() -> No
     cliente = mundo.instancia()
 
     antes = _ranking(cliente)
-    assert {p["pessoa_id"] for p in antes["pessoas"]} == {mundo.ana.id, b.id, c.id}
-    assert antes["total"]["pessoas"] == 3  # sem juntar a origem ao destino
+    assert {p["pessoa_id"] for p in antes["pessoas"]} == {
+        c.id
+    }  # a cadeia inteira (#784)
+    assert antes["total"]["pessoas"] == 1
 
     mundo.catalogo.definir_lixeira(c.id, ENVIO)
     assert _ranking(cliente)["pessoas"] == []
 
     mundo.catalogo.definir_lixeira(c.id, None)
-    assert len(_ranking(cliente)["pessoas"]) == 3
+    assert len(_ranking(cliente)["pessoas"]) == 1
 
     mundo.catalogo.apagar(c.id)
     assert _ranking(cliente)["pessoas"] == []
