@@ -59,12 +59,13 @@ const ETAPAS_DEPOIS_DO_CONCLUIDO = [
   'inventario_de_objetos',
   'indexacao',
 ]
-// ponytail: teto fixo, acima do pior caso de uma etapa, que é o inventário de objetos: espera
-// por GPU, Florence (11100 s) e o inventário em CPU (3900 s), uns 4 h 40 (timeouts do
-// `validacao.workflow.yaml` e `espera_gpu_minutos` do infra). Um Workflows que morreu entre
-// etapas deixa o Job assim; passado o teto, o selo solta e o "Reprocessar…" volta. Se esses
-// prazos subirem, suba o teto.
-const TETO_DO_FINALIZANDO_MS = 6 * 60 * 60 * 1000
+// ponytail: teto fixo, acima da etapa mais longa depois do `concluido`, o inventário de objetos:
+// a espera de GPU (`espera_gpu_minutos` x 60), o prazo do Florence (`prazo_do_conector_s.objetos_gpu`)
+// e o do inventário em CPU (`prazo_do_conector_s.inventario`), 22020 s hoje, mais uma folga de
+// minutos. Um Workflows que morreu entre etapas deixa o Job assim; passado o teto, o selo solta e o
+// "Reprocessar…" volta. A espera na fila FIFO de GPU fica fora da conta. Um teste
+// (api/tests/test_prazos_ligados_ao_codigo.py) lê este literal e falha se ele ficar abaixo da conta.
+export const TETO_DO_FINALIZANDO_MS = (6 * 60 + 30) * 60 * 1000
 
 /**
  * O Job fica `concluido` ao fim da análise, mas as etapas seguintes ainda rodam. Entre uma
