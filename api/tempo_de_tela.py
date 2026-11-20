@@ -13,7 +13,7 @@ instância.
 import json
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Annotated, Any, Literal, NamedTuple, Protocol
 
@@ -28,6 +28,7 @@ from api.copia_bigquery import (
     ConfigDoBigQuery,
     CopiaEmMemoria,
     Transporte,
+    parametro_de_lista,
 )
 from api.csv_seguro import csv_em_texto
 from api.fuso import agora_em_sao_paulo
@@ -93,6 +94,16 @@ class ConsultaDeMomentos(Protocol):
     ) -> list[PessoaNoVideo]:
         """Uma soma por pessoa e vídeo; `desde` e `ate` são datas de exibição, inclusive."""
 
+    def aparicoes_unidas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        pessoas: Sequence[str],
+    ) -> list[tuple[str, str, int, int]]:
+        """Os intervalos de aparição já unidos por vídeo e pessoa (`job_id`, `pessoa_id`,
+        `inicio_ms`, `fim_ms`), só das `pessoas` pedidas, no mesmo filtro das somas (#784)."""
+
 
 def _uniao(intervalos: list[tuple[int, int]]) -> list[tuple[int, int]]:
     unidos: list[tuple[int, int]] = []
@@ -149,6 +160,19 @@ class ConsultaEmMemoria:
         self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
         return somar(self.momentos(programas, desde, ate))
+
+    def aparicoes_unidas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        pessoas: Sequence[str],
+    ) -> list[tuple[str, str, int, int]]:
+        por_par: dict[tuple[str, str], list[tuple[int, int]]] = defaultdict(list)
+        for m in self.momentos(programas, desde, ate):
+            if m.tipo == "aparicao" and m.pessoa_id in pessoas:
+                por_par[(m.job_id, m.pessoa_id)].append((m.inicio_ms, m.fim_ms))
+        return [(j, p, i, f) for (j, p), v in por_par.items() for i, f in _uniao(v)]
 
 
 def ranking_em_python(
@@ -282,6 +306,32 @@ class ConsultaBigQuery:
         )
         return [pessoa_no_video(v) for v in linhas]
 
+    def aparicoes_unidas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        pessoas: Sequence[str],
+    ) -> list[tuple[str, str, int, int]]:
+        linhas = consultar_no_bigquery(
+            self._config,
+            self._transporte,
+            colunas=(
+                "t.job_id, p.id AS pessoa_id, COALESCE(p.nome, '') AS nome, "
+                "t.tipo, t.inicio_ms, t.fim_ms"
+            ),
+            tipos=TIPOS_DO_RELATORIO,
+            programas=programas,
+            desde=desde,
+            ate=ate,
+            unnest_das_pessoas=True,
+            condicoes=["p.id IN UNNEST(@pessoas)"],
+            parametros=[parametro_de_lista("pessoas", pessoas)],
+            depois_da_base=f", {UNIAO_EM_SQL}\n"
+            "SELECT job_id, pessoa_id, inicio_ms, fim_ms FROM unidas",
+        )
+        return [(v[0], v[1], int(v[2]), int(v[3])) for v in linhas]
+
 
 class ConsultaComCache:
     """A soma por filtro, calculada uma vez e lembrada (#453): o ranking, a página, a
@@ -299,6 +349,16 @@ class ConsultaComCache:
             ("tempo-de-tela", programas, desde, ate),
             lambda: self._consulta.somas(programas, desde, ate),
         )
+
+    def aparicoes_unidas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        pessoas: Sequence[str],
+    ) -> list[tuple[str, str, int, int]]:
+        """Só repassa: as pessoas pedidas mudam com o catálogo, não há o que guardar."""
+        return self._consulta.aparicoes_unidas(programas, desde, ate, pessoas)
 
 
 class SoComQuemConta:
@@ -331,9 +391,40 @@ class SoComQuemConta:
     ) -> tuple[list[PessoaNoVideo], dict[str, str]]:
         """As somas de quem conta e o nome atual de cada um, numa leitura do catálogo."""
         somas = self._somas_dos_videos_fora_da_lixeira(programas, desde, ate)
+        return self._no_destino(somas, programas, desde, ate)
+
+    def _no_destino(
+        self,
+        somas: list[PessoaNoVideo],
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        so_o_destino: str | None = None,
+    ) -> tuple[list[PessoaNoVideo], dict[str, str]]:
+        """Passa cada soma ao destino da cadeia de fusão (#784) e tira quem não conta. Num
+        vídeo com duas ou mais pessoas do mesmo destino a soma de baixo já unida não se
+        reúne em Python: os intervalos vêm da consulta, só dessas pessoas. Com `so_o_destino`,
+        só os pares desse destino entram (os vídeos de uma pessoa não pagam a fusão alheia)."""
         destinos = QuemConta(self._catalogo).pessoas({s.pessoa_id for s in somas})
-        nomes = {i: d.pessoa.nome for i, d in destinos.items() if d.pessoa and d.conta}
-        return [s for s in somas if s.pessoa_id in nomes], nomes
+        alvo = {i: d.pessoa.id for i, d in destinos.items() if d.pessoa and d.conta}
+        nomes = {
+            d.pessoa.id: d.pessoa.nome
+            for d in destinos.values()
+            if d.pessoa and d.conta
+        }
+        por_par: dict[tuple[str, str], list[PessoaNoVideo]] = defaultdict(list)
+        for s in somas:
+            if s.pessoa_id in alvo and so_o_destino in (None, alvo[s.pessoa_id]):
+                por_par[(s.job_id, alvo[s.pessoa_id])].append(s)
+        juntas = {k: v for k, v in por_par.items() if len(v) > 1}
+        intervalos: dict[tuple[str, str], list[tuple[int, int]]] = defaultdict(list)
+        if juntas:
+            pessoas = sorted({s.pessoa_id for v in juntas.values() for s in v})
+            for job_id, pessoa_id, inicio, fim in self._consulta.aparicoes_unidas(
+                programas, desde, ate, pessoas
+            ):
+                intervalos[(job_id, pessoa_id)].append((inicio, fim))
+        return [_no_destino(k, v, intervalos) for k, v in por_par.items()], nomes
 
     def ranking(
         self,
@@ -355,10 +446,33 @@ class SoComQuemConta:
         depois: int,
         limite: int,
     ) -> "list[VideoDaPessoa]":
-        if not QuemConta(self._catalogo).contam([pessoa_id]):
-            return []
         somas = self._somas_dos_videos_fora_da_lixeira(programas, desde, ate)
-        return videos_em_python(somas, pessoa_id, depois, limite)
+        no_destino, _ = self._no_destino(somas, programas, desde, ate, pessoa_id)
+        return videos_em_python(no_destino, pessoa_id, depois, limite)
+
+
+def _no_destino(
+    chave: tuple[str, str],
+    somas: list[PessoaNoVideo],
+    intervalos: Mapping[tuple[str, str], list[tuple[int, int]]],
+) -> PessoaNoVideo:
+    """A soma do destino (`chave`: vídeo e destino) a partir das de suas pessoas no vídeo."""
+    job_id, destino = chave
+    if len(somas) == 1:
+        return replace(somas[0], pessoa_id=destino)
+    unidos = _uniao([i for s in somas for i in intervalos[(job_id, s.pessoa_id)]])
+    nomes: Counter[str] = Counter()
+    for s in somas:
+        nomes.update(s.nomes)
+    return PessoaNoVideo(
+        job_id=job_id,
+        pessoa_id=destino,
+        nomes=dict(nomes),
+        tempo_de_tela_ms=sum(fim - ini for ini, fim in unidos),
+        aparicoes=len(unidos),
+        mencoes_na_fala=sum(s.mencoes_na_fala for s in somas),
+        mencoes_no_texto=sum(s.mencoes_no_texto for s in somas),
+    )
 
 
 def consulta_do_ambiente(ambiente: Any) -> ConsultaBigQuery | None:
