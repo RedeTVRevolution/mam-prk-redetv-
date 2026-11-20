@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from api import busca as busca_modulo
 from api.agent_retrieval import AgentRetrieval, ConfigDaBusca
 from api.auth import Usuario
 from api.busca import (
@@ -1013,6 +1014,54 @@ def test_o_teto_de_videos_corta_o_resultado() -> None:
     for i in range(3):
         m.com(job(f"j{i}"), objeto(f"o{i}", f"j{i}", 0, 1_000))
     assert len(buscar(m, "vestido", limite=2).videos) == 2
+
+
+def _mundo_de_videos_com_momentos(n: int, momentos: int) -> Mundo:
+    m = Mundo(pedido(texto_livre="vestido"))
+    for i in range(1, n + 1):
+        m.com(
+            job(f"j{i}"),
+            *[
+                objeto(f"o{i}-{k}", f"j{i}", k * 60_000, k * 60_000 + 1_000)
+                for k in range(momentos)
+            ],
+        )
+    return m
+
+
+def test_a_1a_pagina_so_monta_os_momentos_dos_videos_da_pagina(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    m = _mundo_de_videos_com_momentos(5, 3)
+    montados: list[int] = []
+    original = busca_modulo.Momento
+
+    def contar(**campos: Any) -> Any:
+        montados.append(1)
+        return original(**campos)
+
+    monkeypatch.setattr(busca_modulo, "Momento", contar)
+
+    pagina = m.busca().buscar("vestido", limite=2, dono="u1")
+
+    assert len(montados) == 2 * 3
+    assert [v.n_momentos for v in pagina.videos] == [3, 3]
+    assert pagina._proximo_cursor is not None
+
+
+def test_video_sem_job_visivel_no_meio_nao_fura_a_1a_pagina() -> None:
+    m = _mundo_de_videos_com_momentos(4, 1)
+    m.jobs.salvar(job("j2", estado="analisando"))
+
+    busca = m.busca()
+    primeira = busca.buscar("vestido", limite=2, dono="u1")
+    segunda = busca.buscar(
+        "vestido", limite=2, dono="u1", cursor=primeira._proximo_cursor
+    )
+
+    assert len(primeira.videos) == 2
+    assert "j2" not in [v.job_id for v in (*primeira.videos, *segunda.videos)]
+    assert len(segunda.videos) == 1
 
 
 # --- a rota ---------------------------------------------------------------------------

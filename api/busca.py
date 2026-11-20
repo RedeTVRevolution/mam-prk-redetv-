@@ -389,6 +389,15 @@ class _Trecho:
     tipo: TipoDeRegistro
 
 
+@dataclass
+class _VideoOrdenado:
+    """O vídeo já ordenado, com os trechos na ordem do vídeo: o `Momento` só se monta
+    para os vídeos da página."""
+
+    job: Job
+    trechos: list[_Trecho]
+
+
 _agora = time.perf_counter  # troca-se nos testes por um relógio controlado
 
 
@@ -742,8 +751,8 @@ class Busca:
         usadas = do_nome.usadas()
         termos = _termos(entendida, nome) + usadas
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
-        todos = self._videos(trechos, job, termos, ordem, cancelado)
-        videos = todos[:limite]
+        todos = self._videos(trechos, job, ordem, cancelado)
+        videos = [self._montar(v, termos) for v in todos[:limite]]
         t_videos = _agora() - inicio
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
@@ -857,7 +866,7 @@ class Busca:
     def _guardar(
         self,
         resultado: ResultadoDaBusca,
-        todos: list[VideoDoResultado],
+        todos: list[_VideoOrdenado],
         termos: list[str],
         dono: str,
         impressao: str,
@@ -879,16 +888,16 @@ class Busca:
             versao_da_lixeira=versao,
             videos=[
                 VideoGuardado(
-                    job_id=v.job_id,
+                    job_id=v.job.id,
                     momentos=[
                         MomentoGuardado(
-                            tipo=m.tipo,
-                            inicio_ms=m.inicio_ms,
-                            fim_ms=m.fim_ms,
-                            motivo=m.motivo,
-                            quadro=m.quadro,
+                            tipo=t.tipo,
+                            inicio_ms=t.inicio_ms,
+                            fim_ms=t.fim_ms,
+                            motivo=t.motivo,
+                            quadro=t.quadro,
                         )
-                        for m in v.momentos
+                        for t in v.trechos
                     ],
                 )
                 for v in todos
@@ -1104,14 +1113,13 @@ class Busca:
         self,
         trechos: list[_Trecho],
         job: Callable[[str], Job | None],
-        termos: list[str],
         ordem: Ordem,
         cancelado: threading.Event | None,
-    ) -> list[VideoDoResultado]:
+    ) -> list[_VideoOrdenado]:
         por_video: dict[str, list[_Trecho]] = defaultdict(list)
         for t in trechos:
             por_video[t.job_id].append(t)
-        videos: list[tuple[int, VideoDoResultado]] = []
+        videos: list[tuple[int, _VideoOrdenado]] = []
         for id, lista in por_video.items():
             _conferir(cancelado)
             j = job(id)
@@ -1119,37 +1127,35 @@ class Busca:
                 continue
             # A relevância também dentro do vídeo; no empate, o tempo.
             lista.sort(key=lambda t: (t.posicao, t.inicio_ms, t.fim_ms))
-            momentos = [
-                Momento(
-                    tipo=t.tipo,
-                    inicio_ms=t.inicio_ms,
-                    fim_ms=t.fim_ms,
-                    motivo=t.motivo,
-                    destaques=_destaques(t.motivo, termos),
-                    quadro=t.quadro,
-                    quadro_url=None,
-                )
-                for t in lista
-            ]
-            videos.append(
-                (
-                    min(t.posicao for t in lista),
-                    VideoDoResultado(
-                        job_id=id,
-                        nome=j.nome,
-                        programa=j.programa,
-                        data_exibicao=j.data_exibicao,
-                        duracao_s=j.duracao_s,
-                        n_momentos=len(momentos),
-                        momentos=momentos,
-                    ),
-                )
-            )
-        videos.sort(key=lambda v: (v[0], -v[1].n_momentos))
+            videos.append((min(t.posicao for t in lista), _VideoOrdenado(j, lista)))
+        videos.sort(key=lambda v: (v[0], -len(v[1].trechos)))
         if ordem == "data":
             # Estável: na mesma data, fica a relevância; sem data, no fim.
-            videos.sort(key=lambda v: v[1].data_exibicao or date.min, reverse=True)
+            videos.sort(key=lambda v: v[1].job.data_exibicao or date.min, reverse=True)
         return [v for _, v in videos]
+
+    def _montar(self, v: _VideoOrdenado, termos: list[str]) -> VideoDoResultado:
+        momentos = [
+            Momento(
+                tipo=t.tipo,
+                inicio_ms=t.inicio_ms,
+                fim_ms=t.fim_ms,
+                motivo=t.motivo,
+                destaques=_destaques(t.motivo, termos),
+                quadro=t.quadro,
+                quadro_url=None,
+            )
+            for t in v.trechos
+        ]
+        return VideoDoResultado(
+            job_id=v.job.id,
+            nome=v.job.nome,
+            programa=v.job.programa,
+            data_exibicao=v.job.data_exibicao,
+            duracao_s=v.job.duracao_s,
+            n_momentos=len(momentos),
+            momentos=momentos,
+        )
 
     def _sem_aparicao(
         self,
