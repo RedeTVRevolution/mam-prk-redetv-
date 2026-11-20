@@ -19,19 +19,23 @@ SERVICO = _alvo("\nFROM python:3.12-slim\n")
 # vem junto) e o `uv sync` dela.
 JOBS_GPU = {
     "transcricao-gpu": (
-        _alvo("\nFROM python:3.12-slim-bookworm AS transcricao-base")
+        _alvo("\nFROM ${PYTHON_BASE} AS transcricao-base")
         + _alvo("\nFROM transcricao-base AS transcricao-gpu"),
         "uv sync --locked --no-dev --group transcricao --group transcricao-gpu",
     ),
     "ocr-gpu": (
-        _alvo("\nFROM python:3.12-slim-bookworm AS ocr-gpu"),
+        _alvo("\nFROM ${PYTHON_BASE} AS ocr-gpu"),
         "uv sync --locked --no-dev --group ocr-gpu",
     ),
     "objetos-gpu": (
-        _alvo("\nFROM python:3.12-slim-bookworm AS objetos-gpu"),
+        _alvo("\nFROM ${PYTHON_BASE} AS objetos-gpu"),
         "uv sync --locked --no-dev --group objetos",
     ),
 }
+
+
+def test_a_base_dos_jobs_continua_o_python_slim_bookworm() -> None:
+    assert "\nARG PYTHON_BASE=python:3.12-slim-bookworm\n" in DOCKERFILE
 
 
 def test_dependencias_e_pacote_da_api_vem_compilados() -> None:
