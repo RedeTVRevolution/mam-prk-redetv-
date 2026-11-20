@@ -136,4 +136,5 @@ def test_o_banco_principal_vem_da_variavel_e_chega_a_todo_servico_e_job() -> Non
             todos.add(recurso.group(1))
     assert {"web", "purga", "validacao", "identificacao", "fim"} <= todos
     for nome in ("main.tf", "ambientes/prod/main.tf"):
-        assert "banco_firestore" in (RAIZ / "infra" / nome).read_text(), nome
+        # As raízes só exportam o nome (output); o padrão mora no módulo.
+        assert "module.mam.banco_firestore" in (RAIZ / "infra" / nome).read_text()

@@ -52,15 +52,73 @@ def test_cada_recurso_do_modulo_tem_o_seu_bloco_moved() -> None:
     assert sorted(recursos) == sorted((t, n) for t, n, _, _ in movidos)
 
 
-def test_cada_output_do_modulo_sai_na_raiz_para_o_make_e_o_deploy() -> None:
-    raiz = (INFRA / "main.tf").read_text()
-    saidas = re.findall(r'^output "(\w+)"', _texto_do_modulo(), re.MULTILINE)
+def _saidas(texto: str) -> list[str]:
+    return re.findall(r'^output "(\w+)"', texto, re.MULTILINE)
+
+
+RAIZES = {"dev": INFRA / "main.tf", "prod": INFRA / "ambientes" / "prod" / "main.tf"}
+
+
+@pytest.mark.parametrize("raiz", RAIZES)
+def test_cada_output_do_modulo_sai_na_raiz_para_o_make_e_o_deploy(raiz: str) -> None:
+    texto = RAIZES[raiz].read_text()
+    saidas = _saidas(_texto_do_modulo())
 
     assert saidas
     for saida in saidas:
         assert re.search(
-            rf'output "{saida}" \{{\n\s*value\s*= module\.mam\.{saida}\n', raiz
+            rf'output "{saida}" \{{\n\s*value\s*= module\.mam\.{saida}\n', texto
+        ), saida
+
+
+def test_o_dev_e_a_producao_exportam_os_mesmos_outputs() -> None:
+    assert sorted(_saidas(RAIZES["dev"].read_text())) == sorted(
+        _saidas(RAIZES["prod"].read_text())
+    )
+
+
+def test_o_output_sensivel_continua_sensivel_nas_duas_raizes() -> None:
+    for raiz in RAIZES.values():
+        assert re.search(
+            r'output "identity_api_key" \{\n\s*value\s*= module\.mam\.identity_api_key\n\s*sensitive = true',
+            raiz.read_text(),
         )
+
+
+def test_nenhuma_raiz_exporta_o_projeto() -> None:
+    # GCP_PROJECT_ID segue vindo do arquivo de ambiente.
+    for raiz in RAIZES.values():
+        assert not {"projeto", "gcp_project_id"} & set(_saidas(raiz.read_text()))
+
+
+def test_nenhum_tf_fora_do_modulo_escreve_nome_de_recurso() -> None:
+    # Só o módulo monta nomes (AGENTS.md); `mam-principal` era o caso nas raízes.
+    for raiz in RAIZES.values():
+        assert not re.search(r'"mam-[a-z0-9-]+"', raiz.read_text()), raiz
+
+
+def _padrao(texto: str, nome: str) -> str | None:
+    corpo = re.search(
+        rf'^variable "{nome}" \{{\n(.*?)^\}}', texto, re.DOTALL | re.MULTILINE
+    )
+    assert corpo, nome
+    padrao = re.search(r"^\s*default\s*= (.+)$", corpo.group(1), re.MULTILINE)
+    return padrao.group(1).strip() if padrao else None
+
+
+@pytest.mark.parametrize("raiz", RAIZES)
+def test_o_padrao_de_cada_variavel_da_raiz_e_o_do_modulo(raiz: str) -> None:
+    texto = RAIZES[raiz].read_text()
+    modulo = _texto_do_modulo()
+    redeclaradas = [
+        n
+        for n in re.findall(r'^variable "(\w+)"', texto, re.MULTILINE)
+        if _padrao(texto, n) is not None
+    ]
+
+    assert redeclaradas
+    for nome in redeclaradas:
+        assert _padrao(texto, nome) == _padrao(modulo, nome), nome
 
 
 def test_o_dev_e_a_producao_ligam_o_indice_ann_da_busca() -> None:
@@ -310,6 +368,13 @@ def test_o_ci_valida_dev_e_prod() -> None:
         "terraform -chdir=infra test"
     )
     assert (INFRA / "plano_simulado.tftest.hcl").exists()
+
+
+def test_o_ci_confere_o_formato_de_todo_o_infra_de_uma_vez() -> None:
+    ci = (RAIZ / ".github" / "workflows" / "ci.yml").read_text()
+
+    assert "terraform -chdir=infra fmt -check -recursive" in ci
+    assert "ambientes/prod fmt" not in ci
 
 
 def test_o_readme_da_infra_tem_a_tabela_e_a_lista_do_que_precisa_existir() -> None:
