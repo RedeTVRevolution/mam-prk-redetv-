@@ -12,6 +12,7 @@ import pytest
 from api.erros import ServicoIndisponivel
 from api.fuso import periodo_em_utc
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
+from api.revisao import Pulso
 from api.taxa_de_correcao import calcular
 from api.taxa_diaria import (
     ItensEmMemoria,
@@ -94,7 +95,7 @@ def test_cada_dia_da_tabela_e_o_calculo_de_hoje_sobre_aquele_dia() -> None:
                 jobs,
                 itens,
                 correcoes,
-                revisao,
+                revisao.todas(),
                 lambda job_id: json.loads(b"".join(decupagens.abrir_decupagem(job_id))),
             )
         )
@@ -105,7 +106,9 @@ def test_o_caso_de_hoje_tem_correcao_pendente_aprovada_e_reprocessada() -> None:
     jobs, _, itens, correcoes, revisao = _caso_de_hoje()
 
     def contagem(d: int, tipo: str) -> int:
-        linhas = linhas_do_dia(DIA + timedelta(days=d), jobs, itens, correcoes, revisao)
+        linhas = linhas_do_dia(
+            DIA + timedelta(days=d), jobs, itens, correcoes, revisao.todas()
+        )
         return sum(x.correcoes for x in linhas if x.tipo == tipo)
 
     assert contagem(2, "pessoa.nao_e") == 1  # conta no dia da aprovação
@@ -126,7 +129,7 @@ def test_o_dia_e_o_de_sao_paulo_como_o_do_painel() -> None:
     )
 
     def do_fama(d: date) -> int:
-        linhas = linhas_do_dia(d, jobs, itens, correcoes, revisao)
+        linhas = linhas_do_dia(d, jobs, itens, correcoes, revisao.todas())
         return sum(
             x.correcoes
             for x in linhas
@@ -141,7 +144,7 @@ def test_as_linhas_trazem_o_dia_o_programa_a_versao_e_so_jobs_concluidos() -> No
     jobs, _, itens, correcoes, revisao = _mundo_com_itens()
     jobs.salvar(jobs.obter("j1").model_copy(update={"estado": "falhou"}))
 
-    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao)
+    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao.todas())
 
     assert {(x.dia, x.job_id, x.programa, x.versao_pipeline) for x in linhas} == {
         (DIA, "j2", "Jornal", "v2")
@@ -152,7 +155,7 @@ def test_job_sem_contagem_fica_de_fora_sem_derrubar_o_dia() -> None:
     jobs, _, itens, correcoes, revisao = _mundo_com_itens()
     itens.apagar("j1")
 
-    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao)
+    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao.todas())
 
     assert {x.programa for x in linhas} == {"Jornal"}
     assert {x.versao_pipeline for x in linhas} == {"v2"}
@@ -162,7 +165,7 @@ def test_dois_jobs_no_mesmo_grupo_e_dia_ficam_em_linhas_separadas() -> None:
     jobs, _, itens, correcoes, revisao = _mundo_com_itens()
     _pulsar(revisao, "j4")
 
-    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao)
+    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao.todas())
 
     assert {
         (x.job_id, x.correcoes, x.itens) for x in linhas if x.tipo == "pessoa.renomear"
@@ -387,3 +390,64 @@ def test_o_job_agendado_recebe_os_nomes_do_terraform() -> None:
     assert "google_cloud_scheduler_job" in tf
     main = (MAM.parent.parent / "main.tf").read_text()
     assert 'output "bigquery_tabela_da_taxa"' in main
+
+
+class _RevisaoQueConta:
+    def __init__(self, revisao: Any) -> None:
+        self._revisao = revisao
+        self.leituras: list[datetime | None] = []
+
+    def todas(self, desde: datetime | None = None) -> Any:
+        self.leituras.append(desde)
+        return self._revisao.todas(desde)
+
+
+def test_atualizar_le_as_medidas_uma_vez_e_grava_as_linhas_de_cada_dia() -> None:
+    jobs, _, itens, correcoes, revisao = _caso_de_hoje()
+    # pulsos nas viradas do dia de São Paulo (03h UTC): 02h59 e 03h00
+    for job, quando in (
+        ("j1", datetime(2026, 11, 3, 2, 59, tzinfo=UTC)),
+        ("j2", datetime(2026, 11, 3, 3, 0, tzinfo=UTC)),
+    ):
+        revisao.aplicar(
+            Pulso(job_id=job, uid="u9", email="u9@x", quando=quando, evento="inicio"),
+            300,
+        )
+    dias = [DIA + timedelta(days=d) for d in (5, -3, 0, 20, -12, 2)]
+    contando = _RevisaoQueConta(revisao)
+    tabela = TabelaDaTaxaEmMemoria()
+
+    gravadas = atualizar(dias, jobs, itens, correcoes, contando, tabela)  # type: ignore[arg-type]
+
+    esperadas = [
+        linha
+        for dia in dias
+        for linha in linhas_do_dia(dia, jobs, itens, correcoes, revisao.todas())
+    ]
+    assert tabela.linhas == esperadas
+    assert gravadas == len(esperadas) > 0
+    assert contando.leituras == [periodo_em_utc(min(dias), min(dias))[0]]
+
+
+def test_uma_rodada_de_365_dias_le_as_medidas_uma_vez() -> None:
+    jobs, _, itens, correcoes, revisao = _caso_de_hoje()
+    contando = _RevisaoQueConta(revisao)
+
+    atualizar(
+        dias_recentes(DIA, 365),
+        jobs,
+        itens,
+        correcoes,
+        contando,  # type: ignore[arg-type]
+        TabelaDaTaxaEmMemoria(),
+    )
+
+    assert len(contando.leituras) == 1
+
+
+def test_rodada_sem_dias_nao_le_as_medidas() -> None:
+    jobs, _, itens, correcoes, revisao = _caso_de_hoje()
+    contando = _RevisaoQueConta(revisao)
+
+    assert atualizar([], jobs, itens, correcoes, contando, TabelaDaTaxaEmMemoria()) == 0  # type: ignore[arg-type]
+    assert contando.leituras == []
