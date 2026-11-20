@@ -1,5 +1,5 @@
 -- Tabelas resumidas do painel da diretoria (#280, E9). Roda de tempos em tempos como
--- consulta agendada (`resumos_de_uso.tf`) e mantém as seis tabelas a partir dos eventos de
+-- consulta agendada (`resumos_de_uso.tf`) e mantém as quatro tabelas a partir dos eventos de
 -- uso (#279). `${prefixo}` é o prefixo `projeto.dataset.` das tabelas que ele cria,
 -- `${tabela_de_eventos}` é o nome inteiro da que ele lê, e `${inicio_da_janela}` é o começo
 -- (uma expressão TIMESTAMP, sempre à meia-noite de São Paulo) do período que pode ter
@@ -9,7 +9,7 @@
 --
 -- Incremental (#380): a consulta lê só as partições da janela (`quando` é a coluna da
 -- partição) e troca os dias da janela nas quatro tabelas por dia; o que veio antes fica como
--- está. `uso_por_dia` e `uso_por_usuario` saem da tabela por dia e usuário, que é pequena.
+-- está.
 -- Nenhuma leitura toca os momentos: a duração do vídeo vem no evento de fim.
 --
 -- O marcador `purga` (e o dono que ele guarda) não é uso: fica fora da janela.
@@ -155,43 +155,3 @@ INSERT INTO `${prefixo}correcoes_por_dia` SELECT * FROM novas_correcoes_por_dia;
 DELETE FROM `${prefixo}chamadas_de_api_por_dia` WHERE dia >= (SELECT dia FROM inicio);
 INSERT INTO `${prefixo}chamadas_de_api_por_dia` SELECT * FROM novas_chamadas_de_api_por_dia;
 COMMIT TRANSACTION;
-
--- Um dia, todos juntos. `usuarios_ativos` são só as pessoas que agiram, não os sistemas.
-CREATE OR REPLACE TABLE `${prefixo}uso_por_dia` AS
-SELECT
-  dia,
-  COUNT(CASE WHEN quem_tipo = 'usuario' AND ativo THEN 1 END) AS usuarios_ativos,
-  SUM(acessos) AS acessos,
-  SUM(videos_enviados) AS videos_enviados,
-  SUM(videos_concluidos) AS videos_concluidos,
-  SUM(videos_falhos) AS videos_falhos,
-  SUM(horas_concluidas) AS horas_concluidas,
-  SUM(segundos_de_processamento) AS segundos_de_processamento,
-  SUM(videos_concluidos_com_tempo) AS videos_concluidos_com_tempo,
-  SUM(buscas) AS buscas,
-  SUM(buscas_sem_resultado) AS buscas_sem_resultado,
-  SUM(correcoes) AS correcoes,
-  SUM(chamadas_de_api) AS chamadas_de_api
-FROM `${prefixo}uso_por_dia_e_usuario`
-GROUP BY dia;
-
--- Um usuário (ou sistema), o histórico todo.
-CREATE OR REPLACE TABLE `${prefixo}uso_por_usuario` AS
-SELECT
-  quem_tipo, quem_id,
-  COUNT(CASE WHEN ativo THEN 1 END) AS dias_ativos,
-  MAX(ultimo_acesso) AS ultimo_acesso,
-  SUM(acessos) AS acessos,
-  SUM(videos_enviados) AS videos_enviados,
-  SUM(videos_concluidos) AS videos_concluidos,
-  SUM(videos_falhos) AS videos_falhos,
-  SUM(horas_concluidas) AS horas_concluidas,
-  SUM(segundos_de_processamento) AS segundos_de_processamento,
-  SUM(videos_concluidos_com_tempo) AS videos_concluidos_com_tempo,
-  SUM(buscas) AS buscas,
-  SUM(buscas_sem_resultado) AS buscas_sem_resultado,
-  SUM(correcoes) AS correcoes,
-  SUM(chamadas_de_api) AS chamadas_de_api
-FROM `${prefixo}uso_por_dia_e_usuario`
-GROUP BY quem_tipo, quem_id;
-
