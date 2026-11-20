@@ -1034,7 +1034,7 @@ test("a aba Custo mostra o total, o mês, o usuário, a etapa e o custo sem dono
   ]);
   expect(
     await screen.findByRole("img", {
-      name: /^Custo por etapa/,
+      name: /^Custo por etapa.*Análise/,
     }),
   ).toBeTruthy();
   expect(linhasDe(await tabela("Custo por etapa"))).toEqual([
@@ -1274,7 +1274,10 @@ test("Custo por etapa: etapa que a tabela de nomes não conhece mostra o código
     relatorio("custo", () =>
       HttpResponse.json({
         ...CUSTO,
-        por_etapa: [{ etapa: "etapa_nova", custo: 100 }],
+        por_etapa: [
+          { etapa: "etapa_nova", custo: 100 },
+          { etapa: "constructor", custo: 50 },
+        ],
       }),
     ),
   );
@@ -1282,5 +1285,26 @@ test("Custo por etapa: etapa que a tabela de nomes não conhece mostra o código
 
   expect(linhasDe(await tabela("Custo por etapa"))).toEqual([
     ["etapa_nova", REAL("100,00")],
+    ["constructor", REAL("50,00")],
   ]);
+});
+
+test("clicar na aba já ativa não apaga a falha do CSV quando o filtro efetivo não muda", async () => {
+  const usuario = userEvent.setup();
+  servidor.use(
+    http.get("/v1/painel/buscas", ({ request }) =>
+      new URL(request.url).searchParams.get("formato") === "csv"
+        ? new HttpResponse(null, { status: 500 })
+        : HttpResponse.json(BUSCAS),
+    ),
+  );
+  await abrir("/painel/buscas?agrupar=auto");
+  await tabela("Buscas por dia");
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+  await screen.findByRole("alert");
+
+  await usuario.click(screen.getByRole("tab", { name: "Buscas" }));
+  await new Promise((r) => setTimeout(r, 50));
+
+  expect(screen.getByRole("alert")).toBeTruthy();
 });
