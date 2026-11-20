@@ -232,7 +232,7 @@ def test_publicador_falhando_sempre_faz_o_main_sair_com_erro_sem_marcar(
     monkeypatch.setattr(fim_do_job, "cliente_do_firestore", lambda *a, **k: None)
     monkeypatch.setattr(
         fim_do_job,
-        "_dependencias",
+        "dependencias_do_aviso",
         lambda cliente, amb: (m.jobs, m.webhooks, m.publicador, m.eventos),
     )
 

@@ -121,6 +121,41 @@ class TestRepositorioFirestore:
     ) -> None:
         assert repositorio.obter("nao-existe") is None
 
+    def test_expirar_um_job_grava_a_pendencia_e_o_filtro_a_rele(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        from api.jobs import expirar_uploads
+        from api.tests.test_jobs import ArmazenamentoFalso
+
+        repositorio.salvar(_job("a", BASE))
+
+        assert expirar_uploads(
+            repositorio, ArmazenamentoFalso(), BASE + timedelta(hours=25)
+        ) == ["a"]
+
+        (lido,) = repositorio.consultar(
+            FiltroDeJobs(com_fim_a_avisar=True, na_lixeira=None)
+        ).jobs
+        assert (lido.id, lido.estado) == ("a", "falhou")
+        assert sorted(lido.fim_a_avisar) == ["uso", "webhook"]
+
+    def test_consulta_os_jobs_com_o_fim_a_avisar(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        repositorio.salvar(_job("a", BASE, fim_a_avisar=["uso"]))
+        repositorio.salvar(_job("b", BASE, fim_a_avisar=["webhook", "uso"]))
+        repositorio.salvar(_job("c", BASE))
+
+        achados = repositorio.consultar(
+            FiltroDeJobs(com_fim_a_avisar=True, na_lixeira=None)
+        ).jobs
+
+        assert sorted(j.id for j in achados) == ["a", "b"]
+        assert sorted(next(j for j in achados if j.id == "b").fim_a_avisar) == [
+            "uso",
+            "webhook",
+        ]
+
     def test_obter_varios_le_em_lote_so_os_que_existem(
         self, repositorio: RepositorioFirestore
     ) -> None:
@@ -962,17 +997,17 @@ class TestRepositorioDePapeisFirestore:
     def test_marca_de_desativada_nao_cria_papeis_e_sobrevive_a_salvar(
         self, papeis: RepositorioDePapeisFirestore
     ) -> None:
-        assert not papeis.desativada("u1")
+        assert not papeis.ler("u1").desativada
 
         papeis.marcar_desativada("u1", True)
 
-        assert papeis.desativada("u1")
+        assert papeis.ler("u1").desativada
         assert papeis.obter("u1") is None
         papeis.salvar("u1", ["editor"])
-        assert papeis.desativada("u1")
+        assert papeis.ler("u1").desativada
         assert papeis.obter("u1") == ["editor"]
         papeis.marcar_desativada("u1", False)
-        assert not papeis.desativada("u1")
+        assert not papeis.ler("u1").desativada
         assert papeis.obter("u1") == ["editor"]
 
 

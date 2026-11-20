@@ -12,13 +12,20 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import batched
 from typing import Any, Protocol
 
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, parametro, transporte_http
+from api.copia_bigquery import (
+    PRAZO_CURTO,
+    Transporte,
+    executar_dml,
+    parametro,
+    transporte_http,
+)
 from api.modelo_do_job import RepositorioDeJobs
 from api.nuvem import RepositorioDeRevisaoFirestore
 from api.relatorios import linhas_da_consulta
@@ -198,7 +205,7 @@ class RevisaoBigQuery:
 
 
 class TabelaDaRevisao(Protocol):
-    def gravar(self, medidas: list[Medida]) -> None:
+    def gravar(self, medidas: Sequence[Medida]) -> None:
         """Insere as medidas; a de (vídeo, pessoa) que já havia é trocada se a nova não
         for mais antiga."""
 
@@ -207,7 +214,7 @@ class TabelaDaRevisaoEmMemoria:
     def __init__(self) -> None:
         self.por_chave: dict[tuple[str, str], Medida] = {}
 
-    def gravar(self, medidas: list[Medida]) -> None:
+    def gravar(self, medidas: Sequence[Medida]) -> None:
         for m in medidas:
             antiga = self.por_chave.get((m.job_id, m.uid))
             if antiga is None or m.ultimo_pulso >= antiga.ultimo_pulso:
@@ -232,7 +239,7 @@ class TabelaDaRevisaoBigQuery:
         self._config = config
         self._transporte = transporte
 
-    def gravar(self, medidas: list[Medida]) -> None:
+    def gravar(self, medidas: Sequence[Medida]) -> None:
         c = self._config
         tabela = f"`{c.projeto}.{c.dataset}.{c.tabela_da_revisao}`"
         consulta = f"""
@@ -256,24 +263,21 @@ WHEN NOT MATCHED THEN INSERT
 VALUES
   (s.job_id, s.uid, s.email, s.ativo_s, s.duracao_s, s.ultimo_pulso)
 """
-        resposta = self._transporte(
-            {
-                "query": consulta,
-                "useLegacySql": False,
-                "location": c.regiao,
-                "timeoutMs": 120_000,
-                "queryParameters": [
-                    parametro(
-                        "linhas",
-                        json.dumps(
-                            [_json_da_medida(m) for m in medidas], ensure_ascii=False
-                        ),
-                    )
-                ],
-            }
+        executar_dml(
+            self._transporte,
+            c.regiao,
+            consulta,
+            [
+                parametro(
+                    "linhas",
+                    json.dumps(
+                        [_json_da_medida(m) for m in medidas], ensure_ascii=False
+                    ),
+                )
+            ],
+            PRAZO_CURTO,
+            descricao=f"carga de {len(medidas)} medidas",
         )
-        if not resposta.get("jobComplete", False):
-            raise RuntimeError(f"carga de {len(medidas)} medidas não terminou no prazo")
 
 
 class RepositorioDeRevisaoEspelhado:
@@ -305,17 +309,6 @@ class RepositorioDeRevisaoEspelhado:
         return self._revisao.todas(desde)
 
 
-def _em_lotes(medidas: Iterable[Medida], tamanho: int) -> Iterator[list[Medida]]:
-    lote: list[Medida] = []
-    for m in medidas:
-        lote.append(m)
-        if len(lote) == tamanho:
-            yield lote
-            lote = []
-    if lote:
-        yield lote
-
-
 def preencher(
     revisao: RepositorioDeRevisao,
     tabela: TabelaDaRevisao,
@@ -324,7 +317,7 @@ def preencher(
     """Grava as medidas do repositório e devolve quantas. Passada única de linha de comando;
     o MERGE por (vídeo, pessoa) faz repetir dar o mesmo resultado."""
     total = 0
-    for lote in _em_lotes(revisao.todas(), por_lote):
+    for lote in batched(revisao.todas(), por_lote):
         tabela.gravar(lote)
         total += len(lote)
     return total

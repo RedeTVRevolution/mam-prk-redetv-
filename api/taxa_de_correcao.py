@@ -28,9 +28,9 @@ import logging
 import os
 import sys
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from collections.abc import Set as AbstractSet
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -42,6 +42,7 @@ from api.bancos import cliente_do_firestore
 from api.correcoes import CORRIGIVEIS, Correcao, RepositorioDeCorrecoes
 from api.csv_seguro import csv_em_texto
 from api.erros import ServicoIndisponivel
+from api.fuso import periodo_em_utc
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
 from api.leitura_da_decupagem import AbreDecupagem
 from api.modelo_do_job import RepositorioDeJobs
@@ -53,11 +54,16 @@ from api.nuvem import (
 )
 from api.permissoes import exige_uma_de
 from api.regras_das_correcoes import estado_das, reconciliar
-from api.revisao import RepositorioDeRevisao
+from api.revisao import Medida, RepositorioDeRevisao
 from api.texto_como_dado import LinhaDaConsulta
 from api.tipos_da_taxa import LinhaDaTaxa
 
 log = logging.getLogger(__name__)
+
+
+class ContagemNaoLida(RuntimeError):
+    """O Job do período cuja contagem não se lê, na rodada que não pode pular (#783)."""
+
 
 __all__ = [
     "COLUNAS_DO_CSV",
@@ -106,7 +112,7 @@ def calcular(
         repositorio,
         lambda job_id: _itens_da_decupagem(decupagens, job_id),
         correcoes,
-        revisao,
+        revisao.todas(desde),
         desde,
         ate,
         programa,
@@ -132,28 +138,36 @@ def calcular(
     ]
 
 
+def _fora_da_taxa(estrito: bool, o_que: str, job_id: str, causa: Exception) -> None:
+    """O Job sai da taxa com aviso; no modo estrito, levanta no lugar."""
+    if estrito:
+        raise ContagemNaoLida(f"{o_que} de {job_id} não lida") from causa
+    log.warning("decupagem de %s não lida: fora da taxa", job_id)
+
+
 def calcular_com_itens(
     repositorio: RepositorioDeJobs,
     itens_do_job: Callable[[str], ItensDaDecupagem],
     correcoes: RepositorioDeCorrecoes,
-    revisao: RepositorioDeRevisao,
+    medidas: Iterable[Medida],
     desde: datetime | None = None,
     ate: datetime | None = None,
     programa: str | None = None,
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
+    estrito: bool = False,
 ) -> list[tuple[str, LinhaDaTaxa]]:
     """O cálculo por Job, com a contagem de itens vinda de `itens_do_job` (a decupagem
-    inteira, ou o objeto de contagem gravado com ela, #455). `itens_do_job` levanta
+    inteira, ou o objeto de contagem gravado com ela, #455). `medidas` são as de revisão já
+    lidas (`revisao.todas(desde)` ou mais): quem calcula vários períodos lê uma vez. `itens_do_job` levanta
     `ServicoIndisponivel`, `ValueError`, `KeyError` ou `TypeError` se não lê.
 
     `modelo_do_job` (o JSON da decupagem) só é chamado para o Job que tem correção em vigor
     feita sobre outra versão do JSON, para a `reconciliar` dizer quais casam com a atual
-    (#571). Sem ele, essas ficam fora."""
-    pulsados = {
-        m.job_id
-        for m in revisao.todas(desde)
-        if _no_periodo(m.ultimo_pulso, desde, ate)
-    }
+    (#571). Sem ele, essas ficam fora.
+
+    Job cuja contagem ou decupagem não se lê sai com aviso; com `estrito` (a tabela diária,
+    que apagaria as linhas dele) levanta `ContagemNaoLida`."""
+    pulsados = {m.job_id for m in medidas if _no_periodo(m.ultimo_pulso, desde, ate)}
     # Só os vídeos com correção ou pulso no período; o acervo não é percorrido.
     candidatos = pulsados | correcoes.jobs_com_correcao(desde, ate)
     linhas: list[tuple[str, LinhaDaTaxa]] = []
@@ -168,8 +182,8 @@ def calcular_com_itens(
             continue
         try:
             contagem = itens_do_job(job.id)
-        except (ServicoIndisponivel, ValueError, KeyError, TypeError):
-            log.warning("decupagem de %s não lida: fora da taxa", job.id)
+        except (ServicoIndisponivel, ValueError, KeyError, TypeError) as e:
+            _fora_da_taxa(estrito, "contagem", job.id, e)
             continue
         try:
             # `ServicoIndisponivel` da leitura do JSON escapa: a tabela não troca o dado
@@ -194,8 +208,8 @@ def calcular_com_itens(
                 do_job[tipo] = (n_por_tipo[tipo], itens)
             if sem_contagem:
                 log.warning("contagem de %s sem %s: fora da taxa", job.id, sem_contagem)
-        except (ValueError, KeyError, TypeError):
-            log.warning("decupagem de %s não lida: fora da taxa", job.id)
+        except (ValueError, KeyError, TypeError) as e:
+            _fora_da_taxa(estrito, "decupagem", job.id, e)
             continue
         for tipo, (n, itens) in do_job.items():
             linhas.append(
@@ -276,13 +290,10 @@ def em_csv(linhas: list[LinhaDaTaxa]) -> str:
 def _periodo(
     desde: date | None, ate: date | None
 ) -> tuple[datetime | None, datetime | None]:
-    """Os dias `desde` e `ate` (UTC, os dois inclusive) como `[desde, ate)`."""
+    """Os dias `desde` e `ate` (de São Paulo, os dois inclusive) como `[desde, ate)` em UTC."""
     if desde and ate and desde > ate:
         raise ValueError("`desde` depois de `ate`")
-    return (
-        datetime.combine(desde, time.min, UTC) if desde else None,
-        datetime.combine(ate + timedelta(days=1), time.min, UTC) if ate else None,
-    )
+    return periodo_em_utc(desde, ate)
 
 
 class TaxaDeCorrecao(BaseModel):
@@ -316,7 +327,7 @@ def criar_rotas_da_qualidade(
         ate: date | None = None,
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
     ) -> TaxaDeCorrecao:
-        """`desde` e `ate` são dias (UTC), os dois inclusive."""
+        """`desde` e `ate` são dias de São Paulo, os dois inclusive."""
         try:
             inicio, fim = _periodo(desde, ate)
         except ValueError as e:

@@ -7,11 +7,10 @@ import logging
 import re
 import unicodedata
 import uuid
-import zlib
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import PurePath
 from typing import Annotated, Any, Literal, Protocol, Self
 from urllib.parse import quote
@@ -69,6 +68,7 @@ from api.correcoes import (
 from api.decupagem import caminho_do_quadro
 from api.erros import ServicoIndisponivel
 from api.eventos_de_uso import Eventos, SemEventos, quem_do_chamador, registrar
+from api.fuso import dia_em_sao_paulo
 from api.idempotencia import (
     TAMANHO_MAXIMO_DA_CHAVE,
     ChaveReusadaComOutroCorpo,
@@ -130,8 +130,6 @@ VALIDADE_DA_IMAGEM = timedelta(hours=8)
 # uma validade que a URL não tem.
 JANELA_DA_URL_DO_QUADRO = timedelta(hours=1)
 VALIDADE_INFORMADA_DA_IMAGEM = VALIDADE_DA_IMAGEM - JANELA_DA_URL_DO_QUADRO
-# O "hoje" da data de exibição é o de Brasília, sem horário de verão desde 2019.
-FUSO_DA_EMISSORA = timezone(timedelta(hours=-3))
 
 # Teto de Jobs criados por hora (#371), contado no Firestore, então vale para todas as
 # instâncias: uma chave vazada ou um sistema em laço não gasta GPU e Gemini sem limite.
@@ -665,6 +663,8 @@ def expirar_uploads(
             "falhou",
             agora,
             codigo_falha="upload_expirado",
+            # A pendência vai na mesma escrita: quem publica o fim é a varredura (#782).
+            fim_a_avisar=["webhook", "uso"],
         ):
             expirados.append(job.id)
             try:
@@ -692,14 +692,6 @@ def aceita_gzip(accept_encoding: str) -> bool:
                     q = 0.0
         qs.setdefault(nome, q)
     return qs.get("gzip", qs.get("*", 0.0)) > 0
-
-
-def _comprimir(pedacos: Iterator[bytes]) -> Iterator[bytes]:
-    compressor = zlib.compressobj(wbits=31)
-    for pedaco in pedacos:
-        if dados := compressor.compress(pedaco):
-            yield dados
-    yield compressor.flush()
 
 
 # As exceções do Registro da Correção e da regra, por classe, para HTTP. Mensagem `None`: a do erro.
@@ -782,7 +774,7 @@ def criar_rotas(
         else:
             criado_por, sistema, email = chamador.uid, None, chamador.email or None
         agora = relogio()
-        if novo.data_exibicao > agora.astimezone(FUSO_DA_EMISSORA).date():
+        if novo.data_exibicao > dia_em_sao_paulo(agora):
             raise HTTPException(422, "Data de exibição no futuro")
         job_id, nova, escopo, job_gravado = uuid.uuid4().hex, True, "", False
         if idempotency_key is not None:
@@ -1134,13 +1126,12 @@ def criar_rotas(
         )
         return Reproducao(url=url, expira_em=relogio() + VALIDADE_INFORMADA_DA_IMAGEM)
 
-    def _resposta(corpo: Iterator[bytes], request: Request) -> StreamingResponse:
-        cabecalhos = {"Vary": "Accept-Encoding"}
-        if aceita_gzip(request.headers.get("accept-encoding", "")):
-            cabecalhos["Content-Encoding"] = "gzip"
-            corpo = _comprimir(corpo)
+    def _resposta(corpo: Iterator[bytes]) -> StreamingResponse:
+        # O gzip é do middleware (`_GZipQueRespeitaQZero`); o `Vary` vale também para a pura.
         return StreamingResponse(
-            corpo, media_type="application/json", headers=cabecalhos
+            corpo,
+            media_type="application/json",
+            headers={"Vary": "Accept-Encoding"},
         )
 
     def _ler_correcoes(job_id: str) -> list[Correcao]:
@@ -1155,7 +1146,6 @@ def criar_rotas(
     @rotas.get("/{job_id}/decupagem")
     def decupagem(
         job_id: str,
-        request: Request,
         chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
         lido: JobDoPedido,
         versao: Literal["modelo"] | None = None,
@@ -1165,8 +1155,8 @@ def criar_rotas(
             pedacos = iter(armazenamento.abrir_decupagem(job.id))
             # Lê o primeiro pedaço antes do 200: uma falha ao abrir vira 503, não um JSON cortado.
             pedacos = itertools.chain([next(pedacos, b"")], pedacos)
-            return _resposta(pedacos, request)
-        return _resposta(iter([json.dumps(_entregue(job)).encode()]), request)
+            return _resposta(pedacos)
+        return _resposta(iter([json.dumps(_entregue(job)).encode()]))
 
     @rotas.get("/{job_id}/decupagem/download")
     def baixar_decupagem(

@@ -24,6 +24,11 @@ from api.auth import Usuario
 from api.bancos import auditoria_do_firestore, cliente_do_firestore
 from api.correcoes import RepositorioDeCorrecoes
 from api.dados_da_purga import dados_do_ambiente
+from api.fim_do_job import (
+    avisar_fins_pendentes,
+    dependencias_do_aviso,
+    exigir_os_topicos_do_aviso,
+)
 from api.fusao_de_pessoas import retomar_fusoes_pendentes
 from api.indice_da_busca import IndiceDaBusca
 from api.jobs import Armazenamento, expirar_uploads
@@ -177,15 +182,27 @@ def rodar_a_varredura_diaria(
     purgar_catalogo: Callable[[], int],
     agora: datetime,
     retomar_fusoes: Callable[[], int] = lambda: 0,
+    avisar_fins: Callable[[], int] = lambda: 0,
 ) -> None:
-    """O que o agendador diário faz: expira uploads abandonados (#369), retoma fusões de
-    pessoas pendentes (#722), purga vídeos e catálogo."""
+    """O que o agendador diário faz: expira uploads abandonados (#369) e publica o fim deles,
+    e o que ficou por publicar nas varreduras anteriores (#782), retoma fusões de pessoas
+    pendentes (#722), purga vídeos e catálogo."""
+
+    def avisar() -> None:
+        try:
+            log.info("varredura diária: %d fim(ns) de upload avisado(s)", avisar_fins())
+        except Exception:
+            log.exception("o aviso do fim dos uploads expirados falhou")
+
+    # Os avisos de antes primeiro: a expiração pode gastar o tempo do Job.
+    avisar()
     try:
         expirados = expirar_uploads(repositorio, armazenamento, agora)
         log.info("varredura diária: %d upload(s) expirado(s)", len(expirados))
     except Exception:
         # Não segura a purga: a varredura de amanhã tenta de novo.
         log.exception("a expiração dos uploads falhou")
+    avisar()  # só os que acabaram de expirar
     try:
         log.info("varredura diária: %d fusão(ões) retomada(s)", retomar_fusoes())
     except Exception:
@@ -202,13 +219,16 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         aceitos = exigir_do_ambiente(ambiente, "BUCKET_ACEITOS")
         decupagens = exigir_do_ambiente(ambiente, "BUCKET_DECUPAGENS")
         referencias = exigir_do_ambiente(ambiente, "BUCKET_REFERENCIAS")
+        exigir_do_ambiente(ambiente, "BUSCA_COLECAO")
+        # Sem os tópicos o fim do upload expirado não sairia, e a marca de enviado seria falsa.
+        exigir_os_topicos_do_aviso(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
     log_estruturado.configurar(logging.INFO)
     cliente = cliente_do_firestore(projeto, ambiente)
     auditoria = auditoria_do_firestore(projeto, ambiente)
-    busca = ConfigDaBusca.do_ambiente(ambiente) if "BUSCA_COLECAO" in ambiente else None
+    busca = ConfigDaBusca.do_ambiente(ambiente)
     repositorio = RepositorioFirestore(cliente)
     catalogo = CatalogoFirestore(cliente)
     storage = ClienteStorage(project=projeto)
@@ -216,15 +236,11 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
         repositorio,
         RepositorioDeCorrecoesFirestore(cliente),
         ArquivosNoStorage(storage, aceitos, decupagens),
-        (
-            AgentRetrieval(
-                busca,
-                transporte_http(),
-                tentar_no_429=True,
-                orcamento=OrcamentoFirestore(cliente),
-            )
-            if busca
-            else None
+        AgentRetrieval(
+            busca,
+            transporte_http(),
+            tentar_no_429=True,
+            orcamento=OrcamentoFirestore(cliente),
         ),
         auditoria,
         agora_utc,
@@ -249,6 +265,11 @@ def main(ambiente: Mapping[str, str] = os.environ) -> int:
             ReferenciasStorage(storage, referencias),
             auditoria,
             VersaoDaLixeiraFirestore(cliente).avancar,
+        ),
+        lambda: avisar_fins_pendentes(
+            repositorio,
+            *dependencias_do_aviso(cliente, ambiente)[1:],
+            agora_utc(),
         ),
     )
     return 0

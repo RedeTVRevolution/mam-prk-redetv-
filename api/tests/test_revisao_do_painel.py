@@ -3,6 +3,7 @@ carrega, o espelho das medidas e a tabela do Terraform."""
 
 import re
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -331,7 +332,7 @@ def test_cada_pulso_vai_para_a_tabela_e_a_tabela_guarda_a_mais_nova() -> None:
 
 def test_a_tabela_fora_do_ar_nao_derruba_o_pulso() -> None:
     class Quebrada:
-        def gravar(self, medidas: list[Medida]) -> None:
+        def gravar(self, medidas: Sequence[Medida]) -> None:
             raise RuntimeError("BigQuery fora")
 
     revisao = RepositorioDeRevisaoEmMemoria()

@@ -44,6 +44,7 @@ def test_a_varredura_conclui_as_duas_fases_e_a_segunda_nao_faz_nada(
 ) -> None:
     # Nenhum vídeo é purgado: o BigQuery não é chamado, e o transporte não pede credencial.
     monkeypatch.setattr(dados_da_purga, "transporte_http", lambda _projeto: None)
+    monkeypatch.setattr("api.purga.transporte_http", lambda: None)
     projeto = f"teste-{uuid.uuid4().hex[:12]}"
     ambiente = {
         "GCP_PROJECT_ID": projeto,
@@ -58,6 +59,15 @@ def test_a_varredura_conclui_as_duas_fases_e_a_segunda_nao_faz_nada(
         "BIGQUERY_TABELA_DE_JOBS": "j",
         "BIGQUERY_TABELA_DE_EVENTOS": "e",
         "BIGQUERY_TABELA_DE_REVISAO": "v",
+        "BIGQUERY_TABELA_DA_TAXA": "x",
+        "BUSCA_REGIAO": "r",
+        "BUSCA_COLECAO": "c",
+        # Nenhum upload expira aqui, então nada é publicado.
+        "PUBSUB_TOPICO_EVENTOS": "te",
+        "PUBSUB_TOPICO_USO": "tu",
+        "BUSCA_COLECAO_DE_TEXTO": "ct",
+        "BUSCA_INDICE_DESCRICAO": "i",
+        "BUSCA_DIMENSAO": "8",
     }
     ClienteStorage(project=projeto).create_bucket(ambiente["BUCKET_REFERENCIAS"])
     cliente = firestore.Client(project=projeto)

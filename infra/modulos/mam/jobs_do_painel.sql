@@ -64,9 +64,7 @@ SELECT
   COALESCE(e.quem_tipo, a.quem_tipo, f.quem_tipo) AS quem_tipo,
   COALESCE(e.quem_id, a.quem_id, f.quem_id) AS quem_id,
   COALESCE(f.estado, a.estado, 'em_andamento') AS estado,
-  COALESCE(a.criado_em, e.quando, f.quando) AS criado_em,
-  COALESCE(f.quando, a.concluido_em) AS concluido_em,
-  COALESCE(f.quando, e.quando, a.atualizado_em) AS atualizado_em
+  COALESCE(a.criado_em, e.quando, f.quando) AS criado_em
 FROM (
   SELECT DISTINCT job_id
   FROM (
@@ -82,7 +80,7 @@ LEFT JOIN `${tabela}` AS a ON a.id = j.job_id;
 -- Troca as linhas dos Jobs da rodada de uma vez, para o painel não ler a tabela pela metade.
 DELETE FROM `${tabela}` WHERE id IN (SELECT id FROM novos);
 INSERT INTO `${tabela}`
-  (id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em, concluido_em, atualizado_em)
-SELECT id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em, concluido_em, atualizado_em
+  (id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em)
+SELECT id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em
 FROM novos;
 COMMIT TRANSACTION;

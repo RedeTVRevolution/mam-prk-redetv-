@@ -348,6 +348,7 @@ def test_o_makefile_entrega_a_cada_alvo_so_o_que_ele_lia() -> None:
             "BUCKET_DECUPAGENS",
             "BIGQUERY_DATASET",
             "BIGQUERY_TABELA_DA_TAXA",
+            "BIGQUERY_TABELA_DE_EVENTOS",
             "BIGQUERY_REGIAO",
         },
     }

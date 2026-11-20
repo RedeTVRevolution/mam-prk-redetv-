@@ -220,7 +220,6 @@ ESCALA = { [ "$${PASTA_DO_AMBIENTE:-infra}" = infra ] || { echo "Os testes de es
 	$(ENV_LOCAL) \
 	$(call LER_AMBIENTE,FIRESTORE_BANCO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
-	LISTAGEM_POR_MES="$${LISTAGEM_POR_MES:-true}" \
 	uv run --locked python -m api.firestore_em_escala
 
 gravar-jobs-falsos:
@@ -286,8 +285,7 @@ migrar-papel-operador:
 	uv run --locked python -m api.migrar_papel_operador
 
 # Grava `mes_exibicao` nos Jobs antigos que têm data de exibição (#479): make gravar-mes-nos-jobs.
-# Roda no dev depois do deploy e antes de ligar `listagem_por_mes` no Terraform: sem o campo,
-# o Job some da lista por período. Repetir não muda nada.
+# Repetir não muda nada.
 gravar-mes-nos-jobs:
 	set -a && . ./.env && set +a && \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
@@ -326,7 +324,7 @@ preencher-revisao-do-painel:
 # execução agendada só refaz hoje e ontem). Repetir dá o mesmo resultado.
 preencher-taxa-diaria:
 	$(ENV_LOCAL) \
-	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS BIGQUERY_DATASET BIGQUERY_TABELA_DA_TAXA BIGQUERY_REGIAO) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS BIGQUERY_DATASET BIGQUERY_TABELA_DA_TAXA BIGQUERY_TABELA_DE_EVENTOS BIGQUERY_REGIAO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	uv run --locked python -m api.taxa_diaria PREENCHER $(DIAS)
 
@@ -387,7 +385,7 @@ regressao:
 	uv run --locked python -m api.regressao_da_versao "$(VERSAO)" "$(RESERVADOS)" "$(PASTA)"
 
 # Taxa de correção por tipo, programa e versão do pipeline, em CSV (#265):
-# make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO, UTC, inclusive)
+# make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO de São Paulo, inclusive)
 taxa-de-correcao:
 	$(ENV_LOCAL) \
 	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \

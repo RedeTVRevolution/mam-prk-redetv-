@@ -67,20 +67,12 @@ def _resumir(banco: sqlite3.Connection, inicio: str = TODA_A_HISTORIA) -> None:
         "OR name LIKE 'novas\\_%' ESCAPE '\\'"
     ).fetchall():
         banco.execute(f"DROP TABLE {nome}")
-    # O SQLite não tem CREATE OR REPLACE TABLE: troca por apagar e criar.
-    sql = re.sub(
-        r"CREATE OR REPLACE TABLE `(\w+)`",
-        r"DROP TABLE IF EXISTS `\1`;\nCREATE TABLE `\1`",
-        sql,
-    )
     banco.executescript(sql)
 
 
 def _tabelas_do_sql() -> list[str]:
     """As tabelas do painel, na ordem do SQL (a de fins já contados é só estado interno)."""
-    nomes = re.findall(
-        r"CREATE (?:OR REPLACE )?TABLE (?:IF NOT EXISTS )?`\$\{prefixo\}(\w+)`", SQL
-    )
+    nomes = re.findall(r"CREATE TABLE (?:IF NOT EXISTS )?`\$\{prefixo\}(\w+)`", SQL)
     return [n for n in dict.fromkeys(nomes) if n != "fins_de_processamento_contados"]
 
 
@@ -88,6 +80,20 @@ def _tabela(banco: sqlite3.Connection, nome: str, ordem: str) -> list[dict[str, 
     cursor = banco.execute(f"SELECT * FROM {nome} ORDER BY {ordem}")
     nomes = [c[0] for c in cursor.description]
     return [dict(zip(nomes, linha, strict=True)) for linha in cursor.fetchall()]
+
+
+def _soma(
+    banco: sqlite3.Connection,
+    coluna: str,
+    dia: str | None = None,
+    quem: str | None = None,
+) -> Any:
+    """A soma de uma coluna de `uso_por_dia_e_usuario`, de um dia e/ou de um usuário."""
+    return banco.execute(
+        f"SELECT SUM({coluna}) FROM uso_por_dia_e_usuario "
+        "WHERE (? IS NULL OR dia = ?) AND (? IS NULL OR quem_id = ?)",
+        (dia, dia, quem, quem),
+    ).fetchone()[0]
 
 
 @pytest.fixture
@@ -236,11 +242,11 @@ def test_por_dia_e_usuario_conta_cada_indicador(banco: sqlite3.Connection) -> No
 def test_o_dia_e_o_de_sao_paulo(banco: sqlite3.Connection) -> None:
     _resumir(banco)
 
-    por_dia = _tabela(banco, "uso_por_dia", "dia")
+    dias = banco.execute("SELECT DISTINCT dia FROM uso_por_dia_e_usuario ORDER BY dia")
 
-    assert [r["dia"] for r in por_dia] == ["2026-11-01", "2026-11-02"]
-    assert por_dia[0]["acessos"] == 3  # ana (x2) e beto
-    assert por_dia[1]["acessos"] == 1
+    assert [d for (d,) in dias] == ["2026-11-01", "2026-11-02"]
+    assert _soma(banco, "acessos", "2026-11-01") == 3  # ana (x2) e beto
+    assert _soma(banco, "acessos", "2026-11-02") == 1
 
 
 def test_por_dia_conta_usuarios_ativos_sem_os_sistemas(
@@ -248,16 +254,22 @@ def test_por_dia_conta_usuarios_ativos_sem_os_sistemas(
 ) -> None:
     _resumir(banco)
 
-    dia1, dia2 = _tabela(banco, "uso_por_dia", "dia")
+    def ativos(dia: str) -> Any:
+        return banco.execute(
+            "SELECT COUNT(*) FROM uso_por_dia_e_usuario "
+            "WHERE dia = ? AND quem_tipo = 'usuario' AND ativo",
+            (dia,),
+        ).fetchone()[0]
 
-    assert dia1["usuarios_ativos"] == 2  # ana e beto; o cms não conta
-    assert dia2["usuarios_ativos"] == 2
-    assert dia1["videos_enviados"] == 3
-    assert dia1["videos_concluidos"] == 2
-    assert dia1["videos_falhos"] == 1
-    assert dia1["horas_concluidas"] == 3.0
-    assert dia1["buscas"] == 2 and dia2["buscas"] == 1
-    assert dia1["chamadas_de_api"] == 1
+    assert ativos("2026-11-01") == 2  # ana e beto; o cms não conta
+    assert ativos("2026-11-02") == 2
+    assert _soma(banco, "videos_enviados", "2026-11-01") == 3
+    assert _soma(banco, "videos_concluidos", "2026-11-01") == 2
+    assert _soma(banco, "videos_falhos", "2026-11-01") == 1
+    assert _soma(banco, "horas_concluidas", "2026-11-01") == 3.0
+    assert _soma(banco, "buscas", "2026-11-01") == 2
+    assert _soma(banco, "buscas", "2026-11-02") == 1
+    assert _soma(banco, "chamadas_de_api", "2026-11-01") == 1
 
 
 def test_o_fim_de_processamento_sozinho_nao_faz_ninguem_ativo(
@@ -276,12 +288,18 @@ def test_o_fim_de_processamento_sozinho_nao_faz_ninguem_ativo(
     )
     _resumir(banco)
 
-    dia3 = _tabela(banco, "uso_por_dia", "dia")[2]
-    ana = _tabela(banco, "uso_por_usuario", "quem_id")[0]
+    dia3 = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[-1]
+    dias_ativos = banco.execute(
+        "SELECT COUNT(*) FROM uso_por_dia_e_usuario WHERE quem_id = 'ana' AND ativo"
+    ).fetchone()[0]
 
-    assert (dia3["dia"], dia3["videos_falhos"]) == ("2026-11-03", 1)
-    assert dia3["usuarios_ativos"] == 0
-    assert ana["dias_ativos"] == 2
+    assert (dia3["dia"], dia3["quem_id"], dia3["videos_falhos"]) == (
+        "2026-11-03",
+        "ana",
+        1,
+    )
+    assert not dia3["ativo"]
+    assert dias_ativos == 2
 
 
 def test_por_usuario_traz_dias_ativos_e_ultimo_acesso(
@@ -289,15 +307,20 @@ def test_por_usuario_traz_dias_ativos_e_ultimo_acesso(
 ) -> None:
     _resumir(banco)
 
-    ana, beto, cms = _tabela(banco, "uso_por_usuario", "quem_id")
+    def por_usuario(quem: str) -> Any:
+        return banco.execute(
+            "SELECT COUNT(CASE WHEN ativo THEN 1 END), MAX(ultimo_acesso) "
+            "FROM uso_por_dia_e_usuario WHERE quem_id = ?",
+            (quem,),
+        ).fetchone()
 
-    assert ana["dias_ativos"] == 2
-    assert ana["acessos"] == 3
-    assert ana["videos_enviados"] == 2 and ana["horas_concluidas"] == 2.0
-    assert ana["ultimo_acesso"] == "2026-11-02T03:00:00+00:00"
-    assert beto["dias_ativos"] == 2 and beto["buscas"] == 1
-    assert cms["ultimo_acesso"] is None
-    assert cms["chamadas_de_api"] == 1
+    assert por_usuario("ana") == (2, "2026-11-02T03:00:00+00:00")
+    assert _soma(banco, "acessos", quem="ana") == 3
+    assert _soma(banco, "videos_enviados", quem="ana") == 2
+    assert _soma(banco, "horas_concluidas", quem="ana") == 2.0
+    assert por_usuario("beto")[0] == 2 and _soma(banco, "buscas", quem="beto") == 1
+    assert por_usuario("cms")[1] is None
+    assert _soma(banco, "chamadas_de_api", quem="cms") == 1
 
 
 def test_por_programa_deixa_de_fora_o_evento_sem_programa(
@@ -369,11 +392,11 @@ def test_rodar_de_novo_refaz_as_tabelas_sem_somar_em_dobro(
     banco: sqlite3.Connection,
 ) -> None:
     _resumir(banco)
-    antes = _tabela(banco, "uso_por_dia", "dia")
+    antes = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")
 
     _resumir(banco)
 
-    assert _tabela(banco, "uso_por_dia", "dia") == antes
+    assert _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id") == antes
 
 
 def test_sem_eventos_as_tabelas_ficam_vazias() -> None:
@@ -404,6 +427,11 @@ def test_as_tabelas_do_terraform_sao_as_que_o_sql_cria() -> None:
     assert sorted(criadas) == sorted(re.findall(r'"(\w+)"', listadas.group(1)))
 
 
+def test_as_tabelas_sem_leitor_nao_sao_criadas() -> None:
+    # `uso_por_dia` e `uso_por_usuario` só existiam para quem lesse o BigQuery (#636).
+    assert not re.search(r"uso_por_dia\b(?!_)|uso_por_usuario", SQL + TF)
+
+
 def test_o_sql_le_as_tabelas_pelos_nomes_que_o_terraform_monta() -> None:
     assert "google_bigquery_table.eventos_de_uso.table_id" in TF
     assert "eventos_de_uso`" not in SQL
@@ -430,14 +458,12 @@ def test_o_tempo_de_processamento_soma_so_os_concluidos(
     _resumir(banco)
 
     ana = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0]
-    dia1 = _tabela(banco, "uso_por_dia", "dia")[0]
     hoje = _tabela(banco, "uso_por_dia_e_programa", "programa")[1]
-    cms = _tabela(banco, "uso_por_usuario", "quem_id")[2]
 
     assert ana["segundos_de_processamento"] == 3600  # o que falhou (600) fica de fora
-    assert dia1["segundos_de_processamento"] == 5400
+    assert _soma(banco, "segundos_de_processamento", "2026-11-01") == 5400
     assert hoje["segundos_de_processamento"] == 3600
-    assert cms["segundos_de_processamento"] == 1800
+    assert _soma(banco, "segundos_de_processamento", quem="cms") == 1800
 
 
 def test_o_concluido_sem_tempo_fica_fora_da_media(banco: sqlite3.Connection) -> None:
@@ -456,15 +482,14 @@ def test_o_concluido_sem_tempo_fica_fora_da_media(banco: sqlite3.Connection) -> 
     _resumir(banco)
 
     ana = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0]
-    dia1 = _tabela(banco, "uso_por_dia", "dia")[0]
     hoje = _tabela(banco, "uso_por_dia_e_programa", "programa")[1]
-    ana_total = _tabela(banco, "uso_por_usuario", "quem_id")[0]
 
     assert (ana["videos_concluidos"], ana["videos_concluidos_com_tempo"]) == (2, 1)
     assert ana["segundos_de_processamento"] == 3600
-    assert (dia1["videos_concluidos"], dia1["videos_concluidos_com_tempo"]) == (3, 2)
+    assert _soma(banco, "videos_concluidos", "2026-11-01") == 3
+    assert _soma(banco, "videos_concluidos_com_tempo", "2026-11-01") == 2
     assert (hoje["videos_concluidos"], hoje["videos_concluidos_com_tempo"]) == (2, 1)
-    assert ana_total["videos_concluidos_com_tempo"] == 1
+    assert _soma(banco, "videos_concluidos_com_tempo", quem="ana") == 1
 
 
 def test_busca_sem_resultado_e_a_que_trouxe_zero_videos(
@@ -473,16 +498,16 @@ def test_busca_sem_resultado_e_a_que_trouxe_zero_videos(
     _resumir(banco)
 
     ana, beto = _tabela(banco, "uso_por_dia_e_usuario", "dia, quem_id")[0:2]
-    dia1, dia2 = _tabela(banco, "uso_por_dia", "dia")
     hoje = _tabela(banco, "uso_por_dia_e_programa", "programa")[1]
 
     assert (ana["buscas"], ana["buscas_sem_resultado"]) == (2, 1)
     assert beto["buscas_sem_resultado"] == 0
-    assert dia1["buscas_sem_resultado"] == 1
+    assert _soma(banco, "buscas_sem_resultado", "2026-11-01") == 1
     # A busca de antes do campo existir (sem `n_resultados`) não conta como vazia.
-    assert (dia2["buscas"], dia2["buscas_sem_resultado"]) == (1, 0)
+    assert _soma(banco, "buscas", "2026-11-02") == 1
+    assert _soma(banco, "buscas_sem_resultado", "2026-11-02") == 0
     assert hoje["buscas_sem_resultado"] == 0
-    assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["buscas_sem_resultado"] == 1
+    assert _soma(banco, "buscas_sem_resultado", quem="ana") == 1
 
 
 def test_correcoes_por_dia_pessoa_programa_e_tipo(banco: sqlite3.Connection) -> None:
@@ -605,10 +630,10 @@ def test_a_janela_deixa_os_dias_antigos_como_estao(
         assert [r for r in _tabela(banco, nome, "dia") if r["dia"] == "2026-11-01"] == [
             r for r in linhas if r["dia"] == "2026-11-01"
         ]
-    dia1, dia2 = _tabela(banco, "uso_por_dia", "dia")
-    assert (dia1["videos_concluidos"], dia1["horas_concluidas"]) == (2, 3.0)
-    assert dia2["acessos"] == 2  # o login do dia 2 e o novo
-    assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["acessos"] == 4
+    assert _soma(banco, "videos_concluidos", "2026-11-01") == 2
+    assert _soma(banco, "horas_concluidas", "2026-11-01") == 3.0
+    assert _soma(banco, "acessos", "2026-11-02") == 2  # o login do dia 2 e o novo
+    assert _soma(banco, "acessos", quem="ana") == 4
 
 
 def _todas_as_tabelas(banco: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
@@ -662,8 +687,55 @@ def test_o_fim_repetido_depois_da_janela_nao_conta_de_novo(
 
     _resumir(banco, "'2026-11-05T03:00:00+00:00'")
 
-    assert [r["dia"] for r in _tabela(banco, "uso_por_dia", "dia")] == [
-        "2026-11-01",
-        "2026-11-02",
-    ]
-    assert _tabela(banco, "uso_por_usuario", "quem_id")[0]["videos_concluidos"] == 1
+    dias = banco.execute("SELECT DISTINCT dia FROM uso_por_dia_e_usuario ORDER BY dia")
+    assert [d for (d,) in dias] == ["2026-11-01", "2026-11-02"]
+    assert _soma(banco, "videos_concluidos", quem="ana") == 1
+
+
+def test_o_marcador_da_purga_nao_vira_linha_nem_deixa_o_dono_ativo() -> None:
+    banco = _banco()
+    # Marcador novo (com o dono do vídeo) e antigo (sistema/purga), em dias sem outro uso.
+    _evento(
+        banco, "p1", "purga", "2026-11-03T12:00:00+00:00", "zeca",
+        job_id="j1", programa="Jornal", estado="concluido", duracao_do_video_ms=HORA_MS,
+    )  # fmt: skip
+    _evento(
+        banco, "p2", "purga", "2026-11-04T12:00:00+00:00", "purga",
+        quem_tipo="sistema", job_id="j2",
+    )  # fmt: skip
+
+    _resumir(banco)
+
+    assert _tabela(banco, "uso_por_dia_e_usuario", "dia") == []
+
+
+def test_o_filtro_de_sistemas_da_api_lista_o_sistema_real_e_nao_a_purga() -> None:
+    from api.resumos_de_uso import ConfigDosResumos, ResumosBigQuery
+
+    banco = _banco()
+    _evento(
+        banco, "s1", "busca", "2026-11-03T12:00:00+00:00", "ingest",
+        quem_tipo="sistema",
+    )  # fmt: skip
+    _evento(
+        banco, "p1", "purga", "2026-11-03T13:00:00+00:00", "purga",
+        quem_tipo="sistema", job_id="j1",
+    )  # fmt: skip
+    _evento(
+        banco, "p2", "purga", "2026-11-04T13:00:00+00:00", "zeca",
+        job_id="j2", programa="Jornal", estado="concluido", duracao_do_video_ms=HORA_MS,
+    )  # fmt: skip
+    _resumir(banco)
+
+    class NoSqlite(ResumosBigQuery):
+        def _consultar(self, sql: str, parametros: Any = ()) -> list[list[Any]]:
+            sql = re.sub(r"`p\.d\.(\w+)`", r"\1", sql).replace(
+                "UNION DISTINCT", "UNION"
+            )
+            return [list(linha) for linha in banco.execute(sql).fetchall()]
+
+    config = ConfigDosResumos(
+        "p", "d", "r", "uso_por_dia_e_usuario", "uso_por_dia_e_programa",
+        "correcoes_por_dia", "chamadas_de_api_por_dia",
+    )  # fmt: skip
+    assert NoSqlite(config, lambda _corpo: {}).sistemas() == ["ingest"]

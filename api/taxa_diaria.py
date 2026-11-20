@@ -16,18 +16,17 @@ O agendamento só refaz hoje e ontem: esses dias antigos exigem nova carga do hi
 Na migração, `make preencher-taxa-diaria` substitui as linhas antigas sem Job nos dias refeitos.
 
 Ambiente do comando: `GCP_PROJECT_ID`, `BUCKET_ACEITOS`, `BUCKET_DECUPAGENS`,
-`BIGQUERY_DATASET`, `BIGQUERY_TABELA_DA_TAXA`, `BIGQUERY_REGIAO`.
+`BIGQUERY_DATASET`, `BIGQUERY_TABELA_DA_TAXA`, `BIGQUERY_TABELA_DE_EVENTOS`, `BIGQUERY_REGIAO`.
 """
 
 import json
 import logging
 import os
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, timedelta
 from typing import Any, Protocol
-from zoneinfo import ZoneInfo
 
 from google.api_core.exceptions import NotFound
 from google.cloud.storage import Client as ClienteStorage
@@ -35,9 +34,17 @@ from google.cloud.storage import Client as ClienteStorage
 from api import log_estruturado
 from api.ambiente import FaltaNoAmbiente, exigir_do_ambiente
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, parametro, transporte_http
+from api.copia_bigquery import (
+    PRAZO_CURTO,
+    Transporte,
+    executar_dml,
+    parametro,
+    parametro_de_lista,
+    transporte_http,
+)
 from api.correcoes import RepositorioDeCorrecoes
 from api.erros import ServicoIndisponivel
+from api.fuso import agora_em_sao_paulo, periodo_em_utc
 from api.itens_da_decupagem import (
     ItensDaDecupagem,
     contar_itens,
@@ -51,7 +58,7 @@ from api.nuvem import (
     RepositorioDeRevisaoFirestore,
     RepositorioFirestore,
 )
-from api.revisao import RepositorioDeRevisao
+from api.revisao import Medida, RepositorioDeRevisao
 from api.taxa_de_correcao import calcular_com_itens, modelo_da_decupagem
 from api.tipos_da_taxa import ConfigDaTaxa, LinhaDiaria
 
@@ -62,7 +69,6 @@ DIAS_POR_MERGE = 100
 # 8 MB para @linhas, com margem para a consulta e os demais parâmetros nos 10 MB do REST.
 BYTES_POR_MERGE = 8_000_000
 DIAS_DA_CARGA_INICIAL = 365
-SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 __all__ = [
     "ItensEmMemoria",
@@ -127,22 +133,15 @@ class TabelaDaTaxa(Protocol):
         vazios). Os outros dias não mudam; repetir dá o mesmo resultado."""
 
 
-def _periodo_do_dia(dia: date) -> tuple[datetime, datetime]:
-    return (
-        datetime.combine(dia, time.min, SAO_PAULO).astimezone(UTC),
-        datetime.combine(dia + timedelta(days=1), time.min, SAO_PAULO).astimezone(UTC),
-    )
-
-
 def linhas_do_dia(
     dia: date,
     repositorio: RepositorioDeJobs,
     itens: LeitorDeItens,
     correcoes: RepositorioDeCorrecoes,
-    revisao: RepositorioDeRevisao,
+    medidas: Sequence[Medida],
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[LinhaDiaria]:
-    inicio, fim = _periodo_do_dia(dia)
+    inicio, fim = periodo_em_utc(dia, dia)
     return [
         LinhaDiaria(
             dia,
@@ -157,10 +156,11 @@ def linhas_do_dia(
             repositorio,
             itens.ler_itens,
             correcoes,
-            revisao,
+            medidas,
             inicio,
             fim,
             modelo_do_job=modelo_do_job,
+            estrito=True,
         )
     ]
 
@@ -174,12 +174,17 @@ def atualizar(
     tabela: TabelaDaTaxa,
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> int:
-    """Refaz os `dias` na tabela e devolve quantas linhas gravou."""
+    """Refaz os `dias` na tabela e devolve quantas linhas enviou ao MERGE (o MERGE
+    descarta as de Job purgado, então não é o que ficou gravado). Lê as medidas de revisão
+    uma vez, do menor dia pedido (a ordem dos `dias` não importa); sem dias, não lê. Job do
+    dia sem contagem lida levanta `ContagemNaoLida` antes de trocar qualquer linha: a tabela
+    fica como estava e a próxima rodada tenta de novo (#783)."""
+    medidas = revisao.todas(periodo_em_utc(min(dias), min(dias))[0]) if dias else []
     linhas = [
         linha
         for dia in dias
         for linha in linhas_do_dia(
-            dia, repositorio, itens, correcoes, revisao, modelo_do_job
+            dia, repositorio, itens, correcoes, medidas, modelo_do_job
         )
     ]
     tabela.substituir(dias, linhas)
@@ -228,43 +233,53 @@ class TabelaDaTaxaBigQuery:
         self,
         config: ConfigDaTaxa,
         transporte: Transporte,
+        tabela_de_eventos: str,
         dias_por_merge: int = DIAS_POR_MERGE,
     ) -> None:
         self._config = config
         self._transporte = transporte
+        self._eventos = tabela_de_eventos
         self._dias_por_merge = dias_por_merge
+
+    @classmethod
+    def do_ambiente(
+        cls, ambiente: Mapping[str, str], transporte: Transporte
+    ) -> "TabelaDaTaxaBigQuery":
+        """A tabela de eventos só o escritor exige; o leitor da web não a tem."""
+        return cls(
+            ConfigDaTaxa.do_ambiente(ambiente),
+            transporte,
+            exigir_do_ambiente(ambiente, "BIGQUERY_TABELA_DE_EVENTOS"),
+        )
 
     def substituir(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
         por_dia: dict[date, list[LinhaDiaria]] = {}
         for linha in linhas:
             por_dia.setdefault(linha.dia, []).append(linha)
         lote: list[date] = []
-        linhas_do_lote: list[LinhaDiaria] = []
+        json_do_lote: list[dict[str, Any]] = []
         bytes_do_lote = 0
         for dia in dict.fromkeys(dias):
-            do_dia = por_dia.get(dia, [])
+            json_do_dia = [_json_da_linha(x) for x in por_dia.get(dia, [])]
             # Inclui os escapes no corpo HTTP; somar os dias superestima os colchetes.
-            bytes_do_dia = len(
-                json.dumps(json.dumps([_json_da_linha(x) for x in do_dia])).encode(
-                    "utf-8"
-                )
-            )
+            bytes_do_dia = len(json.dumps(json.dumps(json_do_dia)).encode("utf-8"))
             if lote and (
                 len(lote) >= self._dias_por_merge
                 or bytes_do_lote + bytes_do_dia > BYTES_POR_MERGE
             ):
-                self._merge(lote, linhas_do_lote)
-                lote, linhas_do_lote, bytes_do_lote = [], [], 0
+                self._merge(lote, json_do_lote)
+                lote, json_do_lote, bytes_do_lote = [], [], 0
             # ponytail: dia acima do teto vai sozinho; se ocorrer, migrar a carga para Storage.
             lote.append(dia)
-            linhas_do_lote.extend(do_dia)
+            json_do_lote.extend(json_do_dia)
             bytes_do_lote += bytes_do_dia
         if lote:
-            self._merge(lote, linhas_do_lote)
+            self._merge(lote, json_do_lote)
 
-    def _merge(self, dias: Sequence[date], linhas: list[LinhaDiaria]) -> None:
+    def _merge(self, dias: Sequence[date], linhas: list[dict[str, Any]]) -> None:
         c = self._config
         tabela = f"`{c.projeto}.{c.dataset}.{c.tabela}`"
+        eventos = f"`{c.projeto}.{c.dataset}.{self._eventos}`"
         consulta = f"""
 MERGE {tabela} AS t
 USING (
@@ -277,6 +292,12 @@ USING (
     CAST(JSON_VALUE(l, '$.correcoes') AS INT64) AS correcoes,
     CAST(JSON_VALUE(l, '$.itens') AS INT64) AS itens
   FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
+  -- O marcador da purga (ADR 0010) barra o Job para sempre; o filtro fica aqui porque o
+  -- BigQuery recusa subconsulta no ON.
+  WHERE NOT EXISTS (
+    SELECT 1 FROM {eventos} AS p
+    WHERE p.tipo = 'purga' AND p.job_id = JSON_VALUE(l, '$.job_id')
+  )
 ) AS s
 ON t.dia IN UNNEST(@dias)
   AND t.dia = s.dia
@@ -291,35 +312,18 @@ WHEN NOT MATCHED BY SOURCE
   AND t.dia IN UNNEST(@dias)
 THEN DELETE
 """
-        resposta = self._transporte(
-            {
-                "query": consulta,
-                "useLegacySql": False,
-                "location": c.regiao,
-                "timeoutMs": 120_000,
-                "queryParameters": [
-                    parametro(
-                        "linhas",
-                        json.dumps([_json_da_linha(x) for x in linhas]),
-                    ),
-                    # ARRAY<DATE> e não JSON: o BigQuery recusa subconsulta no ON do MERGE.
-                    {
-                        "name": "dias",
-                        "parameterType": {
-                            "type": "ARRAY",
-                            "arrayType": {"type": "DATE"},
-                        },
-                        "parameterValue": {
-                            "arrayValues": [{"value": d.isoformat()} for d in dias]
-                        },
-                    },
-                ],
-            }
+        executar_dml(
+            self._transporte,
+            c.regiao,
+            consulta,
+            [
+                parametro("linhas", json.dumps(linhas)),
+                # ARRAY<DATE> e não JSON: o BigQuery recusa subconsulta no ON do MERGE.
+                parametro_de_lista("dias", [d.isoformat() for d in dias], "DATE"),
+            ],
+            PRAZO_CURTO,
+            descricao=f"a troca dos dias {dias[0]} a {dias[-1]}",
         )
-        if not resposta.get("jobComplete", False):
-            raise RuntimeError(
-                f"a troca dos dias {dias[0]} a {dias[-1]} não terminou no prazo"
-            )
 
 
 def main(argumentos: list[str]) -> int:
@@ -340,6 +344,9 @@ def main(argumentos: list[str]) -> int:
             project=exigir_do_ambiente(os.environ, "GCP_PROJECT_ID")
         )
         decupagens = DecupagensStorage.do_ambiente(os.environ, cliente)
+        tabela = TabelaDaTaxaBigQuery.do_ambiente(
+            os.environ, transporte_http(os.environ["GCP_PROJECT_ID"])
+        )
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
@@ -349,16 +356,16 @@ def main(argumentos: list[str]) -> int:
     itens = ItensNoStorage(cliente, os.environ["BUCKET_DECUPAGENS"])
     if preenchendo:
         print(f"{preencher_itens(jobs, decupagens, itens)} contagens gravadas")
-    gravadas = atualizar(
-        dias_recentes(datetime.now(SAO_PAULO).date(), quantos),
+    enviadas = atualizar(
+        dias_recentes(agora_em_sao_paulo().date(), quantos),
         jobs,
         itens,
         RepositorioDeCorrecoesFirestore(banco),
         RepositorioDeRevisaoFirestore(banco),
-        TabelaDaTaxaBigQuery(config, transporte_http(config.projeto)),
+        tabela,
         lambda job_id: modelo_da_decupagem(decupagens, job_id),
     )
-    print(f"{gravadas} linhas gravadas em {quantos} dias")
+    print(f"{enviadas} linhas enviadas em {quantos} dias")
     return 0
 
 

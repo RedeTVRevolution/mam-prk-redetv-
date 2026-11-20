@@ -10,7 +10,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Literal, Protocol
-from zoneinfo import ZoneInfo
 
 from pydantic import (
     BaseModel,
@@ -21,9 +20,8 @@ from pydantic import (
 
 from api.catalogo import EnvioParaLixeira
 from api.dispositivo import Dispositivo
+from api.fuso import dia_em_sao_paulo
 from api.texto import sem_acento
-
-SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 Estado = Literal[
     "aguardando_upload",
@@ -196,6 +194,10 @@ class Job(BaseModel):
     fim_avisado_no_reprocessamento: int | None = None
     fim_webhook_enviado_no_reprocessamento: int | None = None
     fim_uso_enviado_no_reprocessamento: int | None = None
+    # O fim do upload que a varredura diária expirou (`falhou` com `upload_expirado`): as partes
+    # do aviso que ainda faltam, gravadas na própria transição e tiradas uma a uma depois de
+    # cada evento sair (#782). Vazio quando nada falta e em Job anterior ao campo.
+    fim_a_avisar: list[Literal["webhook", "uso"]] = []
     # `None` fora da lixeira. Na lixeira o Job só o Administrador enxerga; nada é apagado.
     lixeira: EnvioParaLixeira | None = None
     # Os `catalogo_id` que aparecem na Decupagem entregue (Correções aplicadas, pessoas
@@ -281,6 +283,8 @@ class FiltroDeJobs:
     # Só a lista do acervo: lê os campos do `JobResumido` (e os que o filtro confere), não o
     # Job inteiro. O Job vem incompleto, então quem o regrava não pode pedir isto (#480).
     so_os_da_lista: bool = False
+    # Só os Jobs com `fim_a_avisar` (a varredura diária, #782).
+    com_fim_a_avisar: bool = False
 
 
 def um_alem_do_limite[T: _ComId](
@@ -317,6 +321,8 @@ def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
     """Todos os filtros menos ordem e paginação."""
     if filtro.na_lixeira is not None and (job.lixeira is not None) != filtro.na_lixeira:
         return False
+    if filtro.com_fim_a_avisar and not job.fim_a_avisar:
+        return False
     if filtro.sha256 is not None and job.sha256 != filtro.sha256:
         return False
     if (
@@ -343,7 +349,7 @@ def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
         if filtro.exibicao_ate and job.data_exibicao > filtro.exibicao_ate:
             return False
     if filtro.enviado_de is not None or filtro.enviado_ate is not None:
-        dia = job.criado_em.astimezone(SAO_PAULO).date()
+        dia = dia_em_sao_paulo(job.criado_em)
         if filtro.enviado_de and dia < filtro.enviado_de:
             return False
         if filtro.enviado_ate and dia > filtro.enviado_ate:

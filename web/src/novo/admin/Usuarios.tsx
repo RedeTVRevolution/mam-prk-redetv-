@@ -11,6 +11,7 @@ import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
+import { formataDataEHora } from '../../fuso.ts'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Iniciais, TABELA, TopoDaAba, Vazio } from './comum.tsx'
 import { gravarNaLista, useColunasVisiveis } from './listas.ts'
 
@@ -24,7 +25,7 @@ const rotulo = (c: ContaDaLista) => c.nome || c.email
 
 function ultimoAcesso(iso: string | null): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })
+  return formataDataEHora(iso)
 }
 
 /** Uma caixa por papel; o que ele pode vai na descrição, para o nome acessível ser só o papel. */

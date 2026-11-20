@@ -10,6 +10,7 @@ import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
+import { FUSO } from '../../fuso.ts'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Folga, Selo, TABELA, TopoDaAba, Vazio } from './comum.tsx'
 import { gravarNaLista, useColunasVisiveis, useLinhasVirtuais } from './listas.ts'
 
@@ -30,7 +31,7 @@ const chaveDo = (i: { tipo: string; id: string }) => `${i.tipo}/${i.id}`
 function quando(iso: string): string {
   return new Date(iso)
     .toLocaleString('pt-BR', {
-      timeZone: 'America/Sao_Paulo',
+      timeZone: FUSO,
       day: '2-digit',
       month: '2-digit',
       hour: '2-digit',

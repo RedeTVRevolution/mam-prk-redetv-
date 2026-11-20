@@ -22,11 +22,6 @@ export async function validarArquivo(arquivo: File): Promise<string | null> {
   return null
 }
 
-/** Hoje, no fuso da emissora: a API recusa data de exibição no futuro. */
-export function hoje(): string {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
-}
-
 export function mensagemDoErroDoEnvio(erro: unknown): string {
   if (erro instanceof PedidoInvalido && erro.message === 'Data de exibição no futuro') {
     return 'A data de exibição não pode ser no futuro. Corrija a data e envie de novo.'

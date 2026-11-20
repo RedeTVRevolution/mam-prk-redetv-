@@ -9,13 +9,20 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from itertools import batched
 from typing import Any, Protocol
 
 from api.bancos import cliente_do_firestore
-from api.copia_bigquery import Transporte, parametro, transporte_http
+from api.copia_bigquery import (
+    PRAZO_CURTO,
+    Transporte,
+    executar_dml,
+    parametro,
+    transporte_http,
+)
 from api.modelo_do_job import FIM_OU_CANCELADO, Job, RepositorioDeJobs
 from api.nuvem import RepositorioFirestore
 
@@ -33,14 +40,12 @@ class LinhaDoJob:
     quem_id: str
     estado: str
     criado_em: datetime
-    concluido_em: datetime | None
-    atualizado_em: datetime
 
 
 def linha_do_job(job: Job) -> LinhaDoJob:
     """Os campos que a Revisão e o Custo usam. O dono é o sistema, ou quem criou o Job
-    (o mesmo `quem` do evento de uso); `concluido_em` só existe depois do fim. O estado
-    segue o vocabulário da consulta agendada: antes do fim, `em_andamento`."""
+    (o mesmo `quem` do evento de uso). O estado segue o vocabulário da consulta
+    agendada: antes do fim, `em_andamento`."""
     sistema = job.sistema is not None
     fim = job.estado in FIM_OU_CANCELADO
     return LinhaDoJob(
@@ -51,13 +56,11 @@ def linha_do_job(job: Job) -> LinhaDoJob:
         quem_id=job.sistema if job.sistema is not None else job.criado_por,
         estado=job.estado if fim else "em_andamento",
         criado_em=job.criado_em,
-        concluido_em=job.atualizado_em if fim else None,
-        atualizado_em=job.atualizado_em,
     )
 
 
 class TabelaDeJobs(Protocol):
-    def gravar(self, linhas: list[LinhaDoJob]) -> None:
+    def gravar(self, linhas: Sequence[LinhaDoJob]) -> None:
         """Insere as linhas; as que já havia dos mesmos Jobs são trocadas."""
 
 
@@ -67,7 +70,7 @@ class TabelaEmMemoria:
     def __init__(self) -> None:
         self.por_id: dict[str, LinhaDoJob] = {}
 
-    def gravar(self, linhas: list[LinhaDoJob]) -> None:
+    def gravar(self, linhas: Sequence[LinhaDoJob]) -> None:
         for linha in linhas:
             self.por_id[linha.id] = linha
 
@@ -91,9 +94,7 @@ class ConfigDaTabelaDeJobs:
 
 def _json_da_linha(linha: LinhaDoJob) -> dict[str, Any]:
     dados = asdict(linha)
-    for campo in ("criado_em", "concluido_em", "atualizado_em"):
-        valor = getattr(linha, campo)
-        dados[campo] = valor.isoformat() if valor else None
+    dados["criado_em"] = linha.criado_em.isoformat()
     return dados
 
 
@@ -104,7 +105,7 @@ class TabelaBigQuery:
         self._config = config
         self._transporte = transporte
 
-    def gravar(self, linhas: list[LinhaDoJob]) -> None:
+    def gravar(self, linhas: Sequence[LinhaDoJob]) -> None:
         c = self._config
         tabela = f"`{c.projeto}.{c.dataset}.{c.tabela}`"
         consulta = f"""
@@ -117,52 +118,31 @@ USING (
     JSON_VALUE(l, '$.quem_tipo') AS quem_tipo,
     JSON_VALUE(l, '$.quem_id') AS quem_id,
     JSON_VALUE(l, '$.estado') AS estado,
-    TIMESTAMP(JSON_VALUE(l, '$.criado_em')) AS criado_em,
-    TIMESTAMP(JSON_VALUE(l, '$.concluido_em')) AS concluido_em,
-    TIMESTAMP(JSON_VALUE(l, '$.atualizado_em')) AS atualizado_em
+    TIMESTAMP(JSON_VALUE(l, '$.criado_em')) AS criado_em
   FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l
 ) AS s
 ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET
   programa = s.programa, duracao_ms = s.duracao_ms, quem_tipo = s.quem_tipo,
-  quem_id = s.quem_id, estado = s.estado, criado_em = s.criado_em,
-  concluido_em = s.concluido_em, atualizado_em = s.atualizado_em
+  quem_id = s.quem_id, estado = s.estado, criado_em = s.criado_em
 WHEN NOT MATCHED THEN INSERT
-  (id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em, concluido_em,
-   atualizado_em)
+  (id, programa, duracao_ms, quem_tipo, quem_id, estado, criado_em)
 VALUES
-  (s.id, s.programa, s.duracao_ms, s.quem_tipo, s.quem_id, s.estado, s.criado_em,
-   s.concluido_em, s.atualizado_em)
+  (s.id, s.programa, s.duracao_ms, s.quem_tipo, s.quem_id, s.estado, s.criado_em)
 """
-        resposta = self._transporte(
-            {
-                "query": consulta,
-                "useLegacySql": False,
-                "location": c.regiao,
-                "timeoutMs": 120_000,
-                "queryParameters": [
-                    parametro(
-                        "linhas",
-                        json.dumps(
-                            [_json_da_linha(x) for x in linhas], ensure_ascii=False
-                        ),
-                    )
-                ],
-            }
+        executar_dml(
+            self._transporte,
+            c.regiao,
+            consulta,
+            [
+                parametro(
+                    "linhas",
+                    json.dumps([_json_da_linha(x) for x in linhas], ensure_ascii=False),
+                )
+            ],
+            PRAZO_CURTO,
+            descricao=f"carga de {len(linhas)} Jobs",
         )
-        if not resposta.get("jobComplete", False):
-            raise RuntimeError(f"carga de {len(linhas)} Jobs não terminou no prazo")
-
-
-def _em_lotes(linhas: Iterable[LinhaDoJob], tamanho: int) -> Iterator[list[LinhaDoJob]]:
-    lote: list[LinhaDoJob] = []
-    for linha in linhas:
-        lote.append(linha)
-        if len(lote) == tamanho:
-            yield lote
-            lote = []
-    if lote:
-        yield lote
 
 
 def preencher(
@@ -171,7 +151,7 @@ def preencher(
     """Grava uma linha por Job do repositório e devolve quantas. Passada única de linha de
     comando: lê o acervo inteiro; o MERGE pelo `id` faz repetir dar o mesmo resultado."""
     total = 0
-    for lote in _em_lotes((linha_do_job(j) for j in repositorio.listar()), por_lote):
+    for lote in batched((linha_do_job(j) for j in repositorio.listar()), por_lote):
         tabela.gravar(lote)
         total += len(lote)
     return total

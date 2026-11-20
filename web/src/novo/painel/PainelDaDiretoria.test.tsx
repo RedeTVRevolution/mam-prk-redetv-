@@ -491,9 +491,24 @@ test("Baixar CSV pede o formato csv com os mesmos filtros", async () => {
   const csv = pedidos.find((p) => p.get("formato") === "csv");
   expect(csv?.get("usuario")).toBe("u1");
   expect(csv?.has("programa")).toBe(false);
-  // O CSV nunca é agrupado: traz os dias.
-  expect(csv?.has("agrupar")).toBe(false);
+  // O CSV vem agrupado como a tela: sem escolha na tela, o `auto` da consulta.
+  expect(csv?.get("agrupar")).toBe("auto");
   expect(criar).toHaveBeenCalled();
+  clique.mockRestore();
+});
+
+test("Baixar CSV em Acessos não manda o programa que está no endereço", async () => {
+  const usuario = userEvent.setup();
+  const { clique } = simularDownload();
+  await abrir("/painel/acessos?programa=TV+Fama&agrupar=semana");
+  await tabela("Acessos por dia");
+
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+
+  await waitFor(() => expect(clique).toHaveBeenCalled());
+  const csv = pedidos.find((p) => p.get("formato") === "csv");
+  expect(csv?.has("programa")).toBe(false);
+  expect(csv?.get("agrupar")).toBe("semana");
   clique.mockRestore();
 });
 
@@ -962,6 +977,26 @@ test("a aba API mostra o total, o dia, o sistema e a rota, e nunca manda program
   ).toBe(true);
 });
 
+test.each([
+  ["videos", "Vídeos por dia"],
+  ["buscas", "Buscas por dia"],
+  ["revisao", "Correções por dia"],
+  ["api", "API por dia"],
+])("Baixar CSV em %s manda o agrupamento escolhido", async (aba, titulo) => {
+  const usuario = userEvent.setup();
+  const { clique } = simularDownload();
+  await abrir(`/painel/${aba}?agrupar=mes`);
+  await tabela(titulo);
+
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+
+  await waitFor(() => expect(clique).toHaveBeenCalled());
+  expect(pedidos.find((p) => p.get("formato") === "csv")?.get("agrupar")).toBe(
+    "mes",
+  );
+  clique.mockRestore();
+});
+
 test("Baixar CSV na aba API pede o formato csv sem programa", async () => {
   const usuario = userEvent.setup();
   const { clique } = simularDownload();
@@ -997,8 +1032,13 @@ test("a aba Custo mostra o total, o mês, o usuário, a etapa e o custo sem dono
     "ana@redetv.com.br",
     REAL("100,00"),
   ]);
+  expect(
+    await screen.findByRole("img", {
+      name: /^Custo por etapa.*Análise/,
+    }),
+  ).toBeTruthy();
   expect(linhasDe(await tabela("Custo por etapa"))).toEqual([
-    ["analise", REAL("100,00")],
+    ["Análise", REAL("100,00")],
   ]);
   expect(linhasDe(await tabela("Custo sem dono por serviço"))).toEqual([
     ["Cloud Run", REAL("50,00")],
@@ -1074,7 +1114,10 @@ test("Baixar CSV na aba Custo pede o formato csv", async () => {
   await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
 
   await waitFor(() => expect(clique).toHaveBeenCalled());
-  expect(pedidos.some((p) => p.get("formato") === "csv")).toBe(true);
+  const csv = pedidos.find((p) => p.get("formato") === "csv");
+  expect(csv).toBeDefined();
+  // O custo é sempre por mês: não agrupa.
+  expect(csv?.has("agrupar")).toBe(false);
   clique.mockRestore();
 });
 
@@ -1203,4 +1246,65 @@ test("ao abrir sem filtro, o período é os últimos 7 dias, na tela e no pedido
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("a falha do CSV some ao trocar um filtro", async () => {
+  const usuario = userEvent.setup();
+  servidor.use(
+    http.get("/v1/painel/buscas", ({ request }) =>
+      new URL(request.url).searchParams.get("formato") === "csv"
+        ? new HttpResponse(null, { status: 500 })
+        : HttpResponse.json(BUSCAS),
+    ),
+  );
+  await abrir("/painel/buscas");
+  await tabela("Buscas por dia");
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+  await screen.findByRole("alert");
+
+  fireEvent.change(screen.getByLabelText("De"), {
+    target: { value: "2020-01-01" },
+  });
+
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});
+
+test("Custo por etapa: etapa que a tabela de nomes não conhece mostra o código", async () => {
+  servidor.use(
+    relatorio("custo", () =>
+      HttpResponse.json({
+        ...CUSTO,
+        por_etapa: [
+          { etapa: "etapa_nova", custo: 100 },
+          { etapa: "constructor", custo: 50 },
+        ],
+      }),
+    ),
+  );
+  await abrir("/painel/custo");
+
+  expect(linhasDe(await tabela("Custo por etapa"))).toEqual([
+    ["etapa_nova", REAL("100,00")],
+    ["constructor", REAL("50,00")],
+  ]);
+});
+
+test("clicar na aba já ativa não apaga a falha do CSV quando o filtro efetivo não muda", async () => {
+  const usuario = userEvent.setup();
+  servidor.use(
+    http.get("/v1/painel/buscas", ({ request }) =>
+      new URL(request.url).searchParams.get("formato") === "csv"
+        ? new HttpResponse(null, { status: 500 })
+        : HttpResponse.json(BUSCAS),
+    ),
+  );
+  await abrir("/painel/buscas?agrupar=auto");
+  await tabela("Buscas por dia");
+  await usuario.click(screen.getByRole("button", { name: "Baixar CSV" }));
+  await screen.findByRole("alert");
+
+  await usuario.click(screen.getByRole("tab", { name: "Buscas" }));
+  await new Promise((r) => setTimeout(r, 50));
+
+  expect(screen.getByRole("alert")).toBeTruthy();
 });

@@ -146,7 +146,6 @@ from api.nuvem import (
     RepositorioDeWebhooksFirestore,
     RepositorioFirestore,
     TiposDeObjetoFirestore,
-    listagem_por_mes_do_ambiente,
 )
 from api.orcamento_de_escrita import OrcamentoFirestore
 from api.painel import AcessosAoPainel, criar_rotas_do_painel
@@ -267,14 +266,20 @@ class _FrontComEnderecos(StaticFiles):
 
 
 class _GZipQueRespeitaQZero(GZipMiddleware):
-    """O do Starlette só procura "gzip" no texto: `gzip;q=0` ainda comprimiria."""
+    """O do Starlette só procura "gzip" no texto: `gzip;q=0` ainda comprimiria, e `GZip`
+    ou `*` não. A decisão é a de `aceita_gzip`, entregue ao Starlette como `gzip`."""
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and not aceita_gzip(
-            Headers(scope=scope).get("accept-encoding", "")
-        ):
-            await self.app(scope, receive, send)
-            return
+        if scope["type"] == "http":
+            cabecalhos = Headers(scope=scope)
+            if not aceita_gzip(", ".join(cabecalhos.getlist("accept-encoding"))):
+                await self.app(scope, receive, send)
+                return
+            mutavel = cabecalhos.mutablecopy()
+            mutavel["accept-encoding"] = "gzip"
+            # No próprio scope (não numa cópia): o roteador grava nele a rota que os
+            # eventos de uso leem de volta.
+            scope["headers"] = mutavel.raw
         await super().__call__(scope, receive, send)
 
 
@@ -826,11 +831,20 @@ def _revisao_espelhada(banco: firestore.Client) -> RepositorioDeRevisao:
     )
 
 
+VALIDADE_DA_FALHA_S = (
+    10.0  # consulta do painel que falha: não refeita por cada pedido (#775)
+)
+
+
+def _cache_curto() -> CacheCurto:
+    return CacheCurto(validade_da_falha_s=VALIDADE_DA_FALHA_S)
+
+
 def _com_cache[C, R](
     consulta: C | None, envolver: Callable[[C, CacheCurto], R]
 ) -> R | None:
     """A consulta do BigQuery com o cache curto de uma instância (#453); `None` fica `None`."""
-    return envolver(consulta, CacheCurto()) if consulta else None
+    return envolver(consulta, _cache_curto()) if consulta else None
 
 
 configurar_o_log()
@@ -848,7 +862,6 @@ if _projeto:
         VerificadorIdentityPlatform(_projeto),
         RepositorioFirestore(
             _comum,
-            listagem_por_mes=listagem_por_mes_do_ambiente(os.environ),
         ),
         ArmazenamentoStorage(
             ClienteStorage(project=_projeto),
@@ -940,7 +953,7 @@ if _projeto:
         taxa_de_correcao=taxa_do_ambiente(os.environ),
         nomes_do_acervo=nomes_do_ambiente(os.environ),
         relatorio_de_marcas=_com_cache(marcas_do_ambiente(os.environ), MarcasComCache),
-        cache_do_painel=CacheCurto(),
+        cache_do_painel=_cache_curto(),
         passadas=PassadasStorage(
             ClienteStorage(project=_projeto),
             os.environ["BUCKET_ACEITOS"],

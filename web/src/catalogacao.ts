@@ -2,6 +2,7 @@
 import type { CatalogoDeNomes } from './api.ts'
 import { type CatalogoDeCorrecoes, type Opcao } from './catalogo.ts'
 import { type Intervalo, lerTempo, nomeExibido, ocorrenciasDosObjetos, relogio, SEM_NOME, tempoDoCampo } from './linhaDoTempo.ts'
+import { FUSO } from './fuso.ts'
 import type { ItemDoPainel } from './painel.ts'
 import type { Decupagem, EstadoNaBusca, ItemDoHistorico, Objeto, ObjetoDoInventario, Pessoa } from './decupagem.ts'
 
@@ -682,7 +683,7 @@ export const aindaIndexando = (historico: ItemDoHistorico[]): boolean =>
   historico.some((h) => (h.estado === 'ativa' || h.estado === 'aprovada') && h.na_busca === 'indexando')
 
 // Um formatador só: `toLocaleString` cria um a cada chamada, e as marcas chamam a quantidade de aparições.
-const FORMATO = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'medium', timeZone: 'America/Sao_Paulo' })
+const FORMATO = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'medium', timeZone: FUSO })
 const quando = (iso: string) => FORMATO.format(new Date(iso))
 
 /** As marcas por chave de item: só valem as correções da decupagem aberta que ainda estão de pé. */

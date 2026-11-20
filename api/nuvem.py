@@ -62,6 +62,7 @@ from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
 from api.erros import ServicoIndisponivel
 from api.florence import ObjetosDaDecupagem
+from api.fuso import SAO_PAULO
 from api.idempotencia import (
     Reserva,
     conferir,
@@ -80,7 +81,6 @@ from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente
 from api.modelo_do_job import (
     CAMPOS_DA_LISTA,
-    SAO_PAULO,
     CursorInvalido,
     Estado,
     FiltroDeJobs,
@@ -328,17 +328,16 @@ def _cabe_no_firestore(
 
 
 def plano_da_consulta(
-    filtro: FiltroDeJobs, por_mes: bool
+    filtro: FiltroDeJobs,
 ) -> tuple[list[str] | None, list[str]]:
-    """Os meses (`mes_exibicao in`, só na ordem por envio com `por_mes`) e os programas
+    """Os meses (`mes_exibicao in`, só na ordem por envio) e os programas
     (`programa in`) que vão ao Firestore; o que não cabe nos tetos fica em
     `casa_com_o_filtro`. Sai primeiro o mês, depois os programas."""
     programas = sorted(filtro.programas) if len(filtro.programas) > 1 else []
     datas = _pontas_no_firestore(filtro)
     meses = None
     if (
-        por_mes
-        and filtro.ordem == "enviado"
+        filtro.ordem == "enviado"
         and filtro.exibicao_de is not None
         and filtro.exibicao_ate is not None
     ):
@@ -351,26 +350,19 @@ def plano_da_consulta(
     return meses, programas
 
 
-def listagem_por_mes_do_ambiente(ambiente: Mapping[str, str]) -> bool:
-    """`LISTAGEM_POR_MES`: ausente ou vazia, desligada; outro valor que não `true` ou
-    `false` levanta `ValueError`, em vez de deixar a lista no caminho de hoje sem aviso."""
-    valor = (ambiente.get("LISTAGEM_POR_MES") or "false").strip().lower()
-    if valor not in ("true", "false"):
-        raise ValueError(f"LISTAGEM_POR_MES inválida: {valor!r}")
-    return valor == "true"
-
-
 class RepositorioFirestore:
     def __init__(
         self,
         cliente: firestore.Client,
         colecao: str = COLECAO_DE_JOBS,
-        listagem_por_mes: bool = False,
     ) -> None:
         self._cliente = cliente
         self._colecao = cliente.collection(colecao)
-        # Só depois de `make gravar-mes-nos-jobs`: Job sem `mes_exibicao` some do filtro.
-        self._listagem_por_mes = listagem_por_mes
+
+    def referencia(self, job_id: str) -> Any:
+        """A referência do documento do Job, para quem lê e grava junto com outro documento
+        (a transação do nome do programa)."""
+        return _documento(self._colecao, job_id)
 
     def salvar(self, job: Job) -> None:
         _documento(self._colecao, job.id).set(job.model_dump())
@@ -490,11 +482,13 @@ class RepositorioFirestore:
     def consultar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # O Firestore corta o que dá com um índice composto (igualdades, `in`, uma
         # palavra do nome e, na ordem por exibição, o intervalo de datas, que só pode
-        # estar no campo da ordem; na ordem por envio, com `listagem_por_mes`, os meses do
+        # estar no campo da ordem; na ordem por envio, os meses do
         # período em `mes_exibicao`). O resto, e a conferência de tudo, é de `casa_com_o_filtro`.
         # Os índices estão no infra/modulos/mam/main.tf e no listagem_por_mes.tf.
         if filtro.sha256 is not None:
             return self._consultar_pelo_arquivo(filtro)
+        if filtro.com_fim_a_avisar:
+            return self._consultar_o_fim_a_avisar(filtro)
         if (
             filtro.pessoa_do_catalogo is not None
             or filtro.marca_do_catalogo is not None
@@ -503,7 +497,7 @@ class RepositorioFirestore:
         if filtro.na_lixeira is True:
             return self._consultar_a_lixeira(filtro)
         consulta: Any = self._colecao
-        meses, programas = plano_da_consulta(filtro, self._listagem_por_mes)
+        meses, programas = plano_da_consulta(filtro)
         if programas:
             consulta = consulta.where(filter=FieldFilter("programa", "in", programas))
         elif len(filtro.programas) == 1:
@@ -597,6 +591,12 @@ class RepositorioFirestore:
                 return PaginaDeJobs(aprovados)
         return PaginaDeJobs(aprovados, ultimo_id)
 
+    def _paginar_em_python(self, consulta: Any, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return paginar_em_python(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
+        )
+
     def _consultar_pelo_catalogo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # Só um `array_contains` (índice automático) vai ao Firestore: lê os vídeos da
         # pessoa ou da marca, não o acervo. O resto do filtro, a ordem e o cursor ficam
@@ -613,10 +613,14 @@ class RepositorioFirestore:
                     "marcas_do_catalogo", "array_contains", filtro.marca_do_catalogo
                 )
             )
-        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
-        return paginar_em_python(
-            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
+        return self._paginar_em_python(consulta, filtro)
+
+    def _consultar_o_fim_a_avisar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # No servidor: a lista só tem itens enquanto o aviso está pendente (índice automático).
+        consulta = self._colecao.where(
+            filter=FieldFilter("fim_a_avisar", "array_contains_any", ["webhook", "uso"])
         )
+        return self._paginar_em_python(consulta, filtro)
 
     def _consultar_pelo_arquivo(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
         # Poucos Jobs por arquivo: só a igualdade no `sha256` (índice automático) vai ao
@@ -625,10 +629,7 @@ class RepositorioFirestore:
         consulta = self._colecao.where(
             filter=FieldFilter("sha256", "==", filtro.sha256)
         )
-        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
-        return paginar_em_python(
-            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
-        )
+        return self._paginar_em_python(consulta, filtro)
 
 
 class RepositorioDeChavesFirestore:
@@ -806,9 +807,6 @@ class RepositorioDePapeisFirestore:
     def salvar(self, uid: str, papeis: list[Papel]) -> None:
         # merge: não apaga a marca `desativada`.
         _documento(self._colecao, uid).set({"papeis": papeis}, merge=True)
-
-    def desativada(self, uid: str) -> bool:
-        return self.ler(uid).desativada
 
     def marcar_desativada(self, uid: str, desativada: bool) -> None:
         _documento(self._colecao, uid).set({"desativada": desativada}, merge=True)
@@ -1163,7 +1161,7 @@ class ProgramasFirestore:
         if not isinstance(jobs, RepositorioFirestore):
             raise TypeError("os Jobs precisam estar no Firestore")
         programa_ref = _documento(self._colecao, programa_id)
-        job_ref = _documento(self._cliente.collection(jobs._colecao.id), job_id)
+        job_ref = jobs.referencia(job_id)
 
         @firestore.transactional
         def levar(transacao: Any) -> Job | None:
@@ -1906,7 +1904,6 @@ class ArquivosNoStorage:
             [
                 *self._cliente.list_blobs(self._decupagens, prefix=f"{job_id}/"),
                 bucket.blob(objeto_da_decupagem(job_id)),
-                bucket.blob(f"{job_id}.comparacao.json"),
             ],
         )
 

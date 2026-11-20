@@ -8,11 +8,17 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import Usuario
 from api.cache_curto import CacheCurto
-from api.catalogo import CatalogoEmMemoria, FusaoDaPessoa, PessoaDoCatalogo
+from api.catalogo import (
+    CatalogoEmMemoria,
+    EnvioParaLixeira,
+    FusaoDaPessoa,
+    PessoaDoCatalogo,
+)
 from api.chaves import (
     RepositorioDeChavesEmMemoria,
     VerificadorDeChaveDeApi,
@@ -29,7 +35,7 @@ from api.main import criar_app
 from api.modelo_do_job import Job, agora_utc
 from api.papeis import RepositorioDePapeisEmMemoria
 from api.tempo_de_tela import (
-    NOMES_EM_JSON,
+    COLUNAS_DO_CSV,
     SOMA_EM_SQL,
     UNIAO_EM_SQL,
     ConsultaBigQuery,
@@ -53,13 +59,20 @@ BASE = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 ROTA = "/v1/relatorios/tempo-de-tela"
 
 
-def relatorio(momentos: list[MomentoDaPessoa]) -> list[PessoaNoRelatorio]:
-    """O relatório de hoje: a soma (que o BigQuery faz) e a montagem."""
-    return relatorio_das_somas(somar(momentos))
+def _nomes(momentos: list[MomentoDaPessoa]) -> dict[str, str]:
+    return {m.pessoa_id: m.pessoa_id.upper() for m in momentos}
+
+
+def relatorio(
+    momentos: list[MomentoDaPessoa], nomes: dict[str, str] | None = None
+) -> list[PessoaNoRelatorio]:
+    """O relatório de hoje: a soma (que o BigQuery faz) e a montagem, com os nomes do
+    catálogo (por padrão, o id em maiúsculas)."""
+    return relatorio_das_somas(somar(momentos), nomes or _nomes(momentos))
 
 
 def _m(job: str, tipo: str, ini: int, fim: int, pessoa: str = "c1") -> MomentoDaPessoa:
-    return MomentoDaPessoa(job, pessoa, pessoa.upper(), tipo, ini, fim)
+    return MomentoDaPessoa(job, pessoa, tipo, ini, fim)
 
 
 def test_so_aparicoes_somam_tempo_e_mencoes_so_contam() -> None:
@@ -78,13 +91,14 @@ def test_so_aparicoes_somam_tempo_e_mencoes_so_contam() -> None:
     assert (c1.mencoes_na_fala, c1.mencoes_no_texto) == (2, 1)
 
 
-def test_a_mesma_pessoa_com_grafias_diferentes_e_uma_linha_so() -> None:
+def test_a_pessoa_em_varios_videos_e_uma_linha_so_com_o_nome_do_catalogo() -> None:
     linhas = relatorio(
         [
-            MomentoDaPessoa("j1", "c1", "Sílvio Santos", "aparicao", 0, 1_000),
-            MomentoDaPessoa("j2", "c1", "Silvio Santos", "aparicao", 0, 2_000),
-            MomentoDaPessoa("j3", "c1", "Silvio Santos", "aparicao", 0, 3_000),
-        ]
+            MomentoDaPessoa("j1", "c1", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j2", "c1", "aparicao", 0, 2_000),
+            MomentoDaPessoa("j3", "c1", "aparicao", 0, 3_000),
+        ],
+        {"c1": "Silvio Santos"},
     )
 
     (c1,) = linhas
@@ -209,18 +223,8 @@ def test_bigquery_pede_a_soma_so_dos_tipos_do_relatorio_com_os_filtros_como_para
         {
             "jobComplete": True,
             "rows": [
-                _linha_do_bq(
-                    "j1",
-                    "c1",
-                    "5000",
-                    "1",
-                    "2",
-                    "0",
-                    '[{"nome":"Sabrina","linhas":2},{"nome":"Sabri","linhas":1}]',
-                ),
-                _linha_do_bq(
-                    "j2", "c1", "0", "0", "0", "1", '[{"nome":"Sabrina","linhas":1}]'
-                ),
+                _linha_do_bq("j1", "c1", "5000", "1", "2", "0"),
+                _linha_do_bq("j2", "c1", "0", "0", "0", "1"),
             ],
         }
     )
@@ -230,8 +234,8 @@ def test_bigquery_pede_a_soma_so_dos_tipos_do_relatorio_com_os_filtros_como_para
     )
 
     assert somas == [
-        PessoaNoVideo("j1", "c1", {"Sabrina": 2, "Sabri": 1}, 5000, 1, 2, 0),
-        PessoaNoVideo("j2", "c1", {"Sabrina": 1}, 0, 0, 0, 1),
+        PessoaNoVideo("j1", "c1", 5000, 1, 2, 0),
+        PessoaNoVideo("j2", "c1", 0, 0, 0, 1),
     ]
     (corpo,) = transporte.corpos
     consulta = corpo["query"]
@@ -270,15 +274,10 @@ def test_bigquery_resposta_incompleta_falha_alto() -> None:
 
 def _sqlite_com(momentos: list[MomentoDaPessoa]) -> sqlite3.Connection:
     banco = sqlite3.connect(":memory:")
-    banco.execute(
-        "CREATE TABLE base (job_id, pessoa_id, nome, tipo, inicio_ms, fim_ms)"
-    )
+    banco.execute("CREATE TABLE base (job_id, pessoa_id, tipo, inicio_ms, fim_ms)")
     banco.executemany(
-        "INSERT INTO base VALUES (?, ?, ?, ?, ?, ?)",
-        [
-            (m.job_id, m.pessoa_id, m.nome, m.tipo, m.inicio_ms, m.fim_ms)
-            for m in momentos
-        ],
+        "INSERT INTO base VALUES (?, ?, ?, ?, ?)",
+        [(m.job_id, m.pessoa_id, m.tipo, m.inicio_ms, m.fim_ms) for m in momentos],
     )
     return banco
 
@@ -292,7 +291,6 @@ def test_a_uniao_em_sql_da_os_mesmos_numeros_que_a_de_python() -> None:
             MomentoDaPessoa(
                 job_id=sorteio.choice(["j1", "j2"]),
                 pessoa_id=sorteio.choice(["c1", "c2"]),
-                nome="X",
                 tipo=sorteio.choice(["aparicao", "aparicao", "mencao_na_fala"]),
                 inicio_ms=(inicio := sorteio.randrange(0, 50)),
                 fim_ms=inicio
@@ -320,20 +318,15 @@ def test_a_uniao_em_sql_da_os_mesmos_numeros_que_a_de_python() -> None:
 
 
 def test_a_soma_em_sql_inteira_da_os_mesmos_numeros_que_a_de_python() -> None:
-    # O SOMA_EM_SQL que vai ao BigQuery roda num SQLite, com o JSON dos nomes (o único
-    # trecho só do BigQuery) trocado pelo do SQLite, e cada linha passa pela mesma leitura
-    # da consulta real: confere a união, as contagens, os nomes e a ordem das colunas.
-    sql = "WITH base AS (SELECT * FROM linhas)\n" + SOMA_EM_SQL.replace(
-        NOMES_EM_JSON, "json_group_array(json_object('nome', nome, 'linhas', linhas))"
-    )
-    assert NOMES_EM_JSON in SOMA_EM_SQL
+    # O SOMA_EM_SQL que vai ao BigQuery roda num SQLite, e cada linha passa pela mesma
+    # leitura da consulta real: confere a união, as contagens e a ordem das colunas.
+    sql = "WITH base AS (SELECT * FROM linhas)\n" + SOMA_EM_SQL
     sorteio = random.Random(363)
     for _ in range(200):
         momentos = [
             MomentoDaPessoa(
                 job_id=sorteio.choice(["j1", "j2"]),
                 pessoa_id=sorteio.choice(["c1", "c2"]),
-                nome=sorteio.choice(["Sabrina", "Sabri", ""]),
                 tipo=sorteio.choice(
                     ["aparicao", "aparicao", "mencao_na_fala", "mencao_no_texto"]
                 ),
@@ -348,7 +341,7 @@ def test_a_soma_em_sql_inteira_da_os_mesmos_numeros_que_a_de_python() -> None:
         do_sql = [pessoa_no_video(v) for v in banco.execute(sql)]
 
         assert sorted(do_sql, key=repr) == sorted(somar(momentos), key=repr)
-        assert relatorio_das_somas(do_sql) == relatorio(momentos)
+        assert relatorio_das_somas(do_sql, _nomes(momentos)) == relatorio(momentos)
 
 
 def test_a_uniao_em_sql_cola_o_que_se_toca_e_une_o_que_se_sobrepoe() -> None:
@@ -379,9 +372,7 @@ def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
     somas = ConsultaEmMemoria(_copia()).somas((), None, None)
 
     por_par = {(s.job_id, s.pessoa_id): s for s in somas}
-    assert por_par[("j1", "c1")] == PessoaNoVideo(
-        "j1", "c1", {"Sabrina": 1}, 1_000, 1, 0, 0
-    )
+    assert por_par[("j1", "c1")] == PessoaNoVideo("j1", "c1", 1_000, 1, 0, 0)
     assert por_par[("j3", "c1")].mencoes_na_fala == 1
     assert len(somas) == 4
 
@@ -783,7 +774,7 @@ class CatalogoQueConta(CatalogoEmMemoria):
 def _empate_com_nome_atual() -> tuple[CatalogoQueConta, CopiaEmMemoria]:
     """Quatro pessoas empatadas em 2 s, com o id na ordem contrária à dos nomes atuais.
     p1 se chama "Zélia" no catálogo e "Ana" (o mais frequente) na cópia; p3 foi fundida em
-    p4 ("Carla"), e o nome dela mesma ("Zzz Velho") não vale."""
+    p4 ("Carla"), e o nome dela mesma ("Zzz Velho") não vale; as duas somam numa linha (#784)."""
     catalogo = CatalogoQueConta()
     for id_, nome in (
         ("p1", "Zélia"),
@@ -824,7 +815,7 @@ def _empate_com_nome_atual() -> tuple[CatalogoQueConta, CopiaEmMemoria]:
 def test_tela_e_csv_saem_na_mesma_ordem_no_empate_pelo_nome_atual() -> None:
     catalogo, copia = _empate_com_nome_atual()
     cliente = _cliente(consulta=ConsultaEmMemoria(copia), catalogo=catalogo)
-    esperado = [("p2", "Bia"), ("p3", "Carla"), ("p4", "Carla"), ("p1", "Zélia")]
+    esperado = [("p2", "Bia"), ("p4", "Carla"), ("p1", "Zélia")]  # p3 soma em p4
 
     completo = cliente.get(ROTA, headers=AUTORIZACAO).json()["pessoas"]
     csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO).text
@@ -860,23 +851,71 @@ def test_o_catalogo_e_lido_uma_vez_por_pedido() -> None:
         assert catalogo.leituras == 1
 
 
-def test_sem_catalogo_o_ranking_usa_o_nome_mais_frequente_das_somas() -> None:
+def test_o_ranking_usa_o_nome_do_catalogo_no_empate() -> None:
     somas = somar(
         [
-            MomentoDaPessoa("j1", "p1", "Zed", "aparicao", 0, 1_000),
-            MomentoDaPessoa("j1", "p2", "Abe", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j1", "p1", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j1", "p2", "aparicao", 0, 1_000),
         ]
     )
 
-    sem_mapa, _ = ranking_em_python(somas, 0, 10)
-    com_mapa, _ = ranking_em_python(somas, 0, 10, {"p1": "Ana", "p2": "Zeca"})
+    pagina, _ = ranking_em_python(somas, 0, 10, {"p1": "Zeca", "p2": "Ana"})
 
-    assert [(p.pessoa_id, p.nome) for p in sem_mapa] == [("p2", "Abe"), ("p1", "Zed")]
-    assert [(p.pessoa_id, p.nome) for p in com_mapa] == [("p1", "Ana"), ("p2", "Zeca")]
+    assert [(p.pessoa_id, p.nome) for p in pagina] == [("p2", "Ana"), ("p1", "Zeca")]
+
+
+def test_video_so_de_mencoes_nao_entra_no_total_de_videos() -> None:
+    somas = somar(
+        [
+            MomentoDaPessoa("j1", "p1", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j2", "p1", "mencao_na_fala", 0, 500),
+            MomentoDaPessoa("j2", "p2", "mencao_no_texto", 0, 500),
+        ]
+    )
+
+    pagina, total = ranking_em_python(somas, 0, 10, {"p1": "Ana", "p2": "Bia"})
+
+    assert total.videos == 1  # j2 só tem menções
+    assert total.mencoes_na_fala == 1 and total.mencoes_no_texto == 1
+    assert [(p.pessoa_id, p.videos) for p in pagina] == [("p1", 1), ("p2", 0)]
+
+
+class ConsultaQueEstoura(ConsultaEmMemoria):
+    def __init__(self) -> None:
+        super().__init__(CopiaEmMemoria())
+
+    def somas(
+        self, programas: Sequence[str], desde: date | None, ate: date | None
+    ) -> list[PessoaNoVideo]:
+        raise RuntimeError("a consulta do BigQuery não terminou a tempo")
+
+
+@pytest.mark.parametrize("params", [{}, {"formato": "csv"}])
+def test_consulta_que_nao_termina_vira_503_em_json_e_em_csv(
+    params: dict[str, str],
+) -> None:
+    cliente = _cliente(consulta=ConsultaQueEstoura())
+
+    resposta = cliente.get(ROTA, params=params, headers=AUTORIZACAO)
+
+    assert resposta.status_code == 503
+    assert "não terminou" in resposta.json()["detail"]
+
+
+def test_sem_resultados_o_json_vem_vazio_e_o_csv_so_com_o_cabecalho() -> None:
+    cliente = _cliente(consulta=ConsultaEmMemoria(CopiaEmMemoria()))
+
+    json_ = cliente.get(ROTA, headers=AUTORIZACAO)
+    csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO)
+
+    assert json_.status_code == 200 and json_.json()["pessoas"] == []
+    assert csv_.status_code == 200
+    assert csv_.text.splitlines() == [",".join(COLUNAS_DO_CSV)]
 
 
 class SoSomas:
-    """Uma fonte nova das somas: implementa só `somas`, como o Protocol exige."""
+    """Uma fonte nova das somas: `somas` de verdade e a consulta de intervalos que falha
+    (sem fusão no período, ninguém pode pedi-la, #784)."""
 
     def __init__(self, copia: CopiaEmMemoria) -> None:
         self._em_memoria = ConsultaEmMemoria(copia)
@@ -885,6 +924,15 @@ class SoSomas:
         self, programas: Sequence[str], desde: date | None, ate: date | None
     ) -> list[PessoaNoVideo]:
         return self._em_memoria.somas(programas, desde, ate)
+
+    def aparicoes_unidas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        pessoas: Sequence[str],
+    ) -> list[tuple[str, str, int, int]]:
+        raise AssertionError("sem fusão no período não há consulta de intervalos")
 
 
 def test_uma_fonte_so_com_somas_serve_ao_ranking_e_aos_videos_da_pessoa() -> None:
@@ -902,3 +950,253 @@ def test_uma_fonte_so_com_somas_serve_ao_ranking_e_aos_videos_da_pessoa() -> Non
         resposta = nova.get(url, params=params, headers=AUTORIZACAO)
         assert resposta.status_code == 200
         assert resposta.text == velha.get(url, params=params, headers=AUTORIZACAO).text
+
+
+# --- a pessoa fundida numa linha só (#784) ------------------------------------------------
+
+
+def _fusao() -> FusaoDaPessoa:
+    return FusaoDaPessoa(
+        destino_id="p4", em=agora_utc(), por_uid="u", por_email="u@r.com", motivo="x"
+    )
+
+
+def _aparicao(job: str, pessoa: str, ini: int, fim: int, tipo: str = "aparicao") -> Any:
+    return LinhaDoMomento(
+        job_id=job,
+        programa="Jornal",
+        data_de_exibicao=date(2026, 10, 1),
+        tipo=tipo,
+        inicio_ms=ini,
+        fim_ms=fim,
+        pessoas=[PessoaDoMomento(pessoa, pessoa)],
+    )
+
+
+class FonteQueContaIntervalos(ConsultaEmMemoria):
+    def __init__(self, copia: CopiaEmMemoria) -> None:
+        super().__init__(copia)
+        self.pedidos: list[Sequence[str]] = []
+
+    def aparicoes_unidas(
+        self,
+        programas: Sequence[str],
+        desde: date | None,
+        ate: date | None,
+        pessoas: Sequence[str],
+    ) -> list[tuple[str, str, int, int]]:
+        self.pedidos.append(pessoas)
+        return super().aparicoes_unidas(programas, desde, ate, pessoas)
+
+
+def _mundo_da_fusao() -> tuple[CatalogoQueConta, FonteQueContaIntervalos]:
+    """p3 foi fundida em p4 ("Carla"). Em j1 as duas aparecem com intervalos que se
+    sobrepõem (p3 0-2 s, p4 1-3 s: 3 s unidos, não 4 s somados) e p3 cita Carla na fala;
+    j2 só tem p3 (1 s); j3 só tem p4 (0,5 s); p1 ("Ana") tem 1,5 s em j3."""
+    catalogo = CatalogoQueConta()
+    for id_, nome in (("p1", "Ana"), ("p3", "Carla Velha"), ("p4", "Carla")):
+        catalogo._itens[id_] = PessoaDoCatalogo(id=id_, nome=nome, papel="")
+    catalogo.definir_fusao("p3", _fusao())
+    copia = CopiaEmMemoria()
+    copia.gravar(
+        "j1",
+        [
+            _aparicao("j1", "p3", 0, 2_000),
+            _aparicao("j1", "p4", 1_000, 3_000),
+            _aparicao("j1", "p3", 0, 0, "mencao_na_fala"),
+        ],
+    )
+    copia.gravar("j2", [_aparicao("j2", "p3", 0, 1_000)])
+    copia.gravar("j3", [_aparicao("j3", "p4", 0, 500), _aparicao("j3", "p1", 0, 1_500)])
+    return catalogo, FonteQueContaIntervalos(copia)
+
+
+def _producao(
+    catalogo: CatalogoEmMemoria, fonte: ConsultaDeMomentos, cache: CacheCurto
+) -> TestClient:
+    """Como em `api/main.py`: o cache entre a consulta e `SoComQuemConta`."""
+    return _cliente(consulta=ComCache(fonte, cache), catalogo=catalogo)
+
+
+def test_pessoa_fundida_soma_na_linha_do_destino_com_o_tempo_unido() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    corpo = cliente.get(ROTA, headers=AUTORIZACAO).json()
+
+    carla = next(p for p in corpo["pessoas"] if p["pessoa_id"] == "p4")
+    assert [p["pessoa_id"] for p in corpo["pessoas"]] == ["p4", "p1"]
+    assert carla["nome"] == "Carla"  # o nome atual do destino
+    assert carla["tempo_de_tela_ms"] == 3_000 + 1_000 + 500  # j1 unido + j2 + j3
+    assert carla["aparicoes"] == 3 and carla["videos"] == 3
+    assert carla["mencoes_na_fala"] == 1
+    por_video = {v["job_id"]: v["tempo_de_tela_ms"] for v in carla["por_video"]}
+    assert por_video == {"j1": 3_000, "j2": 1_000, "j3": 500}
+    total = cliente.get(ROTA, params={"limite": 5}, headers=AUTORIZACAO).json()["total"]
+    assert total["pessoas"] == 2
+    assert total["tempo_de_tela_ms"] == 4_500 + 1_500
+    assert total["aparicoes"] == 4
+
+
+def test_pessoa_fundida_sai_numa_linha_so_no_csv_e_nas_paginas() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    csv_ = cliente.get(ROTA, params={"formato": "csv"}, headers=AUTORIZACAO).text
+    pagina = cliente.get(ROTA, params={"limite": 1}, headers=AUTORIZACAO).json()
+
+    linhas = list(csv.DictReader(io.StringIO(csv_)))
+    assert [(r["pessoa_id"], r["tempo_de_tela_ms"]) for r in linhas] == [
+        ("p4", "4500"),
+        ("p1", "1500"),
+    ]
+    assert [p["pessoa_id"] for p in pagina["pessoas"]] == ["p4"]
+    assert pagina["total"]["pessoas"] == 2
+
+
+def test_os_videos_do_destino_trazem_um_item_por_video_com_os_das_origens() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    videos = cliente.get(
+        f"{ROTA}/videos", params={"pessoa_id": "p4"}, headers=AUTORIZACAO
+    ).json()
+    da_origem = cliente.get(
+        f"{ROTA}/videos", params={"pessoa_id": "p3"}, headers=AUTORIZACAO
+    ).json()
+
+    assert [
+        (
+            v["job_id"],
+            v["tempo_de_tela_ms"],
+            v["aparicoes"],
+            v["mencoes_na_fala"],
+            v["mencoes_no_texto"],
+        )
+        for v in videos
+    ] == [("j1", 3_000, 1, 1, 0), ("j2", 1_000, 1, 0, 0), ("j3", 500, 1, 0, 0)]
+    assert da_origem == []  # a origem não é linha do ranking
+
+
+def test_origem_sozinha_no_video_so_troca_o_id_e_nao_consulta_intervalos() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    fonte._copia.por_job.pop("j1")  # sem o vídeo em que as duas aparecem
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    corpo = cliente.get(ROTA, headers=AUTORIZACAO).json()
+
+    carla = next(p for p in corpo["pessoas"] if p["pessoa_id"] == "p4")
+    assert carla["tempo_de_tela_ms"] == 1_500  # j2 (de p3) e j3 (de p4)
+    assert fonte.pedidos == []
+
+
+def test_duas_origens_no_mesmo_destino_somam_uma_linha() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    catalogo._itens["p5"] = PessoaDoCatalogo(id="p5", nome="Carla Outra", papel="")
+    catalogo.definir_fusao("p5", _fusao())
+    fonte._copia.gravar(
+        "j4",
+        [
+            _aparicao("j4", "p3", 0, 1_000),
+            _aparicao("j4", "p5", 500, 1_500),
+            _aparicao("j4", "p4", 5_000, 6_000),
+        ],
+    )
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    corpo = cliente.get(ROTA, headers=AUTORIZACAO).json()
+
+    carla = corpo["pessoas"][0]
+    por_video = {v["job_id"]: v["tempo_de_tela_ms"] for v in carla["por_video"]}
+    assert por_video["j4"] == 1_500 + 1_000  # 0-1,5 s unido e 5-6 s
+    assert next(v for v in carla["por_video"] if v["job_id"] == "j4")["aparicoes"] == 2
+    assert [p["pessoa_id"] for p in corpo["pessoas"]] == ["p4", "p1"]
+    assert fonte.pedidos and set(fonte.pedidos[0]) == {"p3", "p4", "p5"}
+
+
+def test_sem_fusao_no_periodo_nao_ha_segunda_consulta() -> None:
+    copia = _varias_pessoas()
+    catalogo = _catalogo_da_copia(ConsultaEmMemoria(copia))
+    cliente = _producao(catalogo, SoSomas(copia), CacheCurto())
+
+    assert cliente.get(ROTA, headers=AUTORIZACAO).status_code == 200
+    assert (
+        cliente.get(
+            f"{ROTA}/videos", params={"pessoa_id": "c1"}, headers=AUTORIZACAO
+        ).status_code
+        == 200
+    )
+
+
+def test_fundida_na_lixeira_ou_com_destino_purgado_continua_fora() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+    # destino na lixeira: a origem também não conta (o elo do caminho está nela)
+    catalogo.definir_lixeira(
+        "p4",
+        EnvioParaLixeira(em=agora_utc(), por_uid="u", por_email="u@r.com", motivo="x"),
+    )
+
+    na_lixeira = cliente.get(ROTA, params={"limite": 5}, headers=AUTORIZACAO).json()
+    assert [p["pessoa_id"] for p in na_lixeira["pessoas"]] == ["p1"]
+    assert na_lixeira["total"]["pessoas"] == 1
+
+    catalogo.definir_lixeira("p4", None)
+    catalogo.apagar("p4")  # destino purgado
+    purgado = cliente.get(ROTA, headers=AUTORIZACAO).json()
+    assert [p["pessoa_id"] for p in purgado["pessoas"]] == ["p1"]
+    assert (
+        cliente.get(
+            f"{ROTA}/videos", params={"pessoa_id": "p4"}, headers=AUTORIZACAO
+        ).json()
+        == []
+    )
+
+
+def test_o_cache_das_somas_guarda_as_somas_sem_fusao_na_mesma_chave() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cache = CacheCurto()
+    cliente = _producao(catalogo, fonte, cache)
+    cliente.get(ROTA, headers=AUTORIZACAO)
+
+    guardadas: list[PessoaNoVideo] = cache.obter(
+        ("tempo-de-tela", (), None, None), lambda: pytest.fail()
+    )
+
+    assert guardadas == fonte.somas((), None, None)
+    assert {s.pessoa_id for s in guardadas} == {"p1", "p3", "p4"}  # ids originais
+
+
+def test_bigquery_pede_os_intervalos_so_das_pessoas_com_os_filtros_da_soma() -> None:
+    transporte = Transporte(
+        {"jobComplete": True, "rows": [_linha_do_bq("j1", "p3", "0", "2000")]}
+    )
+
+    intervalos = ConsultaBigQuery(CONFIG, transporte).aparicoes_unidas(
+        ("Jornal",), date(2026, 10, 1), date(2026, 10, 31), ["p3", "p4"]
+    )
+
+    assert intervalos == [("j1", "p3", 0, 2_000)]
+    (corpo,) = transporte.corpos
+    consulta = corpo["query"]
+    assert "`proj.ds.tab`" in consulta
+    assert "p.id IN UNNEST(@pessoas)" in consulta
+    assert "t.programa IN UNNEST(@programas)" in consulta
+    assert "t.data_de_exibicao >= @desde" in consulta
+    assert "t.data_de_exibicao <= @ate" in consulta
+    assert "p3" not in consulta  # os ids vão como parâmetro
+    por_nome = {p["name"]: p["parameterValue"] for p in corpo["queryParameters"]}
+    assert [v["value"] for v in por_nome["pessoas"]["arrayValues"]] == ["p3", "p4"]
+    assert set(por_nome) == {"pessoas", "programas", "desde", "ate"}
+
+
+def test_videos_de_quem_nao_esta_em_fusao_nao_consultam_intervalos() -> None:
+    catalogo, fonte = _mundo_da_fusao()
+    cliente = _producao(catalogo, fonte, CacheCurto())
+
+    resposta = cliente.get(
+        f"{ROTA}/videos", params={"pessoa_id": "p1"}, headers=AUTORIZACAO
+    )
+
+    assert [v["job_id"] for v in resposta.json()] == ["j3"]
+    assert fonte.pedidos == []  # a fusão p3 -> p4 não é da p1

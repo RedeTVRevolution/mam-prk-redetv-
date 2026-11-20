@@ -37,11 +37,12 @@ from api.custo_do_painel import (
     relatorio_de_custo,
 )
 from api.erros import ServicoIndisponivel
+from api.fuso import SAO_PAULO
 from api.jobs import espera_da_gpu
 from api.modelo_do_job import Estado, FiltroDeJobs, Job, RepositorioDeJobs
 from api.periodo_padrao import Periodo, dependencia_do_periodo
 from api.permissoes import exige
-from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel
+from api.qualidade_do_painel import QualidadeDoPainel
 from api.relatorios import (
     confere_o_pedido,
     em_paralelo,
@@ -345,6 +346,24 @@ def escolhe_o_grupo(
     return agrupar
 
 
+def _somar_por[C](
+    linhas: Iterable[Any],
+    chave: Callable[[Any], C],
+    medidas: Callable[[Any], tuple[int, ...]],
+) -> dict[C, tuple[int, ...]]:
+    """As medidas inteiras das linhas, somadas por chave (as linhas do mesmo grupo no CSV)."""
+    somas: dict[C, tuple[int, ...]] = {}
+    for linha in linhas:
+        novas = medidas(linha)
+        c = chave(linha)
+        somas[c] = (
+            tuple(a + b for a, b in zip(somas[c], novas, strict=True))
+            if c in somas
+            else novas
+        )
+    return somas
+
+
 def _com_os_dias_vazios(
     por_dia: dict[date, int], grupo: Grupo, desde: date | None
 ) -> dict[date, int]:
@@ -395,10 +414,8 @@ def relatorio_de_acessos(
                 _com_os_dias_vazios(acessos_do_grupo, grupo, filtro.desde).items()
             )
         ],
-        por_semana=_ativos_por(
-            ativos_do_dia, lambda d: d - timedelta(days=d.weekday())
-        ),
-        por_mes=_ativos_por(ativos_do_dia, lambda d: d.replace(day=1)),
+        por_semana=_ativos_por(ativos_do_dia, lambda d: inicio_do_grupo(d, "semana")),
+        por_mes=_ativos_por(ativos_do_dia, lambda d: inicio_do_grupo(d, "mes")),
         por_usuario=sorted(
             (
                 UsuarioDeAcessos(
@@ -431,21 +448,21 @@ COLUNAS_DO_CSV_DE_VIDEOS = (
 
 
 def _linhas_por_programa_do_csv(
-    base: list[UsoDoDia], por_programa: list[UsoDoDia]
+    base: list[UsoDoDia], por_programa: list[UsoDoDia], grupo: Grupo = "dia"
 ) -> list[list[object]]:
     """A quebra por dia e programa de um pedido sem filtro de programa ou usuário, com a linha "Sem programa": o que o dia tem
     a mais que os programas, como no JSON. A soma delas é a dos enviados."""
     base = [u for u in base if _tem_video(u)]
-    totais = _somas_por(base, lambda u: u.dia)
+    totais = _somas_por(base, lambda u: inicio_do_grupo(u.dia, grupo))
     programas = _somas_por(
         [u for u in por_programa if _tem_video(u) and u.programa is not None],
-        lambda u: (u.dia, u.programa or ""),
+        lambda u: (inicio_do_grupo(u.dia, grupo), u.programa or ""),
     )
     linhas: list[list[object]] = []
     for dia in sorted(totais):
         do_dia = {p: s for (d, p), s in programas.items() if d == dia}
         resto = _SomaDeUso()
-        for campo in ("enviados", "concluidos", "falhos", "horas", "segundos"):
+        for campo in ("enviados", "concluidos", "falhos", "ms", "segundos"):
             setattr(
                 resto,
                 campo,
@@ -467,7 +484,7 @@ def _linhas_por_programa_do_csv(
                 s.concluidos,
                 s.falhos,
             ]
-            + [round(s.horas, 2), s.segundos]
+            + [s.horas, s.segundos]
             for p, s in quebra
         ]
     return linhas
@@ -556,12 +573,21 @@ class RelatorioDeBuscas(BaseModel):
     por_usuario: list[QuemDeBuscas]
 
 
+def _em_ms(horas: float) -> int:
+    return round(horas * 3_600_000)
+
+
+def _horas_de_ms(ms: int) -> float:
+    # `+ 0.0` tira o sinal do zero: poucos ms negativos arredondam a `-0.0`.
+    return round(ms / 3_600_000, 2) + 0.0
+
+
 @dataclass
 class _SomaDeUso:
     enviados: int = 0
     concluidos: int = 0
     falhos: int = 0
-    horas: float = 0.0
+    ms: int = 0  # as horas concluídas em ms inteiros: a diferença é exata
     segundos: int = 0
     com_tempo: int = 0
     buscas: int = 0
@@ -571,18 +597,22 @@ class _SomaDeUso:
         self.enviados += u.videos_enviados
         self.concluidos += u.videos_concluidos
         self.falhos += u.videos_falhos
-        self.horas += u.horas_concluidas
+        self.ms += _em_ms(u.horas_concluidas)
         self.segundos += u.segundos_de_processamento
         self.com_tempo += u.videos_concluidos_com_tempo
         self.buscas += u.buscas
         self.sem_resultado += u.buscas_sem_resultado
+
+    @property
+    def horas(self) -> float:
+        return _horas_de_ms(self.ms)
 
     def videos(self) -> dict[str, Any]:
         return NumerosDeVideos(
             enviados=self.enviados,
             concluidos=self.concluidos,
             falhos=self.falhos,
-            horas_concluidas=round(self.horas, 2),
+            horas_concluidas=self.horas,
             tempo_medio_s=(
                 round(self.segundos / self.com_tempo, 1) if self.com_tempo else None
             ),
@@ -711,7 +741,7 @@ def relatorio_de_videos(
             "enviados",
             "concluidos",
             "falhos",
-            "horas",
+            "ms",
             "segundos",
             "com_tempo",
         ):
@@ -796,6 +826,11 @@ def _chave(filtro: FiltroDoPainel) -> tuple[object, ...]:
     return (filtro.desde, filtro.ate, filtro.programa, filtro.usuario)
 
 
+def _confere_programa_ou_usuario(filtro: FiltroDoPainel) -> None:
+    if filtro.programa is not None and filtro.usuario is not None:
+        raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
+
+
 def _base_de_uso(
     fonte: ResumosDeUso,
     filtro: FiltroDoPainel,
@@ -804,8 +839,7 @@ def _base_de_uso(
     """As linhas do filtro: da tabela por programa se pediu programa, senão da por pessoa.
     As duas não se cruzam: pedir os dois é erro, em vez de devolver números que um dos
     filtros não aplicou."""
-    if filtro.programa is not None and filtro.usuario is not None:
-        raise HTTPException(422, "Escolha o programa ou o usuário, não os dois")
+    _confere_programa_ou_usuario(filtro)
     if filtro.programa is not None:
         return ou_503(
             lambda: lido(
@@ -823,16 +857,33 @@ def _base_de_uso(
     )
 
 
-def _linha_do_csv(
-    u: UsoDoDia, emails: dict[str, str], numeros: Sequence[object]
-) -> list[object]:
+def _linhas_de_uso_do_csv(
+    linhas: list[UsoDoDia],
+    grupo: Grupo,
+    emails: dict[str, str],
+    numeros: Callable[[_SomaDeUso], Sequence[object]],
+) -> list[list[object]]:
+    """As linhas de uso somadas por grupo, pessoa (ou sistema) e programa, por grupo e depois
+    por programa e pessoa."""
+    somas = _somas_por(
+        linhas,
+        lambda u: (
+            inicio_do_grupo(u.dia, grupo),
+            u.programa or "",
+            u.quem_id or "",
+            u.quem_tipo or "",
+        ),
+    )
     return [
-        u.dia.isoformat(),
-        u.quem_tipo or "",
-        u.quem_id or "",
-        emails.get(u.quem_id, "") if u.quem_id else "",
-        u.programa or "",
-        *numeros,
+        [
+            dia.isoformat(),
+            tipo,
+            quem_id,
+            emails.get(quem_id, "") if quem_id else "",
+            programa,
+            *numeros(soma),
+        ]
+        for (dia, programa, quem_id, tipo), soma in sorted(somas.items())
     ]
 
 
@@ -1049,23 +1100,31 @@ def _linhas_do_csv_de_revisao(
     taxa: list[LinhaDaTaxa],
     tempo: RevisaoAgregada,
     emails: dict[str, str],
+    grupo: Grupo = "dia",
 ) -> list[list[object]]:
-    """Uma tabela só, com a coluna `indicador`: as correções por dia, pessoa, programa e
+    """Uma tabela só, com a coluna `indicador`: as correções por grupo, pessoa, programa e
     tipo; a taxa por programa e tipo (as versões somadas); o tempo por pessoa e programa."""
     linhas: list[list[object]] = []
-    for c in sorted(
+    somadas = _somar_por(
         correcoes,
-        key=lambda c: (c.dia, c.quem_id, c.programa or "", c.tipo_de_correcao or ""),
-    ):
+        lambda c: (
+            inicio_do_grupo(c.dia, grupo),
+            c.quem_id,
+            c.programa or "",
+            c.tipo_de_correcao or "",
+        ),
+        lambda c: (c.correcoes,),
+    )
+    for (dia, quem_id, programa, tipo), (feitas,) in sorted(somadas.items()):
         linhas.append(
             [
                 "correcoes",
-                c.dia.isoformat(),
-                c.quem_id,
-                emails.get(c.quem_id, ""),
-                c.programa or "",
-                c.tipo_de_correcao or "",
-                c.correcoes,
+                dia.isoformat(),
+                quem_id,
+                emails.get(quem_id, ""),
+                programa,
+                tipo,
+                feitas,
                 "",
                 "",
                 "",
@@ -1259,7 +1318,7 @@ def criar_rotas_do_painel(
         desde: date | None = None,
     ) -> Grupo:
         """Sem `agrupar`, por dia como sempre; com ele, o grupo usado vai no cabeçalho
-        `X-Agrupamento` (o `auto` diz qual escolheu). O CSV não agrupa."""
+        `X-Agrupamento` (o `auto` diz qual escolheu). O CSV usa o mesmo grupo, com o mesmo `desde`."""
         if agrupar is None:
             return "dia"
         grupo = escolhe_o_grupo(agrupar, dias, desde)
@@ -1310,40 +1369,48 @@ def criar_rotas_do_painel(
         if filtro.programa is not None:
             raise HTTPException(422, "Os acessos não têm programa")
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        linhas = _com_acesso(
-            ou_503(
-                lambda: lido(
-                    ("acessos", *_chave(filtro)),
-                    lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario),
+        linhas, emails = em_paralelo(
+            lambda: _com_acesso(
+                ou_503(
+                    lambda: lido(
+                        ("acessos", *_chave(filtro)),
+                        lambda: fonte.acessos(filtro.desde, filtro.ate, filtro.usuario),
+                    )
                 )
-            )
+            ),
+            emails_das_contas,
         )
-        emails = emails_das_contas()
+        grupo = _grupo(agrupar, (a.dia for a in linhas), resposta, filtro.desde)
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "acessos", filtro)
+            do_grupo: dict[tuple[date, str], list[AcessoDoDia]] = defaultdict(list)
+            for a in linhas:
+                do_grupo[(inicio_do_grupo(a.dia, grupo), a.uid)].append(a)
             return resposta_em_csv(
                 csv_em_texto(
                     COLUNAS_DO_CSV_DE_ACESSOS,
                     [
                         [
-                            a.dia.isoformat(),
-                            a.uid,
-                            emails.get(a.uid, ""),
-                            a.acessos,
-                            "sim" if a.ativo else "não",
+                            dia.isoformat(),
+                            uid,
+                            emails.get(uid, ""),
+                            sum(a.acessos for a in dias),
+                            "sim" if any(a.ativo for a in dias) else "não",
                             # Em São Paulo, com o deslocamento, como o `dia`; o JSON segue em UTC.
-                            a.ultimo_acesso.astimezone(SAO_PAULO).isoformat(
-                                timespec="seconds"
+                            ultimo.astimezone(SAO_PAULO).isoformat(timespec="seconds")
+                            if (
+                                ultimo := max(
+                                    (a.ultimo_acesso for a in dias if a.ultimo_acesso),
+                                    default=None,
+                                )
                             )
-                            if a.ultimo_acesso
                             else "",
                         ]
-                        for a in sorted(linhas, key=lambda a: (a.dia, a.uid))
+                        for (dia, uid), dias in sorted(do_grupo.items())
                     ],
                 ),
                 "acessos.csv",
             )
-        grupo = _grupo(agrupar, (a.dia for a in linhas), resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "acessos", filtro)
         return relatorio_de_acessos(linhas, emails, filtro, grupo)
 
@@ -1358,6 +1425,7 @@ def criar_rotas_do_painel(
         """Vídeos enviados, concluídos e com falha, horas e tempo de processamento, por dia,
         programa e usuário (ou sistema). Programa e usuário não se combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
+        _confere_programa_ou_usuario(filtro)  # antes de pedir os e-mails
         # Com `programa` a tabela por programa é a própria base.
         com_tabela_por_programa = filtro.programa is None and filtro.usuario is None
         base, por_programa, emails = em_paralelo(
@@ -1374,6 +1442,9 @@ def criar_rotas_do_painel(
             ),
             emails_das_contas,
         )
+        grupo = _grupo(
+            agrupar, (u.dia for u in base if _tem_video(u)), resposta, filtro.desde
+        )
         if formato == "csv":
             quebra_da_base = "programa" if filtro.programa is not None else "usuario"
             acessos_ao_painel.exportou(pessoa, "videos", filtro)
@@ -1381,25 +1452,22 @@ def criar_rotas_do_painel(
                 csv_em_texto(
                     COLUNAS_DO_CSV_DE_VIDEOS,
                     [
-                        [quebra_da_base]
-                        + _linha_do_csv(
-                            u,
+                        [quebra_da_base] + linha
+                        for linha in _linhas_de_uso_do_csv(
+                            [u for u in base if _tem_video(u)],
+                            grupo,
                             emails,
-                            [
-                                u.videos_enviados,
-                                u.videos_concluidos,
-                                u.videos_falhos,
-                                round(u.horas_concluidas, 2),
-                                u.segundos_de_processamento,
+                            lambda s: [
+                                s.enviados,
+                                s.concluidos,
+                                s.falhos,
+                                s.horas,
+                                s.segundos,
                             ],
-                        )
-                        for u in sorted(
-                            filter(_tem_video, base),
-                            key=lambda u: (u.dia, u.programa or "", u.quem_id or ""),
                         )
                     ]
                     + (
-                        _linhas_por_programa_do_csv(base, por_programa)
+                        _linhas_por_programa_do_csv(base, por_programa, grupo)
                         if com_tabela_por_programa
                         else []
                     ),
@@ -1408,9 +1476,6 @@ def criar_rotas_do_painel(
             )
         if filtro.programa is not None:
             por_programa = base
-        grupo = _grupo(
-            agrupar, (u.dia for u in base if _tem_video(u)), resposta, filtro.desde
-        )
         acessos_ao_painel.abriu(pessoa, "videos", filtro)
         return relatorio_de_videos(base, por_programa, emails, filtro, grupo)
 
@@ -1426,26 +1491,27 @@ def criar_rotas_do_painel(
         busca só tem programa quando foi filtrada por ele. Programa e usuário não se
         combinam: 422."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        base = _base_de_uso(fonte, filtro, lido)
-        emails = emails_das_contas()
+        _confere_programa_ou_usuario(filtro)  # antes de pedir os e-mails
+        base, emails = em_paralelo(
+            lambda: _base_de_uso(fonte, filtro, lido), emails_das_contas
+        )
+        grupo = _grupo(
+            agrupar, (u.dia for u in base if u.buscas), resposta, filtro.desde
+        )
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "buscas", filtro)
             return resposta_em_csv(
                 csv_em_texto(
                     COLUNAS_DO_CSV_DE_BUSCAS,
-                    [
-                        _linha_do_csv(u, emails, [u.buscas, u.buscas_sem_resultado])
-                        for u in sorted(
-                            (u for u in base if u.buscas),
-                            key=lambda u: (u.dia, u.programa or "", u.quem_id or ""),
-                        )
-                    ],
+                    _linhas_de_uso_do_csv(
+                        [u for u in base if u.buscas],
+                        grupo,
+                        emails,
+                        lambda s: [s.buscas, s.sem_resultado],
+                    ),
                 ),
                 "buscas.csv",
             )
-        grupo = _grupo(
-            agrupar, (u.dia for u in base if u.buscas), resposta, filtro.desde
-        )
         acessos_ao_painel.abriu(pessoa, "buscas", filtro)
         return relatorio_de_buscas(base, emails, filtro, grupo)
 
@@ -1461,45 +1527,47 @@ def criar_rotas_do_painel(
         (#265); os minutos de revisão por hora de vídeo por pessoa e por programa (#251).
         Os filtros se cruzam; a taxa não tem pessoa e vem vazia com filtro de usuário."""
         fonte = confere_o_pedido(resumos, filtro.desde, filtro.ate)
-        correcoes = ou_503(
-            lambda: lido(
-                ("correcoes", *_chave(filtro)),
-                lambda: fonte.correcoes(
-                    filtro.desde, filtro.ate, filtro.programa, filtro.usuario
-                ),
-            )
-        )
-        taxa = (
-            []
-            if filtro.usuario is not None
-            else ou_503(
+        correcoes, taxa, tempo, emails = em_paralelo(
+            lambda: ou_503(
                 lambda: lido(
-                    ("taxa", filtro.desde, filtro.ate, filtro.programa),
-                    lambda: qualidade.taxa_de_correcao(
-                        filtro.desde, filtro.ate, filtro.programa
+                    ("correcoes", *_chave(filtro)),
+                    lambda: fonte.correcoes(
+                        filtro.desde, filtro.ate, filtro.programa, filtro.usuario
                     ),
                 )
-            )
+            ),
+            lambda: (
+                []
+                if filtro.usuario is not None
+                else ou_503(
+                    lambda: lido(
+                        ("taxa", filtro.desde, filtro.ate, filtro.programa),
+                        lambda: qualidade.taxa_de_correcao(
+                            filtro.desde, filtro.ate, filtro.programa
+                        ),
+                    )
+                )
+            ),
+            lambda: ou_503(
+                lambda: lido(
+                    ("tempo_de_revisao", *_chave(filtro)),
+                    lambda: qualidade.tempo_de_revisao(
+                        filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+                    ),
+                )
+            ),
+            emails_das_contas,
         )
-        tempo = ou_503(
-            lambda: lido(
-                ("tempo_de_revisao", *_chave(filtro)),
-                lambda: qualidade.tempo_de_revisao(
-                    filtro.desde, filtro.ate, filtro.programa, filtro.usuario
-                ),
-            )
-        )
-        emails = emails_das_contas()
+        grupo = _grupo(agrupar, (c.dia for c in correcoes), resposta, filtro.desde)
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "revisao", filtro)
             return resposta_em_csv(
                 csv_em_texto(
                     COLUNAS_DO_CSV_DE_REVISAO,
-                    _linhas_do_csv_de_revisao(correcoes, taxa, tempo, emails),
+                    _linhas_do_csv_de_revisao(correcoes, taxa, tempo, emails, grupo),
                 ),
                 "revisao.csv",
             )
-        grupo = _grupo(agrupar, (c.dia for c in correcoes), resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "revisao", filtro)
         return RelatorioDeRevisao(
             desde=filtro.desde,
@@ -1539,55 +1607,49 @@ def criar_rotas_do_painel(
             )
         )
         envios = [u for u in uso if u.quem_tipo == "sistema"]
+        dias = [c.dia for c in chamadas] + [u.dia for u in envios if u.videos_enviados]
+        grupo = _grupo(agrupar, dias, resposta, filtro.desde)
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "api", filtro)
+            chamadas_somadas = _somar_por(
+                chamadas,
+                lambda c: (
+                    inicio_do_grupo(c.dia, grupo),
+                    c.quem_tipo,
+                    c.quem_id,
+                    c.metodo or "",
+                    c.rota or "",
+                ),
+                lambda c: (c.chamadas, c.erros_do_cliente, c.erros_do_servidor),
+            )
+            envios_somados = _somar_por(
+                (u for u in envios if u.videos_enviados),
+                lambda u: (
+                    inicio_do_grupo(u.dia, grupo),
+                    u.quem_tipo,
+                    u.quem_id or "",
+                ),
+                lambda u: (u.videos_enviados,),
+            )
             return resposta_em_csv(
                 csv_em_texto(
                     COLUNAS_DO_CSV_DE_API,
                     [
-                        [
-                            c.dia.isoformat(),
-                            c.quem_tipo,
-                            c.quem_id,
-                            c.metodo or "",
-                            c.rota or "",
-                            c.chamadas,
-                            c.erros_do_cliente,
-                            c.erros_do_servidor,
-                            "",
-                        ]
-                        for c in sorted(
-                            chamadas,
-                            key=lambda c: (
-                                c.dia,
-                                c.quem_id,
-                                c.rota or "",
-                                c.metodo or "",
-                            ),
+                        [dia.isoformat(), tipo, quem_id, metodo, rota, *numeros, ""]
+                        for (dia, tipo, quem_id, metodo, rota), numeros in sorted(
+                            chamadas_somadas.items(),
+                            key=lambda i: (i[0][0], i[0][2], i[0][4], i[0][3]),
                         )
                     ]
                     + [
-                        [
-                            u.dia.isoformat(),
-                            u.quem_tipo,
-                            u.quem_id,
-                            "",
-                            "",
-                            "",
-                            "",
-                            "",
-                            u.videos_enviados,
-                        ]
-                        for u in sorted(
-                            (u for u in envios if u.videos_enviados),
-                            key=lambda u: (u.dia, u.quem_id or ""),
+                        [dia.isoformat(), tipo, quem_id, "", "", "", "", "", enviados]
+                        for (dia, tipo, quem_id), (enviados,) in sorted(
+                            envios_somados.items(), key=lambda i: (i[0][0], i[0][2])
                         )
                     ],
                 ),
                 "api.csv",
             )
-        dias = [c.dia for c in chamadas] + [u.dia for u in envios if u.videos_enviados]
-        grupo = _grupo(agrupar, dias, resposta, filtro.desde)
         acessos_ao_painel.abriu(pessoa, "api", filtro)
         return relatorio_de_api(chamadas, envios, filtro, grupo)
 
@@ -1601,19 +1663,24 @@ def criar_rotas_do_painel(
         faturamento cruzado com os Jobs (#285). O custo sem dono (fixo ou sem rótulo) só
         entra sem filtro de programa ou de usuário."""
         fonte = confere_o_pedido(faturamento, filtro.desde, filtro.ate)
-        base = ou_503(
-            lambda: lido(
-                ("custo", *_chave(filtro)),
-                lambda: confere_a_moeda(
-                    fonte.custos(
-                        FiltroDeCusto(
-                            filtro.desde, filtro.ate, filtro.programa, filtro.usuario
+        base, emails = em_paralelo(
+            lambda: ou_503(
+                lambda: lido(
+                    ("custo", *_chave(filtro)),
+                    lambda: confere_a_moeda(
+                        fonte.custos(
+                            FiltroDeCusto(
+                                filtro.desde,
+                                filtro.ate,
+                                filtro.programa,
+                                filtro.usuario,
+                            )
                         )
-                    )
-                ),
-            )
+                    ),
+                )
+            ),
+            emails_das_contas,
         )
-        emails = emails_das_contas()
         if formato == "csv":
             acessos_ao_painel.exportou(pessoa, "custo", filtro)
             return resposta_em_csv(

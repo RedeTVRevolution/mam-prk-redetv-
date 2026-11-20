@@ -21,6 +21,7 @@ import os
 import sys
 import uuid
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from api import log_estruturado
@@ -35,17 +36,18 @@ from api.eventos_do_job import (
     registrar_o_fim,
     transporte_do_pubsub,
 )
-from api.modelo_do_job import Job, RepositorioDeJobs
+from api.modelo_do_job import FiltroDeJobs, Job, RepositorioDeJobs
 from api.webhook import RepositorioDeWebhooks
 
 log = logging.getLogger(__name__)
 
 
-def _id_estavel(job: Job, evento: str) -> str:
+def _id_estavel(job: Job, evento: str, sufixo: str | None = None) -> str:
     """O mesmo em toda tentativa de avisar a mesma falha: o duplicado que a repetição pode
     gerar (marca que falhou depois de publicar) é descartado por quem recebe."""
     return uuid.uuid5(
-        uuid.NAMESPACE_URL, f"mam/{evento}/{job.id}/{job.reprocessamentos}"
+        uuid.NAMESPACE_URL,
+        f"mam/{evento}/{job.id}/{job.reprocessamentos if sufixo is None else sufixo}",
     ).hex
 
 
@@ -95,7 +97,59 @@ def avisar_o_fim(
     return marcar("fim_avisado_no_reprocessamento")
 
 
-def _dependencias(
+def _tirar(repositorio: RepositorioDeJobs, job_id: str, parte: str) -> None:
+    """A marca durável de que a parte saiu."""
+    repositorio.trocar(
+        job_id,
+        lambda atual: {"fim_a_avisar": [p for p in atual.fim_a_avisar if p != parte]},
+    )
+
+
+def avisar_fins_pendentes(
+    repositorio: RepositorioDeJobs,
+    webhooks: RepositorioDeWebhooks,
+    publicador: PublicadorDeEventos,
+    eventos: Eventos,
+    agora: datetime,
+) -> int:
+    """O fim dos uploads que a varredura expirou (#782): publica o que falta de cada Job com
+    `fim_a_avisar` e tira a parte de lá logo depois de o evento sair; devolve quantos Jobs
+    ficaram sem pendência. Cada evento leva a hora `agora` (a tabela dos Jobs e os resumos
+    só leem os últimos dias pela hora do evento). O do webhook mantém o id entre tentativas;
+    o do painel ganha um novo a cada uma, porque a repetição de um evento já publicado cairia
+    fora da janela de deduplicação e a falha seria contada de novo. A falha de uma parte não
+    segura a outra nem os outros Jobs: vai ao log e a próxima varredura repete só o que falta."""
+    resolvidos = 0
+    for job in repositorio.consultar(
+        FiltroDeJobs(com_fim_a_avisar=True, na_lixeira=None)
+    ).jobs:
+        sem_falha = True
+        try:
+            if "webhook" in job.fim_a_avisar:
+                # `False` (sem webhook cadastrado) também encerra a parte.
+                enviar_o_fim(
+                    job,
+                    webhooks,
+                    publicador,
+                    agora,
+                    _id_estavel(job, "webhook", "upload_expirado"),
+                )
+                _tirar(repositorio, job.id, "webhook")
+        except Exception:
+            sem_falha = False
+            log.exception("não consegui avisar o fim do upload expirado de %s", job.id)
+        try:
+            if "uso" in job.fim_a_avisar:
+                registrar_o_fim(eventos, job, agora, levantar=True)
+                _tirar(repositorio, job.id, "uso")
+        except Exception:
+            sem_falha = False
+            log.exception("não consegui avisar o fim do upload expirado de %s", job.id)
+        resolvidos += sem_falha
+    return resolvidos
+
+
+def dependencias_do_aviso(
     cliente: Any, ambiente: Mapping[str, str]
 ) -> tuple[RepositorioDeJobs, RepositorioDeWebhooks, PublicadorDeEventos, Eventos]:
     from api.nuvem import RepositorioDeWebhooksFirestore, RepositorioFirestore
@@ -111,19 +165,23 @@ def _dependencias(
     )
 
 
+def exigir_os_topicos_do_aviso(ambiente: Mapping[str, str]) -> None:
+    exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_EVENTOS")
+    # Sem o tópico de uso, `eventos_do_ambiente` descartaria o evento em silêncio.
+    exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_USO")
+
+
 def main(ambiente: Mapping[str, str] = os.environ) -> int:
     try:
         projeto = exigir_do_ambiente(ambiente, "GCP_PROJECT_ID")
         job_id = exigir_do_ambiente(ambiente, "JOB_ID")
-        exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_EVENTOS")
-        # Sem o tópico de uso, `eventos_do_ambiente` descartaria o evento em silêncio.
-        exigir_do_ambiente(ambiente, "PUBSUB_TOPICO_USO")
+        exigir_os_topicos_do_aviso(ambiente)
     except FaltaNoAmbiente as e:
         print(f"erro: {e}", file=sys.stderr)
         return 2
     cliente = cliente_do_firestore(projeto, ambiente)
     try:
-        avisar_o_fim(job_id, *_dependencias(cliente, ambiente))
+        avisar_o_fim(job_id, *dependencias_do_aviso(cliente, ambiente))
     except Exception:
         # Saída com erro: o Cloud Run repete o Job (`max_retries`) e a repetição envia
         # só o que ainda não saiu.

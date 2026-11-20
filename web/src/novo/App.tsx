@@ -25,8 +25,11 @@ function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuari
   if (rota.tipo === 'raiz') return null
   // O login recente que a purga pede passa pela saída: a Lixeira guarda o pedido e o reabre na volta.
   if (rota.tipo === 'admin') return <Administracao aba={rota.aba} busca={rota.busca} usuario={usuario} aoEntrarDeNovo={aoSair} />
-  // O front só esconde o painel; quem barra é a API.
-  if (rota.tipo === 'nao_encontrada' || (rota.tipo === 'painel' && !usuario.permissoes.includes('painel.ver'))) {
+  // O front só esconde as telas; quem barra é a API.
+  const semPermissao =
+    (rota.tipo === 'painel' && !usuario.permissoes.includes('painel.ver')) ||
+    ((rota.tipo === 'tempo_de_tela' || rota.tipo === 'marcas') && !usuario.permissoes.includes('decupagem.ver'))
+  if (rota.tipo === 'nao_encontrada' || semPermissao) {
     return (
       <div className="m-auto grid justify-items-center gap-2 p-8 text-center">
         <p>Página não encontrada.</p>
@@ -53,11 +56,14 @@ function AreaDeTrabalho({ rota, usuario, aoSair }: { rota: Rota; usuario: Usuari
       </Suspense>
     )
   }
-  return (
-    <Suspense>
-      <Marcas filtros={rota.filtros} />
-    </Suspense>
-  )
+  if (rota.tipo === 'marcas') {
+    return (
+      <Suspense>
+        <Marcas filtros={rota.filtros} />
+      </Suspense>
+    )
+  }
+  return null
 }
 
 /** A sessão aberta. Montada de novo a cada login: o cache das consultas nunca passa de uma pessoa a outra. */

@@ -2,23 +2,29 @@
 das linhas no BigQuery e o Terraform."""
 
 import json
+import re
+import sqlite3
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from api.ambiente import FaltaNoAmbiente
 from api.erros import ServicoIndisponivel
+from api.fuso import periodo_em_utc
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
-from api.qualidade_do_painel import _periodo
-from api.taxa_de_correcao import calcular
+from api.revisao import Pulso
+from api.taxa_de_correcao import ContagemNaoLida, calcular
 from api.taxa_diaria import (
     ItensEmMemoria,
     TabelaDaTaxaBigQuery,
     atualizar,
     dias_recentes,
     linhas_do_dia,
+    main,
     preencher_itens,
 )
 from api.tests.test_taxa_de_correcao import BASE, Decupagens, _c, _mundo, _pulsar
@@ -41,7 +47,7 @@ def _mundo_com_itens() -> Any:
 
 def _dia(d: date) -> tuple[datetime | None, datetime | None]:
     """O período que o painel pede para o dia `d` (dia de São Paulo)."""
-    return _periodo(d, d)
+    return periodo_em_utc(d, d)
 
 
 def _somar(linhas: list[LinhaDiaria]) -> dict[tuple[Any, ...], tuple[int, int]]:
@@ -94,7 +100,7 @@ def test_cada_dia_da_tabela_e_o_calculo_de_hoje_sobre_aquele_dia() -> None:
                 jobs,
                 itens,
                 correcoes,
-                revisao,
+                revisao.todas(),
                 lambda job_id: json.loads(b"".join(decupagens.abrir_decupagem(job_id))),
             )
         )
@@ -105,7 +111,9 @@ def test_o_caso_de_hoje_tem_correcao_pendente_aprovada_e_reprocessada() -> None:
     jobs, _, itens, correcoes, revisao = _caso_de_hoje()
 
     def contagem(d: int, tipo: str) -> int:
-        linhas = linhas_do_dia(DIA + timedelta(days=d), jobs, itens, correcoes, revisao)
+        linhas = linhas_do_dia(
+            DIA + timedelta(days=d), jobs, itens, correcoes, revisao.todas()
+        )
         return sum(x.correcoes for x in linhas if x.tipo == tipo)
 
     assert contagem(2, "pessoa.nao_e") == 1  # conta no dia da aprovação
@@ -126,7 +134,7 @@ def test_o_dia_e_o_de_sao_paulo_como_o_do_painel() -> None:
     )
 
     def do_fama(d: date) -> int:
-        linhas = linhas_do_dia(d, jobs, itens, correcoes, revisao)
+        linhas = linhas_do_dia(d, jobs, itens, correcoes, revisao.todas())
         return sum(
             x.correcoes
             for x in linhas
@@ -141,28 +149,95 @@ def test_as_linhas_trazem_o_dia_o_programa_a_versao_e_so_jobs_concluidos() -> No
     jobs, _, itens, correcoes, revisao = _mundo_com_itens()
     jobs.salvar(jobs.obter("j1").model_copy(update={"estado": "falhou"}))
 
-    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao)
+    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao.todas())
 
     assert {(x.dia, x.job_id, x.programa, x.versao_pipeline) for x in linhas} == {
         (DIA, "j2", "Jornal", "v2")
     }
 
 
-def test_job_sem_contagem_fica_de_fora_sem_derrubar_o_dia() -> None:
+def _tabela_com_uma_linha() -> TabelaDaTaxaEmMemoria:
+    tabela = TabelaDaTaxaEmMemoria()
+    for dia in (DIA - timedelta(days=1), DIA):  # o primeiro dia também tem linha antiga
+        tabela.linhas.append(
+            LinhaDiaria(dia, "j1", "Velho", None, "pessoa.renomear", 9, 9)
+        )
+    return tabela
+
+
+def _rodada_que_falha(
+    itens: Any, jobs: Any, correcoes: Any, revisao: Any, **kw: Any
+) -> None:
+    tabela = _tabela_com_uma_linha()
+    antes = list(tabela.linhas)
+    with pytest.raises(ContagemNaoLida, match="j1"):
+        atualizar(
+            [DIA - timedelta(days=1), DIA],
+            jobs,
+            itens,
+            correcoes,
+            revisao,
+            tabela,
+            **kw,
+        )
+    assert tabela.linhas == antes  # nada foi substituído, nem os dias que deram certo
+
+
+def test_job_sem_objeto_de_contagem_derruba_a_rodada_e_deixa_a_tabela() -> None:
     jobs, _, itens, correcoes, revisao = _mundo_com_itens()
     itens.apagar("j1")
 
-    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao)
+    _rodada_que_falha(itens, jobs, correcoes, revisao)
 
-    assert {x.programa for x in linhas} == {"Jornal"}
-    assert {x.versao_pipeline for x in linhas} == {"v2"}
+
+def test_job_com_contagem_ilegivel_derruba_a_rodada_e_deixa_a_tabela() -> None:
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+
+    class Ilegivel:
+        def ler_itens(self, job_id: str) -> Any:
+            if job_id == "j1":
+                raise ValueError("json")
+            return itens.ler_itens(job_id)
+
+    _rodada_que_falha(Ilegivel(), jobs, correcoes, revisao)
+
+
+def test_decupagem_ilegivel_na_reconciliacao_derruba_a_rodada() -> None:
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+    # correção de j1 feita sobre outro JSON: a reconciliação lê a decupagem
+    correcoes.acrescentar(_c("r", "j1", {"versao": "antiga"}, dias=0))
+
+    def corrompida(_job_id: str) -> dict[str, Any]:
+        raise ValueError("json")
+
+    _rodada_que_falha(itens, jobs, correcoes, revisao, modelo_do_job=corrompida)
+
+
+def test_tipo_sem_contagem_tira_so_a_linha_dele_tambem_na_diaria() -> None:
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+    pronta = itens.ler_itens("j1")
+    itens.gravar_itens(
+        "j1",
+        ItensDaDecupagem(
+            versao_do_modelo=pronta.versao_do_modelo,
+            versao_pipeline=pronta.versao_pipeline,
+            itens={t: n for t, n in pronta.itens.items() if not t.startswith("pauta.")},
+        ),
+    )
+    tabela = TabelaDaTaxaEmMemoria()
+
+    atualizar([DIA], jobs, itens, correcoes, revisao, tabela)
+
+    do_j1 = {x.tipo for x in tabela.linhas if x.job_id == "j1"}
+    assert "pessoa.renomear" in do_j1
+    assert not any(t.startswith("pauta.") for t in do_j1)
 
 
 def test_dois_jobs_no_mesmo_grupo_e_dia_ficam_em_linhas_separadas() -> None:
     jobs, _, itens, correcoes, revisao = _mundo_com_itens()
     _pulsar(revisao, "j4")
 
-    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao)
+    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao.todas())
 
     assert {
         (x.job_id, x.correcoes, x.itens) for x in linhas if x.tipo == "pessoa.renomear"
@@ -234,13 +309,14 @@ class _Transporte:
 
 
 CONFIG = ConfigDaTaxa("proj", "decupagens", "regiao-x", "taxa")
+EVENTOS = "eventos"
 
 
 def test_o_bigquery_troca_os_dias_num_unico_merge() -> None:
     transporte = _Transporte()
     linhas = [LinhaDiaria(DIA, "j1", "Jornal", None, "pessoa.renomear", 2, 10)]
 
-    TabelaDaTaxaBigQuery(CONFIG, transporte).substituir([DIA], linhas)
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS).substituir([DIA], linhas)
 
     [corpo] = transporte.corpos
     consulta = corpo["query"]
@@ -277,11 +353,147 @@ def test_o_bigquery_troca_os_dias_num_unico_merge() -> None:
     ]
 
 
+def _origem_no_sqlite(consulta: str) -> str:
+    """A subconsulta `USING (...)` do MERGE, traduzida só nas funções do BigQuery."""
+    origem = consulta.split("USING (", 1)[1].split(") AS s\nON ", 1)[0]
+    origem = origem.replace("`proj.decupagens.eventos`", "eventos")
+    origem = origem.replace(
+        "FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(@linhas))) AS l",
+        "FROM json_each(:linhas) AS l",
+    )
+    origem = re.sub(r"JSON_VALUE\(l, ('[^']*')\)", r"json_extract(l.value, \1)", origem)
+    return origem.replace("AS INT64", "AS INTEGER")
+
+
+def test_o_merge_nao_reinsere_o_job_que_a_purga_marcou() -> None:
+    transporte = _Transporte()
+    linhas = [
+        LinhaDiaria(DIA, job, "Jornal", None, "pessoa.renomear", 2, 10)
+        for job in ("purgado", "antigo", "vivo")
+    ]
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS).substituir([DIA], linhas)
+    [corpo] = transporte.corpos
+    banco = sqlite3.connect(":memory:")
+    banco.execute("CREATE TABLE eventos (tipo, job_id, quando)")
+    banco.executemany(
+        "INSERT INTO eventos VALUES (?, ?, ?)",
+        [
+            ("purga", "purgado", "2026-11-20T10:00:00+00:00"),
+            ("purga", "antigo", "2020-01-01T00:00:00+00:00"),  # fora de qualquer janela
+            ("envio", "vivo", "2026-11-20T10:00:00+00:00"),  # evento comum não barra
+        ],
+    )
+    [linhas_json] = [
+        p["parameterValue"]["value"]
+        for p in corpo["queryParameters"]
+        if p["name"] == "linhas"
+    ]
+
+    origem = banco.execute(
+        _origem_no_sqlite(corpo["query"]), {"linhas": linhas_json}
+    ).fetchall()
+
+    assert [linha[1] for linha in origem] == ["vivo"]
+
+
+def test_a_tabela_de_eventos_vem_do_ambiente_e_o_nome_dela_chega_ao_merge() -> None:
+    transporte = _Transporte()
+    ambiente = {
+        "GCP_PROJECT_ID": "proj",
+        "BIGQUERY_DATASET": "decupagens",
+        "BIGQUERY_REGIAO": "regiao-x",
+        "BIGQUERY_TABELA_DA_TAXA": "taxa",
+        "BIGQUERY_TABELA_DE_EVENTOS": "eventos",
+    }
+
+    TabelaDaTaxaBigQuery.do_ambiente(ambiente, transporte).substituir([DIA], [])
+
+    assert "`proj.decupagens.eventos`" in transporte.corpos[0]["query"]
+    del ambiente["BIGQUERY_TABELA_DE_EVENTOS"]
+    with pytest.raises(FaltaNoAmbiente):
+        TabelaDaTaxaBigQuery.do_ambiente(ambiente, transporte)
+    # O leitor da web usa a mesma configuração e não precisa da tabela de eventos.
+    assert ConfigDaTaxa.do_ambiente(ambiente).tabela == "taxa"
+
+
+AMBIENTE_DO_COMANDO = {
+    "GCP_PROJECT_ID": "proj",
+    "BUCKET_ACEITOS": "aceitos",
+    "BUCKET_DECUPAGENS": "decupagens-b",
+    "BIGQUERY_DATASET": "decupagens",
+    "BIGQUERY_REGIAO": "regiao-x",
+    "BIGQUERY_TABELA_DA_TAXA": "taxa",
+    "BIGQUERY_TABELA_DE_EVENTOS": "eventos",
+}
+
+
+def _comando_com_dubles(
+    monkeypatch: pytest.MonkeyPatch, ambiente: dict[str, str]
+) -> _Transporte:
+    jobs, decupagens, itens, correcoes, revisao = _mundo_com_itens()
+    transporte = _Transporte()
+    for nome, valor in ambiente.items():
+        monkeypatch.setenv(nome, valor)
+    for nome in set(AMBIENTE_DO_COMANDO) - set(ambiente):
+        monkeypatch.delenv(nome, raising=False)
+    alvo = "api.taxa_diaria."
+    monkeypatch.setattr(alvo + "ClienteStorage", lambda **_: object())
+    monkeypatch.setattr(
+        alvo + "DecupagensStorage",
+        SimpleNamespace(do_ambiente=lambda *_: decupagens),
+    )
+    monkeypatch.setattr(alvo + "transporte_http", lambda _projeto: transporte)
+    monkeypatch.setattr(alvo + "cliente_do_firestore", lambda _projeto: object())
+    monkeypatch.setattr(alvo + "RepositorioFirestore", lambda _banco: jobs)
+    monkeypatch.setattr(alvo + "ItensNoStorage", lambda *_: itens)
+    monkeypatch.setattr(alvo + "RepositorioDeCorrecoesFirestore", lambda _: correcoes)
+    monkeypatch.setattr(alvo + "RepositorioDeRevisaoFirestore", lambda _: revisao)
+    return transporte
+
+
+@pytest.mark.parametrize("argumentos", [["2"], ["PREENCHER", "2"]])
+def test_o_comando_leva_a_tabela_de_eventos_ao_merge_na_rodada_e_na_carga(
+    monkeypatch: pytest.MonkeyPatch, argumentos: list[str]
+) -> None:
+    transporte = _comando_com_dubles(monkeypatch, AMBIENTE_DO_COMANDO)
+
+    assert main(argumentos) == 0
+
+    assert transporte.corpos
+    assert all("`proj.decupagens.eventos`" in c["query"] for c in transporte.corpos)
+
+
+def test_o_comando_sem_a_tabela_de_eventos_sai_com_2_sem_chamar_o_bigquery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ambiente = {
+        k: v
+        for k, v in AMBIENTE_DO_COMANDO.items()
+        if k != "BIGQUERY_TABELA_DE_EVENTOS"
+    }
+    transporte = _comando_com_dubles(monkeypatch, ambiente)
+
+    assert main([]) == 2
+    assert transporte.corpos == []
+
+
+def test_o_comando_nao_promete_gravar_o_que_o_merge_pode_descartar(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _comando_com_dubles(monkeypatch, AMBIENTE_DO_COMANDO)
+
+    main(["2"])
+
+    saida = capsys.readouterr().out
+    assert "linhas enviadas" in saida
+    assert "gravadas em" not in saida
+
+
 def test_o_merge_que_nao_termina_no_prazo_e_erro() -> None:
     with pytest.raises(RuntimeError):
-        TabelaDaTaxaBigQuery(CONFIG, lambda corpo: {"jobComplete": False}).substituir(
-            [DIA], []
-        )
+        TabelaDaTaxaBigQuery(
+            CONFIG, lambda corpo: {"jobComplete": False}, EVENTOS
+        ).substituir([DIA], [])
 
 
 def test_os_dias_sao_trocados_em_lotes_para_caber_no_parametro() -> None:
@@ -289,7 +501,7 @@ def test_os_dias_sao_trocados_em_lotes_para_caber_no_parametro() -> None:
     dias = [DIA + timedelta(days=n) for n in range(400)]
     linhas = [LinhaDiaria(d, "j1", "J", None, "t", 1, 1) for d in dias]
 
-    TabelaDaTaxaBigQuery(CONFIG, transporte, dias_por_merge=100).substituir(
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS, dias_por_merge=100).substituir(
         dias, linhas
     )
 
@@ -305,7 +517,7 @@ def test_muitas_linhas_em_poucos_dias_respeitam_os_bytes_sem_partir_dia() -> Non
         for d in dias[1:]  # um dia vazio também precisa ser substituído
     ]
 
-    TabelaDaTaxaBigQuery(CONFIG, transporte).substituir(dias, linhas)
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS).substituir(dias, linhas)
 
     assert len(transporte.corpos) > 1
     dias_trocados: set[str] = set()
@@ -337,7 +549,7 @@ def test_dia_acima_do_teto_vai_sozinho_sem_perder_linhas(
         for n in range(quantidade)
     ]
 
-    TabelaDaTaxaBigQuery(CONFIG, transporte).substituir(dias, linhas)
+    TabelaDaTaxaBigQuery(CONFIG, transporte, EVENTOS).substituir(dias, linhas)
 
     assert len(transporte.corpos) == 3
     for corpo, dia, quantidade in zip(transporte.corpos, dias, [1, 20, 1], strict=True):
@@ -380,6 +592,7 @@ def test_o_job_agendado_recebe_os_nomes_do_terraform() -> None:
         "BUCKET_DECUPAGENS",
         "BIGQUERY_DATASET",
         "BIGQUERY_TABELA_DA_TAXA",
+        "BIGQUERY_TABELA_DE_EVENTOS",
         "BIGQUERY_REGIAO",
     ):
         assert f'"{variavel}"' in tf
@@ -387,3 +600,75 @@ def test_o_job_agendado_recebe_os_nomes_do_terraform() -> None:
     assert "google_cloud_scheduler_job" in tf
     main = (MAM.parent.parent / "main.tf").read_text()
     assert 'output "bigquery_tabela_da_taxa"' in main
+    assert 'output "bigquery_tabela_de_eventos"' in tf
+    for raiz in (
+        main,
+        (MAM.parent.parent / "ambientes" / "prod" / "main.tf").read_text(),
+    ):
+        assert "module.mam.bigquery_tabela_de_eventos" in raiz
+
+
+class _RevisaoQueConta:
+    def __init__(self, revisao: Any) -> None:
+        self._revisao = revisao
+        self.leituras: list[datetime | None] = []
+
+    def todas(self, desde: datetime | None = None) -> Any:
+        self.leituras.append(desde)
+        return self._revisao.todas(desde)
+
+
+def test_atualizar_grava_cada_job_no_dia_de_sao_paulo_do_pulso_com_uma_leitura() -> (
+    None
+):
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+    # j4 e j3 só têm pulso (j3 tem correção, mas só em 12/11). A virada do dia de São
+    # Paulo é 03h UTC: 02h59 de 03/11 ainda é 02/11; 03h00 já é 03/11.
+    for job, quando in (
+        ("j4", datetime(2026, 11, 3, 2, 59, tzinfo=UTC)),
+        ("j3", datetime(2026, 11, 3, 3, 0, tzinfo=UTC)),
+    ):
+        revisao.aplicar(
+            Pulso(job_id=job, uid="u9", email="u9@x", quando=quando, evento="inicio"),
+            300,
+        )
+    dias = [date(2026, 11, 3), date(2026, 11, 2)]
+    contando = _RevisaoQueConta(revisao)
+    tabela = TabelaDaTaxaEmMemoria()
+
+    gravadas = atualizar(dias, jobs, itens, correcoes, contando, tabela)  # type: ignore[arg-type]
+
+    assert {(x.dia, x.job_id) for x in tabela.linhas} == {
+        (date(2026, 11, 2), "j1"),
+        (date(2026, 11, 2), "j2"),
+        (date(2026, 11, 2), "j4"),
+        (date(2026, 11, 3), "j3"),
+    }
+    assert gravadas == len(tabela.linhas)
+    assert contando.leituras == [
+        periodo_em_utc(date(2026, 11, 2), date(2026, 11, 2))[0]
+    ]
+
+
+def test_uma_rodada_de_365_dias_le_as_medidas_uma_vez() -> None:
+    jobs, _, itens, correcoes, revisao = _caso_de_hoje()
+    contando = _RevisaoQueConta(revisao)
+
+    atualizar(
+        dias_recentes(DIA, 365),
+        jobs,
+        itens,
+        correcoes,
+        contando,  # type: ignore[arg-type]
+        TabelaDaTaxaEmMemoria(),
+    )
+
+    assert len(contando.leituras) == 1
+
+
+def test_rodada_sem_dias_nao_le_as_medidas() -> None:
+    jobs, _, itens, correcoes, revisao = _caso_de_hoje()
+    contando = _RevisaoQueConta(revisao)
+
+    assert atualizar([], jobs, itens, correcoes, contando, TabelaDaTaxaEmMemoria()) == 0  # type: ignore[arg-type]
+    assert contando.leituras == []

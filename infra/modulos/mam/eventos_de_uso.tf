@@ -2,7 +2,7 @@
 # uma assinatura do BigQuery grava cada mensagem na tabela `eventos_de_uso`, no dataset das
 # decupagens, para o painel da diretoria. A tabela tem as colunas do esquema do tópico.
 locals {
-  quem_publica_uso         = toset(["web", "validacao", "transcricao", "ocr", "analise", "fim"])
+  quem_publica_uso         = toset(["web", "validacao", "transcricao", "ocr", "analise", "fim", "purga"])
   tabela_de_eventos_de_uso = "eventos_de_uso"
 }
 
@@ -36,7 +36,7 @@ resource "google_bigquery_table" "eventos_de_uso" {
   clustering = ["tipo", "quem_id"]
   schema = jsonencode([
     { name = "id", type = "STRING", mode = "REQUIRED", description = "Id do evento; a mesma ação pode chegar duas vezes, descarte a repetida por ele" },
-    { name = "tipo", type = "STRING", mode = "REQUIRED", description = "login, envio, fim_de_processamento, busca, correcao ou chamada_de_api" },
+    { name = "tipo", type = "STRING", mode = "REQUIRED", description = "login, envio, fim_de_processamento, busca, correcao, chamada_de_api ou purga (marcador da purga, gravado direto, que os resumos ignoram)" },
     { name = "quando", type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "quem_tipo", type = "STRING", mode = "REQUIRED", description = "usuario ou sistema" },
     { name = "quem_id", type = "STRING", mode = "REQUIRED", description = "uid ou nome do sistema; nunca nome nem e-mail" },
@@ -60,6 +60,7 @@ resource "google_bigquery_table" "eventos_de_uso" {
     { name = "segundos_de_processamento", type = "INTEGER", mode = "NULLABLE", description = "Só no fim de processamento: do registro do Job ao fim" },
     { name = "n_resultados", type = "INTEGER", mode = "NULLABLE", description = "Só na busca: quantos vídeos trouxe; 0 é busca sem resultado" },
     { name = "duracao_do_video_ms", type = "INTEGER", mode = "NULLABLE", description = "Só no fim de processamento: a duração do vídeo, para o painel somar as horas sem ler os momentos" },
+    { name = "criado_em", type = "TIMESTAMP", mode = "NULLABLE", description = "Só no marcador da purga: quando o Job foi criado (fica fora do esquema do tópico: o marcador não passa por ele)" },
   ])
 }
 

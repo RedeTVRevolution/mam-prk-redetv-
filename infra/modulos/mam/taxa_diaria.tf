@@ -37,6 +37,11 @@ output "bigquery_tabela_da_taxa" {
   value       = local.tabela_da_taxa_de_correcao
 }
 
+output "bigquery_tabela_de_eventos" {
+  description = "Tabela dos eventos de uso, onde está o marcador da purga: BIGQUERY_TABELA_DE_EVENTOS"
+  value       = local.tabela_de_eventos_de_uso
+}
+
 resource "google_cloud_run_v2_job" "taxa_diaria" {
   name                = "mam-taxa-diaria"
   location            = var.regiao
@@ -81,6 +86,10 @@ resource "google_cloud_run_v2_job" "taxa_diaria" {
         env {
           name  = "BIGQUERY_TABELA_DA_TAXA"
           value = local.tabela_da_taxa_de_correcao
+        }
+        env {
+          name  = "BIGQUERY_TABELA_DE_EVENTOS"
+          value = local.tabela_de_eventos_de_uso
         }
         env {
           name  = "BIGQUERY_REGIAO"

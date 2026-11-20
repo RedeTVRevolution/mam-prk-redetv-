@@ -369,3 +369,19 @@ def test_a_varredura_diaria_retoma_as_fusoes_e_a_falha_nao_segura_a_purga() -> N
 
     assert retomadas == ["x"]
     assert mundo.jobs.obter("j1") is None and mundo2.jobs.obter("j1") is None
+
+
+def test_a_purga_automatica_sem_a_colecao_da_busca_sai_com_codigo_2(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from api.purga import main
+
+    ambiente = {
+        "GCP_PROJECT_ID": "p",
+        "BUCKET_QUARENTENA": "q",
+        "BUCKET_ACEITOS": "a",
+        "BUCKET_DECUPAGENS": "d",
+        "BUCKET_REFERENCIAS": "r",
+    }
+    assert main(ambiente) == 2
+    assert "BUSCA_COLECAO" in capsys.readouterr().err

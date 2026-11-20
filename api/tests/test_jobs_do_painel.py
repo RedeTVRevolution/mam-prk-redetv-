@@ -3,6 +3,7 @@ uso montados à mão; a carga dos Jobs antigos e o Terraform da tabela."""
 
 import re
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -100,7 +101,7 @@ def test_o_job_criado_chega_com_programa_dono_e_data() -> None:
         "estado": "em_andamento",
         "criado_em": "2026-11-01T12:00:00+00:00",
         "concluido_em": None,
-        "atualizado_em": "2026-11-01T12:00:00+00:00",
+        "atualizado_em": None,
     }
 
 
@@ -142,8 +143,6 @@ def test_o_job_concluido_traz_estado_duracao_e_dia_do_fim() -> None:
     assert linha["estado"] == "concluido"
     assert linha["duracao_ms"] == 7_200_000
     assert linha["criado_em"] == "2026-11-01T12:00:00+00:00"
-    assert linha["concluido_em"] == "2026-11-01T13:00:00+00:00"
-    assert linha["atualizado_em"] == "2026-11-01T13:00:00+00:00"
 
 
 def test_o_job_de_sistema_tem_o_sistema_como_dono() -> None:
@@ -185,7 +184,6 @@ def test_o_reprocessado_troca_o_fim_e_mantem_criacao_e_dono() -> None:
     assert linha["programa"] == "Hoje"
     assert linha["quem_id"] == "ana"
     assert linha["criado_em"] == "2026-11-01T12:00:00+00:00"
-    assert linha["concluido_em"] == "2026-11-05T09:00:00+00:00"
 
 
 def test_o_fim_sem_duracao_nao_apaga_a_que_ja_havia() -> None:
@@ -226,7 +224,7 @@ def test_job_que_nao_teve_evento_na_janela_fica_como_esta() -> None:
     b = _banco()
     b.execute(
         "INSERT INTO jobs_do_painel VALUES "
-        "('antigo', 'Hoje', 10, 'usuario', 'bia', 'concluido', 'a', 'b', 'c')"
+        "('antigo', 'Hoje', 10, 'usuario', 'bia', 'concluido', 'a', NULL, NULL)"
     )
     _evento(b, "e1", "envio", "2026-11-01T12:00:00+00:00", job_id="v1")
     _rodar(b)
@@ -249,6 +247,15 @@ def test_as_colunas_da_tabela_do_terraform_sao_as_do_sql() -> None:
     nomes = re.findall(r'^    \{ name = "(\w+)"', TF, re.MULTILINE)
 
     assert nomes == COLUNAS_DA_TABELA
+    # Sem leitor nem escritor, à espera da remoção num deploy seguinte: nenhuma é exigida.
+    assert re.search(r'"atualizado_em", type = "TIMESTAMP", mode = "NULLABLE"', TF)
+
+
+def test_nenhum_escritor_cita_as_colunas_sem_leitor() -> None:
+    codigo = (Path(__file__).parents[1] / "jobs_do_painel.py").read_text()
+    for texto in (SQL, codigo):
+        assert "concluido_em" not in texto
+        assert "atualizado_em" not in texto
 
 
 def test_a_tabela_e_particionada_por_dia_e_agrupada_por_programa() -> None:
@@ -304,17 +311,14 @@ def test_a_linha_do_job_concluido_de_usuario() -> None:
         quem_id="ana",
         estado="concluido",
         criado_em=datetime(2026, 11, 1, 12, tzinfo=UTC),
-        concluido_em=datetime(2026, 11, 1, 13, tzinfo=UTC),
-        atualizado_em=datetime(2026, 11, 1, 13, tzinfo=UTC),
     )
 
 
-def test_a_linha_do_job_de_sistema_em_andamento_nao_tem_conclusao() -> None:
+def test_a_linha_do_job_de_sistema_em_andamento() -> None:
     linha = linha_do_job(_job(sistema="cms", estado="analisando", duracao_s=None))
 
     assert (linha.quem_tipo, linha.quem_id) == ("sistema", "cms")
     assert linha.estado == "em_andamento"
-    assert linha.concluido_em is None
     assert linha.duracao_ms is None
 
 
@@ -322,7 +326,6 @@ def test_a_linha_do_job_cancelado_fecha_com_o_estado_dele() -> None:
     linha = linha_do_job(_job(estado="cancelado"))
 
     assert linha.estado == "cancelado"
-    assert linha.concluido_em == linha.atualizado_em
 
 
 class _TabelaQueContaLotes(TabelaEmMemoria):
@@ -330,7 +333,7 @@ class _TabelaQueContaLotes(TabelaEmMemoria):
         super().__init__()
         self.lotes: list[int] = []
 
-    def gravar(self, linhas: list[LinhaDoJob]) -> None:
+    def gravar(self, linhas: Sequence[LinhaDoJob]) -> None:
         self.lotes.append(len(linhas))
         super().gravar(linhas)
 

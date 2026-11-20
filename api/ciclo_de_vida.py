@@ -72,6 +72,7 @@ def transitar(
     timecode_origem: str | None = None,
     taxa_de_quadros: float | None = None,
     versao_pipeline: str | None = None,
+    fim_a_avisar: Sequence[Literal["webhook", "uso"]] | None = None,
 ) -> Job | None:
     """O Job já em `para`, ou `None` se ele não estava mais em `de`."""
     if para not in TRANSICOES[de]:
@@ -94,6 +95,8 @@ def transitar(
         mudancas["taxa_de_quadros"] = taxa_de_quadros
     if versao_pipeline is not None:
         mudancas["versao_pipeline"] = versao_pipeline
+    if fim_a_avisar is not None:
+        mudancas["fim_a_avisar"] = list(fim_a_avisar)
     return repositorio.transitar(job_id, de, mudancas)
 
 
