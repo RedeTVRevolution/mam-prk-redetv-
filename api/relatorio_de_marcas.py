@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
-from typing import Annotated, Any, Literal, Protocol, get_args
+from typing import Annotated, Any, Literal, NamedTuple, Protocol, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -35,11 +35,12 @@ from api.copia_bigquery import (
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.erros import lido
+from api.fuso import agora_em_sao_paulo
 from api.jobs import programas_do_pedido
 from api.lixeira_na_leitura import PurgasDeMarca
 from api.marcas import CatalogoDeMarcas, MarcasCanonicas
 from api.modelo_do_job import RepositorioDeJobs
-from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
+from api.periodo_padrao import Periodo, dependencia_do_periodo
 from api.quem_conta import QuemConta
 from api.relatorios import (
     LIMITE_DA_PAGINA,
@@ -157,15 +158,15 @@ def ranking_em_python(
 ) -> "tuple[list[MarcaResumida], TotalDasMarcas]":
     """O ranking e os totais do período, a partir das somas; a página vai de `depois`
     a `limite + 1` itens (o que passa do limite diz que há mais)."""
-    marcas = relatorio(somas)
+    marcas = _linhas(somas)
     total = TotalDasMarcas(
         marcas=len(marcas),
         insercoes=sum(m.insercoes for m in marcas),
         tempo_ms=sum(m.tempo_ms for m in marcas),
-        videos=len({i.job_id for m in marcas for i in m.lista}),
+        videos=len({s.job_id for s in somas}),
     )
     pagina = marcas[depois : depois + limite + 1]
-    return [MarcaResumida(**m.model_dump(exclude={"lista"})) for m in pagina], total
+    return [MarcaResumida(**m._asdict()) for m in pagina], total
 
 
 def lista_em_python(
@@ -472,54 +473,77 @@ def tipos_do_pedido(tipo: list[str] | None) -> tuple[str, ...]:
     return tuple(t for t in TIPOS_DE_INSERCAO if t in pedidos)
 
 
-def _total(tipo: str, grupos: list[InsercoesDaMarca]) -> TotalPorTipo:
-    return TotalPorTipo(
-        tipo=tipo,
-        insercoes=sum(g.insercoes for g in grupos),
-        tempo_ms=sum(g.tempo_ms for g in grupos),
-        videos=len({g.job_id for g in grupos}),
-    )
-
-
 def _ordem_dos_tipos(tipos: set[str]) -> list[str]:
     return [t for t in TIPOS_DE_INSERCAO if t in tipos] + sorted(
         tipos - set(TIPOS_DE_INSERCAO)
     )
 
 
-def relatorio(somas: list[InsercoesDaMarca]) -> list[MarcaNoRelatorio]:
+class _Linha(NamedTuple):
+    """Uma marca no ranking, sem a lista das inserções: o que o ranking, os totais e o
+    CSV usam."""
+
+    marca: str
+    insercoes: int
+    tempo_ms: int
+    videos: int
+    por_tipo: list[TotalPorTipo]
+
+
+def _linhas(somas: list[InsercoesDaMarca]) -> list[_Linha]:
     """Uma linha por marca, do maior tempo para o menor; o detalhe por tipo segue a ordem
     de `TIPOS_DE_INSERCAO` (um tipo que a decupagem não tem mais, de uma linha antiga, vem
-    no fim, para as partes fecharem com o total) e a lista das inserções, a do vídeo e do
-    tempo (no empate, a do tipo)."""
-    por_marca: dict[str, list[InsercoesDaMarca]] = defaultdict(list)
+    no fim, para as partes fecharem com o total). Só tuplas e números: sem um objeto por
+    inserção."""
+    # por marca e por tipo: inserções, tempo e os vídeos
+    por_marca: dict[str, dict[str, tuple[list[int], set[str]]]] = {}
     for g in somas:
-        por_marca[g.marca].append(g)
-    marcas: list[MarcaNoRelatorio] = []
-    for marca, dela in por_marca.items():
-        total = _total(TIPO_DO_TOTAL, dela)
-        ordem = _ordem_dos_tipos({g.tipo for g in dela})
-        lista = [
+        tipos = por_marca.setdefault(g.marca, {})
+        soma, videos = tipos.setdefault(g.tipo, ([0, 0], set()))
+        soma[0] += g.insercoes
+        soma[1] += g.tempo_ms
+        videos.add(g.job_id)
+    linhas = [
+        _Linha(
+            marca,
+            sum(s[0] for s, _ in tipos.values()),
+            sum(s[1] for s, _ in tipos.values()),
+            len(set().union(*(v for _, v in tipos.values()))),
+            [
+                TotalPorTipo(
+                    tipo=t,
+                    insercoes=tipos[t][0][0],
+                    tempo_ms=tipos[t][0][1],
+                    videos=len(tipos[t][1]),
+                )
+                for t in _ordem_dos_tipos(set(tipos))
+            ],
+        )
+        for marca, tipos in por_marca.items()
+    ]
+    linhas.sort(key=lambda m: (-m.tempo_ms, m.marca))
+    return linhas
+
+
+def relatorio(somas: list[InsercoesDaMarca]) -> list[MarcaNoRelatorio]:
+    """O ranking de `_linhas`, cada marca com a lista das inserções, a do vídeo e do tempo
+    (no empate, a do tipo); os objetos por inserção só nascem aqui, no JSON completo e na
+    lista de uma marca."""
+    por_marca: dict[str, list[InsercaoNoRelatorio]] = defaultdict(list)
+    for g in somas:
+        por_marca[g.marca] += [
             InsercaoNoRelatorio(job_id=g.job_id, tipo=g.tipo, inicio_ms=ini, fim_ms=fim)
-            for g in dela
             for ini, fim in g.intervalos
         ]
+    for lista in por_marca.values():
         lista.sort(key=lambda i: (i.job_id, i.inicio_ms, i.fim_ms, i.tipo))
-        marcas.append(
-            MarcaNoRelatorio(
-                marca=marca,
-                insercoes=total.insercoes,
-                tempo_ms=total.tempo_ms,
-                videos=total.videos,
-                por_tipo=[_total(t, [g for g in dela if g.tipo == t]) for t in ordem],
-                lista=lista,
-            )
-        )
-    marcas.sort(key=lambda m: (-m.tempo_ms, m.marca))
-    return marcas
+    return [
+        MarcaNoRelatorio(**m._asdict(), lista=por_marca[m.marca])
+        for m in _linhas(somas)
+    ]
 
 
-def em_csv(marcas: list[MarcaNoRelatorio]) -> str:
+def em_csv(marcas: Sequence[MarcaResumida | _Linha]) -> str:
     """Por marca, uma linha de total (`tipo` = `todos`) e uma por tipo de inserção."""
     linhas: list[list[object]] = []
     for m in marcas:
@@ -578,9 +602,10 @@ def criar_rotas_das_marcas(
                 marcas=pagina,
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
-        achadas = ou_503(lambda: relatorio(fonte.somas(programas, desde, ate, tipos)))
+        somas = ou_503(lambda: fonte.somas(programas, desde, ate, tipos))
         if formato == "csv":
-            return resposta_em_csv(em_csv(achadas), "marcas.csv")
+            return resposta_em_csv(em_csv(_linhas(somas)), "marcas.csv")
+        achadas = relatorio(somas)
         poe_o_nome_dos_videos((i for m in achadas for i in m.lista), repositorio)
         return RelatorioDeMarcas(
             programas=list(programas),

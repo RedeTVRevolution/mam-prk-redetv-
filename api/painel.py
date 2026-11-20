@@ -37,11 +37,12 @@ from api.custo_do_painel import (
     relatorio_de_custo,
 )
 from api.erros import ServicoIndisponivel
+from api.fuso import SAO_PAULO
 from api.jobs import espera_da_gpu
 from api.modelo_do_job import Estado, FiltroDeJobs, Job, RepositorioDeJobs
 from api.periodo_padrao import Periodo, dependencia_do_periodo
 from api.permissoes import exige
-from api.qualidade_do_painel import SAO_PAULO, QualidadeDoPainel
+from api.qualidade_do_painel import QualidadeDoPainel
 from api.relatorios import (
     confere_o_pedido,
     em_paralelo,

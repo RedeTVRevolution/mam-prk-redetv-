@@ -62,6 +62,7 @@ from api.correcoes import CORRIGIVEIS, Correcao, CorrecaoJaExiste, em_ordem
 from api.decupagem import Decupagem
 from api.erros import ServicoIndisponivel
 from api.florence import ObjetosDaDecupagem
+from api.fuso import SAO_PAULO
 from api.idempotencia import (
     Reserva,
     conferir,
@@ -80,7 +81,6 @@ from api.lixeira import ArquivosContados
 from api.marcas import MarcaDoCatalogo, MarcaInexistente
 from api.modelo_do_job import (
     CAMPOS_DA_LISTA,
-    SAO_PAULO,
     CursorInvalido,
     Estado,
     FiltroDeJobs,
