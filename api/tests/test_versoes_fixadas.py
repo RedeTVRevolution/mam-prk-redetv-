@@ -31,7 +31,7 @@ def test_uv_e_python_do_dockerfile_e_do_afk_sao_os_mesmos() -> None:
 
 
 def test_emuladores_do_afk_e_da_acao_do_ci_sao_os_mesmos() -> None:
-    imagens = r"(fsouza/fake-gcs-server:[^\s"']+|google/cloud-sdk:[^\s"']+)"
+    imagens = r"""(fsouza/fake-gcs-server:[^\s"']+|google/cloud-sdk:[^\s"']+)"""
     afk = set(re.findall(imagens, _ler("scripts/afk/rodar.sh")))
     ci = set(re.findall(imagens, _ler(".github/actions/emuladores/action.yml")))
     assert len(afk) == 2 and afk == ci
