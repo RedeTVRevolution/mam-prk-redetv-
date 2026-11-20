@@ -324,7 +324,7 @@ preencher-revisao-do-painel:
 # execução agendada só refaz hoje e ontem). Repetir dá o mesmo resultado.
 preencher-taxa-diaria:
 	$(ENV_LOCAL) \
-	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS BIGQUERY_DATASET BIGQUERY_TABELA_DA_TAXA BIGQUERY_REGIAO) \
+	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS BIGQUERY_DATASET BIGQUERY_TABELA_DA_TAXA BIGQUERY_TABELA_DE_EVENTOS BIGQUERY_REGIAO) \
 	GCP_PROJECT_ID="$${GCP_PROJECT_ID:?}" \
 	uv run --locked python -m api.taxa_diaria PREENCHER $(DIAS)
 

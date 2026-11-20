@@ -260,6 +260,10 @@ output "bigquery_tabela_da_taxa" {
   value = module.mam.bigquery_tabela_da_taxa
 }
 
+output "bigquery_tabela_de_eventos" {
+  value = module.mam.bigquery_tabela_de_eventos
+}
+
 output "busca_regiao" {
   value = module.mam.busca_regiao
 }
