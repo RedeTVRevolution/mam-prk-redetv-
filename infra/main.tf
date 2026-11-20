@@ -101,12 +101,6 @@ variable "busca_aceita_teste_de_carga" {
   default     = false
 }
 
-variable "banco_firestore" {
-  type        = string
-  default     = "mam-principal"
-  description = "Nome do banco principal do Firestore (#536)."
-}
-
 variable "vagas_de_gpu" {
   description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
   type        = number
@@ -135,7 +129,6 @@ module "mam" {
   vagas_de_gpu                 = var.vagas_de_gpu
   busca_consultas_por_minuto   = var.busca_consultas_por_minuto
   busca_aceita_teste_de_carga  = var.busca_aceita_teste_de_carga
-  banco_firestore              = var.banco_firestore
 
   # O índice ANN da descrição (~R$ 290/mês; ADR 0006): o KNN sem índice aceita só 100 mil
   # registros, uns 44 h de vídeo.

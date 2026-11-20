@@ -66,12 +66,6 @@ variable "janelas_em_paralelo" {
   default     = 4
 }
 
-variable "banco_firestore" {
-  type        = string
-  default     = "mam-principal"
-  description = "Nome do banco principal do Firestore (#536)."
-}
-
 variable "vagas_de_gpu" {
   description = "Vagas da fila da GPU, uma por GPU, limitadas à cota disponível"
   type        = number
@@ -140,7 +134,6 @@ module "mam" {
   limite_de_requisicoes_por_ip = var.limite_de_requisicoes_por_ip
   ips_da_redetv                = var.ips_da_redetv
   vagas_de_gpu                 = var.vagas_de_gpu
-  banco_firestore              = var.banco_firestore
   janelas_em_paralelo          = var.janelas_em_paralelo
   espera_gpu_minutos           = var.espera_gpu_minutos
   limite_de_falhas_por_etapa   = var.limite_de_falhas_por_etapa
@@ -322,4 +315,60 @@ output "bucket_fontes" {
 
 output "provedor_github" {
   value = module.mam.provedor_github
+}
+
+output "bigquery_tabela_da_taxa" {
+  value = module.mam.bigquery_tabela_da_taxa
+}
+
+output "bigquery_tabela_de_jobs" {
+  value = module.mam.bigquery_tabela_de_jobs
+}
+
+output "bigquery_tabela_de_revisao" {
+  value = module.mam.bigquery_tabela_de_revisao
+}
+
+output "bigquery_tabelas_do_painel" {
+  value = module.mam.bigquery_tabelas_do_painel
+}
+
+output "busca_aceita_teste_de_carga" {
+  value = module.mam.busca_aceita_teste_de_carga
+}
+
+output "busca_consultas_por_minuto" {
+  value = module.mam.busca_consultas_por_minuto
+}
+
+output "certificado_do_balanceador" {
+  value = module.mam.certificado_do_balanceador
+}
+
+output "indices_da_mescla" {
+  value = module.mam.indices_da_mescla
+}
+
+output "janela_dos_alertas_s" {
+  value = module.mam.janela_dos_alertas_s
+}
+
+output "limite_de_falhas_por_etapa" {
+  value = module.mam.limite_de_falhas_por_etapa
+}
+
+output "limpeza_de_imagens" {
+  value = module.mam.limpeza_de_imagens
+}
+
+output "metrica_de_falhas_por_etapa" {
+  value = module.mam.metrica_de_falhas_por_etapa
+}
+
+output "webhook_segredos" {
+  value = module.mam.webhook_segredos
+}
+
+output "zona_dns" {
+  value = module.mam.zona_dns
 }
