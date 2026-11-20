@@ -64,3 +64,21 @@ def test_purga_recebe_o_bucket_das_fotos_de_rosto_e_tem_papel_nele() -> None:
     assert re.search(
         r'purga\s*=\s*\{[^}]*referencias\s*=\s*"roles/storage.objectUser"', MAIN
     )
+
+
+def test_purga_publica_o_fim_do_upload_expirado_pelos_dois_topicos() -> None:
+    """A varredura publica o fim do Job (webhook) e o evento de uso (#782)."""
+    purga = (MODULO / "purga.tf").read_text()
+    for nome, topico in (
+        ("PUBSUB_TOPICO_EVENTOS", "eventos_do_job"),
+        ("PUBSUB_TOPICO_USO", "eventos_de_uso"),
+    ):
+        assert re.search(
+            rf'name\s+= "{nome}"\s+value\s+= google_pubsub_topic.{topico}.id', purga
+        )
+    for arquivo, lista in (
+        ("eventos.tf", "quem_publica_eventos"),
+        ("eventos_de_uso.tf", "quem_publica_uso"),
+    ):
+        texto = (MODULO / arquivo).read_text()
+        assert re.search(rf'{lista}\s*=\s*toset\(\[[^\]]*"purga"', texto)

@@ -487,6 +487,8 @@ class RepositorioFirestore:
         # Os índices estão no infra/modulos/mam/main.tf e no listagem_por_mes.tf.
         if filtro.sha256 is not None:
             return self._consultar_pelo_arquivo(filtro)
+        if filtro.com_fim_a_avisar:
+            return self._consultar_o_fim_a_avisar(filtro)
         if (
             filtro.pessoa_do_catalogo is not None
             or filtro.marca_do_catalogo is not None
@@ -605,6 +607,16 @@ class RepositorioFirestore:
                     "marcas_do_catalogo", "array_contains", filtro.marca_do_catalogo
                 )
             )
+        jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
+        return paginar_em_python(
+            (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter
+        )
+
+    def _consultar_o_fim_a_avisar(self, filtro: FiltroDeJobs) -> PaginaDeJobs:
+        # No servidor: a lista só tem itens enquanto o aviso está pendente (índice automático).
+        consulta = self._colecao.where(
+            filter=FieldFilter("fim_a_avisar", "array_contains_any", ["webhook", "uso"])
+        )
         jobs = (Job(**(doc.to_dict() or {})) for doc in consulta.stream())
         return paginar_em_python(
             (j for j in jobs if casa_com_o_filtro(j, filtro)), filtro, self.obter

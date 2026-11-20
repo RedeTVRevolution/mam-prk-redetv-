@@ -194,6 +194,10 @@ class Job(BaseModel):
     fim_avisado_no_reprocessamento: int | None = None
     fim_webhook_enviado_no_reprocessamento: int | None = None
     fim_uso_enviado_no_reprocessamento: int | None = None
+    # O fim do upload que a varredura diária expirou (`falhou` com `upload_expirado`): as partes
+    # do aviso que ainda faltam, gravadas na própria transição e tiradas uma a uma depois de
+    # cada evento sair (#782). Vazio quando nada falta e em Job anterior ao campo.
+    fim_a_avisar: list[Literal["webhook", "uso"]] = []
     # `None` fora da lixeira. Na lixeira o Job só o Administrador enxerga; nada é apagado.
     lixeira: EnvioParaLixeira | None = None
     # Os `catalogo_id` que aparecem na Decupagem entregue (Correções aplicadas, pessoas
@@ -279,6 +283,8 @@ class FiltroDeJobs:
     # Só a lista do acervo: lê os campos do `JobResumido` (e os que o filtro confere), não o
     # Job inteiro. O Job vem incompleto, então quem o regrava não pode pedir isto (#480).
     so_os_da_lista: bool = False
+    # Só os Jobs com `fim_a_avisar` (a varredura diária, #782).
+    com_fim_a_avisar: bool = False
 
 
 def um_alem_do_limite[T: _ComId](
@@ -314,6 +320,8 @@ class PaginaDeJobs:
 def casa_com_o_filtro(job: Job, filtro: FiltroDeJobs) -> bool:
     """Todos os filtros menos ordem e paginação."""
     if filtro.na_lixeira is not None and (job.lixeira is not None) != filtro.na_lixeira:
+        return False
+    if filtro.com_fim_a_avisar and not job.fim_a_avisar:
         return False
     if filtro.sha256 is not None and job.sha256 != filtro.sha256:
         return False

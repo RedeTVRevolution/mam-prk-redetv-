@@ -121,6 +121,23 @@ class TestRepositorioFirestore:
     ) -> None:
         assert repositorio.obter("nao-existe") is None
 
+    def test_consulta_os_jobs_com_o_fim_a_avisar(
+        self, repositorio: RepositorioFirestore
+    ) -> None:
+        repositorio.salvar(_job("a", BASE, fim_a_avisar=["uso"]))
+        repositorio.salvar(_job("b", BASE, fim_a_avisar=["webhook", "uso"]))
+        repositorio.salvar(_job("c", BASE))
+
+        achados = repositorio.consultar(
+            FiltroDeJobs(com_fim_a_avisar=True, na_lixeira=None)
+        ).jobs
+
+        assert sorted(j.id for j in achados) == ["a", "b"]
+        assert sorted(next(j for j in achados if j.id == "b").fim_a_avisar) == [
+            "uso",
+            "webhook",
+        ]
+
     def test_obter_varios_le_em_lote_so_os_que_existem(
         self, repositorio: RepositorioFirestore
     ) -> None:
