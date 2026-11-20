@@ -160,7 +160,7 @@ def test_apaga_dados_so_do_video_e_repetir_nao_subtrai_duas_vezes(
     ).fetchall() == [("purga", "j1")]
 
 
-def _marcador(bq: BigQueryFalso) -> tuple[Any, ...]:
+def _marcador(bq: BigQueryFalso) -> Any:
     return bq.banco.execute(
         "SELECT quem_tipo, quem_id, programa, estado, duracao_do_video_ms, criado_em "
         "FROM `projeto-teste.dados.eventos` WHERE tipo = 'purga'"
