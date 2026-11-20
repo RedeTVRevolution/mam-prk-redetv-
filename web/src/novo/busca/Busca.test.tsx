@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 import { criarClienteDaApi } from '../../api.ts'
+import { consultaNova } from '../../busca.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
 import { lerResultado } from '../../resultadoDaBusca.ts'
 import { useRota } from '../../rotas.ts'
@@ -276,7 +277,7 @@ test('o destaque sai das posições e um <script> da API aparece como texto', as
   expect(screen.getByText(/alert\(1\)/)).toBeTruthy()
 })
 
-test('o clique na cena abre o vídeo exatamente no início do momento, com o busca', async () => {
+test('o clique na cena abre o vídeo exatamente no início do momento, com a consulta', async () => {
   const usuario = userEvent.setup()
   resposta = () => HttpResponse.json(resultado({ videos: [video('v1', [momento(6_540, 8_000, 'Objeto: calça vinho')])] }))
   await abrir('/busca?q=calça vinho')
@@ -284,7 +285,7 @@ test('o clique na cena abre o vídeo exatamente no início do momento, com o bus
 
   await usuario.click(within(cena(/v1\.mp4/)).getByText('Objeto: calça vinho'))
 
-  expect(location.pathname + location.search).toBe('/video/v1?t=6.54&busca=cal%C3%A7a+vinho')
+  expect(location.pathname + location.search).toBe('/video/v1?t=6.54&consulta=q%3Dcal%25C3%25A7a%2Bvinho')
 })
 
 test('↓ de fora da grade foca a primeira cena, as setas andam entre elas e Enter abre o vídeo no tempo', async () => {
@@ -294,24 +295,24 @@ test('↓ de fora da grade foca a primeira cena, as setas andam entre elas e Ent
   screen.getByRole('button', { name: 'Fala' }).focus()
 
   await usuario.keyboard('{ArrowDown}')
-  expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=724&busca=sapato')
+  expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=724&consulta=q%3Dsapato')
   // 800 px de largura dão 3 colunas de cenas de 240 px: as três na mesma fileira.
   await usuario.keyboard('{ArrowRight}')
-  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=2462&busca=sapato'))
+  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=2462&consulta=q%3Dsapato'))
   await usuario.keyboard('{ArrowRight}')
-  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v2?t=60&busca=sapato'))
+  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v2?t=60&consulta=q%3Dsapato'))
   await usuario.keyboard('{ArrowLeft}')
-  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=2462&busca=sapato'))
+  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=2462&consulta=q%3Dsapato'))
 
   await usuario.keyboard('{Enter}')
 
-  expect(location.pathname + location.search).toBe('/video/v1?t=2462&busca=sapato')
+  expect(location.pathname + location.search).toBe('/video/v1?t=2462&consulta=q%3Dsapato')
 })
 
 test('o vídeo aberto daqui recebe o resultado para andar com N e Shift+N', async () => {
   await abrir('/busca?q=sapato')
   await screen.findByText('3 momentos em 2 vídeos')
-  await waitFor(() => expect(lerResultado('sapato')?.map((v) => v.job_id)).toEqual(['v1', 'v2']))
+  await waitFor(() => expect(lerResultado(consultaNova('sapato'))?.map((v) => v.job_id)).toEqual(['v1', 'v2']))
 })
 
 test('o vazio de um nome fora do catálogo mostra o aviso com o nome digitado', async () => {
@@ -374,6 +375,24 @@ test('termo novo com resultado na tela mostra o carregando e tira o resultado an
   liberar()
   expect(await screen.findByText('1 momento em 1 vídeo')).toBeTruthy()
   expect(screen.queryByRole('status', { name: 'Buscando' })).toBeNull()
+})
+
+test('o link da cena leva a consulta da tela já carregada, não a que está em pedido (#804)', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=sapato')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const consultaDoLink = (nome = /v1\.mp4/) => new URLSearchParams(new URL(screen.getAllByRole('link', { name: nome })[0].getAttribute('href')!, location.origin).search).get('consulta')
+  expect(consultaDoLink()).toBe('q=sapato')
+  const liberar = segurarABusca()
+
+  await usuario.click(screen.getByRole('button', { name: 'Ordenar por data de exibição' }))
+  await usuario.click(await screen.findByRole('menuitemradio', { name: 'Relevância' }))
+  await screen.findByRole('status', { name: 'Atualizando' })
+
+  expect(consultaDoLink()).toBe('q=sapato')
+  liberar()
+  await screen.findByText('1 momento em 1 vídeo')
+  expect(new URLSearchParams(consultaDoLink(/vB\.mp4/)!).get('ordem')).toBe('relevancia')
 })
 
 test('a busca abre pela data de exibição; trocar a ordem mantém a lista e mostra o "Atualizando" até a resposta (#396, #763)', async () => {

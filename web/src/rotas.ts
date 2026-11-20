@@ -1,4 +1,4 @@
-import { consultaDaBusca, consultaParaEndereco, type ConsultaDaBusca } from './busca.ts'
+import { consultaDaBusca, consultaNova, consultaParaEndereco, type ConsultaDaBusca } from './busca.ts'
 import { filtrosParaEnderecoDaAuditoria, type FiltrosDaAuditoria } from './auditoria.ts'
 import { filtrosParaEnderecoDasEntradas, type FiltrosDasEntradas } from './entradas.ts'
 import { filtrosDaBusca, type FiltrosDoAcervo } from './jobs.ts'
@@ -19,7 +19,7 @@ export type Rota =
   | { tipo: 'raiz' }
   | { tipo: 'acervo'; filtros: FiltrosDoAcervo }
   | { tipo: 'busca'; consulta: ConsultaDaBusca }
-  | { tipo: 'video'; id: string; t: number | null; busca: string | null }
+  | { tipo: 'video'; id: string; t: number | null; consulta: ConsultaDaBusca | null }
   | { tipo: 'tempo_de_tela'; filtros: FiltrosDoRelatorio }
   | { tipo: 'marcas'; filtros: FiltrosDeMarcas }
   | { tipo: 'painel'; aba: AbaDoPainel; filtros: FiltrosDoPainel }
@@ -72,14 +72,23 @@ export function enderecoDaBusca(consulta: ConsultaDaBusca): string {
   return `/busca${consultaParaEndereco(consulta)}`
 }
 
-/** O endereço do vídeo, com o instante em segundos (até o milissegundo) e a busca de origem, se houver. */
-export function enderecoDoVideo(id: string, t?: number | null, busca?: string | null): string {
+/** O endereço do vídeo, com o instante em segundos (até o milissegundo) e a consulta de origem inteira, se houver. */
+export function enderecoDoVideo(id: string, t?: number | null, consulta?: ConsultaDaBusca | null): string {
   const base = `/video/${encodeURIComponent(id)}`
   const p = new URLSearchParams()
   if (t != null && t > 0) p.set('t', String(Math.round(t * 1000) / 1000))
-  if (busca) p.set('busca', busca)
+  if (consulta?.q) p.set('consulta', consultaParaEndereco(consulta).slice(1))
   const query = p.toString()
   return query ? `${base}?${query}` : base
+}
+
+/** `?consulta=` leva a consulta inteira; o link antigo `?busca=` é só o texto, e a busca dele volta a ser nova. */
+function consultaDeOrigem(busca: string): ConsultaDaBusca | null {
+  const p = new URLSearchParams(busca)
+  const inteira = p.get('consulta')
+  if (inteira !== null) return consultaDaBusca(inteira).q ? consultaDaBusca(inteira) : null
+  const texto = p.get('busca')?.trim()
+  return texto ? consultaNova(texto) : null
 }
 
 function instante(busca: string): number | null {
@@ -106,7 +115,7 @@ export function lerRota(caminho: string, busca = ''): Rota {
   if (partes[0] === 'admin' && partes.length <= 2) return { tipo: 'admin', aba: partes[1] ?? null, busca }
   if (partes.length === 2 && partes[0] === 'video') {
     try {
-      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca), busca: new URLSearchParams(busca).get('busca') || null }
+      return { tipo: 'video', id: decodeURIComponent(partes[1]), t: instante(busca), consulta: consultaDeOrigem(busca) }
     } catch {
       return { tipo: 'nao_encontrada' }
     }

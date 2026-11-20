@@ -1,4 +1,5 @@
 import { useQuery, type QueryKey } from '@tanstack/react-query'
+import { useState } from 'react'
 import type { PaginaDaBusca } from '../../api.ts'
 import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type Momento, type VideoDoResultado } from '../../busca.ts'
 import { finalizando, SEM_FILTROS, type Job } from '../../jobs.ts'
@@ -48,7 +49,10 @@ export function useBusca(pedido: PedidoDaBusca | null) {
   const api = useApi()
   const chave = chaveDa(pedido)
   const termo = pedido?.tipo === 'texto' ? pedido.consulta.q : null
-  return usePaginas({
+  // A consulta que produziu a lista à vista: com a nova em pedido (`atualizando`), é a anterior.
+  const pedida = pedido?.tipo === 'texto' ? pedido.consulta : null
+  const [exibida, setExibida] = useState(pedida)
+  const paginas = usePaginas({
     chave,
     pedir: (cursor) => {
       if (pedido?.tipo === 'texto') return api.buscar(pedido.consulta, VIDEOS_POR_PAGINA, cursor)
@@ -66,6 +70,8 @@ export function useBusca(pedido: PedidoDaBusca | null) {
     retry: false,
     manterAnterior: (anterior) => termo !== null && anterior[0] === 'busca' && anterior[1] === 'texto' && anterior[2] === termo,
   })
+  if (!paginas.atualizando && exibida !== pedida) setExibida(pedida)
+  return { ...paginas, consultaExibida: paginas.atualizando ? exibida : pedida }
 }
 
 /**

@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw'
 import { beforeEach, expect, vi } from 'vitest'
 import { criarClienteDaApi } from '../../api.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
+import type { ConsultaDaBusca } from '../../busca.ts'
 import type { Job } from '../../jobs.ts'
 import { AtalhosProvider } from '../Atalhos.tsx'
 import { ContextoDaApi, criarClienteDeConsultas } from '../consultas.ts'
@@ -65,8 +66,8 @@ export function simularPlayer() {
 
 export interface Abertura {
   t?: number | null
-  /** O texto da busca de onde o vídeo foi aberto (`?busca=`). */
-  busca?: string | null
+  /** A consulta de onde o vídeo foi aberto (`?consulta=`). */
+  consulta?: ConsultaDaBusca | null
   permissoes?: string[]
   acompanhamentoMs?: number
   indexacaoMs?: number
@@ -76,7 +77,7 @@ export interface Abertura {
   consultas?: QueryClient
 }
 
-export async function abrirVideo({ t = null, busca = null, permissoes = ['decupagem.ver'], acompanhamentoMs = 5000, indexacaoMs = 2000, esperarFaixas = true, consultas = criarClienteDeConsultas() }: Abertura = {}) {
+export async function abrirVideo({ t = null, consulta = null, permissoes = ['decupagem.ver'], acompanhamentoMs = 5000, indexacaoMs = 2000, esperarFaixas = true, consultas = criarClienteDeConsultas() }: Abertura = {}) {
   const auth = new AutenticadorFalso([{ email: 'ana@redetv.com.br', senha: 'senha-forte-1', totpCadastrado: true }])
   await auth.entrar('ana@redetv.com.br', 'senha-forte-1')
   await auth.confirmarTotp(CODIGO_TOTP_FALSO)
@@ -87,7 +88,7 @@ export async function abrirVideo({ t = null, busca = null, permissoes = ['decupa
         <AtalhosProvider>
           <TooltipProvider>
             <input aria-label="Campo" />
-            <TelaDoVideo id="j1" t={t} busca={busca} permissoes={permissoes} intervalos={{ acompanhamentoMs, indexacaoMs }} />
+            <TelaDoVideo id="j1" t={t} consulta={consulta} permissoes={permissoes} intervalos={{ acompanhamentoMs, indexacaoMs }} />
           </TooltipProvider>
         </AtalhosProvider>
       </ContextoDaApi.Provider>
