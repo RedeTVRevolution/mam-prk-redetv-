@@ -1330,10 +1330,22 @@ def test_o_banco_do_firestore_vem_da_configuracao_e_nao_e_default() -> None:
 
 def _codigos_de_falha_do_yaml(texto: str) -> set[str]:
     """Os códigos literais que o YAML grava em `codigo_falha` ou passa em `codigo_da_falha`."""
-    return set(
-        re.findall(r"codigo_falha:\n\s+stringValue: ([a-z_]+)\n", texto)
-        + re.findall(r"codigo_da_falha: ([a-z_]+)\n", texto)
-    )
+    codigos: set[str] = set()
+
+    def anda(no: object) -> None:
+        if isinstance(no, dict):
+            for chave, valor in no.items():
+                if chave == "codigo_falha":
+                    codigos.add(valor["stringValue"])
+                elif chave == "codigo_da_falha":
+                    codigos.add(valor)
+                anda(valor)
+        elif isinstance(no, list):
+            for item in no:
+                anda(item)
+
+    anda(yaml.safe_load(texto))
+    return {codigo for codigo in codigos if not codigo.startswith("$${")}
 
 
 def test_codigos_de_falha_do_yaml_sao_membros_do_codigo_de_falha() -> None:
@@ -1347,6 +1359,10 @@ def test_o_conferidor_dos_codigos_acusa_um_codigo_que_o_modelo_nao_tem() -> None
     texto = _texto().replace("stringValue: analise_falhou", "stringValue: analise_x")
 
     assert not _codigos_de_falha_do_yaml(texto) <= set(get_args(CodigoDeFalha))
+    com_aspas = _texto().replace(
+        "codigo_da_falha: ocr_falhou", 'codigo_da_falha: "ocr_invalido"'
+    )
+    assert "ocr_invalido" in _codigos_de_falha_do_yaml(com_aspas)
 
 
 def test_formato_de_etapas_do_yaml_bate_com_o_modelo_da_etapa() -> None:
