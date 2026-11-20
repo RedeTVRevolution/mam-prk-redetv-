@@ -1,4 +1,5 @@
 import { ESTADOS_DO_JOB } from './cores.ts'
+import { FUSO, formataData } from './fuso.ts'
 
 // O que a API mostra de um Job e os filtros do acervo, que viajam na URL e na chamada.
 
@@ -175,9 +176,8 @@ export function filtrosParaApi(f: FiltrosDoAcervo, cursor: string | null): strin
 /** O instante como `DD/MM/AAAA HH:MM`, em São Paulo (o dia dos filtros por período). */
 export function dataEHora(iso: string): string {
   const d = new Date(iso)
-  return `${DATA_EM_SAO_PAULO.format(d)} ${HORA_EM_SAO_PAULO.format(d)}`
+  return `${formataData(iso)} ${HORA_EM_SAO_PAULO.format(d)}`
 }
 
 // Formatadores feitos uma vez: o `toLocale…String` com fuso monta um a cada chamada, e as listas chamam por linha.
-const DATA_EM_SAO_PAULO = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' })
-const HORA_EM_SAO_PAULO = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+const HORA_EM_SAO_PAULO = new Intl.DateTimeFormat('pt-BR', { timeZone: FUSO, hour: '2-digit', minute: '2-digit' })
