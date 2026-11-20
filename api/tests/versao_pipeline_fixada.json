@@ -1,5 +1,5 @@
 {
-  "versao_pipeline": "2026.11.16",
+  "versao_pipeline": "2026.11.19",
   "manifesto": {
     "esquema": "1.6",
     "modelos": {
@@ -39,8 +39,7 @@
         "motor": "florence",
         "modelo": null,
         "florence": {
-          "large": "florence-community/Florence-2-large@4271c66b88cdbc05735372ec13b2360108de5317",
-          "base": "florence-community/Florence-2-base@00921df66db728a9ceb750f5eca43e5c203a2051"
+          "large": "florence-community/Florence-2-large@4271c66b88cdbc05735372ec13b2360108de5317"
         },
         "tarefas": [
           "<OD>",

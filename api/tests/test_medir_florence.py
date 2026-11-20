@@ -361,10 +361,10 @@ def test_toda_variacao_so_usa_variaveis_florence() -> None:
     assert all(v.startswith("FLORENCE_") for a in VARIACOES.values() for v in a)
 
 
-@pytest.mark.parametrize("modelo", ["base", "large"])
-def test_variacoes_dos_dois_modelos_explicitam_o_ambiente(modelo: str) -> None:
-    assert VARIACOES[f"{modelo}+guloso+lote16"] == {
-        "FLORENCE_MODELO": modelo,
+def test_variacao_do_large_explicita_o_ambiente_e_nao_ha_variacao_do_base() -> None:
+    assert not any(nome.startswith("base") for nome in VARIACOES)
+    assert VARIACOES["large+guloso+lote16"] == {
+        "FLORENCE_MODELO": "large",
         "FLORENCE_FEIXES": "1",
         "FLORENCE_LOTE": "16",
         "FLORENCE_LEGENDAS": "1",

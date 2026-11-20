@@ -64,11 +64,8 @@ HASH_DA_AMOSTRA = "8cd28b372908bcaa704a438965f8de47238c9514d5efefa89c510b82032f9
 def test_o_alvo_baixa_o_modelo_na_revisao_do_adaptador_conferindo_cada_hash() -> None:
     hashes_especificos = {
         "large": [ARQUIVOS_DO_MODELO[0][0], ARQUIVOS_DO_MODELO[2][0]],
-        "base": [
-            "2a4dfe9885d183da121f239ada734bd700ee6908b650a7a25ab32eb104fe1d7a",
-            "62f3e696da74f8869a68ddb529a9b3e14eb25b21c592cb3dea6179bf944df6a0",
-        ],
     }
+    assert list(florence.MODELOS) == ["large"]
     for nome, modelo in florence.MODELOS.items():
         repositorio, revisao = modelo.split("@")
         assert (
@@ -84,6 +81,11 @@ def test_o_alvo_baixa_o_modelo_na_revisao_do_adaptador_conferindo_cada_hash() ->
     assert "$4  /modelo/$nome/config.json" in ALVO
     assert "$5  /modelo/$nome/model.safetensors" in ALVO
     assert "sha256sum -c /tmp/hashes || exit 1;" in ALVO
+
+
+def test_o_alvo_nao_baixa_o_florence_base() -> None:
+    assert "Florence-2-base" not in ALVO
+    assert "/modelo/base" not in ALVO
 
 
 def test_o_alvo_baixa_a_amostra_conferindo_o_hash_antes_do_uv_sync() -> None:
@@ -289,7 +291,7 @@ def test_a_orquestracao_roda_o_job_do_inventario_e_o_workflows_o_recebe() -> Non
 
 
 @pytest.mark.parametrize("raiz", ["infra", "infra/ambientes/prod"])
-def test_as_quatro_variaveis_do_florence_chegam_ao_job_com_os_padroes(
+def test_as_tres_variaveis_do_florence_chegam_ao_job_com_os_padroes(
     raiz: str,
 ) -> None:
     modulo = RAIZ / "infra/modulos/mam"
@@ -298,7 +300,6 @@ def test_as_quatro_variaveis_do_florence_chegam_ao_job_com_os_padroes(
         (RAIZ / raiz / "main.tf").read_text().split('module "mam"')[1].split("\n}")[0]
     )
     for nome, padrao, expressao in (
-        ("modelo", '"large"', "var.florence_modelo"),
         ("feixes", "1", "tostring(var.florence_feixes)"),
         ("lote", "16", "tostring(var.florence_lote)"),
         ("legendas", "1", "tostring(var.florence_legendas)"),
@@ -317,15 +318,10 @@ def test_as_quatro_variaveis_do_florence_chegam_ao_job_com_os_padroes(
 
 
 @pytest.mark.parametrize("raiz", ["infra", "infra/ambientes/prod"])
-def test_a_escolha_large_na_raiz_e_repassada_sem_fixar_base_no_job(raiz: str) -> None:
-    chamada = (
-        (RAIZ / raiz / "main.tf").read_text().split('module "mam"')[1].split("\n}")[0]
-    )
+def test_nenhuma_raiz_nem_o_job_escolhem_o_modelo_do_florence(raiz: str) -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
-    assert re.search(r"florence_modelo\s*= var\.florence_modelo\n", chamada)
-    assert re.search(r'name\s*= "FLORENCE_MODELO"\s+value = var\.florence_modelo', job)
+    assert "FLORENCE_MODELO" not in job
     for pasta in (RAIZ / raiz, RAIZ / "infra/modulos/mam"):
-        assert (
-            'contains(["base", "large"], var.florence_modelo)'
-            in (pasta / "variables.tf").read_text()
-        )
+        for arquivo in pasta.glob("*.tf"):
+            assert "florence_modelo" not in arquivo.read_text()
+

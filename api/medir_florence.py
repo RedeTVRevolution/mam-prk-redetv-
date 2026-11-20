@@ -57,12 +57,6 @@ VARIACOES: dict[str, dict[str, str]] = {
         "FLORENCE_LOTE": "16",
         "FLORENCE_LEGENDAS": "1",
     },
-    "base+guloso+lote16": {
-        "FLORENCE_MODELO": "base",
-        "FLORENCE_FEIXES": "1",
-        "FLORENCE_LOTE": "16",
-        "FLORENCE_LEGENDAS": "1",
-    },
     "guloso+lote16+sem-legendas": {
         "FLORENCE_FEIXES": "1",
         "FLORENCE_LOTE": "16",
