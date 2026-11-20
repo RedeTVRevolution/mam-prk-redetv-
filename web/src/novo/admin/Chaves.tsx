@@ -8,6 +8,7 @@ import { useApi } from '../consultas.ts'
 import { Button } from '../ui/button.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog.tsx'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip.tsx'
+import { formataData } from '../../fuso.ts'
 import { Aba, Aviso, CABECALHO, CAMPO, CELULA, Carregando, Erro, Selo, TABELA, TopoDaAba, Vazio } from './comum.tsx'
 import { gravarNaLista, useColunasVisiveis } from './listas.ts'
 
@@ -25,7 +26,7 @@ const ESCOPOS = [
 ]
 
 function data(iso: string): string {
-  return new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+  return formataData(iso)
 }
 
 /** A chave emitida, uma vez: só "Já guardei" fecha (sem X, sem Esc, sem clique fora). */

@@ -5,6 +5,7 @@ import { type ClienteDoJob, codigoDoErro, SessaoExpirada } from '../../api.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import type { ComparacaoDaPassada, ItemMarcado, ResumoDaPassada } from '../../passadas.ts'
 import { Button } from '../ui/button.tsx'
+import { formataData } from '../../fuso.ts'
 import { AvisoDeFalha, BotaoDeIcone } from './comum.tsx'
 import { chaveDoVideo } from './tipos.ts'
 
@@ -16,8 +17,6 @@ const TITULOS: Record<string, string> = {
   broll_descricoes: 'B-roll: descrições',
   comerciais: 'Comerciais',
 }
-
-const DATA = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' })
 
 /** O seletor "Comparar com": o valor vazio volta ao inspetor de sempre. */
 export function SeletorDePassada({ passadas, valor, aoEscolher, ref }: { passadas: ResumoDaPassada[]; valor: string | null; aoEscolher: (id: string | null) => void; ref?: Ref<HTMLSelectElement> }) {
@@ -32,7 +31,7 @@ export function SeletorDePassada({ passadas, valor, aoEscolher, ref }: { passada
       <option value="">Comparar com</option>
       {passadas.map((p) => (
         <option key={p.id} value={p.id}>
-          {`${p.modelo} · ${DATA.format(new Date(p.criada_em))}`}
+          {`${p.modelo} · ${formataData(p.criada_em)}`}
         </option>
       ))}
     </select>

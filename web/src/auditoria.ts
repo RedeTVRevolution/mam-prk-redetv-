@@ -1,6 +1,7 @@
 import { nomeDaEtapa } from './etapas.ts'
 import { NOME_DO_PAPEL } from './papeis.ts'
 import { ESTADOS_DO_JOB } from './cores.ts'
+import { fimDoDia, inicioDoDia } from './fuso.ts'
 import { periodoDoEndereco, poePeriodoNoEndereco } from './periodoPadrao.ts'
 
 // A aba Auditoria da administração: a lista fechada de ações, os filtros da URL e os detalhes em frases.
@@ -125,14 +126,14 @@ export function filtrosParaEnderecoDaAuditoria(f: FiltrosDaAuditoria): string {
   return `?${p}`
 }
 
-/** A query de `GET /v1/admin/auditoria`; o período vira o dia inteiro, em São Paulo (UTC-3, sem horário de verão). */
+/** A query de `GET /v1/admin/auditoria`; o período vira o dia inteiro, em São Paulo. */
 export function consultaDaAuditoria(f: FiltrosDaAuditoria, limite: number, cursor: string | null): string {
   const p = new URLSearchParams({ limite: String(limite) })
   if (f.pessoa.trim()) p.set('pessoa', f.pessoa.trim())
   if (f.alvo.trim()) p.set('alvo', f.alvo.trim())
   for (const acao of f.acao.split(',').filter(Boolean)) p.append('acao', acao)
-  if (f.de) p.set('de', `${f.de}T00:00:00-03:00`)
-  if (f.ate) p.set('ate', `${f.ate}T23:59:59.999-03:00`)
+  if (f.de) p.set('de', inicioDoDia(f.de))
+  if (f.ate) p.set('ate', fimDoDia(f.ate))
   if (cursor) p.set('cursor', cursor)
   return p.toString()
 }
