@@ -310,38 +310,55 @@ def test_duas_clausulas_juntas_com_o_mesmo_texto_embutem_uma_vez_so() -> None:
     segunda.join(timeout=5)
     assert vetores == [[0.5] * 256] * 2
     assert len(transporte.chamadas) == 1
-    assert adaptador._embutindo == {}
 
 
-def test_outra_thread_limpando_o_cache_no_meio_nao_derruba_a_busca() -> None:
-    class Limpa(dict[str, list[float]]):
-        """Outra thread chama `clear()` entre o `in` e a leitura."""
-
-        def __contains__(self, chave: object) -> bool:
-            self.clear()
-            return True
-
-    transporte = TransporteFalso(
-        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
-    )
-    adaptador = AgentRetrieval(SEM_INDICES, transporte)
-    adaptador._vetores = Limpa()
-    assert adaptador.vetor_da_consulta("a") == [0.5] * 256
-
-
-def test_o_cache_do_embedding_guarda_no_maximo_256_textos() -> None:
+def test_o_cache_do_embedding_guarda_256_textos_e_expulsa_o_mais_antigo() -> None:
     transporte = TransporteFalso(
         {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
     )
     adaptador = AgentRetrieval(SEM_INDICES, transporte)
     for n in range(256):
         adaptador.vetor_da_consulta(f"t{n}")
-    adaptador.vetor_da_consulta("t0")  # ainda guardado: sem chamada nova
-    assert len(transporte.chamadas) == 256
-    adaptador.vetor_da_consulta("t256")  # passou do limite: o cache recomeça
-    assert len(adaptador._vetores) == 1
-    adaptador.vetor_da_consulta("t0")  # foi esquecido: chama de novo
+    adaptador.vetor_da_consulta("t256")  # o 257º: sai só o mais antigo (t0)
+    assert len(transporte.chamadas) == 257
+    for n in range(1, 257):
+        adaptador.vetor_da_consulta(f"t{n}")  # os outros 256 seguem guardados
+    assert len(transporte.chamadas) == 257
+    adaptador.vetor_da_consulta("t0")  # foi expulso: chama de novo
     assert len(transporte.chamadas) == 258
+
+
+def test_erro_do_embedding_nao_fica_guardado() -> None:
+    chamadas: list[str] = []
+
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        chamadas.append(caminho)
+        if len(chamadas) == 1:
+            raise RuntimeError("429")
+        return {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    with pytest.raises(RuntimeError):
+        adaptador.vetor_da_consulta("a")
+    assert adaptador.vetor_da_consulta("a") == [0.5] * 256
+    assert len(chamadas) == 2
+
+
+def test_com_ann_o_vetor_nao_vence_por_tempo() -> None:
+    agora = [1000.0]
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(
+        CONFIG, _transporte_de_busca(chamadas), relogio=lambda: agora[0]
+    )
+    consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
+    indice.buscar(consulta)
+    _esperar_o_cache()
+    agora[0] += 10_000  # muito além dos 120 s padrão do CacheCurto
+    chamadas.clear()
+    indice.buscar(consulta)
+    assert [p for p, _ in chamadas if p.endswith(":predict")] == []
+    (busca,) = _buscas(next(c for p, c in chamadas))
+    assert busca == "vectorSearch"
 
 
 def test_embedding_da_consulta_de_outra_dimensao_levanta() -> None:
@@ -2206,9 +2223,12 @@ def test_aquecer_o_indice_toca_um_host_de_cada_servico() -> None:
 def test_com_ann_texto_ja_enchendo_nao_abre_outra_thread() -> None:
     liberar = threading.Event()
     chamadas: list[str] = []
+    buscas: list[Any] = []
 
     def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
         chamadas.append(caminho)
+        if caminho.endswith(":batchSearch"):
+            buscas.append(corpo)
         if caminho.endswith(":predict"):
             liberar.wait(5)
             return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
@@ -2217,7 +2237,9 @@ def test_com_ann_texto_ja_enchendo_nao_abre_outra_thread() -> None:
     indice = AgentRetrieval(CONFIG, transporte)
     consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
     for _ in range(10):
+        # o embedding bloqueado não segura a busca: volta com o `semanticSearch`
         indice.buscar(consulta)
+        assert set(_buscas(buscas[-1])) == {"semanticSearch"}
     abertas = [t for t in threading.enumerate() if t.name == "embedding-do-cache"]
     liberar.set()
     _esperar_o_cache()
