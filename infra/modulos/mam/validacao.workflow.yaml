@@ -10,9 +10,9 @@
 # Carregado por templatefile: ${projeto}, ${regiao}, ${regiao_gpu}, ${job_de_validacao},
 # ${job_de_transcricao_gpu}, ${job_de_ocr_gpu},
 # ${workflow} (o nome deste Workflows, para ler as execuções), ${gpu_espera_total_s}, ${gpu_espera_s}, ${gpu_fator_da_espera}, ${gpu_espera_maxima_s},
-# ${job_de_objetos_gpu}, ${motor_objetos}, ${job_de_inventario} (o inventário de objetos, #244:
+# ${job_de_objetos_gpu}, ${job_de_inventario} (o inventário de objetos, #244:
 # o Florence-2 num Job com GPU, sem plano B, e o Job em CPU que grava o inventário na Decupagem
-# entre os quadros-chave e a indexação; com o motor gemini só o Job em CPU),
+# entre os quadros-chave e a indexação),
 # ${job_de_analise}, ${job_de_identificacao},
 # ${job_de_quadros}, ${job_de_indexacao}, ${job_de_fim} (o aviso do `falhou` que o Workflows grava, #379).
 # Toda a execução roda num try: um erro que nenhum passo trata (do próprio Workflows,
@@ -84,7 +84,6 @@ processa:
           - job_id: $${evento.data.name}
           - etapa_inicial: validacao
           - roda_a_transcricao: true
-          - roda_a_leitura_da_tela: true
         next: parte_da_etapa
     - tira_o_id_do_reprocessamento:
         assign:
@@ -94,7 +93,6 @@ processa:
           # leitura da tela, que vem depois dela); reprocessar só a leitura da tela não
           # mexe na transcrição, que já concluiu.
           - roda_a_transcricao: true
-          - roda_a_leitura_da_tela: true
     - parte_da_etapa:
         switch:
           - condition: $${etapa_inicial == "transcricao"}
@@ -246,20 +244,16 @@ processa:
                                     mostra_a_etapa: true
               - ramo_da_leitura_da_tela:
                   steps:
-                    - le_a_tela_se_preciso:
-                        switch:
-                          - condition: $${roda_a_leitura_da_tela}
-                            steps:
-                              - le_a_tela:
-                                  call: etapa_com_gpu
-                                  args:
-                                    job_id: $${job_id}
-                                    etapa: leitura_da_tela
-                                    job_gpu: ${job_de_ocr_gpu}
-                                    # O Job de OCR com GPU tem até 21600 s.
-                                    timeout_gpu: 21900
-                                    codigo_da_falha: ocr_falhou
-                                    mostra_a_etapa: $${not roda_a_transcricao}
+                    - le_a_tela:
+                        call: etapa_com_gpu
+                        args:
+                          job_id: $${job_id}
+                          etapa: leitura_da_tela
+                          job_gpu: ${job_de_ocr_gpu}
+                          # O Job de OCR com GPU tem até 21600 s.
+                          timeout_gpu: 21900
+                          codigo_da_falha: ocr_falhou
+                          mostra_a_etapa: $${not roda_a_transcricao}
         except:
           as: e
           steps:
@@ -435,11 +429,6 @@ processa:
         args:
           job_id: $${job_id}
           etapa: inventario_de_objetos
-    - escolhe_o_motor_de_objetos:
-        switch:
-          - condition: $${"${motor_objetos}" == "florence"}
-            next: roda_o_florence
-        next: roda_o_inventario
     # O Florence-2 num Job com GPU de `${regiao_gpu}`, sem plano B em CPU: esgotada a espera
     # por GPU, a falha sobe (#244). O inventário em CPU lê o que ele gravou.
     - roda_o_florence:
@@ -468,8 +457,7 @@ processa:
                   severity: WARNING
                   text: $${"o Florence-2 falhou para " + job_id}
                 next: inicia_indexacao
-    # O Job em CPU: converte o resultado do Florence-2 (motor florence) ou olha os
-    # quadros-chave (motor gemini), e grava o inventário na Decupagem.
+    # O Job em CPU: converte o resultado do Florence-2 e grava o inventário na Decupagem.
     - roda_o_inventario:
         try:
           call: googleapis.run.v2.projects.locations.jobs.run

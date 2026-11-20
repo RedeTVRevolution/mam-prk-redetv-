@@ -210,16 +210,12 @@ def test_a_orquestracao_roda_o_job_de_objetos() -> None:
     assert 'google_service_account.mam["orquestracao"]' in iam
 
 
-def test_o_motor_dos_objetos_e_florence_por_padrao_e_so_aceita_dois_valores() -> None:
-    variavel = _bloco('variable "motor_objetos"')
-
-    assert 'default     = "florence"' in variavel or 'default = "florence"' in variavel
-    assert '"florence"' in variavel and '"gemini"' in variavel
-    assert "contains(" in variavel
+def test_o_motor_dos_objetos_nao_e_variavel_do_terraform() -> None:
+    assert "motor_objetos" not in MAIN
+    assert "MOTOR_OBJETOS" not in MAIN
 
 
-def test_o_workflows_recebe_o_motor_e_o_job_de_objetos_e_o_cabecalho_os_cita() -> None:
-    assert re.search(r"motor_objetos\s+= var\.motor_objetos", MAIN)
+def test_o_workflows_recebe_o_job_de_objetos_e_o_cabecalho_o_cita() -> None:
     assert re.search(
         r"job_de_objetos_gpu\s+= google_cloud_run_v2_job\.objetos_gpu\.name", MAIN
     )
@@ -228,7 +224,7 @@ def test_o_workflows_recebe_o_motor_e_o_job_de_objetos_e_o_cabecalho_os_cita() -
         .read_text()
         .split("\nmain:")[0]
     )
-    assert "${motor_objetos}" in cabecalho and "${job_de_objetos_gpu}" in cabecalho
+    assert "motor_objetos" not in cabecalho and "${job_de_objetos_gpu}" in cabecalho
 
 
 def test_a_imagem_e_o_nome_do_job_saem_como_output() -> None:
@@ -252,7 +248,7 @@ def test_deploy_dev_publica_e_testa_o_job_de_objetos_pelo_digest() -> None:
     assert "as cinco imagens" in deploy
 
 
-def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_motor_e_o_modelo() -> None:
+def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_modelo() -> None:
     job = _bloco('resource "google_cloud_run_v2_job" "inventario"')
 
     assert 'name                = "mam-inventario"' in job
@@ -264,7 +260,6 @@ def test_o_job_do_inventario_roda_em_cpu_sem_internet_com_o_motor_e_o_modelo() -
     assert 'egress = "ALL_TRAFFIC"' in job
     assert "google_compute_subnetwork.validacao.id" in job
     assert 'value = local.buckets["decupagens"]' in job
-    assert "value = var.motor_objetos" in job
     assert "value = var.modelo_objetos" in job
     assert "max_retries     = 0" in job
 

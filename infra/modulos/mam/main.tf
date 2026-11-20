@@ -371,21 +371,8 @@ variable "imagem_objetos" {
   type        = string
 }
 
-# Qual motor faz o inventário de objetos dos quadros (#243): o Florence-2, num Job com GPU,
-# ou o Gemini, na análise. O Workflows lê o valor; o YAML ainda não o usa.
-variable "motor_objetos" {
-  description = "Motor do inventário de objetos: florence ou gemini"
-  type        = string
-  default     = "florence"
-  validation {
-    condition     = contains(["florence", "gemini"], var.motor_objetos)
-    error_message = "motor_objetos vale florence ou gemini."
-  }
-}
-
 # O modelo do Gemini do inventário de objetos (#244): converte o texto do Florence-2 para o
-# português (motor florence) ou olha os quadros-chave (motor gemini). O mesmo Flash-Lite do
-# restante (`api/gemini.py`, ADR 0004).
+# português. O mesmo Flash-Lite do restante (`api/gemini.py`, ADR 0004).
 variable "modelo_objetos" {
   description = "Modelo do Gemini do inventário de objetos"
   type        = string
@@ -1642,10 +1629,9 @@ resource "google_cloud_run_v2_job_iam_member" "orquestracao_roda_objetos_gpu" {
   member   = google_service_account.mam["orquestracao"].member
 }
 
-# Job do inventário de objetos em CPU (#244): lê o resultado bruto do Florence-2 (ou os
-# quadros-chave, com o motor gemini) e chama o Gemini pela Vertex, sem internet (só o
-# acesso privado do Google, como a identificação); regrava a Decupagem com o inventário.
-# O Workflows o roda depois do Job com GPU (motor florence) ou sozinho (motor gemini).
+# Job do inventário de objetos em CPU (#244): lê o resultado bruto do Florence-2 e chama o
+# Gemini pela Vertex, sem internet (só o acesso privado do Google, como a identificação);
+# regrava a Decupagem com o inventário. O Workflows o roda depois do Job com GPU.
 resource "google_cloud_run_v2_job" "inventario" {
   name                = "mam-inventario"
   location            = var.regiao
@@ -1656,13 +1642,11 @@ resource "google_cloud_run_v2_job" "inventario" {
     template {
       service_account = google_service_account.mam["objetos"].email
       max_retries     = 0
-      # NÃO medido: lotes de 20 planos (florence, só texto) ou de 4 planos com imagens
-      # (gemini), ~190 planos por hora de vídeo. As chamadas vão em Flex (#402), de 1 a
-      # 15 min cada, 8 ao mesmo tempo (`PARALELISMO_DO_INVENTARIO`); cada lote desiste no
-      # prazo de 1500 s (`PRAZO_DA_ANALISE_S`). Pior caso do florence num programa de 4 h:
-      # ~38 chamadas = 5 rodadas de 1500 s = 7500 s; 9000 s dão folga. Em série seriam
-      # 38 x 15 min = 9,5 h. O motor gemini (~190 chamadas em 4 h, 24 rodadas) não cabe
-      # nesse tempo: o padrão é o florence (`motor_objetos`); medir no dev antes de trocar.
+      # NÃO medido: lotes de 20 planos (só texto), ~190 planos por hora de vídeo. As
+      # chamadas vão em Flex (#402), de 1 a 15 min cada, 8 ao mesmo tempo
+      # (`PARALELISMO_DO_INVENTARIO`); cada lote desiste no prazo de 1500 s
+      # (`PRAZO_DA_ANALISE_S`). Pior caso num programa de 4 h: ~38 chamadas = 5 rodadas de
+      # 1500 s = 7500 s; 9000 s dão folga. Em série seriam 38 x 15 min = 9,5 h.
       timeout = "9000s"
       vpc_access {
         egress = "ALL_TRAFFIC"
@@ -1688,10 +1672,6 @@ resource "google_cloud_run_v2_job" "inventario" {
           value = local.buckets["decupagens"]
         }
         env {
-          name  = "MOTOR_OBJETOS"
-          value = var.motor_objetos
-        }
-        env {
           name  = "MODELO_OBJETOS"
           value = var.modelo_objetos
         }
@@ -1700,8 +1680,7 @@ resource "google_cloud_run_v2_job" "inventario" {
           value = "/saida"
         }
         resources {
-          # Os quadros do motor gemini são lidos em memória, lote a lote (4 planos, 2 a 3
-          # quadros de resolução cheia cada); o volume é só o TMPDIR.
+          # O volume é só o TMPDIR.
           limits = {
             cpu    = "2"
             memory = "4Gi"
@@ -2137,7 +2116,6 @@ resource "google_workflows_workflow" "validacao" {
     job_de_transcricao_gpu = google_cloud_run_v2_job.transcricao_gpu.name
     job_de_ocr_gpu         = google_cloud_run_v2_job.ocr_gpu.name
     job_de_objetos_gpu     = google_cloud_run_v2_job.objetos_gpu.name
-    motor_objetos          = var.motor_objetos
     job_de_inventario      = google_cloud_run_v2_job.inventario.name
     job_de_analise         = google_cloud_run_v2_job.analise.name
     job_de_fim             = google_cloud_run_v2_job.fim.name
