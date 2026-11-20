@@ -142,6 +142,24 @@ def test_variavel_com_valor_errado_levanta() -> None:
         listagem_por_mes_do_ambiente({"LISTAGEM_POR_MES": "ture"})
 
 
+def test_repositorio_padrao_manda_os_meses_ao_firestore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repositorio = RepositorioFirestore(_cliente(), colecao="jobs")
+    vista: dict[str, Any] = {}
+
+    def captura(consulta: Any, campo: str, f: FiltroDeJobs) -> PaginaDeJobs:
+        vista["consulta"], vista["campo"] = consulta, campo
+        return PaginaDeJobs([])
+
+    monkeypatch.setattr(repositorio, "_ordenar_e_ler", captura)
+    repositorio.consultar(_filtro())
+    assert [
+        f"{f.field.field_path}:{f.op.name}" for f in vista["consulta"]._field_filters
+    ] == ["mes_exibicao:IN"]
+    assert vista["campo"] == "criado_em"
+
+
 class TestConsulta:
     @staticmethod
     def _campos_da_consulta(
