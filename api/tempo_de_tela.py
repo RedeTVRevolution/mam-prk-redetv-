@@ -460,7 +460,7 @@ def _linhas(
             nomes[pessoa_id]
             if nomes is not None
             else min(contagens[pessoa_id], key=lambda n: (-contagens[pessoa_id][n], n)),
-            *c,  # type: ignore[arg-type]
+            *c,
         )
         for pessoa_id, c in somados.items()
     ]
