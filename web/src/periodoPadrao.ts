@@ -4,18 +4,9 @@
 // Na URL, `de` e `ate` ausentes valem o padrão; presentes e vazios (`?de=&ate=`) são o histórico
 // inteiro, que a pessoa pode escolher.
 
+import { diaDeSaoPaulo } from './fuso.ts'
+
 export const DIAS_DO_PERIODO_PADRAO = 7
-
-const DIA_EM_SAO_PAULO = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Sao_Paulo',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-})
-
-function diaDeSaoPaulo(instante: Date): string {
-  return DIA_EM_SAO_PAULO.format(instante)
-}
 
 /** `{ de, ate }` em `AAAA-MM-DD`; `agora` é o relógio que o teste troca. */
 export function periodoPadrao(agora: Date = new Date()): { de: string; ate: string } {

@@ -37,12 +37,13 @@ import { useProgramas } from '../consultas.ts'
 import { Faceta } from '../acervo/Filtros.tsx'
 import { Button } from '../ui/button.tsx'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '../ui/dropdown-menu.tsx'
+import { anoAtual } from '../../fuso.ts'
 import { Cena, EsqueletoDaCena, TEXTO_DA_CENA } from './Cena.tsx'
 import { useBusca, useEntrandoNaBusca, type PedidoDaBusca } from './useBusca.ts'
 
 /** A largura mínima da cena na grade. */
 const LARGURA_DA_CENA = 240
-const ANOS = Array.from({ length: 26 }, (_, i) => String(new Date().getFullYear() - i))
+const ANOS = Array.from({ length: 26 }, (_, i) => String(anoAtual() - i))
 const ORDENS: Record<OrdemDaBusca, string> = { relevancia: 'Relevância', data: 'Data de exibição' }
 const COR_DO_CHIP: Record<(typeof EVIDENCIAS)[number]['tipo'], string> = {
   aparicao: 'border-tipo-aparicao text-tipo-aparicao',
