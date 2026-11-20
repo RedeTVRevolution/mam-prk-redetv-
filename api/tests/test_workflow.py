@@ -235,7 +235,7 @@ def test_jobs_de_analise_e_identificacao_recebem_a_mesma_tolerancia_da_fala() ->
             "\nresource "
         )[0]
         assert re.search(
-            r'name\s+= "TOLERANCIA_DA_FALA_MS"\s+value\s+= tostring\(var\.tolerancia_da_fala_ms\)',
+            r'name\s+= "TOLERANCIA_DA_FALA_MS"\s+value\s+= tostring\(local\.tolerancia_da_fala_ms\)',
             job,
         ), nome
 
@@ -611,7 +611,7 @@ def test_job_de_identificacao_sem_internet_com_a_imagem_do_ffmpeg() -> None:
 def test_variaveis_dos_jobs_novos_vem_do_main_tf() -> None:
     ident = _job_do_main_tf("identificacao")
 
-    assert "var.limite_de_pessoas_do_modelo_forte" in ident
+    assert "local.limite_de_pessoas_do_modelo_forte" in ident
     assert 'name  = "LIMITE_DE_PESSOAS_DO_MODELO_FORTE"' in ident
     assert 'local.buckets["referencias"]' not in ident
 
@@ -744,7 +744,7 @@ def test_espera_total_vem_de_uma_variavel_do_main_tf_com_27_minutos() -> None:
     texto = _texto()
     assert texto.count("${gpu_espera_total_s}") >= 1
     for nome in ("gpu_espera_s", "gpu_fator_da_espera", "gpu_espera_maxima_s"):
-        assert re.search(rf"{nome}\s+= var\.{nome}", main), nome
+        assert re.search(rf"{nome}\s+= local\.{nome}", main), nome
         assert "${" + nome + "}" in texto, nome
 
 
@@ -805,12 +805,16 @@ def test_a_conta_das_tentativas_dos_valores_propostos_e_de_uma_espera_menor() ->
     main = MAIN.read_text()
 
     def padrao(nome: str) -> int:
+        # As esperas são locals; só `espera_gpu_minutos` é variável com padrão.
         variavel = main.split(f'variable "{nome}"')[1].split("\n}")[0]
         return int(re.search(r"default\s+=\s+(\d+)", variavel).group(1))  # type: ignore[union-attr]
 
-    inicio = padrao("gpu_espera_s")
-    fator = padrao("gpu_fator_da_espera")
-    teto = padrao("gpu_espera_maxima_s")
+    def valor(nome: str) -> int:
+        return int(re.search(rf"^\s+{nome}\s*=\s*(\d+)$", main, re.MULTILINE).group(1))  # type: ignore[union-attr]
+
+    inicio = valor("gpu_espera_s")
+    fator = valor("gpu_fator_da_espera")
+    teto = valor("gpu_espera_maxima_s")
     total = padrao("espera_gpu_minutos") * 60
 
     # 60, 120 e seis esperas de 240 s: 9 tentativas em 27 minutos.

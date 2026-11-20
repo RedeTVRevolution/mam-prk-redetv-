@@ -14,11 +14,16 @@ def _bloco(cabecalho: str) -> str:
     return MAIN[MAIN.index(cabecalho) :].split("\nresource ")[0].split("\nvariable ")[0]
 
 
-def test_a_regiao_da_gpu_vem_de_uma_variavel_com_us_east4_como_padrao() -> None:
-    variavel = _bloco('variable "regiao_gpu"')
+def _local(nome: str) -> str:
+    achado = re.search(rf"^\s+{nome}\s*=\s*(.+)$", MAIN, re.MULTILINE)
+    assert achado, nome
+    return achado.group(1)
 
-    assert 'default = "us-east4"' in variavel
-    # Nenhum recurso da GPU escreve a região: tudo passa pela variável.
+
+def test_a_regiao_da_gpu_vem_de_um_local_com_us_east4() -> None:
+    assert 'variable "regiao_gpu"' not in MAIN
+    assert _local("regiao_gpu") == '"us-east4"'
+    # Nenhum recurso da GPU escreve a região: tudo passa pelo local.
     gpu = (
         _bloco('resource "google_compute_subnetwork" "validacao_gpu"')
         + _bloco('resource "google_artifact_registry_repository" "mam_gpu"')
@@ -27,7 +32,7 @@ def test_a_regiao_da_gpu_vem_de_uma_variavel_com_us_east4_como_padrao() -> None:
         + _bloco('resource "google_cloud_run_v2_job" "objetos_gpu"')
     )
     assert "us-east4" not in gpu
-    assert gpu.count("var.regiao_gpu") == 5
+    assert gpu.count("local.regiao_gpu") == 5
 
 
 def test_sub_rede_da_gpu_na_rede_que_ja_existe_sem_nat_e_sem_sobrepor_a_faixa() -> None:
@@ -131,19 +136,19 @@ def test_nenhum_bucket_nasce_na_regiao_da_gpu() -> None:
 
 def test_saidas_para_o_workflows_e_para_o_teste_depois_da_publicacao() -> None:
     for saida, valor in [
-        ("regiao_gpu", "var.regiao_gpu"),
+        ("regiao_gpu", "local.regiao_gpu"),
         ("job_de_transcricao_gpu", "google_cloud_run_v2_job.transcricao_gpu.name"),
         ("job_de_ocr_gpu", "google_cloud_run_v2_job.ocr_gpu.name"),
         ("job_de_objetos_gpu", "google_cloud_run_v2_job.objetos_gpu.name"),
         ("gpu_espera_total_s", "var.espera_gpu_minutos * 60"),
-        ("gpu_espera_maxima_s", "var.gpu_espera_maxima_s"),
-        ("gpu_espera_s", "var.gpu_espera_s"),
-        ("gpu_fator_da_espera", "var.gpu_fator_da_espera"),
+        ("gpu_espera_maxima_s", "local.gpu_espera_maxima_s"),
+        ("gpu_espera_s", "local.gpu_espera_s"),
+        ("gpu_fator_da_espera", "local.gpu_fator_da_espera"),
         ("repositorio_gpu", "google_artifact_registry_repository.mam_gpu"),
     ]:
         assert valor in _bloco(f'output "{saida}"')
     # O templatefile do Workflows recebe a região e os nomes (o #239 os usa).
-    assert re.search(r"regiao_gpu\s+= var\.regiao_gpu", MAIN)
+    assert re.search(r"regiao_gpu\s+= local\.regiao_gpu", MAIN)
     assert re.search(
         r"job_de_transcricao_gpu\s+= google_cloud_run_v2_job\.transcricao_gpu\.name",
         MAIN,
@@ -153,9 +158,9 @@ def test_saidas_para_o_workflows_e_para_o_teste_depois_da_publicacao() -> None:
 
 def test_a_espera_por_falta_de_gpu_tem_27_minutos_e_esperas_de_1_a_4_minutos() -> None:
     assert re.search(r"default\s+= 27", _bloco('variable "espera_gpu_minutos"'))
-    assert re.search(r"default\s+= 60", _bloco('variable "gpu_espera_s"'))
-    assert re.search(r"default\s+= 2", _bloco('variable "gpu_fator_da_espera"'))
-    assert re.search(r"default\s+= 240", _bloco('variable "gpu_espera_maxima_s"'))
+    assert _local("gpu_espera_s") == "60"
+    assert _local("gpu_fator_da_espera") == "2"
+    assert _local("gpu_espera_maxima_s") == "240"
     assert 'variable "gpu_tentativas"' not in MAIN
 
 
@@ -239,13 +244,12 @@ def test_deploy_dev_le_as_imagens_antes_do_apply_e_testa_depois_so_os_jobs_com_g
     assert deploy.index("URL=$(tf output") > teste
 
 
-def test_o_limiar_de_mudanca_do_ocr_vem_de_uma_variavel_no_job_com_gpu() -> None:
-    variavel = _bloco('variable "limiar_de_mudanca_do_ocr"')
-
-    assert "default     = 3" in variavel
+def test_o_limiar_de_mudanca_do_ocr_vem_de_um_local_no_job_com_gpu() -> None:
+    assert 'variable "limiar_de_mudanca_do_ocr"' not in MAIN
+    assert _local("limiar_de_mudanca_do_ocr") == "3"
     job = _bloco('resource "google_cloud_run_v2_job" "ocr_gpu"')
     assert "LIMIAR_DE_MUDANCA" in job
-    assert "tostring(var.limiar_de_mudanca_do_ocr)" in job
+    assert "tostring(local.limiar_de_mudanca_do_ocr)" in job
 
 
 @pytest.mark.parametrize("nome", ["transcricao_gpu", "ocr_gpu", "objetos_gpu"])

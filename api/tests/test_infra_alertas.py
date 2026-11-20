@@ -84,16 +84,21 @@ def test_a_execucao_que_falha_em_qualquer_etapa_loga_pelo_workflows() -> None:
     )
 
 
-def test_os_limiares_sao_variaveis_com_descricao() -> None:
-    for nome in (
-        "limiar_de_nao_identificadas_pct",
-        "limiar_de_fora_do_esquema",
-        "limite_de_falhas_por_etapa",
-        "janela_dos_alertas_horas",
+def test_os_limiares_vem_de_locals_ou_da_variavel_com_descricao() -> None:
+    # Os que nenhum ambiente configura são locals com valor; o limite de falhas é botão do ambiente.
+    for nome, valor in (
+        ("limiar_de_nao_identificadas_pct", 50),
+        ("limiar_de_fora_do_esquema", 10),
+        ("janela_dos_alertas_horas", 24),
     ):
-        variavel = _bloco(f'variable "{nome}"')
-        assert "description" in variavel and "default" in variavel
-        assert f"var.{nome}" in TF
+        assert f'variable "{nome}"' not in TF
+        assert re.search(rf"\b{nome}\s*=\s*{valor}\b", TF)
+        assert f"local.{nome}" in TF
+    variavel = _bloco('variable "limite_de_falhas_por_etapa"')
+    assert "description" in variavel and "default" in variavel
+    assert "var.limite_de_falhas_por_etapa" in TF
+    alerta = _bloco('resource "google_monitoring_alert_policy" "sinal_percentual"')
+    assert "threshold_value = local.limiar_de_nao_identificadas_pct" in alerta
 
 
 def test_todo_alerta_novo_usa_o_canal_de_emergencia() -> None:
@@ -127,9 +132,9 @@ def test_o_alerta_do_sinal_por_programa_casa_o_log_e_os_rotulos() -> None:
 def test_o_job_de_indexacao_recebe_n_e_k_do_sinal_por_programa() -> None:
     indexacao = _bloco('resource "google_cloud_run_v2_job" "indexacao"')
     assert 'name  = "SINAL_VIDEOS"' in indexacao
-    assert "var.videos_do_sinal_por_programa" in indexacao
+    assert "local.videos_do_sinal_por_programa" in indexacao
     assert 'name  = "SINAL_DESVIOS"' in indexacao
-    assert "var.desvios_do_sinal_por_programa" in indexacao
+    assert "local.desvios_do_sinal_por_programa" in indexacao
 
 
 def test_todo_alerta_de_metrica_restringe_o_resource_type() -> None:

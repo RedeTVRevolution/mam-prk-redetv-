@@ -58,10 +58,10 @@ def test_o_custo_le_a_soma_dos_tokens_da_distribuicao() -> None:
 
 
 def test_o_custo_usa_o_preco_da_configuracao_e_some_sem_preco() -> None:
-    variavel = _bloco('variable "precos_por_milhao_de_tokens"')
-    assert "default = {}" in variavel and "description" in variavel
-    assert "var.precos_por_milhao_de_tokens" in TF
-    assert "length(var.precos_por_milhao_de_tokens) == 0 ? []" in TF
+    assert 'variable "precos_por_milhao_de_tokens"' not in TF
+    assert re.search(r"^\s+precos_por_milhao_de_tokens\s*= \{\}$", TF, re.MULTILINE)
+    assert "local.precos_por_milhao_de_tokens" in TF
+    assert "length(local.precos_por_milhao_de_tokens) == 0 ? []" in TF
 
 
 def test_o_mam_fila_saiu_e_a_fila_e_lida_na_hora_pelo_painel_da_diretoria() -> None:
