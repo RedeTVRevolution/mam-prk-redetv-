@@ -83,6 +83,7 @@ ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.12/site-packages/nvidia/cublas/lib:/a
     AMOSTRAS=/amostras DISPOSITIVO=gpu
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+# >>> copy gerado: transcricao-gpu
 COPY api/__init__.py \
      api/ambiente.py \
      api/assinatura_do_nome.py \
@@ -90,6 +91,7 @@ COPY api/__init__.py \
      api/auth.py \
      api/bancos.py \
      api/cache_curto.py \
+     api/canonicos.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -97,10 +99,8 @@ COPY api/__init__.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
-     api/canonicos.py \
-     api/texto.py \
-     api/correcoes.py \
      api/cofre_secret_manager.py \
+     api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
@@ -126,8 +126,8 @@ COPY api/__init__.py \
      api/numero.py \
      api/nuvem.py \
      api/paddle.py \
-     api/paralelo.py \
      api/papeis.py \
+     api/paralelo.py \
      api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
@@ -140,6 +140,7 @@ COPY api/__init__.py \
      api/taxonomia_de_objetos.json \
      api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
+     api/texto.py \
      api/texto_como_dado.py \
      api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
@@ -148,6 +149,7 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# <<< copy gerado
 # Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
 RUN /app/.venv/bin/python -m compileall -q api
 # A máquina da construção não tem GPU. Aqui se confere que as bibliotecas CUDA carregam e
@@ -176,6 +178,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group ocr-gpu --compile-bytecode
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+# >>> copy gerado: ocr-gpu
 COPY api/__init__.py \
      api/ambiente.py \
      api/assinatura_do_nome.py \
@@ -183,6 +186,7 @@ COPY api/__init__.py \
      api/auth.py \
      api/bancos.py \
      api/cache_curto.py \
+     api/canonicos.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -190,10 +194,8 @@ COPY api/__init__.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
-     api/canonicos.py \
-     api/texto.py \
-     api/correcoes.py \
      api/cofre_secret_manager.py \
+     api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
      api/dispositivo.py \
@@ -221,8 +223,8 @@ COPY api/__init__.py \
      api/nuvem.py \
      api/ocr_job.py \
      api/paddle.py \
-     api/paralelo.py \
      api/papeis.py \
+     api/paralelo.py \
      api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
@@ -236,6 +238,7 @@ COPY api/__init__.py \
      api/taxonomia_de_objetos.json \
      api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
+     api/texto.py \
      api/texto_como_dado.py \
      api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
@@ -243,6 +246,7 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# <<< copy gerado
 # Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
 RUN /app/.venv/bin/python -m compileall -q api
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DOS_MODELOS=/modelos AMOSTRAS=/amostras \
@@ -302,12 +306,14 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --group objetos --compile-bytecode
 # Só os módulos que o ponto de entrada importa (#388), para mudar outro módulo de `api/` não mudar
 # esta imagem nem republicar e testar o Job com GPU: o teste do repositório confere a lista.
+# >>> copy gerado: objetos-gpu
 COPY api/__init__.py \
      api/ambiente.py \
      api/assinatura_do_nome.py \
      api/auditoria.py \
      api/auth.py \
      api/cache_curto.py \
+     api/canonicos.py \
      api/catalogo.py \
      api/catalogo_apagado.py \
      api/catalogo_de_correcoes.py \
@@ -315,8 +321,6 @@ COPY api/__init__.py \
      api/chaves.py \
      api/ciclo_de_vida.py \
      api/clientes_de_nuvem.py \
-     api/canonicos.py \
-     api/texto.py \
      api/correcoes.py \
      api/csv_seguro.py \
      api/decupagem.py \
@@ -342,8 +346,8 @@ COPY api/__init__.py \
      api/nuvem.py \
      api/objetos_job.py \
      api/paddle.py \
-     api/paralelo.py \
      api/papeis.py \
+     api/paralelo.py \
      api/permissoes.py \
      api/pessoas.py \
      api/programas.py \
@@ -356,6 +360,7 @@ COPY api/__init__.py \
      api/taxonomia_de_objetos.json \
      api/taxonomia_de_objetos.py \
      api/teste_dos_jobs.py \
+     api/texto.py \
      api/texto_como_dado.py \
      api/tipo_do_objeto.py \
      api/tipos_de_objeto.py \
@@ -363,6 +368,7 @@ COPY api/__init__.py \
      api/usuarios.py \
      api/webhook.py \
      api/whisper.py api/
+# <<< copy gerado
 # Bytecode pronto (#558), como no serviço: `nobody` não grava `.pyc`; os do root ficam só leitura.
 RUN /app/.venv/bin/python -m compileall -q api
 ENV PATH=/app/.venv/bin:$PATH HOME=/saida TMPDIR=/saida PASTA_DO_MODELO=/modelo AMOSTRAS=/amostras \
