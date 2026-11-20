@@ -261,7 +261,7 @@ class TestCarga:
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
-def test_resultado_ordem_e_cursor_da_listagem_por_mes() -> None:
+def test_resultado_ordem_e_cursor_da_lista_por_mes() -> None:
     repositorio = RepositorioFirestore(_cliente(), colecao=f"jobs-{uuid.uuid4().hex}")
     datas = [
         date(2026, 8, 25),
