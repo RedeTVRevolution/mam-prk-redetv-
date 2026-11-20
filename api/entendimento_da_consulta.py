@@ -15,6 +15,9 @@ from api.texto_como_dado import sanear
 
 MODELO_DA_CONSULTA = "gemini-3.5-flash-lite"
 ETAPA_DA_FOTO = "descricao_da_foto"
+ROTULO_DE_CUSTO_DA_BUSCA = (
+    "busca"  # o `job_id` do rótulo de custo: a busca não tem vídeo
+)
 MAXIMO_DO_TERMO_DA_FOTO = 60
 MAXIMO_DE_PESSOAS = 5
 MAXIMO_DA_FRASE = 120
@@ -147,7 +150,7 @@ def entender(
     )
 
 
-def termo_da_foto(jpeg: bytes, *, transporte: Transporte, job_id: str = "busca") -> str:
+def termo_da_foto(jpeg: bytes, *, transporte: Transporte) -> str:
     """O objeto da foto em poucas palavras ("microfone azul"); vazio se a foto não mostra nada.
 
     Uma chamada só, sem novas tentativas. Falha de rede ou resposta fora do esquema levanta
@@ -158,7 +161,7 @@ def termo_da_foto(jpeg: bytes, *, transporte: Transporte, job_id: str = "busca")
         instrucao=INSTRUCAO_DA_FOTO,
         video_uri="",
         esquema=esquema_do_termo_da_foto(),
-        rotulos={"etapa": ETAPA_DA_FOTO, "job_id": job_id},
+        rotulos={"etapa": ETAPA_DA_FOTO, "job_id": ROTULO_DE_CUSTO_DA_BUSCA},
         imagens=(jpeg,),
         texto="Qual é o objeto?",
         timeout_s=TEMPO_DA_CONSULTA_S,

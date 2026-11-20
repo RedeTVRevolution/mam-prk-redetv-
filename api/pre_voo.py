@@ -32,6 +32,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from api.operacao_do_google import terminou
+
 Chamar = Callable[[str, str, dict[str, Any] | None], dict[str, Any]]
 
 
@@ -301,7 +303,7 @@ def _esperar(
     operacao: dict[str, Any], chamar: Chamar, dormir: Callable[[float], None]
 ) -> None:
     for _ in range(120):
-        if operacao.get("done"):
+        if terminou(operacao):
             break
         dormir(5)
         operacao = chamar("GET", f"{WORKFLOWS}/{operacao['name']}", None)

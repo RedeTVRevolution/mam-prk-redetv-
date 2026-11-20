@@ -19,7 +19,7 @@ const DECUPAGEM = {
   textos_na_tela: [],
 }
 
-const momento = (inicio_ms: number, fim_ms: number, motivo: string) => ({ tipo: 'plano', inicio_ms, fim_ms, motivo, destaques: [], quadro_url: null })
+const momento = (inicio_ms: number, fim_ms: number, motivo: string) => ({ tipo: 'plano', inicio_ms, fim_ms, motivo, destaques: [] })
 
 const video = (id: string, momentos: ReturnType<typeof momento>[]) => ({
   job_id: id,

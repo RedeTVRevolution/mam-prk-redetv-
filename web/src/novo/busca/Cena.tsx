@@ -24,7 +24,7 @@ const TIPOS: Record<TipoDeMomento, { rotulo: string; cor: string; Icone: Icon }>
   comercial: { rotulo: 'Comercial', cor: 'text-tipo-marca', Icone: IconBadgeTm },
 }
 
-/** O quadro do momento: a URL assinada vem na resposta (chave de sistema) ou pela rota do quadro. */
+/** O quadro do momento, pedido pela rota do quadro. */
 function Quadro({ job, momento }: { job: string; momento: Momento }) {
   const api = useApi()
   const caminho = momento.quadro
@@ -32,11 +32,11 @@ function Quadro({ job, momento }: { job: string; momento: Momento }) {
     queryKey: ['quadro-da-busca', job, caminho],
     // O cache dos quadros (com a validade da URL) é o de quadros.ts; este só evita pedir de novo ao rolar.
     queryFn: () => urlDoQuadroDaBusca(api)(job, caminho!),
-    enabled: !momento.quadro_url && !!caminho,
+    enabled: !!caminho,
     retry: false,
   })
   const [falhou, setFalhou] = useState<string | null>(null)
-  const url = urlSegura(momento.quadro_url ?? pedida.data)
+  const url = urlSegura(pedida.data)
   const tipo = TIPOS[momento.tipo]
   return (
     <span className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-canvas">

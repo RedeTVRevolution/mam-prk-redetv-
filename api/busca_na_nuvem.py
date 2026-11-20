@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 # 1 s em ~12% das chamadas; 1 s jogava fora o ranking dessas buscas, e 2 s salva a maioria.
 TEMPO_DA_RANKING_S = 2.0
 # O limite de registros por pedido da Ranking API (RankRequest.records: no máximo 200);
-# a busca funde várias cláusulas de até 100 registros, então passar disso é comum.
+# a busca manda no máximo `TETO_DO_RANKING` (100).
 REGISTROS_POR_PEDIDO = 200
 MODELO_DA_RANKING = (
     "semantic-ranker-default-005"  # o que o @latest apontava em 11/11/2026

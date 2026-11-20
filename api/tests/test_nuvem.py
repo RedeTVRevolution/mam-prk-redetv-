@@ -5,9 +5,11 @@ são pulados; no CI os emuladores sobem antes do pytest.
 """
 
 import contextlib
+import json
 import os
 import threading
 import uuid
+import zlib
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -2090,6 +2092,7 @@ def test_a_lista_da_busca_volta_igual_e_id_desconhecido_da_none() -> None:
         impressao="ab" * 32,
         criado_em=BASE,
         expira_em=BASE + timedelta(minutes=15),
+        versao_da_lixeira=3,
         entendida=Entendida(evidencias=["fala"], programa=None, desde=None, ate=None),
         sem_aparicoes=[],
         plano_b=False,
@@ -2127,11 +2130,11 @@ def test_a_lista_da_busca_volta_igual_e_id_desconhecido_da_none() -> None:
         ),
     ],
 )
-def test_a_lista_guarda_a_versao_da_lixeira_e_a_sem_versao_volta_como_none(
+def test_a_lista_guarda_a_versao_da_lixeira_e_a_sem_versao_nao_le(
     armazenamento: str,
 ) -> None:
     """O contrato do #598: o armazenamento em memória e o Firestore devolvem a versão
-    gravada; a lista do formato antigo (sem o campo) volta sem versão."""
+    gravada; o documento sem o campo (formato de antes do #598) não vira lista."""
     listas: ListasDaBusca = (
         ListasDaBuscaEmMemoria()
         if armazenamento == "memoria"
@@ -2141,7 +2144,7 @@ def test_a_lista_guarda_a_versao_da_lixeira_e_a_sem_versao_volta_como_none(
         )
     )
 
-    def lista(**mais: Any) -> ListaDaBusca:
+    def lista(versao_da_lixeira: int) -> ListaDaBusca:
         return ListaDaBusca(
             dono="u1",
             impressao="ab" * 32,
@@ -2155,23 +2158,24 @@ def test_a_lista_guarda_a_versao_da_lixeira_e_a_sem_versao_volta_como_none(
             facetas=Facetas(),
             termos=["vestido"],
             videos=[],
-            **mais,
+            versao_da_lixeira=versao_da_lixeira,
         )
 
-    com = listas.ler(listas.gravar(lista(versao_da_lixeira=7).para_documento()))
-    sem = listas.ler(listas.gravar(lista().para_documento()))
+    com = listas.ler(listas.gravar(lista(7).para_documento()))
+    documento = lista(0).para_documento()
+    conteudo = json.loads(zlib.decompress(documento["conteudo"]))
+    del conteudo["versao_da_lixeira"]
+    documento["conteudo"] = zlib.compress(json.dumps(conteudo).encode())
+    sem = listas.ler(listas.gravar(documento))
 
     assert com is not None and ListaDaBusca.do_documento(com).versao_da_lixeira == 7
-    assert sem is not None and ListaDaBusca.do_documento(sem).versao_da_lixeira is None
+    assert sem is not None
+    with pytest.raises(ValueError):
+        ListaDaBusca.do_documento(sem)
 
 
 @pytest.mark.skipif(not EMULADOR_FIRESTORE, reason="sem emulador do Firestore")
-def test_lista_legada_sem_o_campo_no_firestore_volta_sem_versao_e_a_pagina_e_recusada() -> (
-    None
-):
-    import json
-    import zlib
-
+def test_lista_legada_sem_o_campo_no_firestore_nao_le_e_a_pagina_e_recusada() -> None:
     from api.busca import Busca, RankingEmOrdem
     from api.tests.test_busca import BASE as BASE_DA_BUSCA
     from api.tests.test_busca import mundo_de_videos
@@ -2202,9 +2206,9 @@ def test_lista_legada_sem_o_campo_no_firestore_volta_sem_versao_e_a_pagina_e_rec
     legada = listas.gravar(documento)
 
     lido = listas.ler(legada)
-    assert (
-        lido is not None and ListaDaBusca.do_documento(lido).versao_da_lixeira is None
-    )
+    assert lido is not None
+    with pytest.raises(ValueError):
+        ListaDaBusca.do_documento(lido)
     with pytest.raises(CursorInvalido):
         busca.buscar("vestido", limite=2, dono="u1", cursor=f"{legada}.2")
 
