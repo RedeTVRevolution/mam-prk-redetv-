@@ -446,7 +446,7 @@ def _linhas_por_programa_do_csv(
     for dia in sorted(totais):
         do_dia = {p: s for (d, p), s in programas.items() if d == dia}
         resto = _SomaDeUso()
-        for campo in ("enviados", "concluidos", "falhos", "horas", "segundos"):
+        for campo in ("enviados", "concluidos", "falhos", "ms", "segundos"):
             setattr(
                 resto,
                 campo,
@@ -468,7 +468,7 @@ def _linhas_por_programa_do_csv(
                 s.concluidos,
                 s.falhos,
             ]
-            + [round(s.horas, 2), s.segundos]
+            + [s.horas, s.segundos]
             for p, s in quebra
         ]
     return linhas
@@ -557,12 +557,21 @@ class RelatorioDeBuscas(BaseModel):
     por_usuario: list[QuemDeBuscas]
 
 
+def _em_ms(horas: float) -> int:
+    return round(horas * 3_600_000)
+
+
+def _horas_de_ms(ms: int) -> float:
+    # `+ 0.0` tira o sinal do zero: poucos ms negativos arredondam a `-0.0`.
+    return round(ms / 3_600_000, 2) + 0.0
+
+
 @dataclass
 class _SomaDeUso:
     enviados: int = 0
     concluidos: int = 0
     falhos: int = 0
-    horas: float = 0.0
+    ms: int = 0  # as horas concluídas em ms inteiros: a diferença é exata
     segundos: int = 0
     com_tempo: int = 0
     buscas: int = 0
@@ -572,18 +581,22 @@ class _SomaDeUso:
         self.enviados += u.videos_enviados
         self.concluidos += u.videos_concluidos
         self.falhos += u.videos_falhos
-        self.horas += u.horas_concluidas
+        self.ms += _em_ms(u.horas_concluidas)
         self.segundos += u.segundos_de_processamento
         self.com_tempo += u.videos_concluidos_com_tempo
         self.buscas += u.buscas
         self.sem_resultado += u.buscas_sem_resultado
+
+    @property
+    def horas(self) -> float:
+        return _horas_de_ms(self.ms)
 
     def videos(self) -> dict[str, Any]:
         return NumerosDeVideos(
             enviados=self.enviados,
             concluidos=self.concluidos,
             falhos=self.falhos,
-            horas_concluidas=round(self.horas, 2),
+            horas_concluidas=self.horas,
             tempo_medio_s=(
                 round(self.segundos / self.com_tempo, 1) if self.com_tempo else None
             ),
@@ -712,7 +725,7 @@ def relatorio_de_videos(
             "enviados",
             "concluidos",
             "falhos",
-            "horas",
+            "ms",
             "segundos",
             "com_tempo",
         ):
@@ -1397,7 +1410,7 @@ def criar_rotas_do_painel(
                                 u.videos_enviados,
                                 u.videos_concluidos,
                                 u.videos_falhos,
-                                round(u.horas_concluidas, 2),
+                                _horas_de_ms(_em_ms(u.horas_concluidas)),
                                 u.segundos_de_processamento,
                             ],
                         )
