@@ -70,7 +70,6 @@ module.mam.google_firestore_index.teto_de_criacao
 module.mam.google_kms_crypto_key.chaves_de_api
 module.mam.google_kms_crypto_key_iam_member.web_usa_a_chave_mac
 module.mam.google_kms_key_ring.mam
-module.mam.google_model_armor_template.consulta_da_busca
 module.mam.google_project_iam_member.mam
 module.mam.google_storage_bucket.fontes
 module.mam.google_storage_bucket.mam

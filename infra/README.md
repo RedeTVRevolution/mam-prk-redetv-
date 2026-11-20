@@ -82,11 +82,9 @@ A `mam-terraform` recebe do wizard os mesmos papéis que tem no dev (`PAPEIS_DA_
 - `roles/cloudkms.admin`
 - `roles/pubsub.admin`
 - `roles/compute.loadBalancerAdmin`
-- `roles/certificatemanager.owner`
 - `roles/compute.securityAdmin`
 - `roles/dns.admin`
 - `roles/iam.roleAdmin`
-- `roles/modelarmor.admin`
 
 A `mam-build` não é pré-requisito: o próprio módulo a cria (`google_service_account.mam["build"]`) e lhe dá os papéis no `apply`, os mesmos do dev:
 

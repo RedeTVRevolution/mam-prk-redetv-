@@ -407,11 +407,6 @@ moved {
 }
 
 moved {
-  from = google_model_armor_template.consulta_da_busca
-  to   = module.mam.google_model_armor_template.consulta_da_busca
-}
-
-moved {
   from = google_storage_bucket.mam
   to   = module.mam.google_storage_bucket.mam
 }

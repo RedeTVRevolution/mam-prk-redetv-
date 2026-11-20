@@ -298,11 +298,9 @@ PAPEIS_DA_TERRAFORM=(
   roles/cloudkms.admin # key ring, chave MAC do hash das chaves de API e IAM na chave (#272)
   roles/pubsub.admin # tópicos, assinaturas e fila de mensagens mortas (#273, #279)
   roles/compute.loadBalancerAdmin # balanceador HTTPS na frente do Cloud Run (#294)
-  roles/certificatemanager.owner # certificado gerenciado, se o #294 usar o Certificate Manager
   roles/compute.securityAdmin # Cloud Armor (#295) e firewall da rede default (#301)
   roles/dns.admin # zona e registro A do domínio no Cloud DNS (#699)
   roles/iam.roleAdmin # papel sob medida da Vertex (#302)
-  roles/modelarmor.admin # cria o modelo do Model Armor da busca (#232)
 )
 for role in "${PAPEIS_DA_TERRAFORM[@]}"; do
   gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:$SA_EMAIL" \
