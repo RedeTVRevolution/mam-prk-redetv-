@@ -472,13 +472,15 @@ class Busca:
             # O filtro do índice só tira inelegíveis do teto; `_visivel_de` decide.
             impostos = replace(impostos, sistema=sistema)
         termo_da_foto = None
-        partes = dict(
-            texto=texto,
-            imagem=hashlib.sha256(imagem).hexdigest() if imagem is not None else None,
-            sistema=sistema,
-            ajustes=asdict(ajustes or Ajustes()),
-            filtros=asdict(impostos),
-        )
+        partes = {
+            "texto": texto,
+            "imagem": hashlib.sha256(imagem).hexdigest()
+            if imagem is not None
+            else None,
+            "sistema": sistema,
+            "ajustes": asdict(ajustes or Ajustes()),
+            "filtros": asdict(impostos),
+        }
         impressao = _impressao(**partes, ordem=ordem)
         # A ordem só age no fim (`_videos`): sem ela na chave, trocá-la reaproveita os caches.
         do_cache = _impressao(**partes)

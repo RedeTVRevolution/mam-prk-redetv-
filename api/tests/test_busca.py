@@ -2579,7 +2579,11 @@ def test_trocar_a_ordem_reaproveita_indice_e_ranking_mas_nao_o_cursor() -> None:
     assert relevancia._proximo_cursor
     with pytest.raises(CursorInvalido):
         busca.buscar(
-            "vestido", limite=2, dono="u1", ordem="data", cursor=relevancia._proximo_cursor
+            "vestido",
+            limite=2,
+            dono="u1",
+            ordem="data",
+            cursor=relevancia._proximo_cursor,
         )
 
 
