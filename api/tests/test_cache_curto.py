@@ -508,3 +508,16 @@ def test_lido_devolve_o_guardado_sem_calcular() -> None:
     assert cache.lido("a") is None
     cache.obter("a", lambda: "x")
     assert cache.lido("a") == "x"
+
+
+def test_quem_acha_o_valor_na_segunda_leitura_nao_deixa_a_trava_da_chave() -> None:
+    # Outra thread guardou o valor entre a 1ª leitura (vazia) e a trava da chave: a trava
+    # precisa sair mesmo assim, senão o mapa de travas cresce com cada consulta (#798).
+    cache = CacheCurto(validade=float("inf"), maximo=2)
+    cache.obter("a", lambda: 1)
+    ler = cache._valido
+    leituras = iter([(False, None)])
+    cache._valido = lambda chave: next(leituras, None) or ler(chave)  # type: ignore[method-assign]
+
+    assert cache.obter("a", lambda: 2) == 1
+    assert cache._travas_das_chaves == {}
