@@ -728,6 +728,15 @@ def test_get_programas_exige_login() -> None:
     assert Ambiente().cliente.get("/v1/programas").status_code == 401
 
 
+def test_hoje_da_data_de_exibicao_segue_o_horario_de_verao_de_sao_paulo() -> None:
+    ambiente = Ambiente()
+    # 2018-11-15T02:30Z: com horário de verão (-02:00) já é dia 15 em São Paulo.
+    ambiente.relogio.agora = datetime(2018, 11, 15, 2, 30, tzinfo=UTC)
+
+    assert ambiente.criar(data_exibicao="2018-11-15").status_code == 202
+    assert ambiente.criar(data_exibicao="2018-11-16").status_code == 422
+
+
 def test_data_de_exibicao_fica_no_job_e_volta_no_get_e_na_lista() -> None:
     ambiente = Ambiente()
 

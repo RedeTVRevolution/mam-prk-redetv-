@@ -35,11 +35,12 @@ from api.copia_bigquery import (
 from api.csv_seguro import csv_em_texto
 from api.decupagem import Comercial
 from api.erros import lido
+from api.fuso import agora_em_sao_paulo
 from api.jobs import programas_do_pedido
 from api.lixeira_na_leitura import PurgasDeMarca
 from api.marcas import CatalogoDeMarcas, MarcasCanonicas
 from api.modelo_do_job import RepositorioDeJobs
-from api.periodo_padrao import Periodo, agora_em_sao_paulo, dependencia_do_periodo
+from api.periodo_padrao import Periodo, dependencia_do_periodo
 from api.quem_conta import QuemConta
 from api.relatorios import (
     LIMITE_DA_PAGINA,

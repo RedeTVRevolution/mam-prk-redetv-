@@ -10,7 +10,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Literal, Protocol
-from zoneinfo import ZoneInfo
 
 from pydantic import (
     BaseModel,
@@ -21,9 +20,8 @@ from pydantic import (
 
 from api.catalogo import EnvioParaLixeira
 from api.dispositivo import Dispositivo
+from api.fuso import SAO_PAULO
 from api.texto import sem_acento
-
-SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 Estado = Literal[
     "aguardando_upload",

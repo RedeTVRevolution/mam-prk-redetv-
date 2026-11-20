@@ -10,7 +10,7 @@ from typing import Annotated, NamedTuple
 
 from fastapi import HTTPException
 
-from api.qualidade_do_painel import SAO_PAULO
+from api.fuso import SAO_PAULO, agora_em_sao_paulo
 from api.texto_como_dado import LinhaDaConsulta
 
 DIAS_DO_PERIODO_PADRAO = 7
@@ -19,10 +19,6 @@ DIAS_DO_PERIODO_PADRAO = 7
 class Periodo(NamedTuple):
     desde: date | None
     ate: date | None
-
-
-def agora_em_sao_paulo() -> datetime:
-    return datetime.now(SAO_PAULO)
 
 
 def periodo_padrao(agora: datetime) -> Periodo:

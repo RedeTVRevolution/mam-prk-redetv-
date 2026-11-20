@@ -25,9 +25,8 @@ import os
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import asdict
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, timedelta
 from typing import Any, Protocol
-from zoneinfo import ZoneInfo
 
 from google.api_core.exceptions import NotFound
 from google.cloud.storage import Client as ClienteStorage
@@ -38,6 +37,7 @@ from api.bancos import cliente_do_firestore
 from api.copia_bigquery import Transporte, parametro, transporte_http
 from api.correcoes import RepositorioDeCorrecoes
 from api.erros import ServicoIndisponivel
+from api.fuso import agora_em_sao_paulo, periodo_em_utc
 from api.itens_da_decupagem import (
     ItensDaDecupagem,
     contar_itens,
@@ -62,7 +62,6 @@ DIAS_POR_MERGE = 100
 # 8 MB para @linhas, com margem para a consulta e os demais parâmetros nos 10 MB do REST.
 BYTES_POR_MERGE = 8_000_000
 DIAS_DA_CARGA_INICIAL = 365
-SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
 __all__ = [
     "ItensEmMemoria",
@@ -127,13 +126,6 @@ class TabelaDaTaxa(Protocol):
         vazios). Os outros dias não mudam; repetir dá o mesmo resultado."""
 
 
-def _periodo_do_dia(dia: date) -> tuple[datetime, datetime]:
-    return (
-        datetime.combine(dia, time.min, SAO_PAULO).astimezone(UTC),
-        datetime.combine(dia + timedelta(days=1), time.min, SAO_PAULO).astimezone(UTC),
-    )
-
-
 def linhas_do_dia(
     dia: date,
     repositorio: RepositorioDeJobs,
@@ -142,7 +134,7 @@ def linhas_do_dia(
     revisao: RepositorioDeRevisao,
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[LinhaDiaria]:
-    inicio, fim = _periodo_do_dia(dia)
+    inicio, fim = periodo_em_utc(dia, dia)
     return [
         LinhaDiaria(
             dia,
@@ -350,7 +342,7 @@ def main(argumentos: list[str]) -> int:
     if preenchendo:
         print(f"{preencher_itens(jobs, decupagens, itens)} contagens gravadas")
     gravadas = atualizar(
-        dias_recentes(datetime.now(SAO_PAULO).date(), quantos),
+        dias_recentes(agora_em_sao_paulo().date(), quantos),
         jobs,
         itens,
         RepositorioDeCorrecoesFirestore(banco),
