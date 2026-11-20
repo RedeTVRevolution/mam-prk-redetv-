@@ -274,15 +274,10 @@ def test_bigquery_resposta_incompleta_falha_alto() -> None:
 
 def _sqlite_com(momentos: list[MomentoDaPessoa]) -> sqlite3.Connection:
     banco = sqlite3.connect(":memory:")
-    banco.execute(
-        "CREATE TABLE base (job_id, pessoa_id, tipo, inicio_ms, fim_ms)"
-    )
+    banco.execute("CREATE TABLE base (job_id, pessoa_id, tipo, inicio_ms, fim_ms)")
     banco.executemany(
         "INSERT INTO base VALUES (?, ?, ?, ?, ?)",
-        [
-            (m.job_id, m.pessoa_id, m.tipo, m.inicio_ms, m.fim_ms)
-            for m in momentos
-        ],
+        [(m.job_id, m.pessoa_id, m.tipo, m.inicio_ms, m.fim_ms) for m in momentos],
     )
     return banco
 
@@ -377,9 +372,7 @@ def test_a_soma_em_memoria_e_a_que_o_relatorio_monta() -> None:
     somas = ConsultaEmMemoria(_copia()).somas((), None, None)
 
     por_par = {(s.job_id, s.pessoa_id): s for s in somas}
-    assert por_par[("j1", "c1")] == PessoaNoVideo(
-        "j1", "c1", 1_000, 1, 0, 0
-    )
+    assert por_par[("j1", "c1")] == PessoaNoVideo("j1", "c1", 1_000, 1, 0, 0)
     assert por_par[("j3", "c1")].mencoes_na_fala == 1
     assert len(somas) == 4
 
@@ -861,8 +854,8 @@ def test_o_catalogo_e_lido_uma_vez_por_pedido() -> None:
 def test_o_ranking_usa_o_nome_do_catalogo_no_empate() -> None:
     somas = somar(
         [
-            MomentoDaPessoa("j1", "p1", 0, 1_000),
-            MomentoDaPessoa("j1", "p2", 0, 1_000),
+            MomentoDaPessoa("j1", "p1", "aparicao", 0, 1_000),
+            MomentoDaPessoa("j1", "p2", "aparicao", 0, 1_000),
         ]
     )
 
