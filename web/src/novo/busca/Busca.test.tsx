@@ -19,7 +19,6 @@ const momento = (inicio_ms: number, fim_ms: number, motivo: string, destaques: o
   fim_ms,
   motivo,
   destaques,
-  quadro_url: null as string | null,
   quadro: null as string | null,
 })
 

@@ -19,7 +19,7 @@ const videos = Array.from({ length: 160 }, (_, i) => ({
   data_exibicao: null,
   duracao_s: null,
   n_momentos: 1,
-  momentos: [{ tipo: 'fala', inicio_ms: i * 1000, fim_ms: i * 1000 + 500, motivo: 'Fala: x', destaques: [], quadro_url: null, quadro: null }],
+  momentos: [{ tipo: 'fala', inicio_ms: i * 1000, fim_ms: i * 1000 + 500, motivo: 'Fala: x', destaques: [], quadro: null }],
 }))
 const VAZIO = { programa: [], mes: [], pessoa: [], marca: [], tipo: [] }
 const cursoresPedidos: (string | null)[] = []
