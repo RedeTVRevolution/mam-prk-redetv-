@@ -159,6 +159,7 @@ def linhas_do_dia(
             inicio,
             fim,
             modelo_do_job=modelo_do_job,
+            estrito=True,
         )
     ]
 
@@ -174,7 +175,9 @@ def atualizar(
 ) -> int:
     """Refaz os `dias` na tabela e devolve quantas linhas enviou ao MERGE (o MERGE
     descarta as de Job purgado, então não é o que ficou gravado). Lê as medidas de revisão
-    uma vez, do menor dia pedido (a ordem dos `dias` não importa); sem dias, não lê."""
+    uma vez, do menor dia pedido (a ordem dos `dias` não importa); sem dias, não lê. Job do
+    dia sem contagem lida levanta `ContagemNaoLida` antes de trocar qualquer linha: a tabela
+    fica como estava e a próxima rodada tenta de novo (#783)."""
     medidas = revisao.todas(periodo_em_utc(min(dias), min(dias))[0]) if dias else []
     linhas = [
         linha

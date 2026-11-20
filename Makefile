@@ -385,7 +385,7 @@ regressao:
 	uv run --locked python -m api.regressao_da_versao "$(VERSAO)" "$(RESERVADOS)" "$(PASTA)"
 
 # Taxa de correção por tipo, programa e versão do pipeline, em CSV (#265):
-# make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO, UTC, inclusive)
+# make taxa-de-correcao [DESDE=2026-11-01] [ATE=2026-11-30] [PROGRAMA=<nome>] (dias ISO de São Paulo, inclusive)
 taxa-de-correcao:
 	$(ENV_LOCAL) \
 	$(call LER_AMBIENTE,BUCKET_ACEITOS BUCKET_DECUPAGENS) \

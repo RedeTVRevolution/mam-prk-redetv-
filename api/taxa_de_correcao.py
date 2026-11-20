@@ -30,7 +30,7 @@ import sys
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from collections.abc import Set as AbstractSet
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -42,6 +42,7 @@ from api.bancos import cliente_do_firestore
 from api.correcoes import CORRIGIVEIS, Correcao, RepositorioDeCorrecoes
 from api.csv_seguro import csv_em_texto
 from api.erros import ServicoIndisponivel
+from api.fuso import periodo_em_utc
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
 from api.leitura_da_decupagem import AbreDecupagem
 from api.modelo_do_job import RepositorioDeJobs
@@ -58,6 +59,11 @@ from api.texto_como_dado import LinhaDaConsulta
 from api.tipos_da_taxa import LinhaDaTaxa
 
 log = logging.getLogger(__name__)
+
+
+class ContagemNaoLida(RuntimeError):
+    """O Job do período cuja contagem não se lê, na rodada que não pode pular (#783)."""
+
 
 __all__ = [
     "COLUNAS_DO_CSV",
@@ -141,6 +147,7 @@ def calcular_com_itens(
     ate: datetime | None = None,
     programa: str | None = None,
     modelo_do_job: Callable[[str], dict[str, Any]] | None = None,
+    estrito: bool = False,
 ) -> list[tuple[str, LinhaDaTaxa]]:
     """O cálculo por Job, com a contagem de itens vinda de `itens_do_job` (a decupagem
     inteira, ou o objeto de contagem gravado com ela, #455). `medidas` são as de revisão já
@@ -149,7 +156,10 @@ def calcular_com_itens(
 
     `modelo_do_job` (o JSON da decupagem) só é chamado para o Job que tem correção em vigor
     feita sobre outra versão do JSON, para a `reconciliar` dizer quais casam com a atual
-    (#571). Sem ele, essas ficam fora."""
+    (#571). Sem ele, essas ficam fora.
+
+    Job cuja contagem ou decupagem não se lê sai com aviso; com `estrito` (a tabela diária,
+    que apagaria as linhas dele) levanta `ContagemNaoLida`."""
     pulsados = {m.job_id for m in medidas if _no_periodo(m.ultimo_pulso, desde, ate)}
     # Só os vídeos com correção ou pulso no período; o acervo não é percorrido.
     candidatos = pulsados | correcoes.jobs_com_correcao(desde, ate)
@@ -165,7 +175,9 @@ def calcular_com_itens(
             continue
         try:
             contagem = itens_do_job(job.id)
-        except (ServicoIndisponivel, ValueError, KeyError, TypeError):
+        except (ServicoIndisponivel, ValueError, KeyError, TypeError) as e:
+            if estrito:
+                raise ContagemNaoLida(f"contagem de {job.id} não lida") from e
             log.warning("decupagem de %s não lida: fora da taxa", job.id)
             continue
         try:
@@ -191,7 +203,9 @@ def calcular_com_itens(
                 do_job[tipo] = (n_por_tipo[tipo], itens)
             if sem_contagem:
                 log.warning("contagem de %s sem %s: fora da taxa", job.id, sem_contagem)
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError) as e:
+            if estrito:
+                raise ContagemNaoLida(f"decupagem de {job.id} não lida") from e
             log.warning("decupagem de %s não lida: fora da taxa", job.id)
             continue
         for tipo, (n, itens) in do_job.items():
@@ -273,13 +287,10 @@ def em_csv(linhas: list[LinhaDaTaxa]) -> str:
 def _periodo(
     desde: date | None, ate: date | None
 ) -> tuple[datetime | None, datetime | None]:
-    """Os dias `desde` e `ate` (UTC, os dois inclusive) como `[desde, ate)`."""
+    """Os dias `desde` e `ate` (de São Paulo, os dois inclusive) como `[desde, ate)` em UTC."""
     if desde and ate and desde > ate:
         raise ValueError("`desde` depois de `ate`")
-    return (
-        datetime.combine(desde, time.min, UTC) if desde else None,
-        datetime.combine(ate + timedelta(days=1), time.min, UTC) if ate else None,
-    )
+    return periodo_em_utc(desde, ate)
 
 
 class TaxaDeCorrecao(BaseModel):
@@ -313,7 +324,7 @@ def criar_rotas_da_qualidade(
         ate: date | None = None,
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
     ) -> TaxaDeCorrecao:
-        """`desde` e `ate` são dias (UTC), os dois inclusive."""
+        """`desde` e `ate` são dias de São Paulo, os dois inclusive."""
         try:
             inicio, fim = _periodo(desde, ate)
         except ValueError as e:

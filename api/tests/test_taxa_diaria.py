@@ -17,7 +17,7 @@ from api.erros import ServicoIndisponivel
 from api.fuso import periodo_em_utc
 from api.itens_da_decupagem import ItensDaDecupagem, contar_itens
 from api.revisao import Pulso
-from api.taxa_de_correcao import calcular
+from api.taxa_de_correcao import ContagemNaoLida, calcular
 from api.taxa_diaria import (
     ItensEmMemoria,
     TabelaDaTaxaBigQuery,
@@ -156,14 +156,81 @@ def test_as_linhas_trazem_o_dia_o_programa_a_versao_e_so_jobs_concluidos() -> No
     }
 
 
-def test_job_sem_contagem_fica_de_fora_sem_derrubar_o_dia() -> None:
+def _tabela_com_uma_linha() -> TabelaDaTaxaEmMemoria:
+    tabela = TabelaDaTaxaEmMemoria()
+    for dia in (DIA - timedelta(days=1), DIA):  # o primeiro dia também tem linha antiga
+        tabela.linhas.append(
+            LinhaDiaria(dia, "j1", "Velho", None, "pessoa.renomear", 9, 9)
+        )
+    return tabela
+
+
+def _rodada_que_falha(
+    itens: Any, jobs: Any, correcoes: Any, revisao: Any, **kw: Any
+) -> None:
+    tabela = _tabela_com_uma_linha()
+    antes = list(tabela.linhas)
+    with pytest.raises(ContagemNaoLida, match="j1"):
+        atualizar(
+            [DIA - timedelta(days=1), DIA],
+            jobs,
+            itens,
+            correcoes,
+            revisao,
+            tabela,
+            **kw,
+        )
+    assert tabela.linhas == antes  # nada foi substituído, nem os dias que deram certo
+
+
+def test_job_sem_objeto_de_contagem_derruba_a_rodada_e_deixa_a_tabela() -> None:
     jobs, _, itens, correcoes, revisao = _mundo_com_itens()
     itens.apagar("j1")
 
-    linhas = linhas_do_dia(DIA, jobs, itens, correcoes, revisao.todas())
+    _rodada_que_falha(itens, jobs, correcoes, revisao)
 
-    assert {x.programa for x in linhas} == {"Jornal"}
-    assert {x.versao_pipeline for x in linhas} == {"v2"}
+
+def test_job_com_contagem_ilegivel_derruba_a_rodada_e_deixa_a_tabela() -> None:
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+
+    class Ilegivel:
+        def ler_itens(self, job_id: str) -> Any:
+            if job_id == "j1":
+                raise ValueError("json")
+            return itens.ler_itens(job_id)
+
+    _rodada_que_falha(Ilegivel(), jobs, correcoes, revisao)
+
+
+def test_decupagem_ilegivel_na_reconciliacao_derruba_a_rodada() -> None:
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+    # correção de j1 feita sobre outro JSON: a reconciliação lê a decupagem
+    correcoes.acrescentar(_c("r", "j1", {"versao": "antiga"}, dias=0))
+
+    def corrompida(_job_id: str) -> dict[str, Any]:
+        raise ValueError("json")
+
+    _rodada_que_falha(itens, jobs, correcoes, revisao, modelo_do_job=corrompida)
+
+
+def test_tipo_sem_contagem_tira_so_a_linha_dele_tambem_na_diaria() -> None:
+    jobs, _, itens, correcoes, revisao = _mundo_com_itens()
+    pronta = itens.ler_itens("j1")
+    itens.gravar_itens(
+        "j1",
+        ItensDaDecupagem(
+            versao_do_modelo=pronta.versao_do_modelo,
+            versao_pipeline=pronta.versao_pipeline,
+            itens={t: n for t, n in pronta.itens.items() if not t.startswith("pauta.")},
+        ),
+    )
+    tabela = TabelaDaTaxaEmMemoria()
+
+    atualizar([DIA], jobs, itens, correcoes, revisao, tabela)
+
+    do_j1 = {x.tipo for x in tabela.linhas if x.job_id == "j1"}
+    assert "pessoa.renomear" in do_j1
+    assert not any(t.startswith("pauta.") for t in do_j1)
 
 
 def test_dois_jobs_no_mesmo_grupo_e_dia_ficam_em_linhas_separadas() -> None:
