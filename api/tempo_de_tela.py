@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal, NamedTuple, Protocol
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
@@ -159,19 +159,17 @@ def ranking_em_python(
 ) -> "tuple[list[PessoaResumida], TotalDoTempoDeTela]":
     """O ranking e os totais do período, a partir das somas, na ordem de `relatorio`; a
     página vai de `depois` a `limite + 1` itens (o que passa do limite diz que há mais)."""
-    pessoas = relatorio(somas, nomes)
+    pessoas = _linhas(somas, nomes)
     total = TotalDoTempoDeTela(
         pessoas=len(pessoas),
         tempo_de_tela_ms=sum(p.tempo_de_tela_ms for p in pessoas),
-        videos=len({v.job_id for p in pessoas for v in p.por_video if v.aparicoes}),
+        videos=len({s.job_id for s in somas if s.aparicoes}),
         aparicoes=sum(p.aparicoes for p in pessoas),
         mencoes_na_fala=sum(p.mencoes_na_fala for p in pessoas),
         mencoes_no_texto=sum(p.mencoes_no_texto for p in pessoas),
     )
     pagina = pessoas[depois : depois + limite + 1]
-    return [
-        PessoaResumida(**p.model_dump(exclude={"por_video"})) for p in pagina
-    ], total
+    return [PessoaResumida(**p._asdict()) for p in pagina], total
 
 
 def videos_em_python(
@@ -421,30 +419,64 @@ class RelatorioDeTempoDeTela(BaseModel):
     pessoas: list[PessoaNoRelatorio]
 
 
-def relatorio(
+class _Linha(NamedTuple):
+    """Uma pessoa no ranking, sem os vídeos: o que o ranking, os totais e o CSV usam."""
+
+    pessoa_id: str
+    nome: str
+    tempo_de_tela_ms: int
+    videos: int
+    aparicoes: int
+    mencoes_na_fala: int
+    mencoes_no_texto: int
+
+
+def _linhas(
     somas: list[PessoaNoVideo], nomes: Mapping[str, str] | None = None
-) -> list[PessoaNoRelatorio]:
+) -> list[_Linha]:
     """Uma linha por pessoa, do maior tempo de tela para o menor e, no empate, pelo nome
-    e pelo id.
+    e pelo id. Só tuplas e números: sem um objeto por par pessoa e vídeo.
 
     A pessoa é o id do catálogo. O nome vem de `nomes` (o atual do catálogo, #417 e #613,
     que tem de trazer toda pessoa das somas); sem o mapa, é o que mais aparece nas linhas
     dela (um vídeo copiado antes de uma correção de grafia não parte a pessoa em duas).
     """
-    por_pessoa: dict[str, list[PessoaNoVideo]] = defaultdict(list)
+    # por pessoa: tempo, vídeos com aparição, aparições, menções na fala e no texto
+    somados: dict[str, list[int]] = {}
+    contagens: dict[str, Counter[str]] = {}
     for s in somas:
-        por_pessoa[s.pessoa_id].append(s)
-    pessoas: list[PessoaNoRelatorio] = []
-    for pessoa_id, dela in por_pessoa.items():
-        contagem: Counter[str] = Counter()
-        for s in dela:
-            contagem.update(s.nomes)
-        nome = (
+        c = somados.get(s.pessoa_id)
+        if c is None:
+            c = somados[s.pessoa_id] = [0, 0, 0, 0, 0]
+        c[0] += s.tempo_de_tela_ms
+        c[1] += s.aparicoes > 0
+        c[2] += s.aparicoes
+        c[3] += s.mencoes_na_fala
+        c[4] += s.mencoes_no_texto
+        if nomes is None:
+            contagens.setdefault(s.pessoa_id, Counter()).update(s.nomes)
+    linhas = [
+        _Linha(
+            pessoa_id,
             nomes[pessoa_id]
             if nomes is not None
-            else min(contagem, key=lambda n: (-contagem[n], n))
+            else min(contagens[pessoa_id], key=lambda n: (-contagens[pessoa_id][n], n)),
+            *c,
         )
-        videos = [
+        for pessoa_id, c in somados.items()
+    ]
+    linhas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.nome, p.pessoa_id))
+    return linhas
+
+
+def relatorio(
+    somas: list[PessoaNoVideo], nomes: Mapping[str, str] | None = None
+) -> list[PessoaNoRelatorio]:
+    """O ranking de `_linhas`, cada pessoa com seus vídeos (do maior tempo para o menor);
+    os objetos por vídeo só nascem aqui, no JSON completo e nos vídeos de uma pessoa."""
+    por_pessoa: dict[str, list[VideoDaPessoa]] = defaultdict(list)
+    for s in somas:
+        por_pessoa[s.pessoa_id].append(
             VideoDaPessoa(
                 job_id=s.job_id,
                 tempo_de_tela_ms=s.tempo_de_tela_ms,
@@ -452,26 +484,16 @@ def relatorio(
                 mencoes_na_fala=s.mencoes_na_fala,
                 mencoes_no_texto=s.mencoes_no_texto,
             )
-            for s in dela
-        ]
-        videos.sort(key=lambda v: (-v.tempo_de_tela_ms, v.job_id))
-        pessoas.append(
-            PessoaNoRelatorio(
-                pessoa_id=pessoa_id,
-                nome=nome,
-                tempo_de_tela_ms=sum(v.tempo_de_tela_ms for v in videos),
-                videos=sum(v.aparicoes > 0 for v in videos),
-                aparicoes=sum(v.aparicoes for v in videos),
-                mencoes_na_fala=sum(v.mencoes_na_fala for v in videos),
-                mencoes_no_texto=sum(v.mencoes_no_texto for v in videos),
-                por_video=videos,
-            )
         )
-    pessoas.sort(key=lambda p: (-p.tempo_de_tela_ms, p.nome, p.pessoa_id))
-    return pessoas
+    for videos in por_pessoa.values():
+        videos.sort(key=lambda v: (-v.tempo_de_tela_ms, v.job_id))
+    return [
+        PessoaNoRelatorio(**linha._asdict(), por_video=por_pessoa[linha.pessoa_id])
+        for linha in _linhas(somas, nomes)
+    ]
 
 
-def em_csv(pessoas: list[PessoaNoRelatorio]) -> str:
+def em_csv(pessoas: Sequence[PessoaResumida | _Linha]) -> str:
     return csv_em_texto(
         COLUNAS_DO_CSV,
         [
@@ -536,9 +558,10 @@ def criar_rotas_do_tempo_de_tela(
                 pessoas=pagina,
             )
             return JSONResponse(corpo.model_dump(mode="json"), headers=cabecalhos)
-        pessoas = ou_503(lambda: relatorio(*fonte.somas_e_nomes(programas, desde, ate)))
+        somas_e_nomes = ou_503(lambda: fonte.somas_e_nomes(programas, desde, ate))
         if formato == "csv":
-            return resposta_em_csv(em_csv(pessoas), "tempo-de-tela.csv")
+            return resposta_em_csv(em_csv(_linhas(*somas_e_nomes)), "tempo-de-tela.csv")
+        pessoas = relatorio(*somas_e_nomes)
         poe_o_nome_dos_videos((v for p in pessoas for v in p.por_video), repositorio)
         return RelatorioDeTempoDeTela(
             programas=list(programas), desde=desde, ate=ate, pessoas=pessoas
