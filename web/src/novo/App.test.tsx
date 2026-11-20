@@ -156,6 +156,20 @@ test('o trilho mostra o Painel e a Administração só para quem pode', async ()
   ])
 })
 
+test('sem decupagem.ver, o trilho não tem Tempo de tela nem Marcas e as duas rotas dão "Página não encontrada"', async () => {
+  permissoes = ['painel.ver']
+  render(<App autenticador={await comSessao()} />)
+  await screen.findByRole('navigation', { name: 'Principal' })
+  expect(trilho().queryByRole('link', { name: 'Tempo de tela' })).toBeNull()
+  expect(trilho().queryByRole('link', { name: 'Marcas' })).toBeNull()
+
+  for (const endereco of ['/relatorios/tempo-de-tela', '/relatorios/marcas']) {
+    history.pushState(null, '', endereco)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    expect(await screen.findByText('Página não encontrada.')).toBeTruthy()
+  }
+})
+
 test('quem só vê o painel começa nele', async () => {
   permissoes = ['painel.ver']
   render(<App autenticador={await comSessao()} />)

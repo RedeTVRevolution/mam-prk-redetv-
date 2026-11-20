@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { rotuloDe } from '../../catalogo.ts'
 import { ESTADOS_DO_JOB } from '../../cores.ts'
+import { nomeDaEtapa } from '../../etapas.ts'
 import { dataDeExibicao, dataEHora } from '../../jobs.ts'
 import {
   COLUNA_DO_GRUPO,
@@ -507,12 +508,12 @@ export function Custo({ relatorio }: { relatorio: RelatorioDeCusto }) {
           <Quebra
             titulo="Custo por etapa"
             itens={relatorio.por_etapa}
-            nome={(e) => e.etapa}
+            nome={(e) => nomeDaEtapa(e.etapa)}
             valor={(e) => emCentavos(e.custo)}
             formato={valor}
             chave={(e) => e.etapa}
             colunas={['Etapa', 'Custo']}
-            celulas={(e) => [e.etapa, valor(e.custo)]}
+            celulas={(e) => [nomeDaEtapa(e.etapa), valor(e.custo)]}
           />
         )}
         {relatorio.sem_dono_por_servico.length > 0 && (

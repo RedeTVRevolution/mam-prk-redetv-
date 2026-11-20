@@ -399,7 +399,7 @@ export default function PainelDaDiretoria({
             )}
           </Campo>
           <BaixarCsv
-            key={aba}
+            key={JSON.stringify([aba, filtros])}
             arquivo={`${aba}.csv`}
             pedir={() => definicao.csv(api, filtros, agrupar)}
             desligado={
