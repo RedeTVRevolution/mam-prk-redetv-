@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from api.auditoria import Acao, RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import ChamadorAutenticado, Usuario
 from api.catalogo import Catalogo, EnvioParaLixeira
+from api.ciclo_de_vida import proxima_versao, rodada_aberta
 from api.correcoes import RepositorioDeCorrecoes
 from api.indice_da_busca import IndiceDaBusca
 from api.marcas import CatalogoDeMarcas
@@ -247,6 +248,14 @@ def criar_rotas_da_lixeira(
             )
         )
 
+    def mudanca(atual: Job, envio: EnvioParaLixeira | None) -> dict[str, object]:
+        """A lixeira nova do Job e, com a indexação em andamento, uma versão a mais: a
+        rodada repete com o Job relido e o índice não fica com o estado velho (#806)."""
+        mudancas: dict[str, object] = {"lixeira": envio}
+        if rodada_aberta(atual, relogio()):
+            mudancas["versao_pedida"] = proxima_versao(atual)
+        return mudancas
+
     def marcar_no_indice(job_id: str, na_lixeira: bool) -> None:
         """Põe o campo de lixeira nos objetos do vídeo no índice da busca (#482). Quem
         falha leva o chamador a desfazer a mudança do Job (503): o índice e o Job não
@@ -332,20 +341,21 @@ def criar_rotas_da_lixeira(
                 or atual.lixeira is not None
             ):
                 return None
-            return {"lixeira": envio}
+            return mudanca(atual, envio)
 
         if repositorio.trocar(job.id, mudar) is None:
             raise HTTPException(409, "O vídeo mudou de estado: tente de novo")
         try:
             marcar_no_indice(job.id, True)
         except HTTPException:
-            repositorio.trocar(job.id, lambda _: {"lixeira": None})
+            repositorio.trocar(job.id, lambda atual: mudanca(atual, None))
+            desmarcar_no_indice(job.id, False)
             raise
         try:
             registrar(pessoa, "item.para_lixeira", job, pedido.motivo, impacto)
         except Exception:
             # Sem registro, o vídeo volta: o histórico de apagamentos não pode ter buraco.
-            repositorio.trocar(job.id, lambda _: {"lixeira": None})
+            repositorio.trocar(job.id, lambda atual: mudanca(atual, None))
             desmarcar_no_indice(job.id, False)
             raise
         return _item(job, envio, relogio())
@@ -365,7 +375,7 @@ def criar_rotas_da_lixeira(
         impacto = impacto_de(job)
         if (
             repositorio.trocar(
-                job.id, lambda atual: {"lixeira": None} if atual.lixeira else None
+                job.id, lambda atual: mudanca(atual, None) if atual.lixeira else None
             )
             is None
         ):
@@ -373,12 +383,13 @@ def criar_rotas_da_lixeira(
         try:
             marcar_no_indice(job.id, False)
         except HTTPException:
-            repositorio.trocar(job.id, lambda _: {"lixeira": envio})
+            repositorio.trocar(job.id, lambda atual: mudanca(atual, envio))
+            desmarcar_no_indice(job.id, True)
             raise
         try:
             registrar(pessoa, "item.restaurado", job, envio.motivo, impacto)
         except Exception:
-            repositorio.trocar(job.id, lambda _: {"lixeira": envio})
+            repositorio.trocar(job.id, lambda atual: mudanca(atual, envio))
             desmarcar_no_indice(job.id, True)
             raise
         return IdENome(id=job.id, nome=job.nome)

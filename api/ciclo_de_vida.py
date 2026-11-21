@@ -512,6 +512,17 @@ def desfazer_reprocessamento(
 PRAZO_DA_RODADA = timedelta(minutes=40)
 
 
+def rodada_aberta(job: Job, agora: datetime) -> bool:
+    """Uma rodada de indexação tomou a vez e ainda está no prazo."""
+    r = job.rodada_da_indexacao
+    return r is not None and agora - r.em < PRAZO_DA_RODADA
+
+
+def proxima_versao(job: Job) -> int:
+    """A versão da busca a pedir: uma à frente da pedida e da indexada."""
+    return max(job.versao_pedida, job.versao_indexada) + 1
+
+
 def pedir_indexacao(
     repositorio: RepositorioDeJobs, job_id: str, agora: datetime
 ) -> Job | None:
@@ -525,7 +536,7 @@ def pedir_indexacao(
         if job.estado != "concluido":
             return None
         return {
-            "versao_pedida": max(job.versao_pedida, job.versao_indexada) + 1,
+            "versao_pedida": proxima_versao(job),
             "indexacao": Indexacao(estado="pendente", em=agora),
         }
 
@@ -553,8 +564,7 @@ def tomar_a_rodada(
     def mudar(job: Job) -> dict[str, Any] | None:
         if job.estado != "concluido":
             return None
-        r = job.rodada_da_indexacao
-        if r is not None and agora - r.em < PRAZO_DA_RODADA:
+        if rodada_aberta(job, agora):
             return None
         pedida = job.versao_pedida > job.versao_indexada or (
             job.indexacao is not None and job.indexacao.estado == "pendente"

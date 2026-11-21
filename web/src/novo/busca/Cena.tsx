@@ -2,7 +2,7 @@ import { IconBadgeTm, IconBox, IconMessage, IconMovie, IconTextCaption, type Ico
 import { useQuery } from '@tanstack/react-query'
 import { cn } from 'cn'
 import { useId, useState, type MouseEvent } from 'react'
-import { trechosDoMotivo, type Momento, type TipoDeMomento } from '../../busca.ts'
+import { trechosDoMotivo, type ConsultaDaBusca, type Momento, type TipoDeMomento } from '../../busca.ts'
 import { dataDeExibicao } from '../../jobs.ts'
 import { relogio } from '../../linhaDoTempo.ts'
 import { urlDoQuadroDaBusca } from '../../quadros.ts'
@@ -24,7 +24,7 @@ const TIPOS: Record<TipoDeMomento, { rotulo: string; cor: string; Icone: Icon }>
   comercial: { rotulo: 'Comercial', cor: 'text-tipo-marca', Icone: IconBadgeTm },
 }
 
-/** O quadro do momento: a URL assinada vem na resposta (chave de sistema) ou pela rota do quadro. */
+/** O quadro do momento, pedido pela rota do quadro. */
 function Quadro({ job, momento }: { job: string; momento: Momento }) {
   const api = useApi()
   const caminho = momento.quadro
@@ -32,11 +32,11 @@ function Quadro({ job, momento }: { job: string; momento: Momento }) {
     queryKey: ['quadro-da-busca', job, caminho],
     // O cache dos quadros (com a validade da URL) é o de quadros.ts; este só evita pedir de novo ao rolar.
     queryFn: () => urlDoQuadroDaBusca(api)(job, caminho!),
-    enabled: !momento.quadro_url && !!caminho,
+    enabled: !!caminho,
     retry: false,
   })
   const [falhou, setFalhou] = useState<string | null>(null)
-  const url = urlSegura(momento.quadro_url ?? pedida.data)
+  const url = urlSegura(pedida.data)
   const tipo = TIPOS[momento.tipo]
   return (
     <span className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-canvas">
@@ -75,9 +75,9 @@ function Motivo({ momento, id, encurtado }: { momento: Momento; id: string; encu
  * Um momento do resultado na grade (#400): o quadro (ou o tipo), o vídeo, o instante e o motivo.
  * O clique em qualquer lugar abre o vídeo no instante, menos no "ver mais".
  */
-export function Cena({ cena, indice, busca }: { cena: DadosDaCena; indice: number; busca: string }) {
+export function Cena({ cena, indice, consulta }: { cena: DadosDaCena; indice: number; consulta: ConsultaDaBusca | null }) {
   const { video, momento } = cena
-  const endereco = enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, busca)
+  const endereco = enderecoDoVideo(video.job_id, momento.inicio_ms / 1000, consulta)
   const [aberto, setAberto] = useState(false)
   const idDoMotivo = useId()
   const longo = momento.motivo.length > MOTIVO_LONGO

@@ -5,8 +5,9 @@ import io
 import json
 import logging
 import tempfile
+import time
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -14,8 +15,9 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from api.auth import Usuario
-from api.busca import Ajustes, BuscaPorImagemIndisponivel
+from api.busca import Ajustes, BuscaPorImagemIndisponivel, ListasDaBuscaEmMemoria
 from api.entendimento_da_consulta import MODELO_DA_CONSULTA
+from api.eventos_de_uso import EventosEmMemoria
 from api.gemini import ErroHttp
 from api.main import criar_app
 from api.rota_da_busca import LimitesDaImagem
@@ -174,7 +176,7 @@ def test_imagem_acima_do_limite_de_pixels_e_recusada() -> None:
 def test_os_filtros_de_programa_e_periodo_valem() -> None:
     c, m = com_vestido(*VESTIDO * 3)
 
-    r = enviar(c, foto(), programa="Leo Dias", sem_periodo="true")
+    r = enviar(c, foto(), programa="Leo Dias")
     assert r.status_code == 200 and r.json()["videos"] == []
     assert {x.filtros.programa for x in m.indice.consultas} == {"Leo Dias"}
 
@@ -185,6 +187,20 @@ def test_os_filtros_de_programa_e_periodo_valem() -> None:
 
     r = enviar(c, foto(), desde="2025-02-01", ate="2025-01-02")
     assert r.status_code == 422
+    assert r.json()["detail"] == "O início do período passa do fim"
+
+
+def test_sem_periodo_e_ignorado_e_nao_vira_filtro_do_evento() -> None:
+    eventos = EventosEmMemoria()
+    c, _ = com_vestido(*VESTIDO * 2, eventos=eventos)
+    base = enviar(c, foto(), programa="Leo Dias")
+    com = enviar(c, foto(), programa="Leo Dias", sem_periodo="true")
+
+    def corpo(r: Any) -> dict[str, Any]:
+        return {k: v for k, v in r.json().items() if k != "quadros_expiram_em"}
+
+    assert com.status_code == 200 and corpo(com) == corpo(base)
+    assert all(f.nome != "sem_periodo" for e in eventos.publicados for f in e.filtros)
 
 
 def test_sem_decupagem_ver_responde_403_e_sem_login_401() -> None:
@@ -272,6 +288,38 @@ def test_a_busca_por_imagem_conta_no_limite_de_consultas() -> None:
     c, _ = com_vestido(maximo_por_minuto=1)
     assert enviar(c, foto()).status_code == 200
     assert enviar(c, foto()).status_code == 429
+
+
+def test_com_o_limite_esgotado_bytes_que_nao_sao_imagem_recebem_429_nao_422() -> None:
+    c, _ = com_vestido(maximo_por_minuto=1)
+    assert enviar(c, foto()).status_code == 200
+    r = enviar(c, b"nao sou imagem")
+    assert r.status_code == 429
+    assert r.json()["detail"] == "Consultas demais; tente em um minuto"
+
+
+def test_cursor_invalido_na_foto_responde_422() -> None:
+    c, _ = com_vestido()
+    r = enviar(c, foto(), cursor="nao-existe")
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Cursor inválido"
+
+
+def test_foto_que_passa_do_prazo_responde_504_com_a_mensagem_da_busca(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("api.rota_da_busca.TEMPO_DA_CONSULTA_S", 0.0)
+    from api.indice_da_busca import Consulta, IndiceEmMemoria, Registro
+
+    class Lento(IndiceEmMemoria):
+        def buscar(self, consulta: Consulta) -> list[Registro]:
+            time.sleep(0.5)
+            return []
+
+    c, _ = com_vestido(tempo_maximo_s=0.05, indice=Lento())
+    r = enviar(c, foto())
+    assert r.status_code == 504
+    assert r.json()["detail"] == "A busca demorou demais"
 
 
 def test_jpeg_de_celular_que_abre_como_mpo_e_aceito() -> None:
@@ -381,3 +429,246 @@ def test_os_limites_padrao_da_imagem_vem_do_valor_unico_de_imagens_hostis() -> N
         5_000_000,
         25_000_000,
     )
+
+
+# --- token da foto (#802) -----------------------------------------------------------
+
+TOKEN = "X-Token-Da-Foto"
+
+
+def com_token(c: TestClient, token: str, **params: str) -> Any:
+    # Um campo de texto do multipart (sem nome de arquivo), como o `FormData` da tela manda.
+    return c.post(
+        ROTA, files={"token": (None, token)}, params=params, headers=AUTORIZACAO
+    )
+
+
+def mundo_de_dois_programas(
+    *respostas: str | Exception, **kw: Any
+) -> tuple[TestClient, Mundo]:
+    """j1 (TV Fama, 2024) e j2 (Leo Dias, 2025), os dois com um vestido."""
+    c, m = com_vestido(*respostas, **kw)
+    m.com(job("j1"), objeto("a", "j1", 0, 1_000, data_de_exibicao=date(2024, 5, 1)))
+    m.com(
+        job("j2", programa="Leo Dias", data_exibicao=date(2025, 3, 1)),
+        objeto(
+            "b", "j2", 0, 1_000, programa="Leo Dias", data_de_exibicao=date(2025, 3, 1)
+        ),
+    )
+    return c, m
+
+
+def ids(r: Any) -> list[str]:
+    return [v["job_id"] for v in r.json()["videos"]]
+
+
+def sem_o_prazo(corpo: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in corpo.items() if k != "quadros_expiram_em"}
+
+
+def test_a_troca_de_programa_e_de_ano_pelo_token_nao_chama_o_modelo() -> None:
+    c, m = mundo_de_dois_programas()
+    dados = foto("PNG")
+    primeira = enviar(c, dados)
+    token = primeira.headers[TOKEN]
+    assert sorted(ids(primeira)) == ["j1", "j2"]
+    chamadas = len(m.transporte.chamadas)
+
+    for filtros in (
+        {"programa": "Leo Dias"},
+        {"programa": "TV Fama"},
+        {"desde": "2025-01-01", "ate": "2025-12-31"},
+        {"desde": "2024-01-01", "ate": "2024-12-31"},
+    ):
+        pelo_token = com_token(c, token, **filtros)
+        assert pelo_token.status_code == 200, pelo_token.text
+        assert len(ids(pelo_token)) == 1
+        assert pelo_token.json()["entendida"]["termo_da_foto"] == "vestido"
+        assert TOKEN not in pelo_token.headers
+        # A mesma troca pela foto devolve o mesmo (o modelo responde "vestido" de novo).
+        m.transporte.respostas.extend(VESTIDO)
+        pela_foto = enviar(c, dados, **filtros)
+        assert sem_o_prazo(pelo_token.json()) == sem_o_prazo(pela_foto.json())
+        chamadas += 1
+
+    # Só as quatro conferências pela foto chamaram o modelo; as trocas pelo token, não.
+    assert len(m.transporte.chamadas) == chamadas
+
+
+def com_listas(*respostas: str | Exception, **kw: Any) -> tuple[TestClient, Mundo, Any]:
+    listas = ListasDaBuscaEmMemoria()
+    c, m = mundo_de_dois_programas(*respostas, listas_da_busca=listas, **kw)
+    return c, m, listas
+
+
+def test_a_pagina_seguinte_pelo_token_traz_os_mesmos_videos_que_pela_foto() -> None:
+    c, m, _ = com_listas()
+    dados = foto("PNG")
+    primeira = enviar(c, dados, limite="1")
+    token, cursor = primeira.headers[TOKEN], primeira.headers["X-Proximo-Cursor"]
+
+    pelo_token = com_token(c, token, limite="1", cursor=cursor)
+    pela_foto = enviar(c, dados, limite="1", cursor=cursor)
+
+    assert pelo_token.status_code == 200, pelo_token.text
+    assert sem_o_prazo(pelo_token.json()) == sem_o_prazo(pela_foto.json())
+    assert sorted(ids(primeira) + ids(pelo_token)) == ["j1", "j2"]
+    assert len(m.transporte.chamadas) == 1
+
+
+def test_o_cursor_da_1a_pagina_feita_pelo_token_vale_na_pagina_2() -> None:
+    c, m, _ = com_listas()
+    token = enviar(c, foto("PNG"), limite="2").headers[TOKEN]
+    # Um programa só: a lista nova tem um vídeo por vez.
+    m.com(job("j3"), objeto("c", "j3", 0, 1_000))
+
+    primeira = com_token(c, token, limite="1", programa="TV Fama")
+    segunda = com_token(
+        c,
+        token,
+        limite="1",
+        programa="TV Fama",
+        cursor=primeira.headers["X-Proximo-Cursor"],
+    )
+
+    assert segunda.status_code == 200, segunda.text
+    assert sorted(ids(primeira) + ids(segunda)) == ["j1", "j3"]
+    assert len(m.transporte.chamadas) == 1
+
+
+def test_a_troca_pelo_token_e_busca_nova_por_imagem_e_a_pagina_nao() -> None:
+    eventos = EventosEmMemoria()
+    c, _, _ = com_listas(eventos=eventos)
+    primeira = enviar(c, foto("PNG"), limite="1")
+    token, cursor = primeira.headers[TOKEN], primeira.headers["X-Proximo-Cursor"]
+    assert len(eventos.publicados) == 1
+
+    com_token(c, token, programa="Leo Dias")
+    assert len(eventos.publicados) == 2
+    nova = eventos.publicados[-1]
+    assert nova.tamanho_da_consulta is None
+    assert nova.programa == "Leo Dias"
+    assert {(f.nome, f.valor) for f in nova.filtros} == {("modo", "imagem")}
+
+    com_token(c, token, limite="1", cursor=cursor)
+    assert len(eventos.publicados) == 2
+
+
+@pytest.mark.parametrize(
+    "falha", ["inexistente", "vencido", "de-outro-dono", "de-lista", "formato"]
+)
+def test_token_que_nao_vale_responde_422_do_token(falha: str) -> None:
+    c, _, listas = com_listas()
+    primeira = enviar(c, foto("PNG"), limite="1")
+    token = primeira.headers[TOKEN]
+    if falha == "inexistente":
+        token = "0" * 20
+    elif falha == "vencido":
+        listas.documentos[token]["expira_em"] = datetime(2000, 1, 1, tzinfo=UTC)
+    elif falha == "de-outro-dono":
+        listas.documentos[token]["dono"] = "u2"
+    elif falha == "de-lista":
+        token = primeira.headers["X-Proximo-Cursor"].partition(".")[0]
+    else:
+        token = "a/b"
+
+    r = com_token(c, token)
+
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Token da foto inválido"
+
+
+def test_token_vencido_com_a_lista_do_cursor_valida_da_o_422_do_token() -> None:
+    c, _, listas = com_listas()
+    primeira = enviar(c, foto("PNG"), limite="1")
+    token, cursor = primeira.headers[TOKEN], primeira.headers["X-Proximo-Cursor"]
+    listas.documentos[token]["expira_em"] = datetime.now(UTC) - timedelta(seconds=1)
+
+    r = com_token(c, token, limite="1", cursor=cursor)
+
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Token da foto inválido"
+
+
+def test_token_valido_com_cursor_recusado_da_cursor_invalido() -> None:
+    c, _, _ = com_listas()
+    token = enviar(c, foto("PNG")).headers[TOKEN]
+
+    r = com_token(c, token, cursor="0" * 20 + ".1")
+
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Cursor inválido"
+
+
+def test_o_id_de_um_token_usado_como_cursor_da_cursor_invalido() -> None:
+    c, _, _ = com_listas()
+    token = enviar(c, foto("PNG"), limite="1").headers[TOKEN]
+
+    for cursor in (token, f"{token}.1"):
+        r = enviar(c, foto("PNG"), limite="1", cursor=cursor)
+        assert r.status_code == 422
+        assert r.json()["detail"] == "Cursor inválido"
+
+
+@pytest.mark.parametrize("campos", ["os-dois", "nenhum"])
+def test_arquivo_e_token_juntos_ou_nenhum_dos_dois_dao_422(campos: str) -> None:
+    c, m, _ = com_listas()
+    token = enviar(c, foto("PNG")).headers[TOKEN]
+    arquivos: dict[str, Any] = {"arquivo": ("a.png", foto("PNG"), "image/png")}
+    if campos == "os-dois":
+        arquivos["token"] = (None, token)
+    else:
+        arquivos = {"outro": (None, "x")}
+    chamadas = len(m.transporte.chamadas)
+
+    r = c.post(ROTA, files=arquivos, headers=AUTORIZACAO)
+
+    assert r.status_code == 422
+    assert len(m.transporte.chamadas) == chamadas
+
+
+def test_acima_da_cota_o_token_responde_429_sem_ler_o_firestore() -> None:
+    class Contada(ListasDaBuscaEmMemoria):
+        leituras = 0
+
+        def ler(self, id: str) -> Any:
+            self.leituras += 1
+            return super().ler(id)
+
+    listas = Contada()
+    c, _ = mundo_de_dois_programas(listas_da_busca=listas, maximo_por_minuto=1)
+    token = enviar(c, foto("PNG")).headers[TOKEN]
+
+    r = com_token(c, token)
+
+    assert r.status_code == 429
+    assert listas.leituras == 0
+
+
+def test_com_o_token_a_foto_nao_e_recodificada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    c, _, _ = com_listas()
+    token = enviar(c, foto("PNG")).headers[TOKEN]
+
+    def proibida(*_: Any, **__: Any) -> Any:
+        raise AssertionError("recodificou")
+
+    monkeypatch.setattr("api.rota_da_busca.recodificar", proibida)
+
+    assert com_token(c, token, programa="Leo Dias").status_code == 200
+
+
+def test_o_documento_do_token_so_tem_dono_termo_hash_criacao_e_vencimento() -> None:
+    c, _, listas = com_listas()
+    dados = foto("PNG", (48, 48))
+
+    token = enviar(c, dados).headers[TOKEN]
+
+    [documento] = listas.documentos.values()
+    assert set(documento) == {"dono", "termo", "hash", "criado_em", "expira_em"}
+    assert documento["dono"] == "u1" and documento["termo"] == "vestido"
+    assert len(documento["hash"]) == 64
+    assert documento["expira_em"] - documento["criado_em"] == timedelta(minutes=15)
+    assert token in listas.documentos
+    assert dados not in [v for v in documento.values() if isinstance(v, bytes)]

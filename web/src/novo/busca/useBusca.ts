@@ -1,5 +1,6 @@
-import { useQuery, type QueryKey } from '@tanstack/react-query'
-import type { PaginaDaBusca } from '../../api.ts'
+import { hashKey, useQuery, type QueryKey } from '@tanstack/react-query'
+import { useRef, useState } from 'react'
+import { CURSOR_INVALIDO, PedidoInvalido, TOKEN_DA_FOTO_INVALIDO, type PaginaDaBusca } from '../../api.ts'
 import { consultaDaImagemParaApi, consultaParaApi, type ConsultaDaBusca, type Momento, type VideoDoResultado } from '../../busca.ts'
 import { finalizando, SEM_FILTROS, type Job } from '../../jobs.ts'
 import { useApi } from '../consultas.ts'
@@ -48,12 +49,42 @@ export function useBusca(pedido: PedidoDaBusca | null) {
   const api = useApi()
   const chave = chaveDa(pedido)
   const termo = pedido?.tipo === 'texto' ? pedido.consulta.q : null
-  return usePaginas({
+  // A consulta que produziu a lista à vista: com a nova em pedido (`atualizando`), é a anterior.
+  const pedida = pedido?.tipo === 'texto' ? pedido.consulta : null
+  const [exibida, setExibida] = useState(pedida)
+  // O token da foto (#805): fica fora da chave, para não refazer a busca quando chega. Vale para a
+  // foto `id`; a resposta só o grava se a seleção de filtros que a pediu é a do último pedido.
+  const token = useRef<{ id: number; valor: string } | null>(null)
+  const ultimo = useRef('')
+  const minha = hashKey(chave)
+  const porImagem = async (p: Extract<PedidoDaBusca, { tipo: 'imagem' }>, cursor: string): Promise<PaginaDaBusca> => {
+    ultimo.current = minha
+    const enviar = async (foto: File | { token: string }) => {
+      const pagina = await api.buscarPorImagem(foto, p.consulta, VIDEOS_POR_PAGINA, cursor)
+      if (pagina.tokenDaFoto && ultimo.current === minha) token.current = { id: p.id, valor: pagina.tokenDaFoto }
+      return pagina
+    }
+    const dele = token.current?.id === p.id ? token.current.valor : null
+    if (!dele) return enviar(p.foto)
+    try {
+      return await enviar({ token: dele })
+    } catch (erro) {
+      if (!(erro instanceof PedidoInvalido) || erro.message !== TOKEN_DA_FOTO_INVALIDO) throw erro
+      if (token.current?.valor === dele) token.current = null
+      // Sem cursor, reenvia a foto aqui mesmo, uma vez e só se este ainda é o último pedido; com
+      // cursor, a lista recomeça do topo (paginas.ts).
+      if (cursor || ultimo.current !== minha) throw erro
+      return enviar(p.foto)
+    }
+  }
+  const paginas = usePaginas({
     chave,
     pedir: (cursor) => {
       if (pedido?.tipo === 'texto') return api.buscar(pedido.consulta, VIDEOS_POR_PAGINA, cursor)
-      return api.buscarPorImagem(pedido!.foto, pedido!.consulta, VIDEOS_POR_PAGINA, cursor)
+      return porImagem(pedido as Extract<PedidoDaBusca, { tipo: 'imagem' }>, cursor)
     },
+    // Na foto, só o token e o cursor recusados recomeçam a lista; outro 422 aparece como erro.
+    recomeca: pedido?.tipo === 'imagem' ? (e) => e.message === TOKEN_DA_FOTO_INVALIDO || e.message === CURSOR_INVALIDO : undefined,
     proximo: proximoDaBusca,
     itens: cenasDaBusca,
     tamanho: tamanhoNaBusca,
@@ -66,6 +97,8 @@ export function useBusca(pedido: PedidoDaBusca | null) {
     retry: false,
     manterAnterior: (anterior) => termo !== null && anterior[0] === 'busca' && anterior[1] === 'texto' && anterior[2] === termo,
   })
+  if (!paginas.atualizando && exibida !== pedida) setExibida(pedida)
+  return { ...paginas, consultaExibida: paginas.atualizando ? exibida : pedida }
 }
 
 /**

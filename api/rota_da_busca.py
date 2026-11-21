@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TempoEsgotado
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from starlette.datastructures import UploadFile
@@ -24,6 +24,7 @@ from api.busca import (
     EvidenciaDaBusca,
     Ordem,
     ResultadoDaBusca,
+    TokenDaFotoInvalido,
     filtros_do_servidor,
 )
 from api.entendimento_da_consulta import TEMPO_DA_CONSULTA_S
@@ -45,6 +46,8 @@ from api.texto_como_dado import PADRAO_DA_LINHA, LinhaDaConsulta
 log = logging.getLogger(__name__)
 
 CONSULTAS_POR_MINUTO = 30
+# A página seguinte (pedido com cursor) gasta este contador, não o das consultas (#803).
+PAGINAS_POR_MINUTO = 120
 # O cabeçalho da carga fica fora do OpenAPI: não é parte do contrato para os sistemas.
 TesteDeCarga = Annotated[
     str | None,
@@ -57,20 +60,28 @@ TesteDeCarga = Annotated[
 ]
 
 
-def consultas_por_minuto_do_ambiente(env: Mapping[str, str]) -> int:
-    """O limite de `BUSCA_CONSULTAS_POR_MINUTO`; ausente ou vazia vale o padrão."""
-    bruto = env.get("BUSCA_CONSULTAS_POR_MINUTO") or ""
+def _teto_do_ambiente(env: Mapping[str, str], nome: str, padrao: int) -> int:
+    """O inteiro (a partir de 1) da variável `nome`; ausente ou vazia vale o padrão."""
+    bruto = env.get(nome) or ""
     if not bruto:
-        return CONSULTAS_POR_MINUTO
+        return padrao
     try:
         valor = int(bruto)
     except ValueError:
         valor = 0
     if valor < 1:
-        raise ValueError(
-            f"BUSCA_CONSULTAS_POR_MINUTO deve ser um inteiro a partir de 1, veio {bruto!r}"
-        )
+        raise ValueError(f"{nome} deve ser um inteiro a partir de 1, veio {bruto!r}")
     return valor
+
+
+def consultas_por_minuto_do_ambiente(env: Mapping[str, str]) -> int:
+    """O limite de `BUSCA_CONSULTAS_POR_MINUTO`; ausente ou vazia vale o padrão."""
+    return _teto_do_ambiente(env, "BUSCA_CONSULTAS_POR_MINUTO", CONSULTAS_POR_MINUTO)
+
+
+def paginas_por_minuto_do_ambiente(env: Mapping[str, str]) -> int:
+    """O teto de `BUSCA_PAGINAS_POR_MINUTO`; ausente ou vazia vale o padrão."""
+    return _teto_do_ambiente(env, "BUSCA_PAGINAS_POR_MINUTO", PAGINAS_POR_MINUTO)
 
 
 # O plano limita o texto da busca (docs/Plano_MAM.md); o campo do front tem o mesmo teto.
@@ -144,10 +155,12 @@ def criar_rotas_da_busca(
     limites_da_imagem: LimitesDaImagem = LIMITES_DA_IMAGEM,
     eventos: Eventos | None = None,
     aceita_teste_de_carga: bool = False,
+    paginas_por_minuto: int = PAGINAS_POR_MINUTO,
 ) -> APIRouter:
     rotas = APIRouter()
     publicador = eventos or SemEventos()
     limite = LimiteDeConsultas(consultas_por_minuto, relogio)
+    limite_de_paginas = LimiteDeConsultas(paginas_por_minuto, relogio)
 
     def da_carga(cabecalho: str | None) -> bool:
         """Só a chave ligada com o valor exato `1` tira a busca dos indicadores de uso."""
@@ -177,6 +190,55 @@ def criar_rotas_da_busca(
             ],
         )
 
+    def consultar(
+        resposta: Response,
+        chamador: Chamador,
+        *,
+        desde: date | None,
+        ate: date | None,
+        cursor: str | None,
+        limite_de_videos: int,
+        prazo_s: float,
+        da_carga_do_pedido: bool,
+        preparar: Callable[[], dict[str, Any]],
+        registrar_o_uso: Callable[[ResultadoDaBusca], None],
+    ) -> ResultadoDaBusca:
+        """A sequência das duas rotas: período, limite (de consultas ou de páginas), busca com prazo, evento e cursor.
+
+        `preparar` roda depois do limite (a foto só é recodificada para quem ainda tem
+        cota) e devolve o `texto`, o `imagem`, o `ordem` e os `ajustes` da `busca.buscar`.
+        """
+        if desde and ate and desde > ate:
+            raise HTTPException(422, "O início do período passa do fim")
+        sistema, quem = _quem_e(chamador)
+        # A página seguinte gasta o contador de páginas; só a consulta nova gasta o das consultas.
+        if not (limite if cursor is None else limite_de_paginas).consumir(quem):
+            raise HTTPException(429, "Consultas demais; tente em um minuto")
+        entrada = preparar()
+        cancelado = threading.Event()
+        futuro = _executor.submit(
+            busca.buscar,
+            limite=limite_de_videos,
+            filtros_do_servidor=filtros_do_servidor(),
+            sistema=sistema,
+            cancelado=cancelado,
+            cursor=cursor,
+            dono=quem,
+            **entrada,
+        )
+        try:
+            resultado = futuro.result(timeout=prazo_s)
+        except TempoEsgotado:
+            futuro.cancel()
+            cancelado.set()
+            log.warning("busca passou de %.1f s", prazo_s)
+            raise HTTPException(504, "A busca demorou demais") from None
+        except CursorInvalido:
+            raise HTTPException(422, "Cursor inválido") from None
+        if cursor is None and not da_carga_do_pedido:  # a 2ª página não é busca nova
+            registrar_o_uso(resultado)
+        return _com_cursor(resposta, resultado)
+
     @rotas.get("/busca", description=f"Busca por texto. {NOTA_DO_QUADRO}")
     def buscar(
         resposta: Response,
@@ -187,7 +249,6 @@ def criar_rotas_da_busca(
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
-        sem_periodo: bool = False,
         pessoa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         marca: Annotated[str | None, LinhaDaConsulta(100)] = None,
         tipo: TipoDeRegistro | None = None,
@@ -197,46 +258,29 @@ def criar_rotas_da_busca(
         cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
         teste_de_carga: TesteDeCarga = None,
     ) -> ResultadoDaBusca:
-        if desde and ate and desde > ate:
-            raise HTTPException(422, "O início do período passa do fim")
-        sistema, quem = _quem_e(chamador)
-        if not limite.consumir(quem):
-            raise HTTPException(429, "Consultas demais; tente em um minuto")
-        cancelado = threading.Event()
-        futuro = _executor.submit(
-            busca.buscar,
-            q,
-            ordem=ordem,
-            limite=limite_de_videos,
-            filtros_do_servidor=filtros_do_servidor(),
-            sistema=sistema,
-            cancelado=cancelado,
+        return consultar(
+            resposta,
+            chamador,
+            desde=desde,
+            ate=ate,
             cursor=cursor,
-            dono=quem,
-            ajustes=Ajustes(
-                evidencias=tuple(dict.fromkeys(evidencias or ())),
-                programa=programa,
-                desde=desde,
-                ate=ate,
-                sem_periodo=sem_periodo,
-                pessoa=pessoa,
-                marca=marca,
-                tipo=tipo,
-            ),
-        )
-        try:
-            resultado = futuro.result(timeout=tempo_maximo_s)
-        except TempoEsgotado:
-            futuro.cancel()
-            cancelado.set()
-            log.warning("busca passou de %.1f s", tempo_maximo_s)
-            raise HTTPException(504, "A busca demorou demais") from None
-        except CursorInvalido:
-            raise HTTPException(422, "Cursor inválido") from None
-        if cursor is None and not da_carga(
-            teste_de_carga
-        ):  # a 2ª página não é busca nova
-            registrar_busca(
+            limite_de_videos=limite_de_videos,
+            prazo_s=tempo_maximo_s,
+            da_carga_do_pedido=da_carga(teste_de_carga),
+            preparar=lambda: {
+                "texto": q,
+                "ordem": ordem,
+                "ajustes": Ajustes(
+                    evidencias=tuple(dict.fromkeys(evidencias or ())),
+                    programa=programa,
+                    desde=desde,
+                    ate=ate,
+                    pessoa=pessoa,
+                    marca=marca,
+                    tipo=tipo,
+                ),
+            },
+            registrar_o_uso=lambda resultado: registrar_busca(
                 chamador,
                 len(q),
                 programa,
@@ -246,17 +290,17 @@ def criar_rotas_da_busca(
                 evidencias=",".join(dict.fromkeys(evidencias or ())),
                 desde=desde,
                 ate=ate,
-                sem_periodo=sem_periodo,
                 pessoa=pessoa,
                 marca=marca,
                 tipo=tipo,
-            )
-        return _com_cursor(resposta, resultado)
+            ),
+        )
 
     teto_do_corpo = limites_da_imagem.max_bytes + FOLGA_DO_MULTIPART
 
-    async def foto_enviada(request: Request) -> bytes:
-        """O arquivo do multipart, lido com teto e só em memória.
+    async def foto_enviada(request: Request) -> bytes | str:
+        """Os bytes do `arquivo` do multipart, ou o `token` (str) no lugar dele, lidos com
+        teto e só em memória.
 
         O `File()` do FastAPI leria o corpo inteiro antes da rota, sem limite, e passaria
         de 1 MB para um arquivo temporário em disco: aqui o `Content-Length` é conferido
@@ -277,7 +321,7 @@ def criar_rotas_da_busca(
                     raise HTTPException(422, _GRANDE_DEMAIS)
                 yield pedaco
 
-        parser = MultiPartParser(request.headers, corpo(), max_files=1, max_fields=0)
+        parser = MultiPartParser(request.headers, corpo(), max_files=1, max_fields=1)
         parser.spool_max_size = teto_do_corpo
         try:
             formulario = await parser.parse()
@@ -285,90 +329,101 @@ def criar_rotas_da_busca(
             raise HTTPException(422, _RECUSA) from None
         try:
             arquivo = formulario.get("arquivo")
+            token = formulario.get("token")
+            if (arquivo is None) == (token is None):
+                raise HTTPException(422, _UM_DOS_DOIS)
+            if isinstance(token, str):
+                return token
             if not isinstance(arquivo, UploadFile):
-                raise HTTPException(422, "Envie a imagem no campo arquivo")
+                raise HTTPException(422, _UM_DOS_DOIS)
             return await arquivo.read(limites_da_imagem.max_bytes + 1)
         finally:
             await formulario.close()
 
-    @rotas.post("/busca/imagem", description=f"Busca por imagem. {NOTA_DO_QUADRO}")
+    @rotas.post(
+        "/busca/imagem",
+        description=f"Busca por imagem. {NOTA_DO_QUADRO}",
+        responses={
+            200: {
+                "headers": {
+                    "X-Token-Da-Foto": {
+                        "description": "O token da foto, na busca com o `arquivo` e sem "
+                        "`cursor`.",
+                        "schema": {"type": "string"},
+                    }
+                }
+            }
+        },
+    )
     def buscar_por_imagem(
         resposta: Response,
         chamador: Annotated[Chamador, Depends(exige_escopo("ler"))],
-        dados: Annotated[bytes, Depends(foto_enviada)],
+        foto: Annotated[bytes | str, Depends(foto_enviada)],
         programa: Annotated[str | None, LinhaDaConsulta(100)] = None,
         desde: date | None = None,
         ate: date | None = None,
-        sem_periodo: bool = False,
         limite_de_videos: Annotated[
             int, Query(alias="limite", ge=1, le=TETO_DE_VIDEOS)
         ] = VIDEOS_POR_PADRAO,
         cursor: Annotated[str | None, LinhaDaConsulta(100)] = None,
         teste_de_carga: TesteDeCarga = None,
     ) -> ResultadoDaBusca:
-        if desde and ate and desde > ate:
-            raise HTTPException(422, "O início do período passa do fim")
-        sistema, quem = _quem_e(chamador)
-        if not limite.consumir(quem):
-            raise HTTPException(429, "Consultas demais; tente em um minuto")
-        # A foto fica só em memória: nunca no disco, no Storage, no Firestore nem nos logs.
+
+        def preparar() -> dict[str, Any]:
+            entrada: dict[str, Any] = {
+                "texto": "",
+                "ajustes": Ajustes(programa=programa, desde=desde, ate=ate),
+            }
+            # Com o token, a foto não sobe nem é decodificada: o termo vem do Firestore.
+            if isinstance(foto, str):
+                return entrada | {"token": foto}
+            # A foto fica só em memória: nunca no disco, no Storage, no Firestore nem nos logs.
+            try:
+                jpeg = recodificar(
+                    foto,
+                    max_bytes=limites_da_imagem.max_bytes,
+                    max_pixels=limites_da_imagem.max_pixels,
+                    formatos=FORMATOS_DA_BUSCA_POR_IMAGEM,
+                )
+            except AcimaDoLimiteDeBytes:
+                raise HTTPException(422, _GRANDE_DEMAIS) from None
+            except AcimaDoLimiteDePixels:
+                raise HTTPException(422, _PIXELS_DEMAIS) from None
+            except ImagemRecusada:
+                raise HTTPException(422, _RECUSA) from None
+            return entrada | {"imagem": jpeg}
+
         try:
-            jpeg = recodificar(
-                dados,
-                max_bytes=limites_da_imagem.max_bytes,
-                max_pixels=limites_da_imagem.max_pixels,
-                formatos=FORMATOS_DA_BUSCA_POR_IMAGEM,
+            resultado = consultar(
+                resposta,
+                chamador,
+                desde=desde,
+                ate=ate,
+                cursor=cursor,
+                limite_de_videos=limite_de_videos,
+                # A foto tem uma chamada para a descrição, além do prazo da busca pelo termo.
+                prazo_s=tempo_maximo_s + TEMPO_DA_CONSULTA_S,
+                da_carga_do_pedido=da_carga(teste_de_carga),
+                preparar=preparar,
+                registrar_o_uso=lambda resultado: registrar_busca(
+                    chamador,
+                    len(foto) if isinstance(foto, bytes) else None,
+                    programa,
+                    resultado,
+                    modo="imagem",
+                    desde=desde,
+                    ate=ate,
+                ),
             )
-        except AcimaDoLimiteDeBytes:
-            raise HTTPException(422, _GRANDE_DEMAIS) from None
-        except AcimaDoLimiteDePixels:
-            raise HTTPException(422, _PIXELS_DEMAIS) from None
-        except ImagemRecusada:
-            raise HTTPException(422, _RECUSA) from None
-        cancelado = threading.Event()
-        futuro = _executor.submit(
-            busca.buscar,
-            "",
-            imagem=jpeg,
-            limite=limite_de_videos,
-            filtros_do_servidor=filtros_do_servidor(),
-            sistema=sistema,
-            cancelado=cancelado,
-            cursor=cursor,
-            dono=quem,
-            ajustes=Ajustes(
-                programa=programa, desde=desde, ate=ate, sem_periodo=sem_periodo
-            ),
-        )
-        # A foto tem uma chamada para a descrição, além do prazo da busca pelo termo.
-        prazo_s = tempo_maximo_s + TEMPO_DA_CONSULTA_S
-        try:
-            resultado = futuro.result(timeout=prazo_s)
-        except TempoEsgotado:
-            futuro.cancel()
-            cancelado.set()
-            log.warning("busca por imagem passou de %.1f s", prazo_s)
-            raise HTTPException(504, "A busca demorou demais") from None
-        except CursorInvalido:
-            raise HTTPException(422, "Cursor inválido") from None
+        except TokenDaFotoInvalido:
+            raise HTTPException(422, TOKEN_INVALIDO) from None
         except BuscaPorImagemIndisponivel:
             raise HTTPException(
                 503, "A busca por imagem não está disponível agora"
             ) from None
-        if cursor is None and not da_carga(
-            teste_de_carga
-        ):  # a 2ª página não é busca nova
-            registrar_busca(
-                chamador,
-                len(dados),
-                programa,
-                resultado,
-                modo="imagem",
-                desde=desde,
-                ate=ate,
-                sem_periodo=sem_periodo,
-            )
-        return _com_cursor(resposta, resultado)
+        if resultado._token_da_foto:
+            resposta.headers["X-Token-Da-Foto"] = resultado._token_da_foto
+        return resultado
 
     return rotas
 
@@ -380,6 +435,9 @@ def _com_cursor(resposta: Response, resultado: ResultadoDaBusca) -> ResultadoDaB
     return resultado
 
 
+# O texto que a tela compara para reenviar a foto (#802): não muda sem mudar a tela.
+TOKEN_INVALIDO = "Token da foto inválido"
+_UM_DOS_DOIS = "Envie a imagem no campo arquivo ou o token no campo token, só um deles"
 _RECUSA = "Envie uma imagem JPEG ou PNG válida"
 _GRANDE_DEMAIS = "A imagem passa do tamanho máximo"
 _PIXELS_DEMAIS = "A imagem passa do tamanho máximo em pixels"

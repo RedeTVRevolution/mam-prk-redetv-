@@ -30,8 +30,10 @@ import requests
 
 from api.busca import RRF_K, TETO_DE_CONSULTAS_AO_INDICE, _intercalar
 from api.busca_na_nuvem import com_pool, tocar_o_host
+from api.cache_curto import CacheCurto
 from api.clientes_de_nuvem import sessao_autenticada
 from api.indice_da_busca import Consulta, Filtros, Registro
+from api.operacao_do_google import terminou
 from api.orcamento_de_escrita import Orcamento
 from api.texto import normalizar
 
@@ -456,7 +458,7 @@ def esperar(
     intervalo_s: float = 10.0,
 ) -> None:
     """Espera a operação de longa duração (criar ou apagar coleção e índice) terminar."""
-    while not operacao.get("done", True):
+    while not terminou(operacao):
         dormir(intervalo_s)
         operacao = transporte("GET", operacao["name"], None)
     if "error" in operacao:
@@ -718,17 +720,11 @@ def _criacao(r: Registro) -> dict[str, Any]:
 @dataclass(frozen=True)
 class PlanoDeReindexacao:
     """O que muda no índice de um vídeo (#418): ids dos registros a apagar, registros a
-    criar (inclui os de `significado` novo), registros a atualizar só em `data`, e ids
-    dos planos que precisam do vetor do quadro novo."""
+    criar (inclui os de `significado` novo) e registros a atualizar só em `data`."""
 
     criar: list[Registro]
     apagar: list[str]
     atualizar: list[Registro]
-    planos_com_quadro_novo: list[str]
-
-    @property
-    def vazio(self) -> bool:
-        return not (self.criar or self.apagar or self.atualizar)
 
 
 def _canonico(dados: dict[str, Any]) -> dict[str, Any]:
@@ -768,7 +764,6 @@ def montar_plano(
     antes = {d["id"]: _canonico(d) for d in lidos}
     criar: list[Registro] = []
     atualizar: list[Registro] = []
-    quadro_novo: list[str] = []
     vistos: set[str] = set()
     for r in novos:
         vistos.add(r.id)
@@ -780,16 +775,10 @@ def montar_plano(
             criar.append(r)
         elif velho != agora:
             atualizar.append(r)
-        if r.tipo == "plano" and (
-            velho is None
-            or velho.get("quadro") != agora.get("quadro")
-            or velho.get("descricao") != agora.get("descricao")
-        ):
-            quadro_novo.append(r.id)
     # `criar` com id já lido (significado novo) também apaga o velho antes.
     apagar = [i for i in antes if i not in vistos]
     apagar += [r.id for r in criar if r.id in antes]
-    return PlanoDeReindexacao(criar, apagar, atualizar, quadro_novo)
+    return PlanoDeReindexacao(criar, apagar, atualizar)
 
 
 class AgentRetrieval:
@@ -821,11 +810,13 @@ class AgentRetrieval:
         self._escritas: dict[str, deque[tuple[float, int]]] = {}
         # Uma busca do usuário repete o mesmo texto em várias cláusulas (a livre e a de cada
         # pessoa na imagem): cada texto é embutido uma vez só, até 256 textos.
-        self._vetores: dict[str, list[float]] = {}
         # As cláusulas vão ao índice juntas (#488): quem pede um texto que outra thread já
-        # está embutindo espera por ele, em vez de pagar a mesma chamada de novo.
-        self._embutindo: dict[str, threading.Lock] = {}
-        self._trava_do_embutindo = threading.Lock()
+        # está embutindo espera por ele (o `CacheCurto`). O vetor não envelhece: só sai
+        # por capacidade, o mais antigo.
+        self._vetores_do_texto = CacheCurto(
+            validade=float("inf"), maximo=256, relogio=relogio
+        )
+        self._trava_do_enchendo = threading.Lock()
         # Os textos com uma thread enchendo o cache (`_buscar_na_colecao`): uma por texto,
         # no máximo `TETO_DE_ENCHIMENTOS` juntas; a busca que não cabe só não enche.
         self._enchendo: set[str] = set()
@@ -934,14 +925,6 @@ class AgentRetrieval:
         return [
             (o["name"], o["data"])
             for o in self._objetos_do_video(job_id, campos, colecao=colecao)
-        ]
-
-    def ler_indice(self, job_id: str) -> list[dict[str, Any]]:
-        """Os dados de todos os objetos do vídeo (ver `_ler_com_nomes`)."""
-        return [
-            dados
-            for colecao in self._config.colecoes
-            for _, dados in self._ler_com_nomes(job_id, colecao)
         ]
 
     def _escrever(
@@ -1103,21 +1086,7 @@ class AgentRetrieval:
         `semanticSearch` o calcula, na região da busca. Medido no dev (5/11/2026): a
         distância de cada posição do top-50 coincide com a do ANN. Sem retry: a chamada
         tem cota regional e um 429 sobe como erro da busca."""
-        # `get`, não `in` e depois `[]`: outra thread pode limpar o cache no meio.
-        guardado = self._vetores.get(texto)
-        if guardado is not None:
-            return guardado
-        with self._trava_do_embutindo:
-            trava = self._embutindo.setdefault(texto, threading.Lock())
-        try:
-            with trava:
-                guardado = self._vetores.get(texto)
-                if guardado is not None:
-                    return guardado
-                return self._embutir(texto)
-        finally:
-            with self._trava_do_embutindo:
-                self._embutindo.pop(texto, None)
+        return self._vetores_do_texto.obter(texto, lambda: self._embutir(texto))
 
     def _guardar_o_vetor(self, texto: str) -> None:
         """Enche o cache; falha não atrapalha a busca (o `semanticSearch` já responde)."""
@@ -1126,14 +1095,14 @@ class AgentRetrieval:
         except Exception:
             log.warning("embedding do cache da busca falhou", exc_info=True)
         finally:
-            with self._trava_do_embutindo:
+            with self._trava_do_enchendo:
                 self._enchendo.discard(texto)
 
     def _encher_o_cache(self, texto: str) -> None:
         """Embute o texto numa thread solta, sem a busca esperar: o embedding pode demorar
         mais que ela (p90 ~450 ms medido). Uma thread por texto, e no máximo
         `TETO_DE_ENCHIMENTOS` juntas, para um embedding lento não acumular threads."""
-        with self._trava_do_embutindo:
+        with self._trava_do_enchendo:
             if texto in self._enchendo or len(self._enchendo) >= TETO_DE_ENCHIMENTOS:
                 return
             self._enchendo.add(texto)
@@ -1146,12 +1115,12 @@ class AgentRetrieval:
             ).start()
         except RuntimeError:
             # Sem thread (falta de recursos): a reserva sai, e a busca segue sem encher.
-            with self._trava_do_embutindo:
+            with self._trava_do_enchendo:
                 self._enchendo.discard(texto)
             log.warning("thread do embedding do cache não iniciou", exc_info=True)
 
     def _embutir(self, texto: str) -> list[float]:
-        """Chama o modelo de embedding e guarda o vetor no cache."""
+        """Chama o modelo de embedding."""
         resposta = self._transporte(
             "POST",
             f"https://{self._config.regiao}-aiplatform.googleapis.com/v1/projects/"
@@ -1168,9 +1137,6 @@ class AgentRetrieval:
                 f"o embedding veio com dimensão {len(valores)}, e a coleção tem "
                 f"{self._config.dimensao}"
             )
-        if len(self._vetores) >= 256:
-            self._vetores.clear()
-        self._vetores[texto] = valores
         return valores
 
     def buscar(self, consulta: Consulta) -> list[Registro]:
@@ -1202,7 +1168,7 @@ class AgentRetrieval:
         elif not self._config.indices_ligados:
             vetor = self.vetor_da_consulta(consulta.significado)
         else:
-            vetor = self._vetores.get(consulta.significado)
+            vetor = self._vetores_do_texto.lido(consulta.significado)
             if vetor is None:
                 self._encher_o_cache(consulta.significado)
         pedido = pedido_de_busca(self._config, consulta, vetor)

@@ -207,7 +207,6 @@ class Ajustes:
     programa: str | None = None  # "": sem programa
     desde: date | None = None
     ate: date | None = None
-    sem_periodo: bool = False  # o "Todos os anos" da tela
     # Facetas da tela: filtram os candidatos (os de programa e mês são o programa e o período).
     pessoa: str | None = None  # id do catálogo: na imagem ou dona do objeto
     marca: str | None = None
@@ -241,6 +240,8 @@ class ResultadoDaBusca(BaseModel):
     quadros_expiram_em: datetime
     # A página seguinte (#426): a rota a põe no cabeçalho `X-Proximo-Cursor`, fora do corpo.
     _proximo_cursor: str | None = PrivateAttr(default=None)
+    # O token da foto (#802), na 1ª resposta da busca por foto: a rota o põe em `X-Token-Da-Foto`.
+    _token_da_foto: str | None = PrivateAttr(default=None)
 
 
 class MomentoGuardado(BaseModel):
@@ -277,9 +278,8 @@ class ListaDaBusca(BaseModel):
     facetas: Facetas
     termos: list[str]
     videos: list[VideoGuardado]
-    # A versão da lixeira do catálogo lida antes da 1ª decisão (#598); `None` é o formato
-    # antigo, de antes dela: a página seguinte o recusa.
-    versao_da_lixeira: int | None = None
+    # A versão da lixeira do catálogo lida antes da 1ª decisão (#598).
+    versao_da_lixeira: int
 
     def para_documento(self) -> dict[str, Any]:
         """A lista num campo de bytes: o Firestore não indexa item por item, e o
@@ -304,6 +304,14 @@ class ListasDaBusca(Protocol):
         ...
 
     def ler(self, id: str) -> dict[str, Any] | None: ...
+
+
+class TokenDaFotoInvalido(Exception):
+    """O token não existe, venceu, é de outro dono, não é de token ou está fora do formato."""
+
+
+# O id que o Firestore dá a um documento tem 20 letras e números.
+TAMANHO_DO_TOKEN = 20
 
 
 class ListasDaBuscaEmMemoria:
@@ -391,6 +399,15 @@ class _Trecho:
     tipo: TipoDeRegistro
 
 
+@dataclass
+class _VideoOrdenado:
+    """O vídeo já ordenado, com os trechos na ordem do vídeo: o `Momento` só se monta
+    para os vídeos da página."""
+
+    job: Job
+    trechos: list[_Trecho]
+
+
 _agora = time.perf_counter  # troca-se nos testes por um relógio controlado
 
 
@@ -454,6 +471,7 @@ class Busca:
         sistema: str | None = None,
         ajustes: Ajustes | None = None,
         imagem: bytes | None = None,
+        token: str | None = None,
         cancelado: threading.Event | None = None,
         cursor: str | None = None,
         dono: str = "",
@@ -467,21 +485,34 @@ class Busca:
         foto (#443) e a busca segue como se a pessoa o tivesse digitado, com o mesmo
         saneamento, índice e ranking; só os filtros de `ajustes` valem. Sem o modelo,
         se ele falhar ou não achar objeto, levanta `BuscaPorImagemIndisponivel`: sem texto
-        digitado não há plano B."""
+        digitado não há plano B.
+
+        `token` (#802) vale a foto: o termo que o modelo deu e o SHA-256 do JPEG ficam num
+        documento curto de `listas_da_busca`, e com ele a busca não chama o modelo
+        (`TokenDaFotoInvalido` se não vale para `dono`); a 1ª busca por `imagem` o devolve
+        em `_token_da_foto`."""
         inicio = _agora()
         impostos = filtros_do_servidor or Filtros()
         if sistema is not None:
             # O filtro do índice só tira inelegíveis do teto; `_visivel_de` decide.
             impostos = replace(impostos, sistema=sistema)
         termo_da_foto = None
-        impressao = _impressao(
-            texto=texto,
-            ordem=ordem,
-            imagem=hashlib.sha256(imagem).hexdigest() if imagem is not None else None,
-            sistema=sistema,
-            ajustes=asdict(ajustes or Ajustes()),
-            filtros=asdict(impostos),
-        )
+        da_foto = self._ler_token(token, dono) if token is not None else None
+        sha: str | None = None
+        if da_foto:
+            sha = da_foto["hash"]
+        elif imagem is not None:
+            sha = hashlib.sha256(imagem).hexdigest()
+        partes = {
+            "texto": texto,
+            "imagem": sha,
+            "sistema": sistema,
+            "ajustes": asdict(ajustes or Ajustes()),
+            "filtros": asdict(impostos),
+        }
+        impressao = _impressao(**partes, ordem=ordem)
+        # A ordem só age no fim (`_videos`): sem ela na chave, trocá-la reaproveita os caches.
+        do_cache = _impressao(**partes)
         if cursor is not None:
             return self._pagina_seguinte(
                 cursor, limite, dono, impressao, sistema, cancelado
@@ -489,7 +520,9 @@ class Busca:
         # Lida antes de qualquer decisão sobre quem conta e gravada na lista: uma mudança na
         # lixeira do catálogo no meio da busca faz a página seguinte ser recusada (#598).
         versao = self._versao.atual()
-        if imagem is not None:
+        if da_foto:
+            texto = termo_da_foto = da_foto["termo"]
+        elif imagem is not None:
             _conferir(cancelado)
             texto = termo_da_foto = self._termo_da_foto(imagem)
         entendida = _ajustada(
@@ -530,7 +563,7 @@ class Busca:
             return [
                 replace(r, pessoas=list(r.pessoas), cor_base=list(r.cor_base))
                 for r in self._candidatos.obter(
-                    ("indice", impressao, c), lambda: self._indice.buscar(c)
+                    ("indice", do_cache, c), lambda: self._indice.buscar(c)
                 )
             ]
 
@@ -713,7 +746,7 @@ class Busca:
             try:
                 achados = [
                     *self._reordenar(
-                        impressao,
+                        do_cache,
                         com_acento(_texto_da_busca(entendida), intocadas),
                         achados[:TETO_DO_RANKING],
                     ),
@@ -740,8 +773,8 @@ class Busca:
         usadas = do_nome.usadas()
         termos = _termos(entendida, nome) + usadas
         trechos = _juntar([r for r in achados if r.id in motivo_de], motivo_de, posicao)
-        todos = self._videos(trechos, job, termos, ordem, cancelado)
-        videos = todos[:limite]
+        todos = self._videos(trechos, job, ordem, cancelado)
+        videos = [self._montar(v, termos) for v in todos[:limite]]
         t_videos = _agora() - inicio
         if sistema is not None:
             self._assinar_os_quadros(videos, cancelado)
@@ -838,7 +871,38 @@ class Busca:
             resultado._proximo_cursor = self._guardar(
                 resultado, todos, termos, dono, impressao, limite, versao
             )
+        if sha is not None and imagem is not None and termo_da_foto:
+            resultado._token_da_foto = self._guardar_token(
+                dono, termo_da_foto, sha, agora
+            )
         return resultado
+
+    def _guardar_token(self, dono: str, termo: str, sha: str, agora: datetime) -> str:
+        """Só dono, termo, hash e prazo: a foto nunca vai ao documento."""
+        return self._listas.gravar(
+            {
+                "dono": dono,
+                "termo": termo,
+                "hash": sha,
+                "criado_em": agora,
+                "expira_em": agora + VALIDADE_DA_LISTA,
+            }
+        )
+
+    def _ler_token(self, token: str, dono: str) -> dict[str, Any]:
+        if not (_ascii_alnum(token) and len(token) <= TAMANHO_DO_TOKEN):
+            raise TokenDaFotoInvalido
+        documento = self._listas.ler(token)
+        if (
+            not documento
+            or documento.get("dono") != dono
+            or not isinstance(documento.get("termo"), str)
+            or not isinstance(documento.get("hash"), str)
+            # O TTL do Firestore apaga com atraso.
+            or documento["expira_em"] <= self._relogio()
+        ):
+            raise TokenDaFotoInvalido
+        return documento
 
     def _reordenar(
         self, impressao: str, texto: str, registros: list[Registro]
@@ -855,7 +919,7 @@ class Busca:
     def _guardar(
         self,
         resultado: ResultadoDaBusca,
-        todos: list[VideoDoResultado],
+        todos: list[_VideoOrdenado],
         termos: list[str],
         dono: str,
         impressao: str,
@@ -877,16 +941,16 @@ class Busca:
             versao_da_lixeira=versao,
             videos=[
                 VideoGuardado(
-                    job_id=v.job_id,
+                    job_id=v.job.id,
                     momentos=[
                         MomentoGuardado(
-                            tipo=m.tipo,
-                            inicio_ms=m.inicio_ms,
-                            fim_ms=m.fim_ms,
-                            motivo=m.motivo,
-                            quadro=m.quadro,
+                            tipo=t.tipo,
+                            inicio_ms=t.inicio_ms,
+                            fim_ms=t.fim_ms,
+                            motivo=t.motivo,
+                            quadro=t.quadro,
                         )
-                        for m in v.momentos
+                        for t in v.trechos
                     ],
                 )
                 for v in todos
@@ -934,8 +998,7 @@ class Busca:
             or lista.dono != dono
             or lista.impressao != impressao
             or not 0 < inicio < len(lista.videos)
-            # A lixeira do catálogo mudou (ou a lista é do formato sem versão): a lista
-            # guarda quem contava então (#598).
+            # A lixeira do catálogo mudou: a lista guarda quem contava então (#598).
             or lista.versao_da_lixeira != self._versao.atual()
         ):
             raise CursorInvalido
@@ -983,12 +1046,9 @@ class Busca:
             resultado._proximo_cursor = f"{id}.{fim}"
         return resultado
 
-    def _visivel(self, job_id: str, sistema: str | None) -> Job | None:
-        """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
-        return self._visivel_de(self._repositorio.obter(job_id), sistema)
-
     @staticmethod
     def _visivel_de(achado: Job | None, sistema: str | None) -> Job | None:
+        """O vídeo, se concluído, fora da lixeira e, para uma chave de sistema, do mesmo sistema."""
         if achado is None or achado.estado != "concluido" or achado.lixeira:
             return None
         if sistema is not None and achado.sistema != sistema:
@@ -1106,14 +1166,13 @@ class Busca:
         self,
         trechos: list[_Trecho],
         job: Callable[[str], Job | None],
-        termos: list[str],
         ordem: Ordem,
         cancelado: threading.Event | None,
-    ) -> list[VideoDoResultado]:
+    ) -> list[_VideoOrdenado]:
         por_video: dict[str, list[_Trecho]] = defaultdict(list)
         for t in trechos:
             por_video[t.job_id].append(t)
-        videos: list[tuple[int, VideoDoResultado]] = []
+        videos: list[tuple[int, _VideoOrdenado]] = []
         for id, lista in por_video.items():
             _conferir(cancelado)
             j = job(id)
@@ -1121,37 +1180,35 @@ class Busca:
                 continue
             # A relevância também dentro do vídeo; no empate, o tempo.
             lista.sort(key=lambda t: (t.posicao, t.inicio_ms, t.fim_ms))
-            momentos = [
-                Momento(
-                    tipo=t.tipo,
-                    inicio_ms=t.inicio_ms,
-                    fim_ms=t.fim_ms,
-                    motivo=t.motivo,
-                    destaques=_destaques(t.motivo, termos),
-                    quadro=t.quadro,
-                    quadro_url=None,
-                )
-                for t in lista
-            ]
-            videos.append(
-                (
-                    min(t.posicao for t in lista),
-                    VideoDoResultado(
-                        job_id=id,
-                        nome=j.nome,
-                        programa=j.programa,
-                        data_exibicao=j.data_exibicao,
-                        duracao_s=j.duracao_s,
-                        n_momentos=len(momentos),
-                        momentos=momentos,
-                    ),
-                )
-            )
-        videos.sort(key=lambda v: (v[0], -v[1].n_momentos))
+            videos.append((min(t.posicao for t in lista), _VideoOrdenado(j, lista)))
+        videos.sort(key=lambda v: (v[0], -len(v[1].trechos)))
         if ordem == "data":
             # Estável: na mesma data, fica a relevância; sem data, no fim.
-            videos.sort(key=lambda v: v[1].data_exibicao or date.min, reverse=True)
+            videos.sort(key=lambda v: v[1].job.data_exibicao or date.min, reverse=True)
         return [v for _, v in videos]
+
+    def _montar(self, v: _VideoOrdenado, termos: list[str]) -> VideoDoResultado:
+        momentos = [
+            Momento(
+                tipo=t.tipo,
+                inicio_ms=t.inicio_ms,
+                fim_ms=t.fim_ms,
+                motivo=t.motivo,
+                destaques=_destaques(t.motivo, termos),
+                quadro=t.quadro,
+                quadro_url=None,
+            )
+            for t in v.trechos
+        ]
+        return VideoDoResultado(
+            job_id=v.job.id,
+            nome=v.job.nome,
+            programa=v.job.programa,
+            data_exibicao=v.job.data_exibicao,
+            duracao_s=v.job.duracao_s,
+            n_momentos=len(momentos),
+            momentos=momentos,
+        )
 
     def _sem_aparicao(
         self,
@@ -1330,8 +1387,6 @@ def _ajustada(e: ConsultaEntendida, a: Ajustes) -> ConsultaEntendida:
     e = replace(e, evidencias=a.evidencias)
     if a.programa is not None:
         e = replace(e, programa=a.programa or None)
-    if a.sem_periodo:
-        e = replace(e, exibido_desde=None, exibido_ate=None)
     if a.desde is not None:
         e = replace(e, exibido_desde=a.desde)
     if a.ate is not None:

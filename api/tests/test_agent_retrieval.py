@@ -1,5 +1,5 @@
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
@@ -17,6 +17,7 @@ from api.agent_retrieval import (
     CotaEsgotada,
     EsquemaIncompativel,
     JaExiste,
+    PlanoDeReindexacao,
     _criacao,
     _fundir_por_rrf,
     _registro,
@@ -309,38 +310,55 @@ def test_duas_clausulas_juntas_com_o_mesmo_texto_embutem_uma_vez_so() -> None:
     segunda.join(timeout=5)
     assert vetores == [[0.5] * 256] * 2
     assert len(transporte.chamadas) == 1
-    assert adaptador._embutindo == {}
 
 
-def test_outra_thread_limpando_o_cache_no_meio_nao_derruba_a_busca() -> None:
-    class Limpa(dict[str, list[float]]):
-        """Outra thread chama `clear()` entre o `in` e a leitura."""
-
-        def __contains__(self, chave: object) -> bool:
-            self.clear()
-            return True
-
-    transporte = TransporteFalso(
-        {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
-    )
-    adaptador = AgentRetrieval(SEM_INDICES, transporte)
-    adaptador._vetores = Limpa()
-    assert adaptador.vetor_da_consulta("a") == [0.5] * 256
-
-
-def test_o_cache_do_embedding_guarda_no_maximo_256_textos() -> None:
+def test_o_cache_do_embedding_guarda_256_textos_e_expulsa_o_mais_antigo() -> None:
     transporte = TransporteFalso(
         {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
     )
     adaptador = AgentRetrieval(SEM_INDICES, transporte)
     for n in range(256):
         adaptador.vetor_da_consulta(f"t{n}")
-    adaptador.vetor_da_consulta("t0")  # ainda guardado: sem chamada nova
-    assert len(transporte.chamadas) == 256
-    adaptador.vetor_da_consulta("t256")  # passou do limite: o cache recomeça
-    assert len(adaptador._vetores) == 1
-    adaptador.vetor_da_consulta("t0")  # foi esquecido: chama de novo
+    adaptador.vetor_da_consulta("t256")  # o 257º: sai só o mais antigo (t0)
+    assert len(transporte.chamadas) == 257
+    for n in range(1, 257):
+        adaptador.vetor_da_consulta(f"t{n}")  # os outros 256 seguem guardados
+    assert len(transporte.chamadas) == 257
+    adaptador.vetor_da_consulta("t0")  # foi expulso: chama de novo
     assert len(transporte.chamadas) == 258
+
+
+def test_erro_do_embedding_nao_fica_guardado() -> None:
+    chamadas: list[str] = []
+
+    def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
+        chamadas.append(caminho)
+        if len(chamadas) == 1:
+            raise RuntimeError("429")
+        return {"predictions": [{"embeddings": {"values": [0.5] * 256}}]}
+
+    adaptador = AgentRetrieval(SEM_INDICES, transporte)
+    with pytest.raises(RuntimeError):
+        adaptador.vetor_da_consulta("a")
+    assert adaptador.vetor_da_consulta("a") == [0.5] * 256
+    assert len(chamadas) == 2
+
+
+def test_com_ann_o_vetor_nao_vence_por_tempo() -> None:
+    agora = [1000.0]
+    chamadas: list[tuple[str, Any]] = []
+    indice = AgentRetrieval(
+        CONFIG, _transporte_de_busca(chamadas), relogio=lambda: agora[0]
+    )
+    consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
+    indice.buscar(consulta)
+    _esperar_o_cache()
+    agora[0] += 10_000  # muito além dos 120 s padrão do CacheCurto
+    chamadas.clear()
+    indice.buscar(consulta)
+    assert [p for p, _ in chamadas if p.endswith(":predict")] == []
+    (busca,) = _buscas(next(c for p, c in chamadas))
+    assert busca == "vectorSearch"
 
 
 def test_embedding_da_consulta_de_outra_dimensao_levanta() -> None:
@@ -1511,9 +1529,13 @@ def test_plano_id_novo_cria_e_id_que_sumiu_apaga() -> None:
     assert plano.atualizar == []
 
 
+def _vazio(plano: PlanoDeReindexacao) -> bool:
+    return not (plano.criar or plano.apagar or plano.atualizar)
+
+
 def test_plano_igual_nao_faz_nada() -> None:
     r = _reg("j:fala:fal000", texto="a", pessoas=["x", "y"], programa="p")
-    assert montar_plano([r], [_lido(r)]).vazio
+    assert _vazio(montar_plano([r], [_lido(r)]))
 
 
 def test_plano_mudar_o_texto_da_fala_so_atualiza() -> None:
@@ -1553,68 +1575,12 @@ def test_plano_compara_float_none_dias_e_listas_fora_de_ordem() -> None:
     sem_listas = _reg("j:fala:fal000", texto="a")
     lido_sem_listas = _lido(sem_listas)
     del lido_sem_listas["pessoas"], lido_sem_listas["cor_base"]  # o índice omite []
-    assert montar_plano([sem_listas], [lido_sem_listas]).vazio
+    assert _vazio(montar_plano([sem_listas], [lido_sem_listas]))
     assert lido["data_de_exibicao"] == 20260102
-    assert montar_plano([r], [lido]).vazio
+    assert _vazio(montar_plano([r], [lido]))
     # Um dia diferente é mudança de verdade.
     outro = replace(r, data_de_exibicao=date(2026, 1, 3))
     assert montar_plano([outro], [lido]).atualizar == [outro]
-
-
-def test_plano_diz_quais_planos_precisam_do_vetor_do_quadro() -> None:
-    def plano(id: str, quadro: str, descricao: str = "d") -> Registro:
-        return _reg(id, "plano", descricao=descricao, quadro=quadro)
-
-    igual, novo = plano("j:plano:p0", "q0"), plano("j:plano:p1", "q1")
-    quadro = plano("j:plano:p2", "q2")
-    texto = plano("j:plano:p3", "q3")
-    pessoas = replace(plano("j:plano:p4", "q4"), pessoas=["x"])
-    # Sem descrição o `significado` cai no tipo, igual ao da descrição "plano" de antes.
-    sem_descricao = replace(plano("j:plano:p5", "q5"), descricao=None)
-    lidos = [
-        _lido(igual),
-        _lido(plano("j:plano:p2", "velho")),
-        _lido(plano("j:plano:p3", "q3", "outra descrição")),
-        _lido(plano("j:plano:p4", "q4")),
-        _lido(plano("j:plano:p5", "q5", "plano")),
-    ]
-    resultado = montar_plano(
-        [igual, novo, quadro, texto, pessoas, sem_descricao], lidos
-    )
-    assert resultado.planos_com_quadro_novo == [
-        "j:plano:p1",
-        "j:plano:p2",
-        "j:plano:p3",
-        "j:plano:p5",
-    ]
-
-
-def test_ler_indice_pede_so_os_campos_do_esquema_e_pagina() -> None:
-    r1, r2 = _reg("j:fala:fal000", texto="a"), _reg("j:fala:fal001", texto="b")
-    respostas = iter(
-        [
-            {
-                "dataObjects": [{"name": "c/dataObjects/a", "data": _lido(r1)}],
-                "nextPageToken": "p2",
-            },
-            {"dataObjects": [{"name": "c/dataObjects/b", "data": _lido(r2)}]},
-            {},
-        ]
-    )
-    transporte = TransporteFalso()
-    lidos = AgentRetrieval(CONFIG, _Sequencia(transporte, respostas)).ler_indice("j")
-    assert [d["id"] for d in lidos] == [r1.id, r2.id]
-    [(_, caminho, corpo1), (_, _, corpo2), (_, texto, corpo3)] = transporte.chamadas
-    assert caminho.endswith("/dataObjects:query")
-    assert corpo1 is not None and corpo2 is not None
-    assert corpo1["filter"] == {"job_id": {"$eq": "j"}}
-    campos = corpo1["outputFields"]["dataFields"]
-    assert campos == list(esquema_da_colecao(CONFIG)["dataSchema"]["properties"])
-    assert corpo2["pageToken"] == "p2"
-    assert "/col-texto/" in texto
-    assert (
-        corpo3 is not None and "significado" not in corpo3["outputFields"]["dataFields"]
-    )
 
 
 class _ColecaoEmMemoria:
@@ -2257,9 +2223,12 @@ def test_aquecer_o_indice_toca_um_host_de_cada_servico() -> None:
 def test_com_ann_texto_ja_enchendo_nao_abre_outra_thread() -> None:
     liberar = threading.Event()
     chamadas: list[str] = []
+    buscas: list[Any] = []
 
     def transporte(metodo: str, caminho: str, corpo: Any) -> dict[str, Any]:
         chamadas.append(caminho)
+        if caminho.endswith(":batchSearch"):
+            buscas.append(corpo)
         if caminho.endswith(":predict"):
             liberar.wait(5)
             return {"predictions": [{"embeddings": {"values": [0.1] * 256}}]}
@@ -2268,7 +2237,9 @@ def test_com_ann_texto_ja_enchendo_nao_abre_outra_thread() -> None:
     indice = AgentRetrieval(CONFIG, transporte)
     consulta = Consulta(significado="paletó", filtros=Filtros(tipo="plano"))
     for _ in range(10):
+        # o embedding bloqueado não segura a busca: volta com o `semanticSearch`
         indice.buscar(consulta)
+        assert set(_buscas(buscas[-1])) == {"semanticSearch"}
     abertas = [t for t in threading.enumerate() if t.name == "embedding-do-cache"]
     liberar.set()
     _esperar_o_cache()
@@ -2288,3 +2259,44 @@ def test_com_ann_thread_que_nao_inicia_libera_a_reserva(
     monkeypatch.setattr(threading.Thread, "start", falha)
     indice.buscar(Consulta(significado="paletó", filtros=Filtros(tipo="plano")))
     assert indice._enchendo == set()
+
+
+def test_esperar_acompanha_a_operacao_com_nome_e_sem_done() -> None:
+    transporte = TransporteFalso()
+    respostas = iter([{"name": "op", "done": True}])
+    esperas: list[float] = []
+
+    esperar({"name": "op"}, _Sequencia(transporte, respostas), esperas.append)
+
+    assert [(m, c) for m, c, _ in transporte.chamadas] == [("GET", "op")]
+    assert len(esperas) == 1
+
+
+def test_esperar_continua_enquanto_o_done_for_falso() -> None:
+    transporte = TransporteFalso()
+    respostas = iter([{"name": "op", "done": False}, {"name": "op", "done": True}])
+
+    esperar(
+        {"name": "op", "done": False}, _Sequencia(transporte, respostas), lambda _: None
+    )
+
+    assert len(transporte.chamadas) == 2
+
+
+def test_esperar_nao_consulta_a_resposta_sem_nome() -> None:
+    transporte = TransporteFalso()
+
+    esperar({}, transporte, lambda _: None)
+
+    assert transporte.chamadas == []
+
+
+def test_apagar_colecao_sem_corpo_na_resposta_termina_sem_consultar() -> None:
+    transporte = TransporteFalso()
+    respostas: Iterator[dict[str, Any]] = iter(
+        [{}, {}]
+    )  # a consulta dos objetos e o DELETE; uma terceira falha
+
+    apagar_colecao(CONFIG, _Sequencia(transporte, respostas), _nao_dorme)
+
+    assert [m for m, _, _ in transporte.chamadas] == ["POST", "DELETE"]

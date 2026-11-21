@@ -39,6 +39,11 @@ class CacheCurto:
         self._guardado: OrderedDict[Hashable, tuple[float, Any]] = OrderedDict()
         self._travas_das_chaves: dict[Hashable, threading.Lock] = {}
 
+    def lido(self, chave: Hashable) -> Any | None:
+        """O valor guardado e ainda válido, sem calcular; `None` se falta."""
+        valido, valor = self._valido(chave)
+        return None if not valido or isinstance(valor, _Falha) else valor
+
     def _valido(self, chave: Hashable) -> tuple[bool, Any]:
         with self._trava:
             achado = self._guardado.get(chave)
@@ -67,10 +72,11 @@ class CacheCurto:
         with self._trava:
             trava = self._travas_das_chaves.setdefault(chave, threading.Lock())
         with trava:
-            valido, valor = self._valido(chave)
-            if valido:
-                return cast(T, self._entregar(valor))
             try:
+                # Quem achou o valor na 2ª leitura também solta a trava da chave (#798).
+                valido, valor = self._valido(chave)
+                if valido:
+                    return cast(T, self._entregar(valor))
                 try:
                     valor = calcular()
                     validade = self._validade
@@ -90,5 +96,6 @@ class CacheCurto:
                         self._guardado.popitem(last=False)
             finally:
                 with self._trava:
-                    self._travas_das_chaves.pop(chave, None)
+                    if self._travas_das_chaves.get(chave) is trava:
+                        del self._travas_das_chaves[chave]
             return cast(T, self._entregar(valor))

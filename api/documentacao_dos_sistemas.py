@@ -143,7 +143,8 @@ _MUITA_CONSULTA = Erro(
     429,
     "Consultas demais; tente em um minuto",
     "O limite é de 30 consultas por minuto por chave (a busca por texto e a por imagem "
-    "dividem o mesmo limite). Espere e repita.",
+    "dividem o mesmo limite); a página seguinte, pedida com `cursor`, não conta nas "
+    "consultas e tem um contador próprio de 120 páginas por minuto. Espere e repita.",
 )
 _DEMOROU = Erro(
     504,
@@ -319,7 +320,7 @@ _BUSCA = {
 }
 _PARAMETROS_DO_PERIODO = (
     "Os filtros `programa`, `desde` e `ate` (datas `AAAA-MM-DD` de exibição) "
-    "restringem os vídeos; `sem_periodo=true` inclui os vídeos sem data de exibição."
+    "restringem os vídeos."
 )
 _BUSCA_DO_SISTEMA = (
     "A chave só acha os vídeos do próprio sistema. Cada momento traz `quadro`, o "
@@ -823,7 +824,8 @@ OPERACOES: tuple[Operacao, ...] = (
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
-        + " Limite de 30 consultas por minuto por chave. `ev` restringe também o texto "
+        + " Limite de 30 consultas por minuto por chave; a página seguinte (`cursor`) não conta "
+        "nelas e tem o contador próprio de 120 páginas por minuto. `ev` restringe também o texto "
         "livre: `imagem` busca planos, `fala` falas e `gc` textos na tela; sem `ev`, todos "
         "os tipos entram. `entendida` traz os filtros aplicados e `plano_b` fica `false`, "
         "mantido por compatibilidade.",
@@ -848,11 +850,16 @@ OPERACOES: tuple[Operacao, ...] = (
         "`entendida.termo_da_foto`. O corpo é "
         "`multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 "
         "milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória "
-        "e pelo modelo: não é guardada. "
+        "e pelo modelo: não é guardada. A resposta da busca com o `arquivo` e sem `cursor` traz "
+        "o cabeçalho `X-Token-Da-Foto`: mande-o no campo `token`, no lugar do `arquivo`, para "
+        "trocar o programa ou o período sem reenviar a foto nem chamar o modelo de novo; vale "
+        "15 min, para a mesma chave. Envie exatamente um dos dois campos. Com `token` o "
+        "`cursor` também vale; sem o `token`, repita a consulta com o `arquivo` e o `cursor`. "
         + _PARAMETROS_DO_PERIODO
         + " "
         + _BUSCA_DO_SISTEMA
-        + " Divide com a busca por texto o limite de 30 consultas por minuto.",
+        + " Divide com a busca por texto o limite de 30 consultas por minuto; a página seguinte "
+        "(`cursor`) não conta nelas e tem o contador próprio de 120 páginas por minuto.",
         _BUSCA,
         (
             *_sem_chave("ler"),
@@ -880,8 +887,14 @@ OPERACOES: tuple[Operacao, ...] = (
             ),
             Erro(
                 422,
-                "Envie a imagem no campo arquivo",
-                "O multipart não tem o campo `arquivo`.",
+                "Envie a imagem no campo arquivo ou o token no campo token, só um deles",
+                "O multipart não tem o campo `arquivo` nem o `token`, ou tem os dois.",
+            ),
+            Erro(
+                422,
+                "Token da foto inválido",
+                "O `token` não existe, venceu (vale 15 min), é de outra chave ou não é um "
+                "token da foto: reenvie a foto no campo `arquivo`.",
             ),
             _CURSOR_DA_BUSCA,
             _MUITA_CONSULTA,
@@ -904,9 +917,14 @@ OPERACOES: tuple[Operacao, ...] = (
                                 "type": "string",
                                 "format": "binary",
                                 "description": "A foto: JPEG ou PNG, até 5 MB.",
-                            }
+                            },
+                            "token": {
+                                "type": "string",
+                                "description": "O `X-Token-Da-Foto` da busca anterior, no "
+                                "lugar do `arquivo`.",
+                            },
                         },
-                        "required": ["arquivo"],
+                        "oneOf": [{"required": ["arquivo"]}, {"required": ["token"]}],
                     }
                 }
             },

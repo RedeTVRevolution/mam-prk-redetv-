@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from api.auditoria import RepositorioDeAuditoria, registro_de_auditoria
 from api.auth import Usuario
+from api.ciclo_de_vida import proxima_versao
 from api.fuso import dia_em_sao_paulo
 from api.jobs import DisparoDaIndexacao, JobPublico
 from api.modelo_do_job import Indexacao, RepositorioDeJobs, mes_da_data
@@ -116,7 +117,7 @@ def criar_rotas_da_edicao(
             if atual.estado != "concluido":
                 return None
             mudancas: dict[str, Any] = {
-                "versao_pedida": max(atual.versao_pedida, atual.versao_indexada) + 1,
+                "versao_pedida": proxima_versao(atual),
                 "indexacao": Indexacao(estado="pendente", em=agora),
             }
             if pedido.data_exibicao is not None:

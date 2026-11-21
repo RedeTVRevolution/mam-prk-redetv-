@@ -65,7 +65,8 @@ class Registro:
     # De 1 a 3, só no objeto do inventário (#245); pesa na ordem dos resultados.
     destaque: int | None = None
     # O sistema dono do vídeo e se ele está na lixeira, para a busca filtrar no índice, antes
-    # do teto de registros (#482). Mudar a lixeira não reindexa: `marcar_lixeira`.
+    # do teto de registros (#482). Mudar a lixeira não reindexa: `marcar_lixeira`; só com
+    # a indexação em andamento a rota pede uma rodada repetida, que relê o Job (#806).
     sistema: str | None = None
     na_lixeira: bool = False
 

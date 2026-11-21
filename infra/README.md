@@ -139,7 +139,7 @@ O `POST /v1/jobs` aceita `Idempotency-Key`. A reserva da chave é um documento d
 
 ## Listas da busca paginada (#426)
 
-A 1ª página da busca grava o resultado inteiro, em ordem, num documento da coleção `listas_da_busca` (`api/busca.py`); as páginas seguintes o leem pelo cursor. A política de TTL de `modulos/mam/listas_da_busca.tf` apaga o documento depois do `expira_em` (15 min), e a API trata a lista vencida como inexistente. O campo não tem índice próprio. Nenhum papel novo: a conta da web já tem `roles/datastore.user`, e o `roles/datastore.owner` da `mam-terraform` cobre a política de TTL.
+A 1ª página da busca grava o resultado inteiro, em ordem, num documento da coleção `listas_da_busca` (`api/busca.py`); as páginas seguintes o leem pelo cursor. A mesma coleção guarda os tokens da busca por foto (#802): um documento curto com o dono, o termo que o modelo deu, o SHA-256 do JPEG regravado (nunca a foto), `criado_em` e `expira_em`. A política de TTL de `modulos/mam/listas_da_busca.tf` apaga o documento depois do `expira_em` (15 min, nas listas e nos tokens), e a API trata a lista ou o token vencido como inexistente. O campo não tem índice próprio. Nenhum papel novo: a conta da web já tem `roles/datastore.user`, e o `roles/datastore.owner` da `mam-terraform` cobre a política de TTL.
 
 ## Recuperação do Firestore (#355)
 

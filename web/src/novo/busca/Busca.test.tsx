@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 import { criarClienteDaApi } from '../../api.ts'
+import { consultaNova } from '../../busca.ts'
 import { AutenticadorFalso, CODIGO_TOTP_FALSO } from '../../auth/falso.ts'
 import { lerResultado } from '../../resultadoDaBusca.ts'
 import { useRota } from '../../rotas.ts'
@@ -19,7 +20,6 @@ const momento = (inicio_ms: number, fim_ms: number, motivo: string, destaques: o
   fim_ms,
   motivo,
   destaques,
-  quadro_url: null as string | null,
   quadro: null as string | null,
 })
 
@@ -64,9 +64,12 @@ const job = (id: string, indexacao: string | null): JobApi => ({ id, estado: 'co
 const buscas: URLSearchParams[] = []
 const quadrosPedidos: string[] = []
 const pedidosDeQuadros: number[] = []
-const fotos: { params: URLSearchParams; arquivo: File | null }[] = []
+const fotos: { params: URLSearchParams; arquivo: File | null; token: string | null }[] = []
 let resposta: () => Response = () => HttpResponse.json(resultado())
-let respostaDaFoto: () => Response = () => HttpResponse.json(DA_FOTO)
+type PedidoDaFoto = (typeof fotos)[number]
+// A 1ª resposta da foto (com o `arquivo`) traz o token; com o `token`, a API não devolve outro.
+const daFotoComToken = (p: PedidoDaFoto) => HttpResponse.json(DA_FOTO, { headers: p.arquivo ? { 'X-Token-Da-Foto': 't1' } : {} })
+let respostaDaFoto: (p: PedidoDaFoto) => Response = daFotoComToken
 let jobs: JobApi[] = []
 let pedidosDoAcervo: URLSearchParams[] = []
 
@@ -87,8 +90,10 @@ const servidor = setupServer(
     return resposta()
   }),
   http.post('/v1/busca/imagem', async ({ request }) => {
-    fotos.push({ params: new URL(request.url).searchParams, arquivo: (await request.formData()).get('arquivo') as File | null })
-    return respostaDaFoto()
+    const f = await request.formData()
+    const pedido = { params: new URL(request.url).searchParams, arquivo: f.get('arquivo') as File | null, token: f.get('token') as string | null }
+    fotos.push(pedido)
+    return respostaDaFoto(pedido)
   }),
 )
 
@@ -117,7 +122,7 @@ afterEach(() => {
   jobs = []
   pedidosDoAcervo = []
   resposta = () => HttpResponse.json(resultado())
-  respostaDaFoto = () => HttpResponse.json(DA_FOTO)
+  respostaDaFoto = daFotoComToken
 })
 afterAll(() => {
   servidor.close()
@@ -277,7 +282,7 @@ test('o destaque sai das posições e um <script> da API aparece como texto', as
   expect(screen.getByText(/alert\(1\)/)).toBeTruthy()
 })
 
-test('o clique na cena abre o vídeo exatamente no início do momento, com o busca', async () => {
+test('o clique na cena abre o vídeo exatamente no início do momento, com a consulta', async () => {
   const usuario = userEvent.setup()
   resposta = () => HttpResponse.json(resultado({ videos: [video('v1', [momento(6_540, 8_000, 'Objeto: calça vinho')])] }))
   await abrir('/busca?q=calça vinho')
@@ -285,7 +290,7 @@ test('o clique na cena abre o vídeo exatamente no início do momento, com o bus
 
   await usuario.click(within(cena(/v1\.mp4/)).getByText('Objeto: calça vinho'))
 
-  expect(location.pathname + location.search).toBe('/video/v1?t=6.54&busca=cal%C3%A7a+vinho')
+  expect(location.pathname + location.search).toBe('/video/v1?t=6.54&consulta=q%3Dcal%25C3%25A7a%2Bvinho')
 })
 
 test('↓ de fora da grade foca a primeira cena, as setas andam entre elas e Enter abre o vídeo no tempo', async () => {
@@ -295,24 +300,24 @@ test('↓ de fora da grade foca a primeira cena, as setas andam entre elas e Ent
   screen.getByRole('button', { name: 'Fala' }).focus()
 
   await usuario.keyboard('{ArrowDown}')
-  expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=724&busca=sapato')
+  expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=724&consulta=q%3Dsapato')
   // 800 px de largura dão 3 colunas de cenas de 240 px: as três na mesma fileira.
   await usuario.keyboard('{ArrowRight}')
-  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=2462&busca=sapato'))
+  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=2462&consulta=q%3Dsapato'))
   await usuario.keyboard('{ArrowRight}')
-  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v2?t=60&busca=sapato'))
+  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v2?t=60&consulta=q%3Dsapato'))
   await usuario.keyboard('{ArrowLeft}')
-  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=2462&busca=sapato'))
+  await waitFor(() => expect(document.activeElement?.getAttribute('href')).toBe('/video/v1?t=2462&consulta=q%3Dsapato'))
 
   await usuario.keyboard('{Enter}')
 
-  expect(location.pathname + location.search).toBe('/video/v1?t=2462&busca=sapato')
+  expect(location.pathname + location.search).toBe('/video/v1?t=2462&consulta=q%3Dsapato')
 })
 
 test('o vídeo aberto daqui recebe o resultado para andar com N e Shift+N', async () => {
   await abrir('/busca?q=sapato')
   await screen.findByText('3 momentos em 2 vídeos')
-  await waitFor(() => expect(lerResultado('sapato')?.map((v) => v.job_id)).toEqual(['v1', 'v2']))
+  await waitFor(() => expect(lerResultado(consultaNova('sapato'))?.map((v) => v.job_id)).toEqual(['v1', 'v2']))
 })
 
 test('o vazio de um nome fora do catálogo mostra o aviso com o nome digitado', async () => {
@@ -377,6 +382,24 @@ test('termo novo com resultado na tela mostra o carregando e tira o resultado an
   expect(screen.queryByRole('status', { name: 'Buscando' })).toBeNull()
 })
 
+test('o link da cena leva a consulta da tela já carregada, não a que está em pedido (#804)', async () => {
+  const usuario = userEvent.setup()
+  await abrir('/busca?q=sapato')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const consultaDoLink = (nome = /v1\.mp4/) => new URLSearchParams(new URL(screen.getAllByRole('link', { name: nome })[0].getAttribute('href')!, location.origin).search).get('consulta')
+  expect(consultaDoLink()).toBe('q=sapato')
+  const liberar = segurarABusca()
+
+  await usuario.click(screen.getByRole('button', { name: 'Ordenar por data de exibição' }))
+  await usuario.click(await screen.findByRole('menuitemradio', { name: 'Relevância' }))
+  await screen.findByRole('status', { name: 'Atualizando' })
+
+  expect(consultaDoLink()).toBe('q=sapato')
+  liberar()
+  await screen.findByText('1 momento em 1 vídeo')
+  expect(new URLSearchParams(consultaDoLink(/vB\.mp4/)!).get('ordem')).toBe('relevancia')
+})
+
 test('a busca abre pela data de exibição; trocar a ordem mantém a lista e mostra o "Atualizando" até a resposta (#396, #763)', async () => {
   const usuario = userEvent.setup()
   await abrir('/busca?q=sapato')
@@ -398,7 +421,7 @@ test('a busca abre pela data de exibição; trocar a ordem mantém a lista e mos
   expect(buscas.at(-1)?.get('ordem')).toBe('relevancia')
 })
 
-test('limpar o ano escolhido pede todos os períodos', async () => {
+test('limpar o ano escolhido volta à busca sem período e tira o ano do endereço', async () => {
   const usuario = userEvent.setup()
   resposta = () => HttpResponse.json(resultado({ entendida: { evidencias: ['objeto'], programa: null, desde: '2020-03-01', ate: '2024-12-31' } }))
   await abrir('/busca?q=vestido&ano=2024')
@@ -407,8 +430,17 @@ test('limpar o ano escolhido pede todos os períodos', async () => {
 
   await usuario.click(screen.getByRole('button', { name: 'Limpar ano' }))
 
-  expect(location.search).toBe('?q=vestido&ano=todos')
-  await waitFor(() => expect(buscas.at(-1)?.get('sem_periodo')).toBe('true'))
+  expect(location.search).toBe('?q=vestido')
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Ano: 2024' })).toBeNull())
+  const ultima = buscas.at(-1)
+  for (const k of ['desde', 'ate', 'sem_periodo']) expect(ultima?.has(k)).toBe(false)
+})
+
+test('o link antigo ?ano=todos abre a busca sem período', async () => {
+  await abrir('/busca?q=vestido&ano=todos')
+  await screen.findByText('3 momentos em 2 vídeos')
+  const primeira = buscas.at(0)
+  for (const k of ['desde', 'ate', 'sem_periodo']) expect(primeira?.has(k)).toBe(false)
 })
 
 test('ignora programa e ano entendidos; escolher ano zera o mês', async () => {
@@ -613,13 +645,191 @@ test('o programa e o período da tela vão junto, e mudar o filtro busca de novo
 
   await waitFor(() => expect(fotos).toHaveLength(2))
   expect(fotos[1].params.get('programa')).toBe('Leo Dias')
-  expect(fotos[1].arquivo?.size).toBe(4)
+  // A foto subiu uma vez só: a troca de filtro manda o token (#805).
+  expect(fotos[1].arquivo).toBeNull()
+  expect(fotos[1].token).toBe('t1')
+})
+
+const TOKEN_INVALIDO = () => HttpResponse.json({ detail: 'Token da foto inválido' }, { status: 422 })
+const muitosDaFoto = Array.from({ length: 30 }, (_, i) => video(`v${i}`, [momento(0, 1000, `Objeto: item ${i}`)]))
+// 30 vídeos em duas páginas; `falhaAoPaginar` responde à 2ª página (a que traz cursor).
+function buscaDeDuasPaginas(falhaAoPaginar?: (p: PedidoDaFoto) => Response | null) {
+  respostaDaFoto = (p) => {
+    const cursor = p.params.get('cursor')
+    if (cursor) {
+      const falha = falhaAoPaginar?.(p)
+      if (falha) return falha
+    }
+    const inicio = cursor ? 20 : 0
+    const headers: Record<string, string> = {}
+    if (!cursor) headers['X-Proximo-Cursor'] = 'abc.20'
+    if (p.arquivo) headers['X-Token-Da-Foto'] = `t${fotos.length}`
+    return HttpResponse.json({ ...DA_FOTO, videos: muitosDaFoto.slice(inicio, inicio + 20) }, { headers })
+  }
+}
+async function buscarPorFoto() {
+  const usuario = userEvent.setup()
+  await abrir('/busca?programa=TV+Fama')
+  await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
+  // A grade do teste cabe 10 fileiras: a 2ª página sai sozinha.
+  await screen.findByRole('link', { name: /^v0\.mp4/ })
+  return usuario
+}
+
+test('as páginas seguintes da busca por foto mandam o token e não a foto (#805)', async () => {
+  buscaDeDuasPaginas()
+  await buscarPorFoto()
+
+  expect(await screen.findByText('30 momentos em 30 vídeos')).toBeTruthy()
+  expect(fotos.map((f) => [f.arquivo ? 'arquivo' : null, f.token, f.params.get('cursor')])).toEqual([
+    ['arquivo', null, null],
+    [null, 't1', 'abc.20'],
+  ])
+})
+
+test('token inválido ao paginar: recomeça do topo reenviando a foto, sem erro, e o pedido seguinte usa o token novo (#805)', async () => {
+  buscaDeDuasPaginas((p) => (p.token === 't1' ? TOKEN_INVALIDO() : null))
+  const usuario = await buscarPorFoto()
+
+  await waitFor(() => expect(fotos.filter((f) => f.arquivo)).toHaveLength(2))
+  expect(fotos[2].params.get('cursor')).toBeNull()
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(await screen.findByText('30 momentos em 30 vídeos')).toBeTruthy()
+  const antes = fotos.length
+
+  await usuario.click(screen.getByRole('button', { name: 'Programa: TV Fama' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Leo Dias' }))
+  await waitFor(() => expect(fotos.length).toBeGreaterThan(antes))
+  expect(fotos[antes].arquivo).toBeNull()
+  expect(fotos[antes].token).toBe('t3')
+})
+
+test('token inválido ao trocar o programa: reenvia a foto, sem erro (#805)', async () => {
+  const usuario = userEvent.setup()
+  respostaDaFoto = (p) => (p.token ? TOKEN_INVALIDO() : daFotoComToken(p))
+  await abrir('/busca?programa=TV+Fama')
+  await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
+  await screen.findByText('3 momentos em 2 vídeos')
+
+  await usuario.click(screen.getByRole('button', { name: 'Programa: TV Fama' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Leo Dias' }))
+
+  await waitFor(() => expect(fotos).toHaveLength(3))
+  expect(fotos.map((f) => [f.arquivo ? 'arquivo' : null, f.token])).toEqual([['arquivo', null], [null, 't1'], ['arquivo', null]])
+  expect(fotos[2].params.get('programa')).toBe('Leo Dias')
+  expect(await screen.findByText('3 momentos em 2 vídeos')).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test('cursor inválido com token válido: recomeça do topo sem cursor e sem reenviar a foto (#805)', async () => {
+  let recusou = false
+  buscaDeDuasPaginas(() => {
+    if (recusou) return null
+    recusou = true
+    return HttpResponse.json({ detail: 'Cursor inválido' }, { status: 422 })
+  })
+  await buscarPorFoto()
+
+  await waitFor(() => expect(fotos.length).toBeGreaterThanOrEqual(3))
+  expect(fotos.slice(0, 3).map((f) => [f.arquivo ? 'arquivo' : null, f.token, f.params.get('cursor')])).toEqual([
+    ['arquivo', null, null],
+    [null, 't1', 'abc.20'],
+    [null, 't1', null],
+  ])
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test('outro 422 ao paginar a foto aparece como erro, sem pedir a primeira página de novo (#805)', async () => {
+  buscaDeDuasPaginas(() => HttpResponse.json({ detail: 'Limite inválido' }, { status: 422 }))
+  await buscarPorFoto()
+
+  expect(await screen.findByText('Não foi possível carregar mais cenas.')).toBeTruthy()
+  expect(fotos).toHaveLength(2)
+})
+
+test('trocar o filtro antes de o token chegar: o pedido novo sai com a foto e a resposta velha não troca o token (#805)', async () => {
+  const usuario = userEvent.setup()
+  let liberar = () => {}
+  const espera = new Promise<void>((r) => (liberar = r))
+  servidor.use(
+    http.post('/v1/busca/imagem', async ({ request }) => {
+      const f = await request.formData()
+      const pedido = { params: new URL(request.url).searchParams, arquivo: f.get('arquivo') as File | null, token: f.get('token') as string | null }
+      fotos.push(pedido)
+      if (fotos.length === 1) {
+        await espera
+        return HttpResponse.json(DA_FOTO, { headers: { 'X-Token-Da-Foto': 'velho' } })
+      }
+      return HttpResponse.json(DA_FOTO, { headers: pedido.arquivo ? { 'X-Token-Da-Foto': 'novo' } : {} })
+    }),
+  )
+  await abrir('/busca?programa=TV+Fama')
+  await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
+  await waitFor(() => expect(fotos).toHaveLength(1))
+
+  await usuario.click(screen.getByRole('button', { name: 'Programa: TV Fama' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Leo Dias' }))
+  await waitFor(() => expect(fotos).toHaveLength(2))
+  expect(fotos[1].arquivo).not.toBeNull()
+  await screen.findByText('3 momentos em 2 vídeos')
+  liberar()
+  await new Promise((r) => setTimeout(r, 50))
+
+  await usuario.click(screen.getByRole('button', { name: 'Programa: Leo Dias' }))
+  await usuario.click(await screen.findByRole('option', { name: 'TV Fama' }))
+  await waitFor(() => expect(fotos).toHaveLength(3))
+  expect(fotos[2].token).toBe('novo')
+})
+
+test('token recusado em dois filtros seguidos: só o último reenvia a foto, e o token dele fica (#805)', async () => {
+  const usuario = userEvent.setup()
+  let liberarA = () => {}
+  const esperaA = new Promise<void>((r) => (liberarA = r))
+  let liberarB = () => {}
+  const esperaB = new Promise<void>((r) => (liberarB = r))
+  servidor.use(
+    http.post('/v1/busca/imagem', async ({ request }) => {
+      const f = await request.formData()
+      const pedido = { params: new URL(request.url).searchParams, arquivo: f.get('arquivo') as File | null, token: f.get('token') as string | null }
+      fotos.push(pedido)
+      const n = fotos.length
+      if (pedido.arquivo) {
+        // O reenvio do 2º filtro (2024) só responde depois da recusa do 1º (Leo Dias).
+        if (n > 1) await esperaB
+        return HttpResponse.json(DA_FOTO, { headers: { 'X-Token-Da-Foto': `t${n}` } })
+      }
+      if (pedido.token !== 't1') return HttpResponse.json(DA_FOTO)
+      if (!pedido.params.get('desde')) await esperaA
+      return TOKEN_INVALIDO()
+    }),
+  )
+  await abrir('/busca?programa=TV+Fama')
+  await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
+  await screen.findByText('3 momentos em 2 vídeos')
+
+  await usuario.click(screen.getByRole('button', { name: 'Programa: TV Fama' }))
+  await usuario.click(await screen.findByRole('option', { name: 'Leo Dias' }))
+  await waitFor(() => expect(fotos).toHaveLength(2))
+  await usuario.click(screen.getByRole('button', { name: 'Ano' }))
+  await usuario.click(await screen.findByRole('option', { name: '2024' }))
+  await waitFor(() => expect(fotos.filter((f) => f.arquivo)).toHaveLength(2))
+  const token = fotos.length
+  liberarA()
+  await new Promise((r) => setTimeout(r, 50))
+  liberarB()
+  await new Promise((r) => setTimeout(r, 50))
+  expect(fotos.filter((f) => f.arquivo)).toHaveLength(2)
+
+  await usuario.click(screen.getByRole('button', { name: 'Ano: 2024' }))
+  await usuario.click(await screen.findByRole('option', { name: '2025' }))
+  await waitFor(() => expect(fotos.at(-1)?.params.get('desde')).toBe('2025-01-01'))
+  expect(fotos.at(-1)?.token).toBe(`t${token}`)
 })
 
 test('tipo ou tamanho errado: a mensagem da API aparece em português', async () => {
   respostaDaFoto = () => HttpResponse.json({ detail: 'Envie uma imagem JPEG ou PNG válida' }, { status: 422 })
   const usuario = userEvent.setup({ applyAccept: false })
-  await abrir('/busca')
+  await abrir('/busca?programa=TV+Fama')
   await usuario.upload(await screen.findByLabelText('Foto para buscar'), new File(['x'], 'a.gif', { type: 'image/gif' }))
 
   expect((await screen.findByRole('alert')).textContent).toContain('Envie uma imagem JPEG ou PNG válida')
@@ -628,7 +838,7 @@ test('tipo ou tamanho errado: a mensagem da API aparece em português', async ()
 test('com o modelo da consulta fora a tela diz que a busca por imagem não está disponível', async () => {
   respostaDaFoto = () => HttpResponse.json({ detail: 'x' }, { status: 503 })
   const usuario = userEvent.setup()
-  await abrir('/busca')
+  await abrir('/busca?programa=TV+Fama')
   await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
 
   expect((await screen.findByRole('alert')).textContent).toContain('A busca por imagem não está disponível agora')
@@ -637,7 +847,7 @@ test('com o modelo da consulta fora a tela diz que a busca por imagem não está
 test('sem momentos para o termo a tela avisa, e Limpar esquece a foto', async () => {
   respostaDaFoto = () => HttpResponse.json({ ...DA_FOTO, videos: [] })
   const usuario = userEvent.setup()
-  await abrir('/busca')
+  await abrir('/busca?programa=TV+Fama')
   await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
 
   expect((await screen.findByRole('status')).textContent).toContain('Nenhum momento encontrado para “sandália vermelha”. Tire um filtro, tente outra foto ou digite o que procura.')
@@ -650,7 +860,7 @@ test('sem momentos para o termo a tela avisa, e Limpar esquece a foto', async ()
 
 test('um texto novo depois da foto sai da foto e busca o texto', async () => {
   const usuario = userEvent.setup()
-  await abrir('/busca')
+  await abrir('/busca?programa=TV+Fama')
   await usuario.upload(await screen.findByLabelText('Foto para buscar'), foto())
   await screen.findByText('3 momentos em 2 vídeos')
 
