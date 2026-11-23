@@ -343,7 +343,7 @@ Cada vídeo decupado vira momentos indexados; cada consulta vira filtros e termo
 
 Correções humanas reindexam o momento, com estado visível (ver Revisão e edição). O mesmo JSON vai para o BigQuery, para relatórios de aparições e menções por pessoa, marca e programa.
 
-**Proteção contra injeção.** A consulta é tratada como hostil: é saneada e os filtros são montados pelo servidor, nunca pelo texto do usuário. A busca por texto não chama modelo nem Model Armor; na foto, o modelo só descreve o objeto e o termo volta como dado da busca. As barreiras completas estão em Entradas hostis.
+**Proteção contra injeção.** A consulta é tratada como hostil: é saneada e os filtros são montados pelo servidor, nunca pelo texto do usuário. A busca por texto não chama modelo nem Model Armor; na foto, o modelo só dá o nome da pessoa famosa ou descreve o objeto, e esse texto volta como dado da busca. As barreiras completas estão em Entradas hostis.
 
 ## Interface
 

@@ -44,3 +44,16 @@ Em 6/11/2026 o Bruno decidiu tirar também o vetor do quadro, a busca visual por
 ## O que não foi medido
 
 Os 88% valem para as três fotos e para as cenas marcadas na medição. O texto de uma característica só não foi medido, e fotos novas precisam de marcação para entrar na conta.
+
+## Pessoa famosa na foto (23/11/2026, #810)
+
+No dev, a foto do Neymar virou "Buscando por: boné branco" e trouxe pessoas quaisquer de boné branco. A instrução, escrita para objetos, proibia o nome. Ficou decidido:
+
+- Continua uma chamada só ao Flash-Lite por foto. O esquema ganha `pessoa` (nulo ou nome) ao lado de `termo`. Com `pessoa` válida, a busca usa só o nome, porque "Neymar boné branco" dilui o resultado; sem ela, segue pelo termo do objeto. O nome entra como texto digitado: acha a pessoa do catálogo pelo nome ou apelido e soma as cláusulas de aparição e menção, sem segunda chamada nem efeito nos filtros do servidor.
+- O nome vem sem aspas, para nunca virar frase exata, e só vale com ao menos um caractere de palavra (letra, dígito ou sublinhado). Se ele é igual a um nome ou apelido do catálogo, fica como veio, mesmo que também esteja dentro do nome de outra pessoa. Senão, se está inteiro, por palavras, dentro do nome ou de um apelido de uma pessoa só, vira o nome dela no catálogo, também sem aspas ("Ronaldinho" vira "Ronaldinho Gaúcho"); se esse nome não tem texto, ou se nada casa, fica o do modelo.
+- O nome do modelo é só o texto da consulta. Ele não confirma nada na Decupagem, onde valem as ADRs 0005 e 0012.
+- A instrução da pessoa é rígida: o normal é nulo; só celebridade de fama nacional ou mundial reconhecida sem nenhuma dúvida; na menor dúvida, nulo; um nome errado é pior que nenhum. A regra do termo continua dizendo "sem pessoa": quando a instrução fala de pessoas, o termo passa a descrevê-la ("homem com boné branco").
+
+Medição (dev, 23/11, 3.5 Flash-Lite, Standard, 5 rodadas por foto, instrução rígida): Neymar 5/5 com o nome (às vezes "Neymar Jr."); rapaz anônimo de boné branco, dois rapazes anônimos, anônimos na praça e o Caio Sorriso (apresentador pouco conhecido) nulo 5/5 cada. Com uma instrução branda ("se reconhecer com segurança"), o modelo inventou nome em 2 de 12 rodadas: chamou o rapaz anônimo de "Tierry" e o Caio Sorriso de "Leandro Hassum". A instrução rígida é requisito.
+
+Não foi medido: a amostra é de 5 fotos e 25 rodadas; o texto final da instrução no código, que pode diferir em palavras do texto medido; outras celebridades e fotos de mais de uma pessoa. Um nome inventado aparece em "Buscando por:", e quem enviou a foto percebe na hora.

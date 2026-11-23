@@ -1,5 +1,5 @@
-"""Nomes do catálogo achados por dicionário (#568, item 4): igual ao regex de antes, sem
-percorrer o catálogo a cada busca."""
+"""Nomes do catálogo achados por dicionário (#568, item 4): igual a um regex por pessoa, sem
+percorrer o catálogo a cada busca; com apelidos e "ganha o mais longo" (#810)."""
 
 import re
 
@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from api import entendimento_da_consulta
+from api import catalogo
 from api.catalogo import CatalogoEmMemoria, PessoaDoCatalogo
 from api.entendimento_da_consulta import MAXIMO_DE_PESSOAS, entender
 from api.tests.test_busca import Mundo
@@ -15,31 +15,39 @@ from api.texto import normalizar
 from api.texto_como_dado import sanear
 
 
-def _antigo(pessoas: list[PessoaDoCatalogo], consulta: str) -> tuple[str, ...]:
-    """O `entender` de antes do #568, só a parte dos nomes (regex por pessoa)."""
+def _oraculo(pessoas: list[PessoaDoCatalogo], consulta: str) -> tuple[str, ...]:
+    """Os nomes por regex, pessoa a pessoa (o `entender` de antes do #568), com os
+    apelidos e "ganha o mais longo" do #810: a ocorrência estritamente dentro de outra
+    sai; as de mesmo trecho ficam."""
     chave = normalizar(sanear(consulta))
-    achadas = (
-        sorted(
-            (achado.start(), p.id)
-            for p in pessoas
-            if (nome := normalizar(p.nome))
-            and (achado := re.search(r"(?<!\w)" + re.escape(nome) + r"(?!\w)", chave))
-        )
-        if chave
-        else []
-    )
-    return tuple(dict.fromkeys(i for _, i in achadas))[:MAXIMO_DE_PESSOAS]
+    ocorrencias = {
+        (achado.start(), achado.start() + len(nome), p.id)
+        for p in pessoas
+        for nome in {normalizar(n) for n in [p.nome, *p.apelidos]}
+        if nome
+        # o lookahead acha também as ocorrências sobrepostas
+        for achado in re.finditer(r"(?=(?<!\w)" + re.escape(nome) + r"(?!\w))", chave)
+    }
+    trechos = {(i, f) for i, f, _ in ocorrencias}
+    livres = [
+        (i, id)
+        for i, f, id in ocorrencias
+        if not any(a <= i and f <= b and (a, b) != (i, f) for a, b in trechos)
+    ]
+    return tuple(dict.fromkeys(i for _, i in sorted(livres)))[:MAXIMO_DE_PESSOAS]
 
 
-def _catalogo(*nomes: str) -> CatalogoEmMemoria:
+def _catalogo(*nomes: str | tuple[str, list[str]]) -> CatalogoEmMemoria:
+    """Cada pessoa é um nome ou `(nome, apelidos)`."""
     c = CatalogoEmMemoria()
     for n in nomes:
-        c.acrescentar(n, "apresentador", [])
+        nome, apelidos = (n, []) if isinstance(n, str) else n
+        c.acrescentar(nome, "apresentador", apelidos)
     return c
 
 
 def _confere(c: CatalogoEmMemoria, consulta: str) -> tuple[str, ...]:
-    esperado = _antigo(c.todas(), consulta)
+    esperado = _oraculo(c.todas(), consulta)
     assert entender(consulta, catalogo=c).pessoas == esperado
     return esperado
 
@@ -55,8 +63,9 @@ def _confere(c: CatalogoEmMemoria, consulta: str) -> tuple[str, ...]:
         (["Ana Lima"], "Ana Lima2", 0),  # dígito é \w
         (["Ana Lima"], "xAna Lima", 0),
         (["Ana"], "Ana Lima", 1),  # nome dentro de outro nome
-        (["Ana", "Ana Lima"], "com Ana Lima", 2),
-        (["Lima", "Ana Lima", "Ana"], "Ana Lima", 3),
+        (["Ana", "Ana Lima"], "com Ana Lima", 1),  # ganha o mais longo (#810)
+        (["Lima", "Ana Lima", "Ana"], "Ana Lima", 1),
+        (["Ana", "Ana Lima"], "Ana e Ana Lima", 2),  # o "Ana" solto fica
         (["Ana Lima", "Ana Lima"], "Ana Lima", 2),  # dois cadastros, mesmo nome
         (["ANA LÍMA"], "ana lima", 1),  # acento e maiúscula
         (["Ana Lima"], "ÁNA LIMÁ!", 1),
@@ -79,7 +88,7 @@ def test_casos_de_caracterizacao(nomes: list[str], consulta: str, quantos: int) 
 
 
 def test_empate_de_posicao_desempata_por_id() -> None:
-    c = _catalogo("Ana", "Ana Lima", "Ana Lima Souza")  # as três na posição 0
+    c = _catalogo("Ana Lima", "Ana Lima", "Ana Lima")  # mesmo trecho: ficam os três
     ids = _confere(c, "Ana Lima Souza")
     assert ids == tuple(sorted(ids)) and len(ids) == 3
 
@@ -108,13 +117,21 @@ def test_homonimos_alem_do_teto_ficam_os_de_menor_id() -> None:
     )
 
 
+_TEXTO = st.text(alphabet="aAbé_.- 1", min_size=0, max_size=6)
+
+
+# Até 5 pessoas: o teto de homônimos por nome nunca corta, e o oráculo não o modela.
 @settings(max_examples=300, deadline=None)
 @given(
-    nomes=st.lists(st.text(alphabet="aAbé_.- 1", min_size=0, max_size=6), max_size=8),
+    pessoas=st.lists(
+        st.tuples(_TEXTO, st.lists(_TEXTO, max_size=2)), max_size=MAXIMO_DE_PESSOAS
+    ),
     consulta=st.text(alphabet='aAbBéÉ_.-," 1ç', max_size=40),
 )
-def test_aleatorio_igual_ao_regex_antigo(nomes: list[str], consulta: str) -> None:
-    _confere(_catalogo(*nomes), consulta)
+def test_aleatorio_igual_ao_oraculo(
+    pessoas: list[tuple[str, list[str]]], consulta: str
+) -> None:
+    _confere(_catalogo(*pessoas), consulta)
 
 
 def test_nao_percorre_o_catalogo_a_cada_busca(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,7 +145,8 @@ def test_nao_percorre_o_catalogo_a_cada_busca(monkeypatch: pytest.MonkeyPatch) -
         vistos.append(texto)
         return normalizar(texto)
 
-    monkeypatch.setattr(entendimento_da_consulta, "normalizar", contando)
+    # o índice normaliza os nomes por `nomes_de_busca`, no módulo do catálogo
+    monkeypatch.setattr(catalogo, "normalizar", contando)
     busca.buscar("vestido vermelho")  # a primeira busca monta o índice da cópia
     antes = len(vistos)
     for q in ("Pessoa Numero 7 de azul", "tênis", "Sabrina Sato"):

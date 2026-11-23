@@ -844,9 +844,10 @@ OPERACOES: tuple[Operacao, ...] = (
         "POST",
         "/v1/busca/imagem",
         "Buscar momentos por imagem",
-        "Acha os momentos do objeto que aparece na foto: o modelo da consulta dá o nome do "
-        "objeto (e no máximo uma característica) e a busca segue como se esse termo tivesse "
-        "sido digitado, sem segunda chamada ao Gemini nem Model Armor; o termo vem em "
+        "Acha os momentos da pessoa famosa ou do objeto que aparece na foto: o modelo da "
+        "consulta dá o nome da pessoa, se a reconhece sem dúvida, ou o nome do objeto (e no "
+        "máximo uma característica), e a busca segue como se esse texto tivesse sido "
+        "digitado, sem segunda chamada ao Gemini nem Model Armor; o texto vem em "
         "`entendida.termo_da_foto`. O corpo é "
         "`multipart/form-data` com o arquivo no campo `arquivo` (JPEG ou PNG, até 5 MB e 25 "
         "milhões de pixels; o `Content-Length` é obrigatório). A foto só passa pela memória "
@@ -902,7 +903,8 @@ OPERACOES: tuple[Operacao, ...] = (
                 503,
                 "A busca por imagem não está disponível agora",
                 "O modelo que descreve a foto está desligado ou fora do ar, ou não achou "
-                "objeto na foto. Repita com espera crescente ou tente outra foto.",
+                "pessoa famosa nem objeto na foto. Repita com espera crescente ou tente "
+                "outra foto.",
             ),
             _DEMOROU,
         ),

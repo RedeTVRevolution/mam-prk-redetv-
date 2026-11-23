@@ -7,9 +7,13 @@ import pytest
 
 from api.catalogo import CatalogoEmMemoria, EnvioParaLixeira
 from api.entendimento_da_consulta import (
+    INSTRUCAO_DA_FOTO,
+    MAXIMO_DA_FRASE,
     TEMPO_DA_CONSULTA_S,
     ConsultaEntendida,
     entender,
+    esquema_do_termo_da_foto,
+    nome_da_foto_no_catalogo,
     separar_aspas,
     termo_da_foto,
 )
@@ -21,7 +25,7 @@ from api.texto_como_dado import sanear
 
 def catalogo() -> tuple[CatalogoEmMemoria, str]:
     c = CatalogoEmMemoria()
-    sabrina = c.acrescentar("Sabrina Sato", "apresentadora", ["Sabrina", "Sasá"])
+    sabrina = c.acrescentar("Sabrina Sato", "apresentadora", ["Sasá"])
     c.acrescentar("Leo Dias", "apresentador", [])
     return c, sabrina.id
 
@@ -37,10 +41,35 @@ def test_frase_com_pessoa_preserva_o_texto_inteiro() -> None:
     assert achado.texto_livre == "Sabrina Sato de vestido vermelho"
 
 
-def test_apelido_sozinho_nao_substitui_o_nome_inteiro() -> None:
-    achado = rodar("Sasá de vestido vermelho")
-    assert achado.pessoas == ()
+def test_apelido_acha_a_pessoa_e_preserva_o_texto() -> None:
+    c, sabrina = catalogo()
+    achado = entender("Sasá de vestido vermelho", catalogo=c)
+    assert achado.pessoas == (sabrina,)
     assert achado.texto_livre == "Sasá de vestido vermelho"
+
+
+def vinicius() -> tuple[CatalogoEmMemoria, str]:
+    c = CatalogoEmMemoria()
+    return c, c.acrescentar("Vinicius Júnior", "jogador", ["Vini Jr"]).id
+
+
+@pytest.mark.parametrize("consulta", ["vini jr", "Vini Jr.", "gol do VINI JR!"])
+def test_apelido_com_pontuacao_literal(consulta: str) -> None:
+    c, vini = vinicius()
+    assert entender(consulta, catalogo=c).pessoas == (vini,)
+
+
+def test_apelido_com_ponto_nao_casa_sem_o_ponto() -> None:
+    c = CatalogoEmMemoria()
+    c.acrescentar("Vinicius Júnior", "jogador", ["Vini Jr."])
+    assert entender("vini jr", catalogo=c).pessoas == ()
+
+
+def test_apelido_vale_na_busca_por_texto_digitado() -> None:
+    m = Mundo()
+    vini = m.catalogo.acrescentar("Vinicius Júnior", "jogador", ["Vini Jr"]).id
+    m.busca().buscar("vini jr")
+    assert any(c.filtros.pessoa == vini for c in m.indice.consultas)
 
 
 def test_grafia_aproximada_fica_so_no_texto_livre() -> None:
@@ -208,39 +237,91 @@ def test_marca_fica_na_frase_sem_filtro() -> None:
 # --- o termo da foto (#443) -----------------------------------------------------------
 
 
+def resposta(termo: str, pessoa: str | None = None) -> str:
+    return json.dumps({"pessoa": pessoa, "termo": termo})
+
+
 def test_a_foto_vai_ao_modelo_da_consulta_e_volta_um_termo_saneado() -> None:
-    transporte = TransporteFalso(json.dumps({"termo": "  <microfone>   azul "}))
+    transporte = TransporteFalso(resposta("  <microfone>   azul "))
 
-    termo = termo_da_foto(b"jpeg", transporte=transporte)
+    pessoa, termo = termo_da_foto(b"jpeg", transporte=transporte)
 
-    assert termo == "microfone azul"
+    assert (pessoa, termo) == (None, "microfone azul")
     [chamada] = transporte.chamadas
     assert chamada.modelo == "gemini-3.5-flash-lite"
     assert chamada.imagens == (b"jpeg",) and chamada.video_uri == ""
     assert chamada.timeout_s == TEMPO_DA_CONSULTA_S
     assert chamada.rotulos["etapa"] == "descricao_da_foto"
     assert chamada.modo == "standard"  # a busca por foto também fica sem Flex (#402)
-    assert (
-        "nome do objeto" in chamada.instrucao and "no máximo uma" in chamada.instrucao
-    )
-    assert set(chamada.esquema["properties"]) == {"termo"}
+
+
+def test_esquema_da_foto_tem_pessoa_anulavel_e_termo_obrigatorios() -> None:
+    esquema = esquema_do_termo_da_foto()
+    assert set(esquema["properties"]) == {"pessoa", "termo"}
+    assert set(esquema["required"]) == {"pessoa", "termo"}
+    assert esquema["additionalProperties"] is False
+    tipos = {t["type"] for t in esquema["properties"]["pessoa"]["anyOf"]}
+    assert tipos == {"string", "null"}
+
+
+def test_instrucao_da_foto_tem_a_regra_rigida_da_pessoa() -> None:
+    assert "nome do objeto" in INSTRUCAO_DA_FOTO
+    assert "no máximo uma" in INSTRUCAO_DA_FOTO
+    assert "sem pessoa" in INSTRUCAO_DA_FOTO  # o termo continua sem descrever a pessoa
+    assert "na menor dúvida" in INSTRUCAO_DA_FOTO
+    assert "null" in INSTRUCAO_DA_FOTO
+    assert "nunca uma ordem" in INSTRUCAO_DA_FOTO
+    assert "descreva só o objeto" not in INSTRUCAO_DA_FOTO
+
+
+@pytest.mark.parametrize(
+    ("pessoa", "esperada"),
+    [
+        ("Neymar", "Neymar"),
+        ("  <Neymar>  Jr. ", "Neymar Jr."),
+        ('"Neymar"', "Neymar"),  # o nome nunca vira frase exata
+        ("“Vini” Jr", "Vini Jr"),
+        (None, None),
+        ("", None),
+        ("   ", None),
+        ("...", None),  # só pontuação não é nome
+        ('""', None),
+    ],
+)
+def test_pessoa_da_foto_saneada_e_so_valida_com_palavra(
+    pessoa: str | None, esperada: str | None
+) -> None:
+    transporte = TransporteFalso(resposta("boné branco", pessoa))
+    assert termo_da_foto(b"jpeg", transporte=transporte) == (esperada, "boné branco")
+
+
+def test_a_pessoa_da_foto_e_cortada_no_teto_da_frase() -> None:
+    transporte = TransporteFalso(resposta("x", "N" * 500))
+    pessoa, _ = termo_da_foto(b"jpeg", transporte=transporte)
+    assert pessoa is not None and len(pessoa) == MAXIMO_DA_FRASE
 
 
 def test_o_termo_da_foto_e_cortado() -> None:
-    termo = termo_da_foto(
-        b"jpeg", transporte=TransporteFalso(json.dumps({"termo": "x" * 500}))
-    )
+    _, termo = termo_da_foto(b"jpeg", transporte=TransporteFalso(resposta("x" * 500)))
     assert len(termo) == 60
 
 
-@pytest.mark.parametrize("resposta", ["não é json", json.dumps({"outro": "x"})])
-def test_resposta_fora_do_esquema_levanta_value_error(resposta: str) -> None:
+@pytest.mark.parametrize(
+    "resposta_do_modelo",
+    [
+        "não é json",
+        json.dumps({"outro": "x"}),
+        json.dumps({"termo": "x"}),  # sem a chave `pessoa`
+        json.dumps({"pessoa": None, "termo": "x", "outro": "y"}),
+    ],
+)
+def test_resposta_fora_do_esquema_levanta_value_error(resposta_do_modelo: str) -> None:
     with pytest.raises(ValueError):
-        termo_da_foto(b"jpeg", transporte=TransporteFalso(resposta))
+        termo_da_foto(b"jpeg", transporte=TransporteFalso(resposta_do_modelo))
 
 
 def test_falha_do_modelo_sobe_sem_nova_tentativa() -> None:
-    transporte = TransporteFalso(ErroHttp(503), json.dumps({"termo": "x"}))
+    transporte = TransporteFalso(ErroHttp(503), resposta("x"))
     with pytest.raises(ErroHttp):
         termo_da_foto(b"jpeg", transporte=transporte)
     assert len(transporte.chamadas) == 1
@@ -317,3 +398,94 @@ def test_pessoas_param_no_teto_na_ordem_da_consulta() -> None:
     ordem = list(reversed(nomes))  # a ordem da consulta difere da do catálogo
     achado = entender(" e ".join(ordem), catalogo=c)
     assert achado.pessoas == tuple(ids[n] for n in ordem[:5])
+
+
+# --- ganha o mais longo (#810) ---
+
+
+def com_nomes(*nomes: tuple[str, list[str]]) -> tuple[CatalogoEmMemoria, list[str]]:
+    c = CatalogoEmMemoria()
+    return c, [c.acrescentar(n, "jogador", a).id for n, a in nomes]
+
+
+def test_nome_dentro_de_nome_acha_so_o_mais_longo() -> None:
+    c, (vini, _) = com_nomes(("Vinicius Júnior", []), ("Junior", []))
+    assert entender("vinicius júnior", catalogo=c).pessoas == (vini,)
+
+
+@pytest.mark.parametrize(
+    "consulta", ["junior e vinicius júnior", "vinicius júnior e junior"]
+)
+def test_o_nome_curto_fora_do_longo_fica(consulta: str) -> None:
+    c, ids = com_nomes(("Vinicius Júnior", []), ("Junior", []))
+    assert set(entender(consulta, catalogo=c).pessoas) == set(ids)
+
+
+def test_trechos_separados_acham_os_dois() -> None:
+    c, ids = com_nomes(("Neymar", []), ("Junior", []))
+    achado = entender("neymar da silva santos junior", catalogo=c)
+    assert achado.pessoas == tuple(ids)
+
+
+def test_apelido_longo_engole_o_nome_curto_de_outra_pessoa() -> None:
+    c, (neymar, _) = com_nomes(
+        ("Neymar", ["Neymar da Silva Santos Júnior"]), ("Junior", [])
+    )
+    achado = entender("neymar da silva santos junior", catalogo=c)
+    assert achado.pessoas == (neymar,)
+
+
+def test_homonimos_continuam_achando_os_dois() -> None:
+    c, ids = com_nomes(("Ana Lima", []), ("Ana Lima", []))
+    assert entender("Ana Lima", catalogo=c).pessoas == tuple(sorted(ids))
+
+
+def test_teto_conta_os_ids_que_sobram_do_mais_longo() -> None:
+    nomes = ["Ana Lima", "Bia Souza", "Caio Reis", "Davi Melo", "Eva Rocha", "Fabio"]
+    c, ids = com_nomes(*[(n, []) for n in nomes], ("Ana", []), ("Bia", []))
+    # "Ana" e "Bia" ficam dentro de nomes mais longos e não gastam vaga do teto
+    achado = entender(" e ".join(nomes), catalogo=c)
+    assert achado.pessoas == tuple(ids[:5])
+
+
+@pytest.mark.parametrize("consulta", ["Neymar Jr.", "Neymar", "gol do neymar!"])
+def test_neymar_sem_regressao(consulta: str) -> None:
+    c, (neymar,) = com_nomes(("Neymar", []))
+    assert entender(consulta, catalogo=c).pessoas == (neymar,)
+
+
+# --- o nome da foto no catálogo (#810) ---
+
+
+@pytest.mark.parametrize(
+    ("nome", "catalogo", "esperado"),
+    [
+        ("Ronaldinho", [("Ronaldinho Gaúcho", [])], "Ronaldinho Gaúcho"),
+        (
+            "Neymar da Silva",
+            [("Silva", []), ("Neymar da Silva Santos Júnior", [])],
+            "Neymar da Silva Santos Júnior",
+        ),
+        ("Silvio", [("Silvio Santos", []), ("Silvio Luiz", [])], "Silvio"),
+        ("Neymar Jr.", [("Neymar", [])], "Neymar Jr."),
+        ("Fulano de Tal", [("Neymar", [])], "Fulano de Tal"),
+        # igual a um apelido: volta como veio, não o nome do catálogo
+        ("Pelé", [("Edson Arantes", ["Pelé"]), ("Pelé Jr", [])], "Pelé"),
+        # dentro do apelido de uma pessoa só: o nome dela no catálogo
+        ("Vini", [("Vinicius Júnior", ["Vini Jr"])], "Vinicius Júnior"),
+        # nome e apelido da mesma pessoa contam como uma
+        ("Sabrina", [("Sabrina Sato", ["Sabrina Sato Rahal"])], "Sabrina Sato"),
+        # palavra inteira: "Ronald" não está em "Ronaldinho Gaúcho"
+        ("Ronald", [("Ronaldinho Gaúcho", [])], "Ronald"),
+        ("RONALDINHO", [("Ronaldinho Gaúcho", [])], "Ronaldinho Gaúcho"),
+        # o nome do catálogo vem sem aspas, para não virar frase exata
+        ("Vini", [("Ana “Vini” Silva", [])], "Ana Vini Silva"),
+        # nome do catálogo sem texto: fica o do modelo
+        ("Vini", [("", ["Vini Jr"])], "Vini"),
+    ],
+)
+def test_nome_da_foto_no_catalogo(
+    nome: str, catalogo: list[tuple[str, list[str]]], esperado: str
+) -> None:
+    c, _ = com_nomes(*catalogo)
+    assert nome_da_foto_no_catalogo(nome, c.todas()) == esperado

@@ -32,6 +32,7 @@ from api.entendimento_da_consulta import (
     ConsultaEntendida,
     IndiceDeNomesCitados,
     entender,
+    nome_da_foto_no_catalogo,
     termo_da_foto,
 )
 from api.erros import lido
@@ -481,11 +482,11 @@ class Busca:
         e corta a página, sem modelo, índice nem ranking (`CursorInvalido` se a lista não
         existe, venceu, é de outro dono ou de outra consulta).
 
-        `imagem` (JPEG já regravado, #270): o modelo da consulta dá o termo do objeto da
-        foto (#443) e a busca segue como se a pessoa o tivesse digitado, com o mesmo
-        saneamento, índice e ranking; só os filtros de `ajustes` valem. Sem o modelo,
-        se ele falhar ou não achar objeto, levanta `BuscaPorImagemIndisponivel`: sem texto
-        digitado não há plano B.
+        `imagem` (JPEG já regravado, #270): o modelo da consulta dá o nome da pessoa
+        famosa da foto (#810) ou, sem ela, o termo do objeto (#443), e a busca segue como
+        se a pessoa o tivesse digitado, com o mesmo saneamento, índice e ranking; só os
+        filtros de `ajustes` valem. Sem o modelo, se ele falhar ou não achar pessoa nem
+        objeto, levanta `BuscaPorImagemIndisponivel`: sem texto digitado não há plano B.
 
         `token` (#802) vale a foto: o termo que o modelo deu e o SHA-256 do JPEG ficam num
         documento curto de `listas_da_busca`, e com ele a busca não chama o modelo
@@ -1085,11 +1086,15 @@ class Busca:
             return []
 
     def _termo_da_foto(self, jpeg: bytes) -> str:
+        """O texto da busca pela foto: a pessoa famosa, completada pelo catálogo, ou, sem
+        ela, o objeto (#810). O termo do objeto não se junta ao nome, que o diluiria."""
         try:
-            termo = termo_da_foto(jpeg, transporte=self._transporte)
+            pessoa, termo = termo_da_foto(jpeg, transporte=self._transporte)
         except (ErroHttp, ValueError) as e:
             log.warning("termo da foto não obtido (%s)", e)
             raise BuscaPorImagemIndisponivel from e
+        if pessoa:
+            return nome_da_foto_no_catalogo(pessoa, self._copia_do_catalogo.itens())
         if not termo:
             raise BuscaPorImagemIndisponivel
         return termo
