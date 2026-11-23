@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from api.catalogo import Catalogo, PessoaDoCatalogo
+from api.catalogo import Catalogo, PessoaDoCatalogo, nomes_de_busca
 from api.gemini import MODO_STANDARD, Chamada, Transporte, validar_json
 from api.texto import normalizar
 from api.texto_como_dado import sanear
@@ -102,7 +102,7 @@ class IndiceDeNomesCitados:
         if atual is None or atual[0] is not pessoas:
             por_nome: dict[str, set[str]] = {}
             for p in pessoas:
-                for n in _nomes_de(p):
+                for n in nomes_de_busca(p):
                     por_nome.setdefault(n, set()).add(p.id)
             # Homônimos caem na mesma posição: só os de menor id passam do teto.
             nomes = {n: sorted(ids)[:MAXIMO_DE_PESSOAS] for n, ids in por_nome.items()}
@@ -134,11 +134,6 @@ class IndiceDeNomesCitados:
             for id in ids:
                 primeira.setdefault(id, ini)
         return sorted((pos, id) for id, pos in primeira.items())
-
-
-def _nomes_de(p: PessoaDoCatalogo) -> set[str]:
-    """Nome e apelidos normalizados, sem os vazios."""
-    return {n for n in map(normalizar, [p.nome, *p.apelidos]) if n}
 
 
 def _palavra(c: str) -> bool:
@@ -175,14 +170,14 @@ def nome_da_foto_no_catalogo(nome: str, pessoas: list[PessoaDoCatalogo]) -> str:
     """
     chave = normalizar(nome)
     dentro = re.compile(r"(?<!\w)" + re.escape(chave) + r"(?!\w)")
-    contem = set()
+    contem: dict[str, str] = {}
     for p in pessoas:
-        nomes = _nomes_de(p)
+        nomes = nomes_de_busca(p)
         if chave in nomes:
             return nome
         if any(dentro.search(n) for n in nomes):
-            contem.add((p.id, p.nome))
-    return contem.pop()[1] if len(contem) == 1 else nome
+            contem[p.id] = p.nome
+    return next(iter(contem.values())) if len(contem) == 1 else nome
 
 
 def termo_da_foto(jpeg: bytes, *, transporte: Transporte) -> tuple[str | None, str]:

@@ -37,12 +37,12 @@ def _oraculo(pessoas: list[PessoaDoCatalogo], consulta: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(i for _, i in sorted(livres)))[:MAXIMO_DE_PESSOAS]
 
 
-def _catalogo(
-    *nomes: str, apelidos: list[list[str]] | None = None
-) -> CatalogoEmMemoria:
+def _catalogo(*nomes: str | tuple[str, list[str]]) -> CatalogoEmMemoria:
+    """Cada pessoa é um nome ou `(nome, apelidos)`."""
     c = CatalogoEmMemoria()
-    for i, n in enumerate(nomes):
-        c.acrescentar(n, "apresentador", apelidos[i] if apelidos else [])
+    for n in nomes:
+        nome, apelidos = (n, []) if isinstance(n, str) else n
+        c.acrescentar(nome, "apresentador", apelidos)
     return c
 
 
@@ -131,8 +131,7 @@ _TEXTO = st.text(alphabet="aAbé_.- 1", min_size=0, max_size=6)
 def test_aleatorio_igual_ao_oraculo(
     pessoas: list[tuple[str, list[str]]], consulta: str
 ) -> None:
-    nomes = [n for n, _ in pessoas]
-    _confere(_catalogo(*nomes, apelidos=[a for _, a in pessoas]), consulta)
+    _confere(_catalogo(*pessoas), consulta)
 
 
 def test_nao_percorre_o_catalogo_a_cada_busca(monkeypatch: pytest.MonkeyPatch) -> None:

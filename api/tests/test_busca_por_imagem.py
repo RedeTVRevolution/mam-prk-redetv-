@@ -735,9 +735,7 @@ def test_o_texto_da_foto_e_a_pessoa_valida_ou_o_termo(
 
 
 def test_pessoa_com_aspas_nao_vira_frase_exata() -> None:
-    m = Mundo(da_foto('"Fulano de Tal"', "microfone"))
-    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
-    m.busca().buscar("", imagem=b"jpeg")
+    _, m = buscar_foto(da_foto('"Fulano de Tal"', "microfone"))
     # sem frase exata, a busca por significado leva o nome inteiro
     assert {q.significado for q in m.indice.consultas} == {"Fulano de Tal"}
 
@@ -750,9 +748,7 @@ def test_sem_pessoa_e_sem_termo_levanta_indisponivel() -> None:
 
 
 def test_os_filtros_do_servidor_valem_com_qualquer_pessoa() -> None:
-    m = Mundo(da_foto("Sabrina Sato"))
-    m.com(job("j1"), objeto("a", "j1", 0, 1_000))
-    m.busca().buscar("", imagem=b"jpeg", sistema="sis-x")
+    _, m = buscar_foto(da_foto("Sabrina Sato"), sistema="sis-x")
     assert m.indice.consultas
     assert {q.filtros.sistema for q in m.indice.consultas} == {"sis-x"}
 
