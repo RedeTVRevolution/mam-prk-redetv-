@@ -478,6 +478,10 @@ def test_neymar_sem_regressao(consulta: str) -> None:
         # palavra inteira: "Ronald" não está em "Ronaldinho Gaúcho"
         ("Ronald", [("Ronaldinho Gaúcho", [])], "Ronald"),
         ("RONALDINHO", [("Ronaldinho Gaúcho", [])], "Ronaldinho Gaúcho"),
+        # o nome do catálogo vem sem aspas, para não virar frase exata
+        ("Vini", [("Ana “Vini” Silva", [])], "Ana Vini Silva"),
+        # nome do catálogo sem texto: fica o do modelo
+        ("Vini", [("", ["Vini Jr"])], "Vini"),
     ],
 )
 def test_nome_da_foto_no_catalogo(

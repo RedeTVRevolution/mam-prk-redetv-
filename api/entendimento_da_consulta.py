@@ -165,8 +165,9 @@ def nome_da_foto_no_catalogo(nome: str, pessoas: list[PessoaDoCatalogo]) -> str:
     """O nome que o modelo deu à pessoa da foto, completado pelo catálogo (#810).
 
     Igual a um nome ou apelido: fica como veio. Inteiro, por palavras, dentro do nome ou
-    de um apelido de uma pessoa só: o nome dela no catálogo ("Ronaldinho" vira
-    "Ronaldinho Gaúcho"). Senão, fica como veio, e o `entender` acha nele o que houver.
+    de um apelido de uma pessoa só: o nome dela no catálogo, sem aspas ("Ronaldinho" vira
+    "Ronaldinho Gaúcho"), se ele tiver texto. Senão, fica como veio, e o `entender` acha
+    nele o que houver.
     """
     chave = normalizar(nome)
     dentro = re.compile(r"(?<!\w)" + re.escape(chave) + r"(?!\w)")
@@ -177,16 +178,25 @@ def nome_da_foto_no_catalogo(nome: str, pessoas: list[PessoaDoCatalogo]) -> str:
             return nome
         if any(dentro.search(n) for n in nomes):
             contem[p.id] = p.nome
-    return next(iter(contem.values())) if len(contem) == 1 else nome
+    if len(contem) == 1:
+        return _nome_valido(next(iter(contem.values()))) or nome
+    return nome
+
+
+def _nome_valido(texto: str) -> str | None:
+    """Saneado e sem aspas, depois do NFKC (que faz de `＂` uma aspa); `None` sem `\\w`."""
+    nome = sanear(_sem_aspas(sanear(texto, MAXIMO_DA_FRASE)), MAXIMO_DA_FRASE)
+    return nome if re.search(r"\w", normalizar(nome)) else None
 
 
 def termo_da_foto(jpeg: bytes, *, transporte: Transporte) -> tuple[str | None, str]:
     """A pessoa famosa da foto, se o modelo a reconhece (#810), e o objeto em poucas
     palavras ("microfone azul"); vazio se a foto não mostra nada.
 
-    A pessoa vem saneada e sem aspas, para nunca virar frase exata; sem letra nem dígito,
-    vale como `None`. Uma chamada só, sem novas tentativas. Falha de rede ou resposta fora
-    do esquema levanta `ErroHttp` ou `ValueError`: sem texto digitado não há plano B.
+    A pessoa vem saneada e sem aspas, para nunca virar frase exata; sem caractere de
+    palavra (`\\w`), vale como `None`. Uma chamada só, sem novas tentativas. Falha de
+    rede ou resposta fora do esquema levanta `ErroHttp` ou `ValueError`: sem texto
+    digitado não há plano B.
     """
     chamada = Chamada(
         modelo=MODELO_DA_CONSULTA,
@@ -200,8 +210,7 @@ def termo_da_foto(jpeg: bytes, *, transporte: Transporte) -> tuple[str | None, s
         modo=MODO_STANDARD,
     )
     foto = validar_json(_TermoDaFoto, transporte.gerar(chamada))
-    pessoa = sanear(_sem_aspas(foto.pessoa or ""), MAXIMO_DA_FRASE)
     return (
-        pessoa if re.search(r"\w", normalizar(pessoa)) else None,
+        _nome_valido(foto.pessoa or ""),
         sanear(foto.termo, MAXIMO_DO_TERMO_DA_FOTO),
     )

@@ -7,7 +7,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from api import entendimento_da_consulta
+from api import catalogo
 from api.catalogo import CatalogoEmMemoria, PessoaDoCatalogo
 from api.entendimento_da_consulta import MAXIMO_DE_PESSOAS, entender
 from api.tests.test_busca import Mundo
@@ -145,7 +145,8 @@ def test_nao_percorre_o_catalogo_a_cada_busca(monkeypatch: pytest.MonkeyPatch) -
         vistos.append(texto)
         return normalizar(texto)
 
-    monkeypatch.setattr(entendimento_da_consulta, "normalizar", contando)
+    # o índice normaliza os nomes por `nomes_de_busca`, no módulo do catálogo
+    monkeypatch.setattr(catalogo, "normalizar", contando)
     busca.buscar("vestido vermelho")  # a primeira busca monta o índice da cópia
     antes = len(vistos)
     for q in ("Pessoa Numero 7 de azul", "tênis", "Sabrina Sato"):

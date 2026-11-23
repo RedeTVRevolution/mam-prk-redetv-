@@ -734,8 +734,10 @@ def test_o_texto_da_foto_e_a_pessoa_valida_ou_o_termo(
     assert len(m.transporte.chamadas) == 1
 
 
-def test_pessoa_com_aspas_nao_vira_frase_exata() -> None:
-    _, m = buscar_foto(da_foto('"Fulano de Tal"', "microfone"))
+@pytest.mark.parametrize("pessoa", ['"Fulano de Tal"', "＂Fulano de Tal＂"])
+def test_pessoa_com_aspas_nao_vira_frase_exata(pessoa: str) -> None:
+    r, m = buscar_foto(da_foto(pessoa, "microfone"))
+    assert r.entendida.termo_da_foto == "Fulano de Tal"
     # sem frase exata, a busca por significado leva o nome inteiro
     assert {q.significado for q in m.indice.consultas} == {"Fulano de Tal"}
 
